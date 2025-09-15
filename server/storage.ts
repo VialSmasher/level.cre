@@ -19,25 +19,30 @@ export class MemStorage implements IStorage {
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
-    const existingIndex = this.users.findIndex(user => user.id === userData.id);
+    const userId = userData.id || `user_${Date.now()}`;
+    const existingIndex = this.users.findIndex(user => user.id === userId);
     const now = new Date();
     
     if (existingIndex >= 0) {
       // Update existing user
-      this.users[existingIndex] = {
+      const updatedUser: User = {
         ...this.users[existingIndex],
-        ...userData,
+        email: userData.email ?? this.users[existingIndex].email,
+        firstName: userData.firstName ?? this.users[existingIndex].firstName,
+        lastName: userData.lastName ?? this.users[existingIndex].lastName,
+        profileImageUrl: userData.profileImageUrl ?? this.users[existingIndex].profileImageUrl,
         updatedAt: now,
       };
-      return this.users[existingIndex];
+      this.users[existingIndex] = updatedUser;
+      return updatedUser;
     } else {
       // Create new user
       const newUser: User = {
-        id: userData.id || `user_${Date.now()}`,
-        email: userData.email || null,
-        firstName: userData.firstName || null,
-        lastName: userData.lastName || null,
-        profileImageUrl: userData.profileImageUrl || null,
+        id: userId,
+        email: userData.email ?? null,
+        firstName: userData.firstName ?? null,
+        lastName: userData.lastName ?? null,
+        profileImageUrl: userData.profileImageUrl ?? null,
         createdAt: now,
         updatedAt: now,
       };

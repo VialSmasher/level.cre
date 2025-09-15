@@ -1,6 +1,6 @@
 import { Router, Route, Switch } from 'wouter';
-import { Toaster } from '@/components/ui/toaster';
-import { useAuth } from '@/hooks/useAuth';
+import { Toaster } from './components/ui/toaster';
+import { useAuth } from './hooks/useAuth';
 import HomePage from './pages/HomePage';
 import UsersPage from './pages/UsersPage';
 import LandingPage from './pages/LandingPage';

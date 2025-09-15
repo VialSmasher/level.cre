@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'wouter';
-import { useAuth } from '@/hooks/useAuth';
-import { Button } from '@/components/ui/button';
+import { useAuth } from '../hooks/useAuth';
+import { Button } from './ui/button';
 
 export default function Navigation() {
   const [location] = useLocation();

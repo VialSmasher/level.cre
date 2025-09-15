@@ -13,3 +13,8 @@ externalPort = 5000
 [[ports]]
 localPort = 24678
 externalPort = 80
+
+[deployment]
+build = ["sh", "-c", "node build.js"]
+run = ["sh", "-c", "node start.js"]
+deploymentTarget = "cloudrun"
