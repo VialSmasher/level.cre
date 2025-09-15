@@ -1,6 +1,7 @@
+import React, { useState } from 'react';
+import type { FormEvent } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { useState } from 'react';
-import { User, InsertUser } from '../../shared/schema';
+import { User, InsertUser } from '../../../shared/schema';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -8,7 +9,8 @@ import { useToast } from '../hooks/use-toast';
 import { queryClient } from '../lib/queryClient';
 
 export default function UsersPage() {
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const { toast } = useToast();
 
@@ -28,7 +30,8 @@ export default function UsersPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/users'] });
-      setName('');
+      setFirstName('');
+      setLastName('');
       setEmail('');
       toast({
         title: 'Success',
@@ -45,7 +48,7 @@ export default function UsersPage() {
   });
 
   const deleteUserMutation = useMutation({
-    mutationFn: async (id: number) => {
+    mutationFn: async (id: string) => {
       const response = await fetch(`/api/users/${id}`, {
         method: 'DELETE',
       });
@@ -67,9 +70,9 @@ export default function UsersPage() {
     },
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !email.trim()) {
+    if (!firstName?.trim() || !email?.trim()) {
       toast({
         title: 'Error',
         description: 'Please fill in all fields',
@@ -77,7 +80,7 @@ export default function UsersPage() {
       });
       return;
     }
-    createUserMutation.mutate({ name: name.trim(), email: email.trim() });
+    createUserMutation.mutate({ firstName: firstName?.trim(), lastName: lastName?.trim() || undefined, email: email?.trim() });
   };
 
   if (isLoading) {
@@ -103,10 +106,19 @@ export default function UsersPage() {
             <div>
               <Input
                 type="text"
-                placeholder="Name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                data-testid="input-name"
+                placeholder="First Name"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                data-testid="input-firstName"
+              />
+            </div>
+            <div>
+              <Input
+                type="text"
+                placeholder="Last Name"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                data-testid="input-lastName"
               />
             </div>
             <div>
@@ -141,7 +153,7 @@ export default function UsersPage() {
               <CardContent className="flex justify-between items-center pt-6">
                 <div>
                   <h3 className="font-semibold" data-testid={`text-name-${user.id}`}>
-                    {user.name}
+                    {user.firstName} {user.lastName}
                   </h3>
                   <p className="text-gray-600 dark:text-gray-400" data-testid={`text-email-${user.id}`}>
                     {user.email}

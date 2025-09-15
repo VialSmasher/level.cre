@@ -1,3 +1,4 @@
+import React from 'react';
 import { Router, Route, Switch } from 'wouter';
 import { Toaster } from './components/ui/toaster';
 import { useAuth } from './hooks/useAuth';
