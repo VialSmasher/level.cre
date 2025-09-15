@@ -1,44 +1,57 @@
-import { User, InsertUser } from '../shared/schema';
+import { User, UpsertUser } from '../shared/schema';
 
 export interface IStorage {
   // User operations
+  // (IMPORTANT) these user operations are mandatory for Replit Auth.
+  getUser(id: string): Promise<User | undefined>;
+  upsertUser(user: UpsertUser): Promise<User>;
+  // Other operations for demo purposes
   getUsers(): Promise<User[]>;
-  getUserById(id: number): Promise<User | null>;
-  createUser(user: InsertUser): Promise<User>;
-  updateUser(id: number, user: Partial<InsertUser>): Promise<User | null>;
-  deleteUser(id: number): Promise<boolean>;
+  deleteUser(id: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
   private users: User[] = [];
-  private nextId = 1;
 
+  // (IMPORTANT) these user operations are mandatory for Replit Auth.
+  async getUser(id: string): Promise<User | undefined> {
+    return this.users.find(user => user.id === id);
+  }
+
+  async upsertUser(userData: UpsertUser): Promise<User> {
+    const existingIndex = this.users.findIndex(user => user.id === userData.id);
+    const now = new Date();
+    
+    if (existingIndex >= 0) {
+      // Update existing user
+      this.users[existingIndex] = {
+        ...this.users[existingIndex],
+        ...userData,
+        updatedAt: now,
+      };
+      return this.users[existingIndex];
+    } else {
+      // Create new user
+      const newUser: User = {
+        id: userData.id || `user_${Date.now()}`,
+        email: userData.email || null,
+        firstName: userData.firstName || null,
+        lastName: userData.lastName || null,
+        profileImageUrl: userData.profileImageUrl || null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.users.push(newUser);
+      return newUser;
+    }
+  }
+
+  // Other operations for demo purposes
   async getUsers(): Promise<User[]> {
     return [...this.users];
   }
 
-  async getUserById(id: number): Promise<User | null> {
-    return this.users.find(user => user.id === id) || null;
-  }
-
-  async createUser(user: InsertUser): Promise<User> {
-    const newUser: User = {
-      id: this.nextId++,
-      ...user,
-    };
-    this.users.push(newUser);
-    return newUser;
-  }
-
-  async updateUser(id: number, userData: Partial<InsertUser>): Promise<User | null> {
-    const index = this.users.findIndex(user => user.id === id);
-    if (index === -1) return null;
-    
-    this.users[index] = { ...this.users[index], ...userData };
-    return this.users[index];
-  }
-
-  async deleteUser(id: number): Promise<boolean> {
+  async deleteUser(id: string): Promise<boolean> {
     const index = this.users.findIndex(user => user.id === id);
     if (index === -1) return false;
     

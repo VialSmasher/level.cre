@@ -1,15 +1,19 @@
 import express from 'express';
 import path from 'path';
 import routes from './routes';
+import { setupAuth } from './replitAuth';
 
 const app = express();
 const port = parseInt(process.env.PORT || '5000', 10);
 
 app.use(express.json());
-app.use(routes);
 
 // Initialize server
 async function startServer() {
+  // Setup authentication
+  await setupAuth(app);
+  app.use(routes);
+
   // Development mode - Vite integration
   if (process.env.NODE_ENV !== 'production') {
     try {

@@ -2,8 +2,21 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { storage } from './storage';
 import { insertUserSchema } from '../shared/schema';
+import { isAuthenticated } from './replitAuth';
 
 const router = Router();
+
+// Auth routes
+router.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
+  try {
+    const userId = req.user.claims.sub;
+    const user = await storage.getUser(userId);
+    res.json(user);
+  } catch (error) {
+    console.error("Error fetching user:", error);
+    res.status(500).json({ message: "Failed to fetch user" });
+  }
+});
 
 // Users endpoints
 router.get('/api/users', async (req, res) => {
@@ -17,12 +30,9 @@ router.get('/api/users', async (req, res) => {
 
 router.get('/api/users/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: 'Invalid user ID' });
-    }
+    const id = req.params.id;
     
-    const user = await storage.getUserById(id);
+    const user = await storage.getUser(id);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -36,7 +46,7 @@ router.get('/api/users/:id', async (req, res) => {
 router.post('/api/users', async (req, res) => {
   try {
     const userData = insertUserSchema.parse(req.body);
-    const user = await storage.createUser(userData);
+    const user = await storage.upsertUser(userData);
     res.status(201).json(user);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -48,17 +58,16 @@ router.post('/api/users', async (req, res) => {
 
 router.patch('/api/users/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: 'Invalid user ID' });
+    const id = req.params.id;
+    
+    // Get existing user first
+    const existingUser = await storage.getUser(id);
+    if (!existingUser) {
+      return res.status(404).json({ error: 'User not found' });
     }
     
     const userData = insertUserSchema.partial().parse(req.body);
-    const user = await storage.updateUser(id, userData);
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+    const user = await storage.upsertUser({ ...existingUser, ...userData });
     
     res.json(user);
   } catch (error) {
@@ -71,10 +80,7 @@ router.patch('/api/users/:id', async (req, res) => {
 
 router.delete('/api/users/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: 'Invalid user ID' });
-    }
+    const id = req.params.id;
     
     const deleted = await storage.deleteUser(id);
     if (!deleted) {

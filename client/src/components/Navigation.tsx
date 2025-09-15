@@ -1,7 +1,10 @@
 import { Link, useLocation } from 'wouter';
+import { useAuth } from '@/hooks/useAuth';
+import { Button } from '@/components/ui/button';
 
 export default function Navigation() {
   const [location] = useLocation();
+  const { user } = useAuth();
 
   const isActive = (path: string) => location === path;
 
@@ -41,6 +44,31 @@ export default function Navigation() {
                 </a>
               </Link>
             </div>
+          </div>
+          <div className="flex items-center space-x-4">
+            {user && (
+              <div className="flex items-center space-x-3">
+                {user.profileImageUrl && (
+                  <img 
+                    src={user.profileImageUrl} 
+                    alt="Profile" 
+                    className="w-8 h-8 rounded-full object-cover"
+                    data-testid="img-profile"
+                  />
+                )}
+                <span className="text-sm text-gray-700 dark:text-gray-300" data-testid="text-username">
+                  {user.firstName || user.email}
+                </span>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => window.location.href = '/api/logout'}
+                  data-testid="button-logout"
+                >
+                  Sign Out
+                </Button>
+              </div>
+            )}
           </div>
         </div>
       </div>
