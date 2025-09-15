@@ -10,9 +10,6 @@ integrations = ["javascript_log_in_with_replit:1.0.0"]
 localPort = 5000
 externalPort = 5000
 
-[[ports]]
-localPort = 24678
-externalPort = 80
 
 [deployment]
 build = ["sh", "-c", "node build.js"]
