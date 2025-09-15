@@ -6,6 +6,11 @@ import { isAuthenticated } from './replitAuth';
 
 const router = Router();
 
+// Health check endpoint
+router.get('/api/health', (req, res) => {
+  res.json({ ok: true, timestamp: new Date().toISOString() });
+});
+
 // Auth routes
 router.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
   try {
