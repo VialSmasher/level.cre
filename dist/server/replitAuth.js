@@ -1,10 +1,13 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isAuthenticated = void 0;
 exports.getSession = getSession;
 exports.setupAuth = setupAuth;
-const passport_1 = require("passport");
-const express_session_1 = require("express-session");
+const passport_1 = __importDefault(require("passport"));
+const express_session_1 = __importDefault(require("express-session"));
 function getSession() {
     const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
     return (0, express_session_1.default)({
