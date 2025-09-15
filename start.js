@@ -1,7 +1,7 @@
 const { spawn } = require('child_process');
 
-// Start the server with tsx
-const server = spawn('npx', ['tsx', 'server/index.ts'], { 
+// Start the server with tsx directly (no npm/npx needed)
+const server = spawn('tsx', ['server/index.ts'], { 
   stdio: 'inherit',
   env: { ...process.env, NODE_ENV: 'development', PORT: '5000' }
 });
