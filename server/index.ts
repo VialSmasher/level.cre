@@ -1,5 +1,6 @@
 import express from 'express';
 import { createServer } from 'vite';
+import path from 'path';
 import routes from './routes';
 
 const app = express();
@@ -12,15 +13,16 @@ app.use(routes);
 if (process.env.NODE_ENV !== 'production') {
   const vite = await createServer({
     server: { middlewareMode: true },
-    appType: 'spa'
+    appType: 'spa',
+    root: './client'
   });
   app.use(vite.ssrFixStacktrace);
   app.use(vite.middlewares);
 } else {
-  // Production mode - serve static files
-  app.use(express.static('dist'));
+  // Production mode - serve static files from client build
+  app.use(express.static('client/dist'));
   app.get('*', (req, res) => {
-    res.sendFile('index.html', { root: 'dist' });
+    res.sendFile(path.resolve('./client/dist/index.html'));
   });
 }
 
