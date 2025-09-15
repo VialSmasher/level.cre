@@ -3,7 +3,7 @@ import session from "express-session";
 import type { Express, RequestHandler } from "express";
 import { storage } from "./storage";
 
-export function getSession() {
+export function getSession(): import('express').RequestHandler {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
   return session({
     secret: process.env.SESSION_SECRET || 'dev-secret-key',
@@ -14,7 +14,7 @@ export function getSession() {
       secure: process.env.NODE_ENV === 'production',
       maxAge: sessionTtl,
     },
-  });
+  }) as unknown as import('express').RequestHandler;
 }
 
 export async function setupAuth(app: Express) {
