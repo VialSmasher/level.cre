@@ -1,9 +1,9 @@
 const { spawn } = require('child_process');
 
-// Start the server
-const server = spawn('node', ['dist/server/index.js'], { 
+// Start the server with tsx
+const server = spawn('npx', ['tsx', 'server/index.ts'], { 
   stdio: 'inherit',
-  env: { ...process.env, NODE_ENV: 'production' }
+  env: { ...process.env, NODE_ENV: 'development', PORT: '5000' }
 });
 
 server.on('error', (err) => {
