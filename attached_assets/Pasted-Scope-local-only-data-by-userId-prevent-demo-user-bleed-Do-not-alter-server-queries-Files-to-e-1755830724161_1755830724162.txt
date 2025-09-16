@@ -1,0 +1,39 @@
+Scope local-only data by userId; prevent demo/user bleed. Do not alter server queries.
+
+Files to edit:
+- client/src/contexts/AuthContext.tsx
+- client/src/pages/home.tsx (map UI state: controlPanelOpen, legendOpen, mapData)
+- client/src/pages/knowledge.tsx (touches local cache)
+- client/src/pages/profile.tsx (any local cache)
+- client/src/lib (add a tiny util: storage.ts)
+
+Tasks:
+1) Create client/src/lib/storage.ts with helpers:
+   export const nsKey = (userId: string | null, key: string) =>
+     userId ? `${key}::${userId}` : `${key}::guest`;
+
+   export const readJSON = <T>(k: string, def: T) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) as T : def; } catch { return def; } };
+   export const writeJSON = (k: string, v: any) => localStorage.setItem(k, JSON.stringify(v));
+   export const removeKey = (k: string) => localStorage.removeItem(k);
+
+2) Replace all localStorage reads/writes with namespaced versions:
+   - home.tsx:
+     controlPanelOpen  → nsKey(user?.id, "controlPanelOpen")
+     legendOpen        → nsKey(user?.id, "legendOpen")
+     mapData           → nsKey(user?.id, "mapData")
+   - knowledge.tsx:
+     touches           → nsKey(user?.id, "touches")
+   - profile.tsx and any others using prospects/submarkets/filters/settings: namespace them the same way.
+
+3) On user change (in AuthContext onAuthStateChange):
+   - Clear in-memory app state (assets, touches, selectedId). Easiest: expose a `resetClientState()` callback via context that pages can subscribe to, or dispatch a global event.
+   - Do NOT wipe all localStorage; just stop reading previous user’s keys. New reads should use the new user’s namespace (which will be empty for a brand-new user).
+
+4) First-login clean slate:
+   - Ensure onboarding submit does not seed demo/sample data unless DEMO/SAFE mode is true.
+   - For brand-new users, the namespaced keys will be empty, so UI starts fresh by default.
+
+Acceptance:
+- Sign in as User A, create UI state (panel open), then sign out and sign in as User B → B does not inherit A’s panel/touches/mapData.
+- Brand-new Google user → /app shows 0 assets/touches and blank UI state after onboarding.
+- Switching back to User A restores A’s own local UI state (thanks to namespacing).

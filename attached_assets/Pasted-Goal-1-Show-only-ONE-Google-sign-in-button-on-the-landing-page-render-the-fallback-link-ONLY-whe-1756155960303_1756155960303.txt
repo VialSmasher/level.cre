@@ -1,0 +1,95 @@
+Goal: (1) Show only ONE Google sign-in button on the landing page; render the fallback link ONLY when a popup is blocked. 
+(2) Prevent the app from loading unless the user is authenticated or explicitly in Demo mode.
+
+Files:
+- client/src/pages/landing.tsx (or wherever the landing CTA lives)
+- client/src/contexts/AuthContext.tsx (read-only)
+- client/src/App.tsx or router file (route guard)
+
+A) Landing page: single button with conditional fallback
+1) Keep a single primary button: “Sign in with Google”.
+2) Implement handler with iframe-aware flow:
+
+   const inIframe = typeof window !== 'undefined' && window.self !== window.top;
+   const [popupUrl, setPopupUrl] = useState<string | null>(null);
+
+   async function handleGoogle() {
+     setLoading(true);
+     setPopupUrl(null); // clear any stale link
+     try {
+       const { data, error } = await supabase.auth.signInWithOAuth({
+         provider: 'google',
+         options: { redirectTo: window.location.origin + '/app' },
+         skipBrowserRedirect: true
+       });
+       if (error) throw error;
+       if (!data?.url) throw new Error('No OAuth URL returned');
+
+       if (inIframe) {
+         // Try to escape the iframe
+         try {
+           window.top!.location.href = data.url;
+         } catch {
+           // Fallback: open new tab; if blocked, show a link
+           const w = window.open(data.url, '_blank', 'noopener,noreferrer');
+           if (!w) setPopupUrl(data.url);
+         }
+       } else {
+         window.location.href = data.url;
+       }
+     } catch (e) {
+       toast.error('Sign-in failed. Please try again.');
+       console.error(e);
+     } finally {
+       setLoading(false);
+     }
+   }
+
+3) UI:
+   - Render ONLY the primary “Sign in with Google” button.
+   - Render the “Continue Google Sign-in” link/button **only if** popupUrl is non-null:
+     {popupUrl && (
+       <a href={popupUrl} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
+         Continue Google Sign-in
+       </a>
+     )}
+   - Keep “Try Demo Mode” exactly as is.
+
+B) Route guard: block /app unless user OR demo
+1) In App.tsx (or your router wrapper), add a ProtectedRoute component that waits for auth to finish:
+
+   function ProtectedRoute({ children }) {
+     const { user, loading } = useAuth();           // from AuthContext
+     const demo = localStorage.getItem('demo-mode') === 'true';
+     if (loading) return null;                      // avoid flicker/loops
+     if (!user && !demo) {
+       navigate('/');                               // or setLocation('/')
+       return null;
+     }
+     return children;
+   }
+
+2) Wrap protected routes:
+   - '/' (landing) is public.
+   - '/app' and '/onboarding' must be wrapped in <ProtectedRoute>.
+   - Ensure starting a Google flow clears any demo flag:
+     when handleGoogle() runs: localStorage.removeItem('demo-mode').
+
+3) Acceptance:
+   - Visiting /app without being signed in and without demo flag → redirects to '/'.
+   - After “Try Demo Mode”, /app loads normally.
+   - After Google OAuth completes, /app loads with an authenticated session.
+
+C) Supabase redirect URLs (double-check)
+- In Supabase → Authentication → URL Configuration:
+  Add your deployed/replit URLs with the /app path as Allowed Redirect URLs, e.g.:
+    https://<repl>.repl.co/app
+    https://<repl>.replit.app/app
+    http://localhost:5173/app  (for local dev)
+
+Acceptance (full):
+- Landing shows ONE Google button. The “Continue Google Sign-in” link appears only when a popup is blocked.
+- Clicking Google in Replit preview opens auth in top window or a new tab and returns to /app.
+- /app is inaccessible unless (user is logged in) OR (demo-mode is true).
+- Demo Mode button still works exactly as before.
+- No console errors; no redirect loops.

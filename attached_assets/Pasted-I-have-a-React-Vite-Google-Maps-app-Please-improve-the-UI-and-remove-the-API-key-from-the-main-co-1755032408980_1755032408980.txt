@@ -1,0 +1,37 @@
+I have a React + Vite Google Maps app. Please improve the UI and remove the API key from the main control panel.
+
+Goals (keep it simple and lightweight):
+
+1) Google Maps API key
+   - Use import.meta.env.VITE_GOOGLE_MAPS_API_KEY as the default key.
+   - Do NOT show the key in the main control panel.
+   - Add a small "Developer settings" modal (gear icon) where I can optionally paste an override key.
+   - The override input should be masked (••••) with a show/hide toggle.
+   - Store the override in local storage; if present, use it instead of the env key.
+   - Add a tooltip text reminding to restrict the key by HTTP referrer in Google Cloud.
+
+2) Control panel + legend
+   - Keep the control panel minimal: status filter buttons, submarket selector/manager, and a collapse/expand toggle.
+   - Make the legend a small floating card with its own collapse/expand toggle.
+   - Remember collapsed/expanded state across refresh (use local storage).
+
+3) Drawing UX
+   - Ensure the Google Maps Drawing toolbar is visible at TOP_LEFT and doesn’t overlap my top-center tabs.
+   - Modes: marker and polygon.
+   - Light polygon style (fillOpacity ~0.15, strokeWeight 2).
+   - Only render drawing features after the map loader reports isLoaded = true (don’t reference window.google before that).
+
+4) Side panel polish
+   - When clicking a shape, open a right-side panel with: Name, Status dropdown, Notes, Submarket dropdown, Delete button.
+   - Keep the panel clean and responsive; simple CSS, no big UI libraries.
+
+5) Small UI touches
+   - Add a “Satellite / Map” toggle in the top-right of the map.
+   - Add a basic search box for quick pan-to (optional: just a text input that centers to the last clicked marker/polygon by name; no external APIs).
+   - Keep dependencies minimal: @react-google-maps/api only.
+
+Acceptance:
+- The app uses the env key by default and does not show it publicly.
+- I can optionally override the key in a masked “Developer settings” modal.
+- Control panel and legend can be collapsed and remember their state.
+- Drawing toolbar is visible and I can add markers/polygons, edit them in a side panel, and see status colors.

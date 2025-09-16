@@ -1,0 +1,49 @@
+1) Stable map shell
+   - Wrapper div: position: relative; height: 100vh; width: 100%; overflow: hidden;
+   - Inside: one child div for the map canvas, position: absolute; inset: 0;
+   - Render ONLY <GoogleMap> (and markers/polygons/DrawingManager) inside the map canvas.
+
+2) Search bar
+   - ONE search bar only (remove duplicates).
+   - Place it TOP_LEFT, above the drawing toolbar, similar to Google My Maps default.
+   - Absolutely position with a small top margin so it doesn’t overlap nav or map attribution.
+   - z-index high enough to sit above map controls.
+   - Debounce input (~200ms) so typing doesn’t cause UI jank.
+   - Search must allow filter by asset name OR pan/zoom to a selected asset.
+
+3) Legend + filters
+   - Legend bottom-left, clickable to toggle status filters.
+   - Status order: Prospect → Contacted → Followup → Meeting → Client → No go.
+   - Match colors between legend and map markers/polygons.
+   - Add a "Clear filters" chip.
+
+4) Drawing toolbar
+   - useJsApiLoader({ libraries: ['drawing'] }) and render <DrawingManager> only after isLoaded === true.
+   - Keep drawing tools at TOP_LEFT, below the search bar.
+   - onOverlayComplete:
+     - Marker ⇒ GeoJSON Point {type:'Point', coordinates:[lng,lat]}
+     - Polygon ⇒ GeoJSON Polygon (closed ring)
+     - Save new assets with default: {status:'prospect', name:'', notes:''}
+     - Remove the freehand overlay after saving (re-render from state).
+
+5) Other floating UI
+   - Profile/User card bottom-right, control panel top-right, import/export buttons top-right.
+   - Absolutely position, z-index above map, but use `pointer-events: none` on outer wrapper and `pointer-events: auto` on clickable children so map panning works underneath.
+
+6) CSV import
+   - After import, update state and re-render assets immediately.
+   - Deduplicate by (name + address) OR (name + lat + lng).
+   - Show toast summary: inserted / updated / skipped.
+
+7) Performance + responsive
+   - Ensure full-height map always visible.
+   - Overlays wrap on small screens; max-widths set for smaller viewports.
+   - Keep styling minimal (plain CSS or existing utility classes).
+
+ACCEPTANCE:
+- Map fills screen and stays stable while typing in the search bar.
+- Only one search bar exists, top-left above drawing tools.
+- Legend and control panel collapse/expand with state remembered in localStorage.
+- Drawing toolbar works; drawn shapes save and persist.
+- CSV import updates immediately with summary toast.
+- Floating UI doesn’t block normal map pan/zoom.

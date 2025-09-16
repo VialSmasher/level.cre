@@ -1,0 +1,58 @@
+Goal: Redesign the XP section into a true “Foundation Wall”:
+- Dense grid of bricks (no big gaps).
+- Bricks fill left→right, wrap to next row (top→down).
+- Milestone band every 100 bricks (1,000 XP).
+- Compact, readable, and satisfying.
+
+Scope (small):
+- client/src/components/BrickWall.tsx (replace rendering only)
+- client/src/pages/stats.tsx (read-only except for header text)
+- Do NOT change XP event fetching, leaderboard, map, or CRM.
+
+Design:
+- Each brick = 10 XP (unitXp).
+- Grid: CSS Grid, no per-day grouping.
+  * desktop: brick 14x8 px, gap 2 px, radius 2 px
+  * tablet: 12x7 px, gap 2 px
+  * mobile: 10x6 px, gap 1.5 px
+- Columns: use responsive `grid-template-columns`:
+  desktop: repeat(auto-fill, minmax(14px, 14px));
+  tablet:  repeat(auto-fill, minmax(12px, 12px));
+  mobile:  repeat(auto-fill, minmax(10px, 10px));
+- Grid auto-flow: row; fill left→right then wrap.
+- No vertical columns or day buckets.
+
+Brick color by category (use app tokens if available):
+  prospecting  #1E90FF
+  followup     #10B981
+  consistency  #F59E0B
+  knowledge    #6366F1
+
+Milestones:
+- After every 100 bricks (i.e., indexes 99,199,299…), insert a thin full-width divider line with a small label chip:
+  “Milestone: {totalXp} XP”.
+- Implement by rendering a `div` spanning all columns (grid-column: 1 / -1) between rows. 
+- The label chip sits on the line at the left.
+
+Info header (above wall):
+- “XP Foundation” on left.
+- On the right: small summary “Total XP: {totalXp} · Bricks: {brickCount} · Next milestone: {nextMilestoneXp} XP”.
+- Keep the 7D / 30D / All toggle. When switching timeframe, recompute bricks and milestones.
+
+Tooltips & a11y:
+- Hover/focus on a brick shows: “{Category} · {action} · +10 XP · {date time}”.
+- `aria-label` matches the tooltip.
+
+Performance:
+- Cap to the most recent 1,500 bricks (15k XP) for smoothness. If more exist, show a tiny “+ more” badge after the last visible brick.
+
+Empty state:
+- If no bricks in the window: “No XP yet—add a prospect or log a follow-up to start building your foundation.”
+
+Acceptance:
+- Bricks are tightly packed left→right with no big gaps.
+- Colors reflect categories; tooltips work.
+- Milestone dividers appear every 100 bricks with the XP label.
+- Header shows total/bricks/next milestone.
+- Time toggle re-renders correctly.
+- No changes to other pages or data flows.

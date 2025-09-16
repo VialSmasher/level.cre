@@ -1,0 +1,64 @@
+Goal: When a user searches an address, drop a temporary marker at the result. Clicking it opens a small info bubble with:
+- the formatted address
+- a button “Save as Prospect” that opens the existing asset/create panel prefilled.
+
+Scope: small, isolated change. Do NOT modify drawing, CSV, filters, auth, or demo logic.
+
+Files to touch:
+- client/src/pages/home.tsx                  // map + search handling
+- client/src/components/AssetPanel.tsx       // accept initial data (address, point)
+- (read-only) client/src/hooks/useProfile.ts // for submarkets if needed
+
+A) State & types (home.tsx)
+- Add state: const [searchPin, setSearchPin] = useState<{ id:'temp-search', lat:number, lng:number, address:string }|null>(null);
+- Ensure only one temp pin exists at a time.
+
+B) On search success (home.tsx)
+- After geocoding/places result resolves, call:
+   setSearchPin({ id:'temp-search', lat: result.lat, lng: result.lng, address: result.formatted_address || query });
+   map.panTo({lat:result.lat, lng:result.lng}); map.setZoom(Math.max(map.getZoom(), 17));
+- If a previous pin exists, replace it.
+
+C) Render the temp pin (home.tsx)
+- Render a lightweight google.maps.Marker (or your Marker wrapper) when searchPin != null, with a distinct style (e.g., blue-dot or pulse).
+- Attach an InfoWindow with:
+   line 1: searchPin.address
+   line 2: small button “Save as Prospect”
+   line 3 (optional): “Clear” link that sets setSearchPin(null)
+
+D) “Save as Prospect” behavior (home.tsx)
+- On click:
+   open the existing AssetPanel in “create” mode and pass initial data:
+   openAssetPanel({
+     mode: 'create',
+     initial: {
+       address: searchPin.address,
+       geometry: { type:'Point', coordinates:[searchPin.lng, searchPin.lat] },
+       status: 'Prospect',
+       submarket: inferSubmarketFromPoint(searchPin) || ''
+     }
+   });
+- After panel opens, keep the temp pin visible until user saves/cancels. On successful save, setSearchPin(null).
+
+E) AssetPanel changes (AssetPanel.tsx)
+- Accept optional prop `initial?: { address?: string; geometry?: GeoJSON.Point; status?: Status; submarket?: string }`
+- When opening in create mode and `initial` is provided:
+   - prefill address, status, submarket
+   - if geometry is a Point, keep it as the asset’s geometry unless the user draws a polygon later
+- Ensure save path includes geometry (point) and other fields as usual.
+
+F) Utility (home.tsx) — submarket inference (optional)
+- If you have submarket polygons in memory, add a helper `inferSubmarketFromPoint({lat,lng})` that returns the first matching submarket name; otherwise return ''.
+- This is optional—don’t block feature if unavailable.
+
+G) Cleanup rules
+- New search replaces the previous temp pin.
+- “Clear” link removes the pin.
+- On route change away from Map, clear the pin.
+- Do not persist the temp pin to DB.
+
+Acceptance:
+- Searching an address recenters the map and shows a distinct temporary marker with the address.
+- Clicking the pin shows a small bubble with “Save as Prospect”.
+- Clicking “Save as Prospect” opens the asset panel prefilled (address/status; and point geometry). Saving creates the asset and the temp pin disappears.
+- Nothing else (drawing, filters, CSV, auth) changes or breaks.

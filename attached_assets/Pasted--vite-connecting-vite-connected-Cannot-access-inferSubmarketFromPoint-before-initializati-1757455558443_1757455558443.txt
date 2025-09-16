@@ -1,0 +1,23 @@
+[vite] connecting...
+[vite] connected.
+Cannot access 'inferSubmarketFromPoint' before initialization
+Cannot access 'inferSubmarketFromPoint' before initialization
+The above error occurred in the <HomePage> component:
+
+    at HomePage (https://89807d01-b56b-406a-8065-ae80b3ab2733-00-3dcp0mely9dnc.janeway.replit.dev/src/pages/home.tsx:95:21)
+    at main
+    at div
+    at AppLayout (https://89807d01-b56b-406a-8065-ae80b3ab2733-00-3dcp0mely9dnc.janeway.replit.dev/src/components/AppLayout.tsx:45:29)
+    at ProtectedRoute (https://89807d01-b56b-406a-8065-ae80b3ab2733-00-3dcp0mely9dnc.janeway.replit.dev/src/components/ProtectedRoute.tsx:21:34)
+    at Route (https://89807d01-b56b-406a-8065-ae80b3ab2733-00-3dcp0mely9dnc.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=5be563c4:323:16)
+    at Switch (https://89807d01-b56b-406a-8065-ae80b3ab2733-00-3dcp0mely9dnc.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=5be563c4:379:17)
+    at Router (https://89807d01-b56b-406a-8065-ae80b3ab2733-00-3dcp0mely9dnc.janeway.replit.dev/src/App.tsx?v=yV5IinU1i2OhrzrmHUTS1:41:29)
+    at Provider (https://89807d01-b56b-406a-8065-ae80b3ab2733-00-3dcp0mely9dnc.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-7CHUOEIG.js?v=5be563c4:38:15)
+    at TooltipProvider (https://89807d01-b56b-406a-8065-ae80b3ab2733-00-3dcp0mely9dnc.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@radix-ui_react-tooltip.js?v=5be563c4:61:5)
+    at MapProvider (https://89807d01-b56b-406a-8065-ae80b3ab2733-00-3dcp0mely9dnc.janeway.replit.dev/src/contexts/MapContext.tsx:29:31)
+    at AuthProvider (https://89807d01-b56b-406a-8065-ae80b3ab2733-00-3dcp0mely9dnc.janeway.replit.dev/src/contexts/AuthContext.tsx:31:32)
+    at QueryClientProvider (https://89807d01-b56b-406a-8065-ae80b3ab2733-00-3dcp0mely9dnc.janeway.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@tanstack_react-query.js?v=5be563c4:2805:3)
+    at App
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.

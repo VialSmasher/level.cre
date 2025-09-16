@@ -1,0 +1,58 @@
+Goal: Polish the landing page UI/UX. Keep both CTAs:
+- Primary: “Sign in with Google”
+- Secondary: “Continue in Demo Mode”
+
+Do NOT modify auth logic or routes. Only refine layout, copy, and states.
+
+Files: landing/marketing page component (e.g., client/src/pages/index.tsx or /landing.tsx) + shared styles if needed.
+
+1) Layout & hierarchy
+- Hero section centered, tighter vertical spacing on desktop (less blank space).
+- Headline max-width ~ 18–22ch, supporting text max-width ~ 60ch.
+- Two CTAs stacked on mobile, side-by-side on desktop with equal width and height.
+- Below hero: 3 feature cards in a responsive grid (2 on tablet, 1 on mobile).
+
+2) CTA behavior & states
+- “Sign in with Google” is primary (filled).
+- “Continue in Demo Mode” is secondary (outline). Under it, a subtle caption:
+  “Demo data may not persist across sessions.”
+- While an auth request is in flight, disable the clicked button, show a small spinner, and prevent double-clicks.
+- On auth error, show a non-blocking toast: “Sign-in failed. Please try again.”
+
+3) Copy (use this exactly)
+- H1: “Commercial Real Estate Prospect Mapping”
+- Subhead: “Visualize, track, and manage your commercial real estate opportunities with powerful mapping tools, analytics, and pipeline management.”
+- Feature cards:
+  • “Interactive Mapping” — “Draw properties as points or polygons on Google Maps with real-time editing.”
+  • “Analytics Dashboard” — “Track coverage, activity, and freshness by submarket.”
+  • “Pipeline Management” — “Move prospects from first call to client with clear statuses and follow-ups.”
+
+4) Visual polish
+- Use consistent tokens: radius 14px, gap 12px, card bg rgba(255,255,255,0.92) with subtle shadow, backdrop blur 6px.
+- Icons sized consistently (24–28px). CTA height ~44–48px.
+- Keep color system aligned with the rest of the app (primary blue for the main button).
+
+5) Accessibility
+- Button text remains visible at AA contrast.
+- Add aria-labels: 
+  • Google button: aria-label="Sign in with Google"
+  • Demo button: aria-label="Continue in Demo Mode (temporary sandbox)"
+- Headings in logical order (H1 → H2 for features).
+- Keyboard focus ring visible on buttons and feature cards.
+
+6) Responsiveness
+- Mobile: stack CTAs, full-width with 16–20px side padding.
+- Tablet: grid = 2 columns; Desktop: grid = 3 columns.
+- Make hero min-height ~70vh on desktop, ~auto on mobile.
+
+7) Keep routing as-is
+- Primary CTA calls existing Google sign-in handler.
+- Demo CTA continues to set demo mode and route to the app.
+- Do NOT remove or rename Demo Mode.
+
+Acceptance:
+- Page shows both CTAs, with a small caption under Demo.
+- Buttons show loading/disabled states while processing; no double-submits.
+- No layout shifts; looks good on mobile, tablet, desktop.
+- Auth success routes unchanged; Demo still works exactly as before.
+- Lighthouse a11y issues for contrast/focus are clean.

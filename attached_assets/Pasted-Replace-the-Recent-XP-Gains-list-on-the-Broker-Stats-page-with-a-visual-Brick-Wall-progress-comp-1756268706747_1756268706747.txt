@@ -1,0 +1,64 @@
+Replace the “Recent XP Gains” list on the Broker Stats page with a visual “Brick Wall” progress component.
+
+Scope: only the stats page + a new component. Do NOT change map, CRM, leaderboard, or auth.
+
+Files:
+- client/src/pages/stats.tsx            // replace list section with <BrickWall />
+- client/src/components/BrickWall.tsx   // new component
+- server/storage.ts or hooks that fetch XP events (read-only; reuse existing endpoint)
+
+Requirements:
+
+1) Data
+- Reuse the same XP events the list used. Each event has: id, category, xp, action, created_at.
+- Add a time window selector (7d | 30d | All), default 30d; filter events client-side for now.
+
+2) Brick aggregation
+- UNIT_XP = 10. Each full 10 XP = 1 brick. Ignore leftover remainder (or carry to next event if easy).
+- Expand events into an array of bricks: { id: string, category, action, created_at }.
+- Cap to the most recent 1,200 bricks to keep render smooth.
+
+3) Component API
+<BrickWall
+  events={filteredEvents}
+  unitXp={10}
+  columns={{ desktop:16, tablet:10, mobile:6 }}
+/>
+
+4) Rendering
+- Render bricks in a responsive CSS grid; left→right, top→bottom.
+- Brick style: 16×8 px (desktop), gap 2 px, border-radius 2 px.
+- Colors by category:
+  prospecting: var(--color-prospecting, #1E90FF)
+  followup:    var(--color-followup,    #10B981)
+  consistency: var(--color-consistency, #F59E0B)
+  knowledge:   var(--color-knowledge,   #6366F1)
+- Tooltip on hover/focus: “{Category} · {action} · +{unitXp} XP · {date time}”.
+- Entrance animation: fade+scale for newly appended bricks (CSS only).
+
+5) Milestones
+- Every 100 bricks (i.e., 1,000 XP), render a thin horizontal milestone divider with a small label chip:
+  “Milestone: {totalXp} XP / Level {computedLevel if available}”.
+- The divider spans the grid width and sticks between rows.
+
+6) Legend
+- Small legend below the wall with colored dots + labels for the four categories.
+
+7) Time window UI
+- Place a compact SegmentedControl (“7d / 30d / All”) above the wall. Changing it re-filters and re-renders.
+- Keep the rest of the Broker Stats page intact.
+
+8) Accessibility & empty state
+- Each brick uses aria-label with details.
+- If there are no events in the window, render:
+  “No XP yet — add a prospect or log a follow-up to start building your wall.”
+
+9) Acceptance
+- The “Recent XP Gains” list is replaced by the Brick Wall section.
+- Bricks appear with correct colors and tooltips; totals visually increase as new events are logged.
+- Time window switch updates the wall correctly.
+- Performance is smooth with 1,000+ bricks.
+- No changes to the rest of the app behavior.
+
+Optional (nice-to-have, only if quick)
+- Support partial bricks for remainder XP (render with a diagonal clip or 50% opacity).

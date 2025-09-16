@@ -1,0 +1,80 @@
+Goal: Make Google sign-in work when the app runs inside Replit’s iframe preview.
+Do NOT remove Demo Mode. Do NOT auto-switch to demo.
+
+Approach:
+- Detect iframe environment.
+- Use Supabase OAuth with `skipBrowserRedirect: true` to get the provider URL.
+- Open that URL in a new tab (or in top window) so it’s not inside the iframe.
+- Keep normal redirect when not in an iframe.
+
+Files:
+- client/src/lib/supabase.ts (read-only)
+- client/src/pages/landing.tsx (or wherever the login buttons live)
+- client/src/contexts/AuthContext.tsx (read-only; no behavior change)
+- Optional: client/src/components/Toast.tsx (for errors)
+
+Changes:
+
+1) In the landing page, add an iframe detector:
+   const inIframe = typeof window !== 'undefined' && window.self !== window.top;
+
+2) Replace the Google sign-in handler with this exact flow:
+
+   async function handleGoogle() {
+     setLoading(true);
+     try {
+       const { data, error } = await supabase.auth.signInWithOAuth({
+         provider: 'google',
+         options: {
+           redirectTo: window.location.origin + '/app'
+         },
+         skipBrowserRedirect: true
+       });
+
+       if (error) throw error;
+       if (!data?.url) throw new Error('No OAuth URL returned');
+
+       if (inIframe) {
+         // Replit preview is an iframe: open top-level or a new tab
+         const w = window.open(data.url, '_blank', 'noopener,noreferrer');
+         if (!w) {
+           // Popup blocked: show a clickable fallback link
+           setPopupUrl(data.url);
+         }
+       } else {
+         // Normal local dev / deployed site: redirect in same tab
+         window.location.href = data.url;
+       }
+     } catch (err) {
+       toast.error('Sign-in failed. Please try again.');
+       console.error(err);
+     } finally {
+       setLoading(false);
+     }
+   }
+
+   // UI fallback: if popupUrl is set, render a visible link:
+   {popupUrl && (
+     <a href={popupUrl} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
+       Continue Google Sign-in
+     </a>
+   )}
+
+3) Keep Demo Mode button exactly as-is. Do NOT auto-switch to demo based on iframe.
+
+4) In AuthContext, no changes to onAuthStateChange or routing logic.
+   (After OAuth completes, Supabase will redirect back to /app and the listener will populate user/session.)
+
+5) Supabase settings:
+   - In the Supabase dashboard → Authentication → URL Configuration:
+     * Add the Replit public URL you open in a new tab as an Allowed Redirect URL, e.g.:
+       https://<your-repl-name>.<your-username>.repl.co/app
+       https://<your-repl-name>.<your-username>.replit.app/app (if applicable)
+     * Keep localhost dev URL if you use it, e.g. http://localhost:5173/app
+
+Acceptance:
+- In Replit preview (iframe), clicking “Sign in with Google” opens a new tab to Google, completes OAuth, and returns to /app with an authenticated session.
+- Outside the iframe (Open in new tab), sign-in works in the same tab.
+- Demo Mode still works and is unchanged.
+- No auto-fallback to demo; clear fallback link renders if the popup is blocked.
+- No console errors; no redirect loops.

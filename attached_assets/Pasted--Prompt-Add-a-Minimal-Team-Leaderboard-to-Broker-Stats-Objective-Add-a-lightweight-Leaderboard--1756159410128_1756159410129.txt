@@ -1,0 +1,156 @@
+📋 Prompt: Add a Minimal Team Leaderboard to Broker Stats
+
+Objective: Add a lightweight Leaderboard to the Broker Stats page that ranks teammates by Level (derived from XP) and shows Follow-Up XP and Prospecting XP. Keep it dead simple and safe.
+
+Guardrails (do NOT change)
+
+Do not modify map/CRM features, routes, or their APIs.
+
+Do not change Demo Mode semantics.
+
+Do not alter XP math, level math, or RLS policies.
+
+Read-only: useProfile, AuthContext.
+
+Preserve /app/stats UI and existing queries; add the Leaderboard as an isolated block.
+
+Scope of Work
+1) Server: one small endpoint + helper
+
+Create a single server helper and expose it behind a tiny API route.
+
+Name: getLeaderboard({ userId, orgId?, since? })
+
+Timeframes:
+
+7d: now − 7 days
+
+30d: now − 30 days
+
+All: omit since
+
+Scope:
+
+If caller has profiles.org_id, return users only from that org.
+
+If caller has no org, include all non-demo users.
+
+Data sources (use what already exists):
+
+If since provided → aggregate from skill_activities within window.
+
+If since omitted → read totals from broker_skills.
+
+Metrics:
+
+xp_prospect = XP where skill = 'prospecting'
+
+xp_followup = XP where skill = 'follow_up'
+
+level_total = use the exact same level formula already used on Broker Stats
+
+Sort: level_total DESC → xp_followup DESC → xp_prospect DESC
+
+Join: profiles for display_name and email (fallback to email prefix for name)
+
+RLS: Apply the same org/user filters used elsewhere. Do not broaden access.
+
+API contract (GET /api/leaderboard)
+
+Query params:
+
+orgId (optional)
+
+since (optional ISO string)
+
+Response:
+
+{
+  "data": [
+    {
+      "user_id": "uuid",
+      "user_email": "a@b.com",
+      "display_name": "Alice",
+      "level_total": 7,
+      "xp_followup": 565,
+      "xp_prospect": 150
+    }
+  ]
+}
+
+
+Errors: 401 if unauthenticated, 500 with {"error": "message"} otherwise.
+
+If streak/knowledge exist server-side, ignore for this first pass. Keep it small.
+
+2) Client: add a compact Leaderboard block to /app/stats
+
+Place a “Leaderboard” card/section in the top-right of the stats page (or directly below the top summary row if that’s easier).
+
+Timeframe selector: 7d | 30d | All (default 7d)
+
+Table columns: Rank, User, Level, Follow-Up XP, Prospecting XP
+
+Rows: show top 10 (or fewer if not available)
+
+Highlight: current user’s row with a subtle background
+
+Empty state: “No teammates yet”
+
+Loading: simple skeleton/placeholder
+
+Demo Mode: show “Leaderboard hidden in Demo” and do not call the API
+
+Fetch logic
+
+Read user.id and profile.org_id via existing hooks (read-only).
+
+Build since from timeframe; pass { orgId, since } to /api/leaderboard.
+
+Abort signal on unmount; handle non-200s gracefully (show empty state).
+
+Mobile behavior (simple):
+
+Keep the same table but allow horizontal scroll or
+
+Show only Rank, User, Level with a “⋯” row action that reveals XP values.
+
+Acceptance Checklist
+
+Two real users in the same org see identical Leaderboards for the same timeframe.
+
+Users in different orgs never see each other.
+
+Switching 7d/30d/All updates ordering consistently with the XP math already used in Broker Stats.
+
+Demo Mode: shows “Leaderboard hidden in Demo” (no network call).
+
+No changes to map/CRM flows; no new console errors or type errors.
+
+RLS continues to apply; the endpoint never leaks data cross-org.
+
+Testing Steps (quick)
+
+User A (same org as B): create 2 prospect assets and 2 follow-up touches.
+
+User B: add 1 follow-up touch.
+
+Open Broker Stats → Leaderboard (7d) as both users:
+
+User A should rank above B.
+
+Switch to 30d and All; ordering remains logical.
+
+Log in with a user from a different org; ensure they don’t appear with A/B.
+
+Toggle Demo Mode; verify the “hidden in Demo” note and no API call.
+
+Notes to Keep It Stable
+
+Reuse the existing level formula and XP categories exactly as the stats page (no new constants).
+
+Don’t refactor shared hooks/contexts; compose new code around them.
+
+Small PR: one helper, one route, one React section. No global state changes.
+
+If anything is unclear, default to simpler (e.g., omit columns rather than altering shared logic).

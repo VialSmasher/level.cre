@@ -1,0 +1,55 @@
+Problem:
+- Knowledge page shows submarkets correctly (e.g., NW, NE, SW, SE, nisku, leduc, calgary).
+- On the Map, the "Select submarket" dropdown (asset editor) is empty and the submarket layer filter is missing/incorrect.
+- Cause: the Map is not consuming the same submarket source that Knowledge uses.
+
+Goal:
+- Reuse the exact submarket list that Knowledge uses (from useProfile / profiles.submarkets) for BOTH:
+  (a) the asset editor dropdown, and
+  (b) the map’s submarket multi-select filter.
+
+Scope (minimal edits only):
+- client/src/hooks/useProfile.ts            // source of truth already working for Knowledge
+- client/src/pages/home.tsx                 // Map filters + render predicate
+- client/src/components/AssetPanel.tsx      // or wherever the Edit Prospect panel lives
+- client/src/pages/profile.tsx (read-only)  // no changes unless it helps with typing
+- server/storage.ts (read/write submarket is already supported; verify only)
+
+Tasks:
+
+1) Single source of truth
+- Import and use the same hook the Knowledge page uses for submarkets:
+  const { profile, isLoading } = useProfile();
+  const submarkets = profile?.submarkets || [];
+- Do NOT read submarkets from localStorage or any demo stub in the Map.
+
+2) Asset editor dropdown (Map side panel)
+- Pass `submarkets` from useProfile into the submarket <Select>.
+- If submarkets.length === 0 → show disabled state “No submarkets defined”.
+- Controlled value = asset.submarket || "".
+- On save/upsert, include `submarket` in the asset payload.
+- After save, invalidate/refetch the assets query so the UI reflects the selected submarket immediately.
+
+3) Map submarket filter (multi-select, acts like layers)
+- Add a compact multi-select “Submarkets” control that uses the SAME `submarkets` array.
+- State: selectedSubmarkets: Set<string>. (Persist UI state per user if you already do that, but this is not the data source.)
+- Render predicate BEFORE rendering Markers/Polygons:
+  const passesSubmarket =
+    selectedSubmarkets.size === 0 ||
+    (asset.submarket && selectedSubmarkets.has(asset.submarket));
+  const passesStatus = ...existing logic...
+  if (!(passesSubmarket && passesStatus)) skip rendering this asset.
+
+4) Refetch and sync
+- When profile.submarkets changes (add/remove on Profile), Map should automatically re-render options:
+  - Easiest: ensure home.tsx uses the useProfile hook directly so it reacts to query invalidation.
+  - After profile update, invalidate the useProfile query so both Map and Knowledge refresh options.
+
+5) Verify server/storage
+- Ensure all asset reads are WHERE user_id = $1 and include submarket in the response.
+- Ensure upsert includes `submarket` when provided.
+
+Acceptance:
+- The options in the Map’s submarket dropdown and filter EXACTLY match the Knowledge page list.
+- Creating a new asset lets me choose a submarket; saving persists it; the map filter hides/shows it correctly.
+- Adding/removing a submarket on Profile updates the Map options without reload.
