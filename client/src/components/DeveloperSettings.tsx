@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { Settings, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -15,19 +15,19 @@ export function DeveloperSettings({ onApiKeyChange }: DeveloperSettingsProps) {
   const [showKey, setShowKey] = useState(false);
   const [keyInput, setKeyInput] = useState('');
 
-  const handleSave = useCallback(() => {
+  const handleSave = () => {
     const trimmedKey = keyInput.trim();
     localStorage.setItem('google-maps-api-key-override', trimmedKey);
     onApiKeyChange(trimmedKey);
     setIsOpen(false);
-  }, [keyInput, onApiKeyChange]);
+  };
 
-  const handleClear = useCallback(() => {
+  const handleClear = () => {
     setKeyInput('');
     localStorage.removeItem('google-maps-api-key-override');
     onApiKeyChange('');
     setIsOpen(false);
-  }, [onApiKeyChange]);
+  };
 
   return (
     <TooltipProvider>

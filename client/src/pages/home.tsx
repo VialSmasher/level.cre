@@ -24,7 +24,6 @@ import { DeveloperSettings } from '@/components/DeveloperSettings';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth, useDemoAuth } from '@/hooks/useAuth';
 import { useProfile } from '@/hooks/useProfile';
-import { useMapContext } from '@/contexts/MapContext';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { queryClient, apiRequest } from '@/lib/queryClient';
@@ -40,7 +39,7 @@ import type {
   Touch 
 } from '@shared/schema';
 
-const GOOGLE_MAPS_LIBRARIES: any = ['drawing', 'geometry', 'places'];
+const libraries: any = ['drawing', 'geometry', 'places'];
 
 const STATUS_COLORS: Record<ProspectStatusType, string> = {
   'prospect': '#FBBF24',
@@ -117,7 +116,6 @@ export default function HomePage() {
   const { user } = useAuth();
   const { demoUser } = useDemoAuth();
   const { profile } = useProfile();
-  const { mapState, updateCenter, updateZoom, updateMapType } = useMapContext();
   
   // Memoize currentUser to prevent infinite loops
   const currentUser = useMemo(() => user || demoUser, [user, demoUser]);
@@ -127,6 +125,8 @@ export default function HomePage() {
   
   // Map state
   const [map, setMap] = useState<google.maps.Map | null>(null);
+  const [mapType, setMapType] = useState<'roadmap' | 'hybrid'>('roadmap');
+  const [center] = useState({ lat: 53.5461, lng: -113.4938 }); // Edmonton
   
   // Data state
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -159,19 +159,6 @@ export default function HomePage() {
   
   // Search pin state
   const [searchPin, setSearchPin] = useState<{ id: 'temp-search', lat: number, lng: number, address: string, businessName?: string | null, websiteUrl?: string | null } | null>(null);
-
-  // POI click state (for clicked businesses on map)
-  const [poiPin, setPoiPin] = useState<{
-    id: string;
-    lat: number;
-    lng: number;
-    placeId: string;
-    name?: string;
-    address?: string;
-    businessName?: string | null;
-    websiteUrl?: string | null;
-    isLoading?: boolean;
-  } | null>(null);
   
   // Drawing state
   const drawingManagerRef = useRef<google.maps.drawing.DrawingManager | null>(null);
@@ -180,7 +167,7 @@ export default function HomePage() {
   // Google Maps loader
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
-    libraries: GOOGLE_MAPS_LIBRARIES,
+    libraries,
   });
 
   // Reset state when user changes
@@ -203,16 +190,13 @@ export default function HomePage() {
     queryKey: ['/api/prospects'],
     enabled: !!currentUser,
     retry: false,
-    refetchOnWindowFocus: false,
   });
   
   // Remove submarkets query - we'll use profile submarkets instead
   
   // Sync React Query data with local state
   useEffect(() => {
-    if (prospectsData) {
-      setProspects(prospectsData);
-    }
+    setProspects(prospectsData);
   }, [prospectsData]);
   
   
@@ -238,7 +222,7 @@ export default function HomePage() {
     return () => {
       window.removeEventListener('userChanged', handleUserChange);
     };
-  }, [currentUser?.id]); // Use currentUser.id instead of refetchProspects to avoid dependency issues
+  }, [currentUser?.id]); // Removed refetchProspects to fix infinite loop
 
   // Save data to user-scoped localStorage
   const saveData = useCallback(() => {
@@ -248,7 +232,7 @@ export default function HomePage() {
 
   // Save data whenever prospects or touches change (but not on initial load)
   useEffect(() => {
-    if (currentUser?.id && prospects.length > 0) {
+    if (currentUser && prospects.length > 0) {
       const data: MapData = { prospects, submarkets: [], touches };
       writeJSON(nsKey(currentUser.id, 'mapData'), data);
     }
@@ -263,18 +247,10 @@ export default function HomePage() {
     writeJSON(nsKey(currentUser?.id, 'legendOpen'), isLegendOpen);
   }, [isLegendOpen, currentUser?.id]);
   
-  // Save submarket filter state - guard against redundant writes
+  // Save submarket filter state
   useEffect(() => {
-    if (!currentUser?.id) return; // Guard against undefined user
-    
-    const submarketArray = Array.from(selectedSubmarkets);
-    const existing = readJSON(nsKey(currentUser.id, 'selectedSubmarkets'), []);
-    
-    // Only write if value actually changed
-    if (JSON.stringify(submarketArray) !== JSON.stringify(existing)) {
-      writeJSON(nsKey(currentUser.id, 'selectedSubmarkets'), submarketArray);
-    }
-  }, [selectedSubmarkets.size, currentUser?.id]);
+    writeJSON(nsKey(currentUser?.id, 'selectedSubmarkets'), Array.from(selectedSubmarkets));
+  }, [selectedSubmarkets, currentUser?.id]);
 
   // Filter prospects based on status and submarket
   const filteredProspects = prospects.filter(prospect => {
@@ -284,157 +260,10 @@ export default function HomePage() {
     return passesStatus && passesSubmarket;
   });
 
-  // Infer submarket from point coordinates
-  const inferSubmarketFromPoint = useCallback((point: { lat: number; lng: number }): string => {
-    // For now, return empty string since we don't have submarket polygon logic
-    // This can be enhanced later if submarkets are available
-    return '';
-  }, []);
-
-  // Fetch place details using Google Places API
-  const fetchPlaceDetails = useCallback(async (placeId: string, lat: number, lng: number) => {
-    try {
-      if (!map) return;
-      
-      const service = new google.maps.places.PlacesService(map);
-      
-      service.getDetails({
-        placeId: placeId,
-        fields: ['name', 'formatted_address', 'website', 'business_status', 'types']
-      }, (place, status) => {
-        if (status === google.maps.places.PlacesServiceStatus.OK && place) {
-          setPoiPin({
-            id: `poi-${placeId}`,
-            lat,
-            lng,
-            placeId,
-            name: place.name || undefined,
-            address: place.formatted_address || undefined,
-            businessName: place.name || undefined,
-            websiteUrl: place.website || undefined,
-            isLoading: false
-          });
-        } else {
-          console.error('Place details request failed:', status);
-          // Clear loading state on error
-          setPoiPin(null);
-        }
-      });
-    } catch (error) {
-      console.error('Error fetching place details:', error);
-      setPoiPin(null);
-    }
-  }, [map]);
-
-  // Handle saving POI pin as prospect
-  const handleSavePoiPin = useCallback(async () => {
-    if (!poiPin) return;
-    
-    try {
-      const newProspectData = {
-        name: poiPin.address || poiPin.name || 'Unknown Location',
-        geometry: {
-          type: 'Point' as const,
-          coordinates: [poiPin.lng, poiPin.lat] as [number, number]
-        },
-        status: 'prospect' as ProspectStatusType,
-        notes: '',
-        submarketId: inferSubmarketFromPoint(poiPin) || '',
-        businessName: poiPin.businessName || undefined,
-        websiteUrl: poiPin.websiteUrl || undefined,
-        contactCompany: poiPin.businessName || undefined
-      };
-
-      console.log('Saving POI pin as prospect:', newProspectData);
-      
-      // Save directly to database
-      const response = await apiRequest('POST', '/api/prospects', newProspectData);
-      const savedProspect = await response.json();
-      
-      // Add to prospects list
-      setProspects(prev => [...prev, savedProspect]);
-      
-      // Invalidate query cache to refresh
-      queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
-      
-      // Clear the POI pin
-      setPoiPin(null);
-      
-      // Show success message
-      toast({
-        title: "Prospect saved successfully",
-        description: `"${savedProspect.name}" has been added to your map.`
-      });
-      
-      console.log('POI pin saved as prospect:', savedProspect);
-      
-    } catch (error) {
-      console.error('Error saving POI pin as prospect:', error);
-      toast({
-        title: "Error saving prospect",
-        description: "Failed to save prospect to database.",
-        variant: "destructive"
-      });
-    }
-  }, [poiPin, inferSubmarketFromPoint, toast, queryClient]);
-
   // Map event handlers
   const onMapLoad = useCallback((map: google.maps.Map) => {
     setMap(map);
-    
-    // Add event listeners to track map state changes and update context
-    map.addListener('center_changed', () => {
-      const center = map.getCenter();
-      if (center) {
-        updateCenter({
-          lat: center.lat(),
-          lng: center.lng()
-        });
-      }
-    });
-    
-    map.addListener('zoom_changed', () => {
-      const zoom = map.getZoom();
-      if (zoom !== undefined) {
-        updateZoom(zoom);
-      }
-    });
-    
-    map.addListener('maptypeid_changed', () => {
-      const mapTypeId = map.getMapTypeId();
-      if (mapTypeId) {
-        updateMapType(mapTypeId);
-      }
-    });
-
-    // Add click listener for POI detection
-    map.addListener('click', (event: google.maps.MapMouseEvent) => {
-      // Cast to any to access placeId which exists at runtime for POI clicks
-      const eventAny = event as any;
-      if (eventAny.placeId) {
-        // Prevent default behavior
-        event.stop();
-        
-        // Get the clicked location
-        const lat = event.latLng?.lat();
-        const lng = event.latLng?.lng();
-        
-        if (lat !== undefined && lng !== undefined) {
-          // Set loading state
-          setPoiPin({
-            id: `poi-${eventAny.placeId}`,
-            lat,
-            lng,
-            placeId: eventAny.placeId,
-            isLoading: true
-          });
-          
-          // Fetch place details
-          fetchPlaceDetails(eventAny.placeId, lat, lng);
-        }
-      }
-    });
-  }, [updateCenter, updateZoom, updateMapType, fetchPlaceDetails]);
+  }, []);
 
   const onMapUnmount = useCallback(() => {
     setMap(null);
@@ -665,6 +494,13 @@ export default function HomePage() {
       businessName: location.businessName,
       websiteUrl: location.websiteUrl
     });
+  }, []);
+
+  // Submarket inference helper
+  const inferSubmarketFromPoint = useCallback((point: { lat: number; lng: number }): string => {
+    // For now, return empty string since we don't have submarket polygon logic
+    // This can be enhanced later if submarkets are available
+    return '';
   }, []);
 
   // Handle "Save as Prospect" from search pin - save immediately to database
@@ -909,10 +745,6 @@ export default function HomePage() {
     console.log('API key changed:', newApiKey);
   }, []);
 
-  // Callback functions to prevent inline function recreation
-  const clearSearchPin = useCallback(() => setSearchPin(null), []);
-  const clearPoiPin = useCallback(() => setPoiPin(null), []);
-
   if (!isLoaded) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -930,11 +762,11 @@ export default function HomePage() {
       <div style={{ position: 'absolute', inset: 0 }}>
         <GoogleMap
           mapContainerStyle={{ width: '100%', height: '100%' }}
-          center={mapState.center}
-          zoom={mapState.zoom}
+          center={center}
+          zoom={11}
           onLoad={onMapLoad}
           onUnmount={onMapUnmount}
-          mapTypeId={mapState.mapTypeId as google.maps.MapTypeId}
+          mapTypeId={mapType}
           options={{
             disableDefaultUI: true,
             zoomControl: true,
@@ -943,8 +775,7 @@ export default function HomePage() {
             streetViewControl: false,
             rotateControl: false,
             fullscreenControl: true,
-            gestureHandling: 'greedy',
-            clickableIcons: false // Disable default info windows for POIs
+            gestureHandling: 'greedy'
           }}
         >
           {/* Drawing Manager */}
@@ -1058,89 +889,12 @@ export default function HomePage() {
                       Add to Map
                     </button>
                     <button
-                      onClick={clearSearchPin}
+                      onClick={() => setSearchPin(null)}
                       className="px-2 py-1.5 text-gray-500 hover:text-gray-700 text-xs"
                     >
                       ✕
                     </button>
                   </div>
-                </div>
-              </InfoWindow>
-            </>
-          )}
-
-          {/* POI Pin Info Window */}
-          {poiPin && (
-            <>
-              <Marker
-                position={{ lat: poiPin.lat, lng: poiPin.lng }}
-                icon={{
-                  path: window.google?.maps?.SymbolPath?.CIRCLE,
-                  fillColor: '#34D399',
-                  fillOpacity: 1,
-                  strokeWeight: 3,
-                  strokeColor: '#ffffff',
-                  scale: 12,
-                }}
-              />
-              <InfoWindow
-                position={{ lat: poiPin.lat, lng: poiPin.lng }}
-                onCloseClick={() => setPoiPin(null)}
-                options={{
-                  pixelOffset: new window.google.maps.Size(0, -10)
-                }}
-              >
-                <div 
-                  className="relative bg-white p-3 max-w-xs shadow-lg border border-gray-200 rounded-lg"
-                  style={{
-                    fontFamily: 'Roboto, Arial, sans-serif',
-                    fontSize: '13px',
-                    lineHeight: '1.4'
-                  }}
-                >
-                  {/* Custom pointer arrow to match Google Maps style */}
-                  <div 
-                    className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-full"
-                    style={{
-                      width: 0,
-                      height: 0,
-                      borderLeft: '8px solid transparent',
-                      borderRight: '8px solid transparent',
-                      borderTop: '8px solid white',
-                      filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))'
-                    }}
-                  />
-                  
-                  {poiPin.isLoading ? (
-                    <div className="flex items-center gap-2">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-                      <span className="text-gray-600 text-sm">Loading details...</span>
-                    </div>
-                  ) : (
-                    <>
-                      <h3 className="font-medium text-sm mb-1 text-gray-900">
-                        {poiPin.businessName || poiPin.name || 'Business'}
-                      </h3>
-                      {poiPin.address && (
-                        <p className="text-xs text-gray-600 mb-3">{poiPin.address}</p>
-                      )}
-                      <div className="flex gap-2">
-                        <button
-                          onClick={handleSavePoiPin}
-                          className="flex-1 bg-blue-500 hover:bg-blue-600 text-white text-xs px-3 py-1.5 rounded transition-colors font-medium"
-                          style={{ backgroundColor: '#1976d2' }}
-                        >
-                          Add to Map
-                        </button>
-                        <button
-                          onClick={clearPoiPin}
-                          className="px-2 py-1.5 text-gray-500 hover:text-gray-700 text-xs font-medium"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </>
-                  )}
                 </div>
               </InfoWindow>
             </>
@@ -1308,15 +1062,12 @@ export default function HomePage() {
           {/* Map View Toggle */}
           <div className="bg-white rounded-lg shadow-lg border border-gray-200 p-1">
             <Button
-              onClick={() => {
-                const currentMapType = mapState.mapTypeId === 'roadmap' ? 'hybrid' : 'roadmap';
-                updateMapType(currentMapType);
-              }}
+              onClick={() => setMapType(mapType === 'roadmap' ? 'hybrid' : 'roadmap')}
               className="w-full h-8"
               variant="ghost"
               size="sm"
             >
-              {mapState.mapTypeId === 'roadmap' ? (
+              {mapType === 'roadmap' ? (
                 <>
                   <Satellite className="h-4 w-4 mr-2" />
                   Hybrid

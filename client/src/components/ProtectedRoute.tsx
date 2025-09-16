@@ -9,9 +9,9 @@ interface ProtectedRouteProps {
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, loading } = useAuth()
   const [, setLocation] = useLocation()
-  
-  // Check demo mode from localStorage - memoize to prevent re-reads
-  const [demo] = useState(() => localStorage.getItem('demo-mode') === 'true')
+
+  // Check demo mode from localStorage
+  const demo = localStorage.getItem('demo-mode') === 'true'
 
   useEffect(() => {
     if (!loading && !user && !demo) {

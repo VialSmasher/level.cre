@@ -50,11 +50,13 @@ export default function CompsPage() {
   // Fetch comps
   const { data: comps = [], isLoading } = useQuery({
     queryKey: ['/api/comps'],
-    queryFn: async () => {
-      const response = await apiRequest('GET', '/api/comps');
-      return await response.json();
-    },
+    queryFn: () => apiRequest('GET', '/api/comps'),
   });
+
+  // Debug logging
+  console.log('Raw comps data:', comps);
+  console.log('Comps array check:', Array.isArray(comps));
+  console.log('Comps length:', Array.isArray(comps) ? comps.length : 'Not an array');
 
   // Create comp mutation
   const createMutation = useMutation({
@@ -210,8 +212,19 @@ export default function CompsPage() {
     const matchesSource = filterSource === "all" || comp.source === filterSource;
     const matchesTransactionType = filterTransactionType === "all" || comp.transactionType === filterTransactionType;
     
+    console.log('Filtering comp:', comp.tenantPurchaserName, {
+      matchesSearch,
+      matchesSource,
+      matchesTransactionType,
+      searchQuery,
+      filterSource,
+      filterTransactionType
+    });
+    
     return matchesSearch && matchesSource && matchesTransactionType;
   }) : [];
+
+  console.log('Filtered comps:', filteredComps.length);
 
   const uniqueSources = Array.from(new Set((Array.isArray(comps) ? comps : []).map((comp: Comp) => comp.source).filter(Boolean)));
 
