@@ -3,15 +3,13 @@ import { createServer, type Server } from "http";
 import jwt from "jsonwebtoken";
 import { storage } from "./storage";
 import { getUserId, requireAuth } from "./auth";
-import { createClient } from '@supabase/supabase-js';
+// import { createClient } from '@supabase/supabase-js'; // Disabled - package not installed
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Initialize Supabase client for server-side OAuth
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
-  const supabase = (supabaseUrl && supabaseKey) 
-    ? createClient(supabaseUrl, supabaseKey)
-    : null;
+  // Initialize Supabase client for server-side OAuth (DISABLED)
+  // const supabaseUrl = process.env.VITE_SUPABASE_URL;
+  // const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
+  const supabase = null; // Disabled - using demo auth instead
 
   // Simple redirect to Google OAuth - let Supabase handle everything
   app.get('/api/auth/google', async (req, res) => {
