@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Calendar, MapPin, Phone, Mail, Building2, Clock, Filter, Plus, MessageSquare, X, PhoneCall, Zap, CheckCircle, Undo2, AlertTriangle } from 'lucide-react';
+import { Calendar, MapPin, Phone, Mail, Building2, Clock, Filter, Plus, MessageSquare, X, PhoneCall, Zap, CheckCircle, Undo2 } from 'lucide-react';
 import { Prospect, ProspectStatusType, FollowUpTimeframeType, Submarket, ContactInteractionType, ContactInteractionRow } from '@shared/schema';
 import { apiRequest } from '@/lib/queryClient';
 
@@ -284,8 +284,7 @@ function QuickEngagement({ prospect, allInteractions }: { prospect: Prospect; al
 export default function FollowUpPage() {
   const [selectedSubmarket, setSelectedSubmarket] = useState<string>('all');
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>('all'); // Status filter: 'all', 'prospect', 'contacted', 'listing', 'client', 'no_go'
-  const [filterDate, setFilterDate] = useState<string>(''); // Date filter for due dates
+  const [showEngagementFilter, setShowEngagementFilter] = useState<string>('all'); // 'all', 'no_engagement', 'has_engagement'
   
   const { data: prospects = [], isLoading } = useQuery<Prospect[]>({
     queryKey: ['/api/prospects'],
@@ -300,67 +299,35 @@ export default function FollowUpPage() {
     queryKey: ['/api/interactions'],
   });
 
-  // Helper function to check if a prospect is overdue
-  const isOverdue = (prospect: Prospect): boolean => {
-    if (!prospect.followUpDueDate) return false;
-    return new Date(prospect.followUpDueDate) < new Date();
-  };
+  // Filter prospects that have follow-up timeframes OR show those with no engagement
+  const baseProspects = showEngagementFilter === 'no_engagement' 
+    ? prospects // Show all prospects when filtering by engagement
+    : prospects.filter((prospect: Prospect) => prospect.followUpTimeframe);
 
-  // Helper function to format due date
-  const formatDueDate = (dateString: string): string => {
-    const date = new Date(dateString);
-    const today = new Date();
-    const diffTime = date.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  // Apply engagement filter
+  const engagementFilteredProspects = baseProspects.filter((prospect: Prospect) => {
+    const prospectInteractions = allInteractions.filter(i => i.prospectId === prospect.id);
     
-    if (diffDays < 0) {
-      return `${Math.abs(diffDays)} day${Math.abs(diffDays) !== 1 ? 's' : ''} overdue`;
-    } else if (diffDays === 0) {
-      return 'Due today';
-    } else if (diffDays === 1) {
-      return 'Due tomorrow';
-    } else {
-      return `Due in ${diffDays} day${diffDays !== 1 ? 's' : ''}`;
+    if (showEngagementFilter === 'no_engagement') {
+      return prospectInteractions.length === 0; // Only prospects with no interactions
     }
-  };
-
-  // Apply status filter first
-  const statusFilteredProspects = prospects.filter((prospect: Prospect) => {
-    if (statusFilter === 'all') return true;
-    return prospect.status === statusFilter;
-  });
-
-  // Filter prospects that have follow-up due dates
-  const baseProspects = statusFilteredProspects.filter((prospect: Prospect) => prospect.followUpDueDate);
-
-  // Apply date filter if specified
-  const dateFilteredProspects = baseProspects.filter((prospect: Prospect) => {
-    if (!filterDate) return true;
-    if (!prospect.followUpDueDate) return false;
-    
-    const dueDate = new Date(prospect.followUpDueDate);
-    const selectedDate = new Date(filterDate);
-    return dueDate <= selectedDate;
+    if (showEngagementFilter === 'has_engagement') {
+      return prospectInteractions.length > 0; // Only prospects with interactions
+    }
+    return true; // 'all' - show everything
   });
 
   // Apply submarket filter
-  const filteredProspects = dateFilteredProspects.filter((prospect: Prospect) => {
+  const filteredProspects = engagementFilteredProspects.filter((prospect: Prospect) => {
     if (selectedSubmarket === 'all') return true;
     if (selectedSubmarket === 'none') return !prospect.submarketId;
     return prospect.submarketId === selectedSubmarket;
   });
 
-  // Sort by follow-up due date (overdue first, then soonest due dates)
+  // Sort by follow-up timeframe (shortest first)
   const sortedProspects = [...filteredProspects].sort((a, b) => {
-    // If one has due date and other doesn't, prioritize the one with due date
-    if (a.followUpDueDate && !b.followUpDueDate) return -1;
-    if (!a.followUpDueDate && b.followUpDueDate) return 1;
-    if (!a.followUpDueDate && !b.followUpDueDate) return 0;
-    
-    // Both have due dates, sort by date
-    const dateA = new Date(a.followUpDueDate!);
-    const dateB = new Date(b.followUpDueDate!);
-    return dateA.getTime() - dateB.getTime();
+    const timeframeOrder: Record<FollowUpTimeframeType, number> = { '1_month': 1, '3_month': 2, '6_month': 3, '1_year': 4 };
+    return timeframeOrder[a.followUpTimeframe!] - timeframeOrder[b.followUpTimeframe!];
   });
 
   if (isLoading) {
@@ -379,8 +346,10 @@ export default function FollowUpPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Follow-Up Schedule</h1>
             <p className="text-gray-600 mt-1">
-              {filteredProspects.length} prospects
-              {statusFilter !== 'all' && ` with status: ${statusFilter.replace('_', ' ')}`}
+              {filteredProspects.length} prospects 
+              {showEngagementFilter === 'no_engagement' && ' with no engagement'}
+              {showEngagementFilter === 'has_engagement' && ' with logged activity'}
+              {showEngagementFilter === 'all' && ' scheduled for follow-up'}
               {selectedSubmarket !== 'all' && (
                 <span className="ml-2">
                   in {selectedSubmarket === 'none' ? 'no submarket' : submarkets.find(s => s.id === selectedSubmarket)?.name || selectedSubmarket}
@@ -389,38 +358,17 @@ export default function FollowUpPage() {
             </p>
           </div>
           <div className="flex items-center gap-4">
-            {/* Date Filter */}
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-gray-500" />
-              <Input
-                type="date"
-                value={filterDate}
-                onChange={(e) => setFilterDate(e.target.value)}
-                className="w-40"
-                placeholder="Filter by due date"
-              />
-            </div>
-
-            {/* Status Filter */}
+            {/* Engagement Filter */}
             <div className="flex items-center gap-2">
               <MessageSquare className="h-4 w-4 text-gray-500" />
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select value={showEngagementFilter} onValueChange={setShowEngagementFilter}>
                 <SelectTrigger className="w-48">
-                  <SelectValue placeholder="Filter by status" />
+                  <SelectValue placeholder="Filter by engagement" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Prospects</SelectItem>
-                  {Object.keys(STATUS_COLORS).map((status) => (
-                    <SelectItem key={status} value={status}>
-                      <div className="flex items-center gap-2">
-                        <div 
-                          className="w-3 h-3 rounded-full border"
-                          style={{ backgroundColor: STATUS_COLORS[status as ProspectStatusType] }}
-                        />
-                        <span className="capitalize">{status.replace('_', ' ')}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="no_engagement">No Engagement</SelectItem>
+                  <SelectItem value="has_engagement">Has Engagement</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -476,9 +424,11 @@ export default function FollowUpPage() {
               {baseProspects.length === 0 ? 'No Prospects Found' : 'No Results for Current Filters'}
             </h3>
             <p className="text-gray-600">
-              {baseProspects.length === 0 
-                ? 'Add follow-up timeframes to your prospects to see them here.'
-                : 'Try adjusting your filters to view other prospects.'
+              {showEngagementFilter === 'no_engagement' 
+                ? 'All prospects have some form of engagement recorded.'
+                : baseProspects.length === 0 
+                  ? 'Add follow-up timeframes to your prospects to see them here.'
+                  : 'Try adjusting your filters to view other prospects.'
               }
             </p>
           </div>
@@ -505,38 +455,13 @@ export default function FollowUpPage() {
                             {prospect.status.replace('_', ' ')}
                           </span>
                         </div>
-                        {prospect.followUpDueDate ? (
-                          <div className="flex flex-col gap-1">
-                            <Badge 
-                              variant="outline" 
-                              className={`inline-flex w-fit text-xs ${
-                                isOverdue(prospect) 
-                                  ? 'bg-red-50 text-red-700 border-red-200' 
-                                  : 'bg-blue-50 text-blue-700 border-blue-200'
-                              }`}
-                            >
-                              {isOverdue(prospect) ? (
-                                <AlertTriangle className="h-3 w-3 mr-1" />
-                              ) : (
-                                <Clock className="h-3 w-3 mr-1" />
-                              )}
-                              {formatDueDate(prospect.followUpDueDate)}
-                            </Badge>
-                            {isOverdue(prospect) && (
-                              <Badge variant="destructive" className="text-xs">
-                                OVERDUE
-                              </Badge>
-                            )}
-                          </div>
-                        ) : prospect.followUpTimeframe ? (
-                          <Badge 
-                            variant="outline" 
-                            className="inline-flex w-fit text-xs bg-gray-50 text-gray-700 border-gray-200"
-                          >
-                            <Clock className="h-3 w-3 mr-1" />
-                            {FOLLOW_UP_LABELS[prospect.followUpTimeframe]}
-                          </Badge>
-                        ) : null}
+                        <Badge 
+                          variant="outline" 
+                          className="bg-blue-50 text-blue-700 border-blue-200"
+                        >
+                          <Clock className="h-3 w-3 mr-1" />
+                          {FOLLOW_UP_LABELS[prospect.followUpTimeframe!]}
+                        </Badge>
                       </div>
                       
                       {/* Quick Engagement Actions */}

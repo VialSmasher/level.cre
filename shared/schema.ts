@@ -63,9 +63,7 @@ export const ProspectSchema = z.object({
   geometry: ProspectGeometry,
   createdDate: z.string(),
   submarketId: z.string().optional(),
-  lastContactDate: z.string().optional(), // Keep for backward compatibility
-  lastContactedDate: z.string().optional(), // New timestamp field as ISO string
-  followUpDueDate: z.string().optional(), // New due date field as ISO string
+  lastContactDate: z.string().optional(),
   followUpTimeframe: FollowUpTimeframe.optional(),
   // Contact information
   contactName: z.string().optional(),
@@ -220,9 +218,7 @@ export const prospects = pgTable("prospects", {
   notes: varchar("notes").default(""),
   geometry: jsonb("geometry").notNull(), // GeoJSON geometry
   submarketId: varchar("submarket_id"),
-  lastContactDate: varchar("last_contact_date"), // Keep for backward compatibility
-  lastContactedDate: timestamp("last_contacted_date"), // New timestamp field
-  followUpDueDate: timestamp("follow_up_due_date"), // New calculated due date field
+  lastContactDate: varchar("last_contact_date"),
   followUpTimeframe: varchar("follow_up_timeframe"), // 1_month, 3_month, 6_month, 1_year
   contactName: varchar("contact_name"),
   contactEmail: varchar("contact_email"),
@@ -263,6 +259,7 @@ export const requirements = pgTable("requirements", {
   userId: varchar("user_id").notNull().references(() => users.id),
   title: varchar("title").notNull(),
   source: varchar("source"), // dropdown: CBRE, Colliers, LoopNet, Direct, Other
+  location: varchar("location"), // dropdown from submarkets
   contactName: varchar("contact_name"),
   contactEmail: varchar("contact_email"),
   contactPhone: varchar("contact_phone"),
@@ -330,6 +327,7 @@ export const RequirementSchema = z.object({
   userId: z.string().optional(),
   title: z.string().min(1, "Title is required"),
   source: z.enum(["CBRE", "Colliers", "LoopNet", "Direct", "Other", "Cushman", "Avison", "JLL", "Cresa", "Omada", "Remax"]).nullable().optional(),
+  location: z.string().optional(),
   contactName: z.string().optional(),
   contactEmail: z.string().email().optional().or(z.literal("")),
   contactPhone: z.string().optional(),
@@ -350,32 +348,6 @@ export const InsertRequirementSchema = RequirementSchema.omit({
 
 export type Requirement = z.infer<typeof RequirementSchema>;
 export type InsertRequirement = z.infer<typeof InsertRequirementSchema>;
-
-// Comps schema with validation
-export const CompSchema = z.object({
-  id: z.string().optional(),
-  userId: z.string().optional(),
-  tenantPurchaserName: z.string().min(1, "Tenant/Purchaser Name is required"),
-  source: z.enum(["CBRE", "Colliers", "LoopNet", "Direct", "Other", "Cushman", "Avison", "JLL", "Cresa", "Omada", "Remax"]).nullable().optional(),
-  tags: z.array(z.string()).default([]),
-  transactionType: z.enum(["Sale", "Lease"]),
-  spaceSize: z.string().optional(),
-  leaseRate: z.string().optional(),
-  term: z.string().optional(),
-  salePrice: z.string().optional(),
-  notes: z.string().optional(),
-  createdAt: z.string().optional(),
-  updatedAt: z.string().optional(),
-});
-
-export const InsertCompSchema = CompSchema.omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-
-export type Comp = z.infer<typeof CompSchema>;
-export type InsertComp = z.infer<typeof InsertCompSchema>;
 
 // Broker Skills XP System - Runescape-style leveling (0-99)
 export const brokerSkills = pgTable("broker_skills", {
@@ -400,23 +372,6 @@ export const skillActivities = pgTable("skill_activities", {
   timestamp: timestamp("timestamp").defaultNow(),
   relatedId: varchar("related_id"), // prospect_id, interaction_id, etc.
   multiplier: integer("multiplier").default(1), // Streak multipliers
-});
-
-// Comps table for tracking sale and lease comparables
-export const comps = pgTable("comps", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
-  tenantPurchaserName: varchar("tenant_purchaser_name").notNull(),
-  source: varchar("source"), // dropdown: same as requirements
-  tags: varchar("tags").array().default(sql`ARRAY[]::varchar[]`),
-  transactionType: varchar("transaction_type").notNull(), // "Sale" or "Lease"
-  spaceSize: varchar("space_size"), // Space size range
-  leaseRate: varchar("lease_rate"), // for lease transactions (e.g., $/SF)
-  term: varchar("term"), // for lease transactions (e.g., Years)
-  salePrice: varchar("sale_price"), // for sale transactions ($)
-  notes: varchar("notes"),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 // Broker Skills Schemas

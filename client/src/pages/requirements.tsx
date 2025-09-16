@@ -9,7 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/hooks/useAuth";
 import { Plus, Edit, Trash2, Tag, Building, Users, Clock, MapPin } from "lucide-react";
 import { Requirement, InsertRequirement, Submarket } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
@@ -74,12 +73,12 @@ export default function RequirementsPage() {
   const [filterSource, setFilterSource] = useState<string>("all");
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
 
   // Form state - simplified
   const [formData, setFormData] = useState<InsertRequirement>({
     title: "",
     source: undefined,
+    location: "",
     contactName: "",
     contactEmail: "",
     contactPhone: "",
@@ -96,6 +95,20 @@ export default function RequirementsPage() {
   const { data: requirements = [], isLoading } = useQuery<Requirement[]>({
     queryKey: ['/api/requirements'],
   });
+
+  // Fetch submarkets for location dropdown
+  const { data: submarkets = [], isLoading: submarketstLoading, error: submarketError } = useQuery<Submarket[]>({
+    queryKey: ['/api/submarkets'],
+    retry: 3,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+  
+  // Debug submarkets
+  useEffect(() => {
+    console.log('Submarkets loaded:', submarkets);
+    console.log('Submarkets loading:', submarketstLoading);
+    console.log('Submarkets error:', submarketError);
+  }, [submarkets, submarketstLoading, submarketError]);
 
   // Create requirement mutation
   const createMutation = useMutation({
@@ -173,6 +186,7 @@ export default function RequirementsPage() {
     setFormData({
       title: "",
       source: undefined,
+      location: "",
       contactName: "",
       contactEmail: "",
       contactPhone: "",
@@ -213,11 +227,12 @@ export default function RequirementsPage() {
     setFormData({
       title: requirement.title,
       source: requirement.source as any,
+      location: requirement.location || "",
       contactName: requirement.contactName || "",
       contactEmail: requirement.contactEmail || "",
       contactPhone: requirement.contactPhone || "",
       spaceSize: requirement.spaceSize as any,
-      timeline: requirement.timeline as any,
+
       status: requirement.status,
       tags: requirement.tags || [],
       notes: requirement.notes || ""
@@ -248,13 +263,11 @@ export default function RequirementsPage() {
     }));
   };
 
-  // Filter requirements including tags search
+  // Filter requirements
   const filteredRequirements = requirements.filter(req => {
-    const matchesSearch = searchQuery === "" || 
-                         req.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    const matchesSearch = req.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          (req.contactName?.toLowerCase().includes(searchQuery.toLowerCase())) ||
-                         (req.notes?.toLowerCase().includes(searchQuery.toLowerCase())) ||
-                         (req.tags?.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase())));
+                         (req.location?.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesStatus = filterStatus === "all" || req.status === filterStatus;
     const matchesSource = filterSource === "all" || req.source === filterSource;
     return matchesSearch && matchesStatus && matchesSource;
@@ -325,6 +338,30 @@ export default function RequirementsPage() {
                   </Select>
                 </div>
 
+                <div>
+                  <Label htmlFor="location">Location (Submarket)</Label>
+                  <Select
+                    value={formData.location || ""}
+                    onValueChange={(value) => {
+                      console.log('Submarket selected:', value);
+                      setFormData(prev => ({ ...prev, location: value }));
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select submarket" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {submarkets.map((submarket) => (
+                        <SelectItem key={submarket.id} value={submarket.name}>
+                          {submarket.name}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="Other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {submarketstLoading && <p className="text-sm text-gray-500 mt-1">Loading submarkets...</p>}
+                  {submarketError && <p className="text-sm text-red-500 mt-1">Error loading submarkets</p>}
+                </div>
 
                 <div>
                   <Label htmlFor="spaceSize">Space Size</Label>
@@ -357,69 +394,7 @@ export default function RequirementsPage() {
                   />
                 </div>
 
-                <div>
-                  <Label htmlFor="tags">Tags</Label>
-                  <div className="space-y-2">
-                    <div className="flex gap-2">
-                      <Input
-                        id="tags"
-                        value={tagInput}
-                        onChange={(e) => setTagInput(e.target.value)}
-                        placeholder="Add a tag..."
-                        onKeyPress={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            addTag();
-                          }
-                        }}
-                      />
-                      <Button type="button" onClick={addTag} size="sm">
-                        Add
-                      </Button>
-                    </div>
-                    
-                    {/* Quick-add tag buttons */}
-                    <div className="flex flex-wrap gap-1">
-                      {['NW', 'SE', 'Nisku', 'Leduc', 'Dock', 'Grade', 'Cranes'].map((quickTag) => (
-                        <Button
-                          key={quickTag}
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="text-xs"
-                          onClick={() => {
-                            if (!formData.tags.includes(quickTag)) {
-                              setFormData(prev => ({
-                                ...prev,
-                                tags: [...prev.tags, quickTag]
-                              }));
-                            }
-                          }}
-                        >
-                          {quickTag}
-                        </Button>
-                      ))}
-                    </div>
-                    
-                    {/* Display current tags */}
-                    {formData.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {formData.tags.map((tag, index) => (
-                          <Badge key={index} variant="secondary" className="flex items-center gap-1">
-                            {tag}
-                            <button
-                              type="button"
-                              onClick={() => removeTag(tag)}
-                              className="ml-1 text-xs hover:text-red-500"
-                            >
-                              ×
-                            </button>
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                
 
                 <div>
                   <Label htmlFor="notes">Notes</Label>
@@ -524,6 +499,13 @@ export default function RequirementsPage() {
                 </CardHeader>
                 
                 <CardContent className="space-y-3">
+                  {requirement.location && (
+                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                      <MapPin className="h-4 w-4" />
+                      {requirement.location}
+                    </div>
+                  )}
+                  
                   {requirement.spaceSize && (
                     <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                       <Building className="h-4 w-4" />

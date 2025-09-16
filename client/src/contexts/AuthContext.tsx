@@ -7,9 +7,11 @@ interface AuthContextType {
   user: User | null
   session: Session | null
   loading: boolean
+  needsOnboarding: boolean
   isDemoMode: boolean
   signInWithGoogle: () => Promise<void>
   signOut: () => Promise<void>
+  setNeedsOnboarding: (needs: boolean) => void
   resetClientState: () => void
 }
 
@@ -31,6 +33,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [needsOnboarding, setNeedsOnboarding] = useState(false)
   const [isDemoMode, setIsDemoMode] = useState(false)
   
   // Reset client state function that pages can call on user change
@@ -76,6 +79,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
               created_at: new Date().toISOString()
             } as unknown as User
             setUser(demoUser)
+            setNeedsOnboarding(false) // Demo users don't need onboarding
             setLoading(false)
             
             // Reset client state if switching to demo user
@@ -147,39 +151,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
         resetClientState()
       }
       
-      // Auto-create profile for new real users
+      // Check if user needs onboarding (only for real users, not demo)
       if (session?.user && session.user.id !== 'demo-user') {
         try {
-          // Check if profile exists
           const response = await fetch('/api/profile', {
             headers: {
               'Authorization': `Bearer ${session.access_token}`
             }
           })
-          
-          if (!response.ok && response.status === 404) {
-            // Profile doesn't exist - create it automatically
-            const profileData = {
-              name: session.user.user_metadata?.full_name || '',
-              company: '',
-              email: session.user.email || '',
-              marketCity: 'Edmonton',
-              submarkets: ['NW', 'NE', 'SW', 'SE'],
-              assetClasses: []
-            }
-            
-            await fetch('/api/profile', {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${session.access_token}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(profileData)
-            })
-          }
+          const profile = response.ok ? await response.json() : null
+          setNeedsOnboarding(!profile)
         } catch (error) {
-          console.error('Error handling profile:', error)
+          console.error('Error checking profile:', error)
+          setNeedsOnboarding(true) // Default to requiring onboarding on error
         }
+      } else {
+        setNeedsOnboarding(false) // Demo users don't need onboarding
       }
       
       setLoading(false)
@@ -238,9 +225,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     user,
     session,
     loading,
+    needsOnboarding,
     isDemoMode,
     signInWithGoogle,
     signOut,
+    setNeedsOnboarding,
     resetClientState,
   }
 

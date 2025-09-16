@@ -184,18 +184,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getUserId(req);
       console.log("Creating profile for user:", userId);
       console.log("Profile data:", req.body);
-
-      // First, ensure the user record exists in the users table
-      await storage.upsertUser({
-        id: userId,
-        email: req.body.email || undefined,
-        firstName: req.body.firstName || undefined,
-        lastName: req.body.lastName || undefined,
-        profileImageUrl: req.body.profileImageUrl || undefined,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      });
-      console.log("User record ensured for:", userId);
       
       const profileData = {
         id: userId,
@@ -203,12 +191,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       const profile = await storage.createProfile(profileData);
       console.log("Profile created successfully:", profile);
-
-      // Create default submarkets in database for new user
-      console.log("Creating default submarkets for user:", userId);
-      await storage.createDefaultSubmarkets(userId);
-      console.log("Default submarkets created successfully");
-      
       res.json(profile);
     } catch (error: any) {
       console.error("Error creating profile:", error);
@@ -252,18 +234,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/requirements', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      
-      // Ensure user record exists before creating requirement
-      await storage.upsertUser({
-        id: userId,
-        email: req.body.email || undefined,
-        firstName: undefined,
-        lastName: undefined,
-        profileImageUrl: undefined,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      });
-      
       const requirement = await storage.createRequirement({
         ...req.body,
         userId
@@ -303,72 +273,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Comps routes with user association
-  app.get('/api/comps', requireAuth, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const comps = await storage.getAllComps(userId);
-      res.json(comps);
-    } catch (error) {
-      console.error("Error fetching comps:", error);
-      res.status(500).json({ message: "Failed to fetch comps" });
-    }
-  });
-
-  app.post('/api/comps', requireAuth, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      
-      // Ensure user record exists before creating comp
-      await storage.upsertUser({
-        id: userId,
-        email: req.body.email || undefined,
-        firstName: undefined,
-        lastName: undefined,
-        profileImageUrl: undefined,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      });
-      
-      const comp = await storage.createComp({
-        ...req.body,
-        userId
-      });
-      res.status(201).json(comp);
-    } catch (error) {
-      console.error("Error creating comp:", error);
-      res.status(500).json({ message: "Failed to create comp" });
-    }
-  });
-
-  app.patch('/api/comps/:id', requireAuth, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const comp = await storage.updateComp(req.params.id, userId, req.body);
-      if (!comp) {
-        return res.status(404).json({ message: "Comp not found" });
-      }
-      res.json(comp);
-    } catch (error) {
-      console.error("Error updating comp:", error);
-      res.status(500).json({ message: "Failed to update comp" });
-    }
-  });
-
-  app.delete('/api/comps/:id', requireAuth, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const deleted = await storage.deleteComp(req.params.id, userId);
-      if (!deleted) {
-        return res.status(404).json({ message: "Comp not found" });
-      }
-      res.status(204).send();
-    } catch (error) {
-      console.error("Error deleting comp:", error);
-      res.status(500).json({ message: "Failed to delete comp" });
-    }
-  });
-
   // Prospects routes with user association
   app.get('/api/prospects', requireAuth, async (req, res) => {
     try {
@@ -384,18 +288,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/prospects', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      
-      // Ensure user record exists before creating prospect
-      await storage.upsertUser({
-        id: userId,
-        email: req.body.email || undefined,
-        firstName: undefined,
-        lastName: undefined,
-        profileImageUrl: undefined,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      });
-      
       const prospect = await storage.createProspect({
         ...req.body,
         userId
@@ -583,11 +475,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/leaderboard', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      const { orgId } = req.query;
+      const { orgId, since } = req.query;
+      
+      // Parse since parameter if provided
+      let sinceDate: Date | undefined;
+      if (since && typeof since === 'string') {
+        sinceDate = new Date(since);
+        if (isNaN(sinceDate.getTime())) {
+          return res.status(400).json({ error: 'Invalid since parameter' });
+        }
+      }
 
       const leaderboard = await storage.getLeaderboard({
         userId,
-        orgId: orgId as string
+        orgId: orgId as string,
+        since: sinceDate
       });
 
       res.json({ data: leaderboard });

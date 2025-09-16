@@ -1,3 +1,4 @@
+import React from "react";
 import { Switch, Route } from "wouter";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -11,15 +12,33 @@ import Knowledge from "@/pages/knowledge";
 import FollowUp from "@/pages/followup";
 import Stats from "@/pages/stats";
 import Requirements from "@/pages/requirements";
-import Comps from "@/pages/comps";
 import Profile from "@/pages/profile";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
+import Onboarding from "@/pages/onboarding";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useLocation } from "wouter";
 
-// Component removed - onboarding no longer needed
+// Component to handle onboarding check and routing
+function OnboardingCheck({ children }: { children: React.ReactNode }) {
+  const { user, loading, needsOnboarding } = useAuth()
+  const [, setLocation] = useLocation()
+
+  useEffect(() => {
+    // Only check for onboarding if user is authenticated and not in demo mode
+    if (!loading && user && user.id !== 'demo-user' && needsOnboarding) {
+      setLocation('/onboarding')
+    }
+  }, [loading, user, needsOnboarding, setLocation])
+
+  // Show loading while checking auth/profile
+  if (loading) {
+    return null // Avoid flicker
+  }
+
+  return <>{children}</>
+}
 
 function Router() {
   const { user, loading } = useAuth()
@@ -40,60 +59,71 @@ function Router() {
       {/* Public routes */}
       <Route path="/" component={Landing} />
       
+      {/* Onboarding route - only for authenticated users */}
+      <Route path="/onboarding">
+        <ProtectedRoute>
+          <Onboarding />
+        </ProtectedRoute>
+      </Route>
+      
       {/* Protected app routes - flat structure */}
       <Route path="/app">
         <ProtectedRoute>
-          <AppLayout>
-            <Home />
-          </AppLayout>
+          <OnboardingCheck>
+            <AppLayout>
+              <Home />
+            </AppLayout>
+          </OnboardingCheck>
         </ProtectedRoute>
       </Route>
       
       <Route path="/app/knowledge">
         <ProtectedRoute>
-          <AppLayout>
-            <Knowledge />
-          </AppLayout>
+          <OnboardingCheck>
+            <AppLayout>
+              <Knowledge />
+            </AppLayout>
+          </OnboardingCheck>
         </ProtectedRoute>
       </Route>
       
       <Route path="/app/followup">
         <ProtectedRoute>
-          <AppLayout>
-            <FollowUp />
-          </AppLayout>
+          <OnboardingCheck>
+            <AppLayout>
+              <FollowUp />
+            </AppLayout>
+          </OnboardingCheck>
         </ProtectedRoute>
       </Route>
       
       <Route path="/app/stats">
         <ProtectedRoute>
-          <AppLayout>
-            <Stats />
-          </AppLayout>
+          <OnboardingCheck>
+            <AppLayout>
+              <Stats />
+            </AppLayout>
+          </OnboardingCheck>
         </ProtectedRoute>
       </Route>
       
       <Route path="/app/requirements">
         <ProtectedRoute>
-          <AppLayout>
-            <Requirements />
-          </AppLayout>
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/app/comps">
-        <ProtectedRoute>
-          <AppLayout>
-            <Comps />
-          </AppLayout>
+          <OnboardingCheck>
+            <AppLayout>
+              <Requirements />
+            </AppLayout>
+          </OnboardingCheck>
         </ProtectedRoute>
       </Route>
       
       <Route path="/app/profile">
         <ProtectedRoute>
-          <AppLayout>
-            <Profile />
-          </AppLayout>
+          <OnboardingCheck>
+            <AppLayout>
+              <Profile />
+            </AppLayout>
+          </OnboardingCheck>
         </ProtectedRoute>
       </Route>
       

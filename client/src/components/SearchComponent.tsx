@@ -1,6 +1,5 @@
 import { useRef, useEffect } from 'react';
 import type { Prospect } from '@shared/schema';
-import '../styles/toolbar.css';
 
 interface SearchComponentProps {
   prospects: Prospect[];
@@ -12,7 +11,6 @@ interface SearchComponentProps {
 export function SearchComponent({ prospects, map, onProspectSelect, onLocationFound }: SearchComponentProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
-  const lastAutocompleteSelectionRef = useRef<number>(0);
 
   // Handle prospect search from input change
   const handleProspectSearch = (query: string) => {
@@ -71,9 +69,6 @@ export function SearchComponent({ prospects, map, onProspectSelect, onLocationFo
             // Center and zoom the map
             map.setCenter({ lat, lng });
             map.setZoom(Math.max(map.getZoom() || 15, 17));
-            
-            // Mark that autocomplete just provided a result
-            lastAutocompleteSelectionRef.current = Date.now();
             
             if (onLocationFound) {
               onLocationFound({
@@ -135,7 +130,7 @@ export function SearchComponent({ prospects, map, onProspectSelect, onLocationFo
 
   return (
     <div 
-      className="search-container"
+      className="bg-white rounded-lg shadow-lg border"
       style={{ pointerEvents: 'auto' }}
     >
       <input
@@ -150,37 +145,15 @@ export function SearchComponent({ prospects, map, onProspectSelect, onLocationFo
           if (e.key === 'Enter') {
             const value = (e.target as HTMLInputElement).value;
             if (value.trim()) {
-              // Don't use geocoder if autocomplete just provided a result (within 500ms)
-              const timeSinceAutocomplete = Date.now() - lastAutocompleteSelectionRef.current;
-              if (timeSinceAutocomplete > 500) {
-                console.log('Manual search for:', value);
-                // Use geocoder for manual searches
-                handleGeocodeSearch(value);
-              }
-            }
-          }
-        }}
-        placeholder="Search"
-        className="search-input"
-      />
-      <button 
-        className="search-button"
-        onClick={() => {
-          const value = inputRef.current?.value;
-          if (value?.trim()) {
-            // Don't use geocoder if autocomplete just provided a result (within 500ms)
-            const timeSinceAutocomplete = Date.now() - lastAutocompleteSelectionRef.current;
-            if (timeSinceAutocomplete > 500) {
+              console.log('Manual search for:', value);
+              // Use geocoder for manual searches
               handleGeocodeSearch(value);
             }
           }
         }}
-        title="Search"
-      >
-        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
-      </button>
+        placeholder="search"
+        className="w-80 px-3 py-2 border-0 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
     </div>
   );
 }

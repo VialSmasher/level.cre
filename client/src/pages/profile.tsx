@@ -40,10 +40,6 @@ export default function ProfilePage() {
   // Submarket Management State
   const [newSubmarket, setNewSubmarket] = useState("");
   
-  // Company Management State
-  const [editingCompany, setEditingCompany] = useState(false);
-  const [companyName, setCompanyName] = useState("");
-  
 
   useEffect(() => {
     // Load saved settings from localStorage
@@ -58,12 +54,7 @@ export default function ProfilePage() {
       setDarkMode(savedSettings.darkMode ?? false);
       setAutoSave(savedSettings.autoSave ?? true);
     }
-    
-    // Load company name from profile
-    if (profile?.company) {
-      setCompanyName(profile.company);
-    }
-  }, [user?.id, profile]);
+  }, [user?.id]);
 
   const saveSettings = () => {
     const settings = {
@@ -146,36 +137,6 @@ export default function ProfilePage() {
     });
   };
 
-  const handleUpdateCompany = async () => {
-    try {
-      const response = await fetch('/api/profile', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ company: companyName.trim() })
-      });
-
-      if (response.ok) {
-        setEditingCompany(false);
-        toast({
-          title: "Company updated",
-          description: "Your company name has been updated successfully.",
-        });
-        // Refresh profile data
-        window.location.reload();
-      } else {
-        throw new Error('Failed to update company');
-      }
-    } catch (error) {
-      toast({
-        title: "Update failed",
-        description: "Failed to update company name. Please try again.",
-        variant: "destructive",
-      });
-    }
-  };
-
   const statusOptions = [
     { value: 'prospect', label: 'Prospect', color: 'bg-gray-500' },
     { value: 'contacted', label: 'Contacted', color: 'bg-blue-500' },
@@ -204,65 +165,6 @@ export default function ProfilePage() {
             <>Not signed in.</>
           )}
         </div>
-
-        {/* Company Management */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <User className="h-6 w-6 text-blue-600" />
-              <div>
-                <CardTitle>Company Information</CardTitle>
-                <CardDescription>Manage your company details</CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <Label className="text-base font-medium">Company Name</Label>
-              {editingCompany ? (
-                <div className="flex gap-2 mt-2">
-                  <Input
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    placeholder="Enter company name..."
-                    onKeyPress={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleUpdateCompany();
-                      }
-                    }}
-                  />
-                  <Button onClick={handleUpdateCompany} size="sm">
-                    Save
-                  </Button>
-                  <Button 
-                    onClick={() => {
-                      setEditingCompany(false);
-                      setCompanyName(profile?.company || '');
-                    }} 
-                    variant="outline" 
-                    size="sm"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between mt-2">
-                  <span className="text-sm text-gray-600">
-                    {profile?.company || 'No company name set'}
-                  </span>
-                  <Button 
-                    onClick={() => setEditingCompany(true)} 
-                    variant="outline" 
-                    size="sm"
-                  >
-                    Edit
-                  </Button>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Submarkets Management */}
         <Card>

@@ -1,13 +1,12 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { GoogleMap, useJsApiLoader, DrawingManager, Marker, Polygon, InfoWindow } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
-import '../styles/toolbar.css';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Download, MapIcon, Satellite, ChevronLeft, ChevronRight, X, Save, Trash2, Filter, ChevronDown, ChevronUp, User, LogOut, Settings, Edit3, MapPin, Square, Hand } from 'lucide-react';
+import { Download, MapIcon, Satellite, ChevronLeft, ChevronRight, X, Save, Trash2, Filter, ChevronDown, ChevronUp, User, LogOut, Settings, Edit3 } from 'lucide-react';
 
 // Standardized size options for consistent use across Prospects and Requirements
 const STANDARD_SIZE_OPTIONS = [
@@ -222,7 +221,7 @@ export default function HomePage() {
     return () => {
       window.removeEventListener('userChanged', handleUserChange);
     };
-  }, [currentUser?.id]); // Removed refetchProspects to fix infinite loop
+  }, [currentUser?.id, refetchProspects]); // Use currentUser?.id to avoid infinite loop
 
   // Save data to user-scoped localStorage
   const saveData = useCallback(() => {
@@ -509,7 +508,7 @@ export default function HomePage() {
     
     try {
       const newProspectData = {
-        name: searchPin.address, // Always use address for Property tab Address field
+        name: searchPin.businessName || searchPin.address, // Use business name if available
         geometry: {
           type: 'Point' as const,
           coordinates: [searchPin.lng, searchPin.lat] as [number, number]
@@ -518,8 +517,7 @@ export default function HomePage() {
         notes: '',
         submarketId: inferSubmarketFromPoint(searchPin) || '',
         businessName: searchPin.businessName || undefined,
-        websiteUrl: searchPin.websiteUrl || undefined,
-        contactCompany: searchPin.businessName || undefined // Use business name for Contact tab Company field
+        websiteUrl: searchPin.websiteUrl || undefined
       };
 
       console.log('Saving search pin as prospect:', newProspectData);
@@ -784,7 +782,14 @@ export default function HomePage() {
               onLoad={onDrawingManagerLoad}
               onOverlayComplete={onOverlayComplete}
               options={{
-                drawingControl: false, // Disable default controls since we have custom toolbar
+                drawingControl: true,
+                drawingControlOptions: {
+                  position: window.google?.maps?.ControlPosition?.TOP_LEFT,
+                  drawingModes: [
+                    window.google?.maps?.drawing?.OverlayType?.MARKER,
+                    window.google?.maps?.drawing?.OverlayType?.POLYGON,
+                  ],
+                },
                 polygonOptions: {
                   fillColor: '#3B82F6',
                   fillOpacity: 0.15,
@@ -907,62 +912,17 @@ export default function HomePage() {
         
 
 
-        {/* Search Bar and Toolbar Container - Top Left */}
+        {/* Search Bar - Bottom Center */}
         <div 
-          style={{ 
-            position: 'absolute', 
-            top: '10px', 
-            left: '10px', 
-            zIndex: 10,
-            pointerEvents: 'auto'
-          }}
+          className="absolute bottom-20 left-1/2 transform -translate-x-1/2"
+          style={{ pointerEvents: 'auto' }}
         >
-          {/* Search Bar */}
-          <div className="mb-2">
-            <SearchComponent 
-              prospects={prospects}
-              map={map}
-              onProspectSelect={handleProspectClick}
-              onLocationFound={handleLocationFound}
-            />
-          </div>
-
-          {/* Map Tools Toolbar - Icon Only */}
-          <div className="toolbar-container">
-            <button
-              className="toolbar-button"
-              onClick={() => {
-                if (drawingManagerRef.current) {
-                  drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.MARKER);
-                }
-              }}
-              title="Add Marker"
-            >
-              <MapPin className="h-4 w-4" />
-            </button>
-            <button
-              className="toolbar-button"
-              onClick={() => {
-                if (drawingManagerRef.current) {
-                  drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.POLYGON);
-                }
-              }}
-              title="Draw Area"
-            >
-              <Square className="h-4 w-4" />
-            </button>
-            <button
-              className="toolbar-button"
-              onClick={() => {
-                if (drawingManagerRef.current) {
-                  drawingManagerRef.current.setDrawingMode(null);
-                }
-              }}
-              title="Select"
-            >
-              <Hand className="h-4 w-4" />
-            </button>
-          </div>
+          <SearchComponent 
+            prospects={prospects}
+            map={map}
+            onProspectSelect={handleProspectClick}
+            onLocationFound={handleLocationFound}
+          />
         </div>
 
         {/* Filters Panel - Bottom Left */}

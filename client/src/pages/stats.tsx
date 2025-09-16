@@ -75,46 +75,13 @@ interface SkillCardProps {
   xp: number;
   icon: React.ComponentType<any>;
   description: string;
-  skillType: 'prospecting' | 'followUp' | 'marketKnowledge' | 'consistency';
 }
 
-function SkillCard({ name, xp, icon: Icon, description, skillType }: SkillCardProps) {
+function SkillCard({ name, xp, icon: Icon, description }: SkillCardProps) {
   const level = getLevel(xp);
   const progress = getProgressToNextLevel(xp);
   const xpToNext = getXpToNextLevel(xp);
   const levelColor = getLevelColor(level);
-
-  // Calculate concrete actions needed based on skill type
-  const getActionsNeeded = (skillType: string, xpToNext: number) => {
-    if (xpToNext === 0) return { count: 0, label: 'actions' };
-    
-    switch (skillType) {
-      case 'prospecting':
-        return { 
-          count: Math.round(xpToNext / 25), 
-          label: 'prospects to next level' 
-        };
-      case 'followUp':
-        return { 
-          count: Math.round(xpToNext / 17), 
-          label: 'follow-ups to next level' 
-        };
-      case 'marketKnowledge':
-        return { 
-          count: Math.round(xpToNext / 20), 
-          label: 'requirements to next level' 
-        };
-      case 'consistency':
-        return { 
-          count: Math.round(xpToNext / 100), 
-          label: 'days to next level' 
-        };
-      default:
-        return { count: 0, label: 'actions' };
-    }
-  };
-
-  const actionsNeeded = getActionsNeeded(skillType, xpToNext);
 
   return (
     <Card className="relative overflow-hidden">
@@ -149,7 +116,7 @@ function SkillCard({ name, xp, icon: Icon, description, skillType }: SkillCardPr
           <Progress value={progress} className="h-2" />
           {xpToNext > 0 && (
             <div className="text-xs text-gray-500 text-center">
-              {actionsNeeded.count} {actionsNeeded.label}
+              {xpToNext.toLocaleString()} XP to next level
             </div>
           )}
         </div>
@@ -171,11 +138,27 @@ function SkillCard({ name, xp, icon: Icon, description, skillType }: SkillCardPr
 function Leaderboard() {
   const { user } = useAuth();
   const currentUser = user;
+  
+  const [timeframe, setTimeframe] = useState<'7d' | '30d' | 'all'>('all');
+
+  // Calculate since date based on timeframe
+  const getSinceDate = (timeframe: string) => {
+    if (timeframe === 'all') return undefined;
+    const days = timeframe === '7d' ? 7 : 30;
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    return since.toISOString();
+  };
 
   // Fetch leaderboard data - only if not in demo mode
   const { data: leaderboardResponse, isLoading, error } = useQuery({
-    queryKey: ['/api/leaderboard'],
+    queryKey: ['/api/leaderboard', timeframe],
     queryFn: async () => {
+      const sinceParam = getSinceDate(timeframe);
+      const url = sinceParam 
+        ? `/api/leaderboard?since=${encodeURIComponent(sinceParam)}`
+        : '/api/leaderboard';
+      
       // Use the existing auth system
       const { supabase } = await import('@/lib/supabase');
       const headers: Record<string, string> = {};
@@ -187,7 +170,7 @@ function Leaderboard() {
         }
       }
       
-      const response = await fetch('/api/leaderboard', { 
+      const response = await fetch(url, { 
         headers,
         credentials: 'include'
       });
@@ -228,10 +211,25 @@ function Leaderboard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Crown className="h-5 w-5 text-yellow-500" />
-          Market Leader
-        </CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <Crown className="h-5 w-5 text-yellow-500" />
+            Market Leader
+          </CardTitle>
+          <div className="flex gap-1">
+            {(['7d', '30d', 'all'] as const).map((period) => (
+              <Button
+                key={period}
+                variant={timeframe === period ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setTimeframe(period)}
+                className="text-xs px-3 py-1"
+              >
+                {period === 'all' ? 'All' : period.toUpperCase()}
+              </Button>
+            ))}
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -404,7 +402,6 @@ export default function StatsPage() {
                 xp={skills?.prospecting || 0}
                 icon={MapPin}
                 description="Adding prospects, mapping areas, discovering opportunities"
-                skillType="prospecting"
               />
               
               <SkillCard
@@ -412,7 +409,6 @@ export default function StatsPage() {
                 xp={skills?.followUp || 0}
                 icon={Phone}
                 description="Calls, emails, meetings, and consistent communication"
-                skillType="followUp"
               />
               
               <SkillCard
@@ -420,7 +416,6 @@ export default function StatsPage() {
                 xp={skills?.consistency || 0}
                 icon={Zap}
                 description="Daily activity streaks and regular engagement patterns"
-                skillType="consistency"
               />
               
               <SkillCard
@@ -428,7 +423,6 @@ export default function StatsPage() {
                 xp={skills?.marketKnowledge || 0}
                 icon={Brain}
                 description="Requirements tracking, market research, and industry insights"
-                skillType="marketKnowledge"
               />
             </div>
           </div>
