@@ -1,6 +1,6 @@
 "use client"
 
-import * as React from "react"
+import React, { useMemo } from "react"
 import * as RechartsPrimitive from "recharts"
 
 import { cn } from "@/lib/utils"
@@ -133,10 +133,11 @@ const ChartTooltipContent = React.forwardRef<
   ) => {
     const { config } = useChart()
 
-    const tooltipLabel = React.useMemo(() => {
+  import { useMemo } from 'react';
+  const tooltipLabel = useMemo(() => {
       if (hideLabel || !payload?.length) {
         return null
-      }
+        const tooltipLabel = useMemo(() => {
 
       const [item] = payload
       const key = `${labelKey || item?.dataKey || item?.name || "value"}`

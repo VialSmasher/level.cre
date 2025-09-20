@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { queryClient } from '@/lib/queryClient'
+import { apiUrl } from '@/lib/api'
 
 interface AuthContextType {
   user: User | null
@@ -57,14 +58,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setIsDemoMode(demoModeRequested)
     
     if (demoModeRequested) {
-      // Load demo user immediately with demo headers
-      fetch('/api/auth/user', {
-        headers: {
-          'X-Demo-Mode': 'true'
-        }
+      // Load demo user immediately, including credentials to get the dev cookie
+      fetch(apiUrl('/auth/user'), {
+        credentials: 'include'
       })
-        .then(res => res.json())
+        .then(res => {
+          console.log('Demo mode fetch response:', res);
+          return res.json();
+        })
         .then(data => {
+          console.log('Demo mode user data:', data);
           if (data.id === 'demo-user') {
             const prevUserId = user?.id
             const demoUser = {
@@ -86,9 +89,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
             if (prevUserId !== demoUser.id) {
               resetClientState()
             }
+          } else {
+            console.warn('Demo mode: unexpected user data', data);
+            setLoading(false);
           }
         })
-        .catch(() => {
+        .catch((err) => {
+          console.error('Demo mode fetch error:', err);
           setLoading(false)
         })
       return
@@ -154,7 +161,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Check if user needs onboarding (only for real users, not demo)
       if (session?.user && session.user.id !== 'demo-user') {
         try {
-          const response = await fetch('/api/profile', {
+          const response = await fetch(apiUrl('/profile'), {
             headers: {
               'Authorization': `Bearer ${session.access_token}`
             }
@@ -180,7 +187,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     
     try {
       // Use server-side OAuth endpoint - bypasses CSP issues completely
-      window.location.href = '/api/auth/google'
+      window.location.href = apiUrl('/auth/google')
     } catch (error: any) {
       console.error('OAuth redirect error:', error)
       throw new Error('Failed to initiate Google sign-in')
@@ -200,7 +207,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     
     try {
       // Use server-side logout endpoint
-      const response = await fetch('/api/auth/logout', { 
+      const response = await fetch(apiUrl('/auth/logout'), { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       })

@@ -66,33 +66,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.redirect('/app');
   });
 
-  // Get current authenticated user
-  app.get('/api/auth/session', async (req, res) => {
-    const session = (req.session as any)?.supabaseSession;
-    const userId = (req.session as any)?.userId;
-    
-    if (session && userId) {
-      try {
-        const user = await storage.getUser(userId);
-        if (user) {
-          res.json({ user, session });
-        } else {
-          res.status(404).json({ error: 'User not found' });
-        }
-      } catch (error) {
-        res.status(500).json({ error: 'Failed to get user' });
-      }
-    } else {
-      res.status(401).json({ error: 'Not authenticated' });
-    }
-  });
+  // Removed stateful session endpoint (stateless auth only)
 
-  // Logout endpoint
-  app.post('/api/auth/logout', async (req, res) => {
-    req.session = req.session || {};
-    delete (req.session as any).supabaseSession;
-    delete (req.session as any).userId;
-    
+  // Logout endpoint (stateless) – nothing to clear server-side
+  app.post('/api/auth/logout', async (_req, res) => {
     res.json({ success: true });
   });
   // User endpoint - returns demo user for unauthenticated requests, real user for authenticated requests
@@ -136,8 +113,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(demoUser);
   });
 
-  // Demo bypass route for testing
-  app.post('/api/auth/demo', async (req, res) => {
+  // Demo bypass route for testing (stateless)
+  app.post('/api/auth/demo', async (_req, res) => {
     try {
       const demoUser = await storage.upsertUser({
         id: 'demo-user',
@@ -146,11 +123,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lastName: 'User',
         profileImageUrl: null,
       });
-      
-      // Create a demo session
-      req.session = req.session || {};
-      (req.session as any).demoUser = demoUser;
-      
       res.json(demoUser);
     } catch (error) {
       console.error("Error creating demo user:", error);
@@ -158,16 +130,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Check demo auth status
+  // Demo auth status (stateless) – use X-Demo-Mode header
   app.get('/api/auth/demo/user', async (req, res) => {
-    const demoUser = (req.session as any)?.demoUser;
-    if (demoUser) {
-      res.json(demoUser);
-    } else {
-      res.status(401).json({ message: "Not authenticated" });
+    if (req.headers['x-demo-mode'] === 'true') {
+      return res.json({
+        id: 'demo-user',
+        email: 'demo@example.com',
+        firstName: 'Demo',
+        lastName: 'User',
+        profileImageUrl: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
     }
+    res.status(401).json({ message: 'Not authenticated' });
   });
-
   // Profile routes
   app.get('/api/profile', requireAuth, async (req, res) => {
     try {
@@ -289,14 +266,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/prospects', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      const prospect = await storage.createProspect({
-        ...req.body,
-        userId
+      // Zod validation
+      const { z } = require('zod');
+      const ProspectInputSchema = z.object({
+        name: z.string().min(1),
+        status: z.string().default('new'),
+        lat: z.number(),
+        lng: z.number(),
+        userId: z.string().optional(),
       });
+      const parseResult = ProspectInputSchema.safeParse({ ...req.body, userId });
+      if (!parseResult.success) {
+        console.error('Prospect validation error:', parseResult.error);
+        return res.status(400).json({ message: 'Invalid prospect data', error: parseResult.error.errors });
+      }
+      const prospect = await storage.createProspect(parseResult.data);
       res.status(201).json(prospect);
-    } catch (error) {
-      console.error("Error creating prospect:", error);
-      res.status(500).json({ message: "Failed to create prospect" });
+    } catch (e) {
+      if (e instanceof Error) {
+        console.error('Error creating prospect:', e.message, e.stack);
+        res.status(500).json({ message: 'Failed to create prospect', error: e.message });
+      } else {
+        console.error('Error creating prospect:', e);
+        res.status(500).json({ message: 'Failed to create prospect', error: String(e) });
+      }
     }
   });
 

@@ -1,67 +1,88 @@
 import { Request, Response, NextFunction } from 'express'
-import jwt from 'jsonwebtoken'
+import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose'
 
-// Supabase JWT verification middleware
-export function verifySupabaseToken(req: Request, res: Response, next: NextFunction) {
+// Build Supabase JWKS URL from env
+function getSupabaseUrls() {
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
+  if (!supabaseUrl) return { supabaseUrl: undefined, jwksUrl: undefined, issuer: undefined }
+  // Ensure no trailing slash
+  const base = supabaseUrl.replace(/\/$/, '')
+  const jwksUrl = `${base}/auth/v1/jwks`
+  const issuer = `${base}/auth/v1`
+  return { supabaseUrl: base, jwksUrl, issuer }
+}
+
+let remoteJwks: ReturnType<typeof createRemoteJWKSet> | null = null
+function getRemoteJwks() {
+  if (!remoteJwks) {
+    const { jwksUrl } = getSupabaseUrls()
+    if (!jwksUrl) return null
+    remoteJwks = createRemoteJWKSet(new URL(jwksUrl))
+  }
+  return remoteJwks
+}
+
+async function verifyBearerJWT(token: string): Promise<JWTPayload | null> {
+  try {
+    const jwks = getRemoteJwks()
+    if (!jwks) return null
+    const { issuer } = getSupabaseUrls()
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer,
+      // audience optional; Supabase uses aud: 'authenticated'
+    })
+    return payload
+  } catch (err) {
+    console.error('JWT verify failed:', (err as Error).message)
+    return null
+  }
+}
+
+// Supabase JWT verification middleware (stateless)
+export async function verifySupabaseToken(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization
-  
-  // Check for demo mode first
+
+  // Demo mode is allowed for non-production usage and tests
   if (req.headers['x-demo-mode'] === 'true') {
-    // Allow demo requests through with demo user
-    (req as any).user = { id: 'demo-user' }
+    ;(req as any).user = { id: 'demo-user' }
     return next()
   }
-  
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ message: 'No authentication token provided' })
   }
 
-  const token = authHeader.slice(7) // Remove 'Bearer ' prefix
-  
-  try {
-    // Verify the JWT token without checking signature for now
-    // In production, you'd want to verify with Supabase's public key
-    const decoded = jwt.decode(token) as any
-    
-    if (!decoded || !decoded.sub) {
-      return res.status(401).json({ message: 'Invalid token' })
-    }
-    
-    // Add user info to request
-    (req as any).user = {
-      id: decoded.sub,
-      email: decoded.email,
-      ...decoded
-    }
-    
-    next()
-  } catch (error) {
-    console.error('Token verification error:', error)
+  const token = authHeader.slice(7)
+  const payload = await verifyBearerJWT(token)
+  if (!payload || !payload.sub) {
     return res.status(401).json({ message: 'Invalid token' })
   }
+
+  ;(req as any).user = {
+    id: payload.sub,
+    email: (payload as any).email,
+    ...payload,
+  }
+  next()
 }
 
-// Extract user ID from request (either from JWT or demo mode)
+// Extract user ID from request (either from verified JWT or demo mode)
 export function getUserId(req: Request): string {
   const user = (req as any).user
   return user?.id || 'demo-user'
 }
 
 // Middleware for routes that need authentication but allow demo mode
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  // Check for demo mode
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (req.headers['x-demo-mode'] === 'true') {
-    (req as any).user = { id: 'demo-user' }
+    ;(req as any).user = { id: 'demo-user' }
     return next()
   }
-  
+
   const authHeader = req.headers.authorization
-  console.log("Auth header:", authHeader ? `Bearer ${authHeader.slice(7, 20)}...` : 'None')
-  
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    console.log("No auth header provided for profile creation")
     return res.status(401).json({ message: 'Authentication required' })
   }
-  
-  verifySupabaseToken(req, res, next)
+
+  return verifySupabaseToken(req, res, next)
 }
