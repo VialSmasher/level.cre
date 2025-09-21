@@ -11,6 +11,7 @@ interface AuthContextType {
   needsOnboarding: boolean
   isDemoMode: boolean
   signInWithGoogle: () => Promise<void>
+  signInWithEmail: (email: string) => Promise<void>
   signOut: () => Promise<void>
   setNeedsOnboarding: (needs: boolean) => void
   resetClientState: () => void
@@ -235,6 +236,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     needsOnboarding,
     isDemoMode,
     signInWithGoogle,
+    // Magic Link sign-in via Supabase email OTP
+    signInWithEmail: async (email: string) => {
+      // Clear demo mode if present
+      localStorage.removeItem('demo-mode')
+      if (!supabase) {
+        throw new Error('Auth is not configured')
+      }
+      const redirectTo = `${window.location.origin}/app`
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: redirectTo, shouldCreateUser: true }
+      })
+      if (error) throw error
+    },
     signOut,
     setNeedsOnboarding,
     resetClientState,

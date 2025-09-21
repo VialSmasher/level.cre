@@ -21,11 +21,11 @@ if (process.env.NODE_ENV === 'development') {
   app.use((req, res, next) => {
     res.setHeader('Content-Security-Policy', [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.googleapis.com https://maps.googleapis.com https://*.google.com",
+      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.googleapis.com https://maps.googleapis.com https://*.google.com https://*.gstatic.com https://maps.gstatic.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com",
       "font-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
-      "connect-src 'self' https://*.googleapis.com https://maps.googleapis.com https://*.google.com",
-      "img-src 'self' data: https:",
+      "connect-src 'self' https://*.googleapis.com https://maps.googleapis.com https://*.google.com https://*.gstatic.com https://maps.gstatic.com",
+      "img-src 'self' data: https: https://*.googleusercontent.com https://*.gstatic.com https://maps.gstatic.com",
       "frame-src https://accounts.google.com"
     ].join('; '));
     next();
@@ -36,14 +36,14 @@ if (process.env.NODE_ENV === 'development') {
     // Allow eval and unsafe-inline for OAuth and Maps
     const cspPolicy = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.supabase.co https://*.googleapis.com https://*.google.com https://maps.googleapis.com https://replit.com",
+      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.supabase.co https://*.googleapis.com https://*.google.com https://maps.googleapis.com https://*.gstatic.com https://maps.gstatic.com https://replit.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com",
       "font-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
-      "connect-src 'self' https://*.supabase.co https://*.googleapis.com https://*.google.com https://maps.googleapis.com",
-      "img-src 'self' data: https:",
+      "connect-src 'self' https://*.supabase.co https://*.googleapis.com https://*.google.com https://maps.googleapis.com https://*.gstatic.com https://maps.gstatic.com",
+      "img-src 'self' data: https: https://*.googleusercontent.com https://*.gstatic.com https://maps.gstatic.com",
       "frame-src https://accounts.google.com"
     ].join('; ');
-    
+
     res.setHeader('Content-Security-Policy', cspPolicy);
     next();
   });

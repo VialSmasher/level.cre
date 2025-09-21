@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express'
+import { storage } from './storage'
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose'
 
 // Build Supabase JWKS URL from env
@@ -45,6 +46,11 @@ export async function verifySupabaseToken(req: Request, res: Response, next: Nex
   // Demo mode is allowed for non-production usage and tests
   if (req.headers['x-demo-mode'] === 'true') {
     ;(req as any).user = { id: 'demo-user' }
+    try {
+      await storage.upsertUser({ id: 'demo-user', email: 'demo@example.com', firstName: 'Demo', lastName: 'User' })
+    } catch (e) {
+      console.error('Demo upsert user error:', (e as Error).message)
+    }
     return next()
   }
 
@@ -74,11 +80,27 @@ export function getUserId(req: Request): string {
 
 // Middleware for routes that need authentication but allow demo mode
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  // Allow explicit demo mode via header
   if (req.headers['x-demo-mode'] === 'true') {
     ;(req as any).user = { id: 'demo-user' }
     return next()
   }
 
+  // In development, accept the dev user injected by middleware
+  const isDevEnv = process.env.NODE_ENV === 'development' || req.app?.get('env') === 'development'
+  if (isDevEnv && (req as any).user?.id) {
+    // Ensure dev user exists in DB to satisfy FK constraints
+    try {
+      const uid = (req as any).user.id as string
+      await storage.upsertUser({ id: uid, email: `${uid}@dev.local` })
+    } catch (e) {
+      // Log and continue – upsert is best-effort for dev
+      console.error('Dev upsert user error:', (e as Error).message)
+    }
+    return next()
+  }
+
+  // Otherwise require a valid Bearer token
   const authHeader = req.headers.authorization
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ message: 'Authentication required' })

@@ -3,8 +3,9 @@ import { randomUUID } from 'crypto';
 
 export const devUser = (): RequestHandler => {
   return (req, res, next) => {
-    // Only active in development
-    if (process.env.NODE_ENV !== 'development') return next();
+    // Only active in development (use Express env fallback)
+    const nodeEnv = process.env.NODE_ENV || req.app?.get('env');
+    if (nodeEnv !== 'development') return next();
 
     const signed = (req as any).signedCookies;
     let uid = signed?.dev_uid;

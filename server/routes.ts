@@ -3,7 +3,10 @@ import { createServer, type Server } from "http";
 import jwt from "jsonwebtoken";
 import { storage } from "./storage";
 import { getUserId, requireAuth } from "./auth";
+import { z } from 'zod';
+import { ProspectGeometry, ProspectStatus, FollowUpTimeframe } from '@shared/schema';
 import { createClient } from '@supabase/supabase-js';
+import { pool } from './db';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Supabase client for server-side OAuth
@@ -100,17 +103,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
     
-    // Fall back to demo user
-    const demoUser = {
-      id: 'demo-user',
-      email: 'demo@example.com',
-      firstName: 'Demo',
-      lastName: 'User',
-      profileImageUrl: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    res.json(demoUser);
+    // Fall back to demo user and ensure the row exists for FK constraints
+    try {
+      const demoUser = await storage.upsertUser({
+        id: 'demo-user',
+        email: 'demo@example.com',
+        firstName: 'Demo',
+        lastName: 'User',
+        profileImageUrl: null,
+      });
+      res.json({
+        id: demoUser.id,
+        email: demoUser.email,
+        firstName: demoUser.firstName || 'Demo',
+        lastName: demoUser.lastName || 'User',
+        profileImageUrl: demoUser.profileImageUrl || null,
+        createdAt: demoUser.createdAt || new Date(),
+        updatedAt: demoUser.updatedAt || new Date(),
+      });
+    } catch (e) {
+      console.error('Error ensuring demo user exists:', e);
+      res.status(500).json({ message: 'Failed to load demo user' });
+    }
   });
 
   // Demo bypass route for testing (stateless)
@@ -266,21 +280,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/prospects', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      // Zod validation
-      const { z } = require('zod');
+      // Validate payload to match client shape (uses GeoJSON geometry)
       const ProspectInputSchema = z.object({
         name: z.string().min(1),
-        status: z.string().default('new'),
-        lat: z.number(),
-        lng: z.number(),
-        userId: z.string().optional(),
+        status: ProspectStatus.default('prospect'),
+        notes: z.string().optional().default(''),
+        geometry: ProspectGeometry,
+        submarketId: z.string().optional(),
+        lastContactDate: z.string().optional(),
+        followUpTimeframe: FollowUpTimeframe.optional(),
+        // Contact and business info
+        contactName: z.string().optional(),
+        contactEmail: z.string().optional(),
+        contactPhone: z.string().optional(),
+        contactCompany: z.string().optional(),
+        size: z.string().optional(),
+        acres: z.string().optional(),
+        businessName: z.string().optional(),
+        websiteUrl: z.string().optional(),
       });
-      const parseResult = ProspectInputSchema.safeParse({ ...req.body, userId });
+
+      const parseResult = ProspectInputSchema.safeParse(req.body);
       if (!parseResult.success) {
         console.error('Prospect validation error:', parseResult.error);
         return res.status(400).json({ message: 'Invalid prospect data', error: parseResult.error.errors });
       }
-      const prospect = await storage.createProspect(parseResult.data);
+
+      const prospect = await storage.createProspect({ ...parseResult.data, userId });
       res.status(201).json(prospect);
     } catch (e) {
       if (e instanceof Error) {
@@ -432,6 +458,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching broker skills:', error);
       res.status(500).json({ message: 'Failed to fetch broker skills' });
+    }
+  });
+
+  // Diagnostics: check DB connectivity and required tables
+  app.get('/api/_diag/db', async (_req, res) => {
+    try {
+      await pool.query('SELECT 1');
+      const required = [
+        'users','profiles','prospects','submarkets','requirements',
+        'touches','contact_interactions','broker_skills','skill_activities'
+      ];
+      const { rows } = await pool.query(
+        `SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public'`
+      );
+      const present = new Set(rows.map((r: any) => r.tablename));
+      const missing = required.filter(t => !present.has(t));
+      res.json({ ok: true, missing, present: Array.from(present) });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, message: err.message });
     }
   });
 
