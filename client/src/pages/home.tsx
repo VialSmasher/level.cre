@@ -124,9 +124,24 @@ export default function HomePage() {
   const submarketOptions = profile?.submarkets || [];
   
   // Map state
+  const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton
+  const DEFAULT_ZOOM = 11;
   const [map, setMap] = useState<google.maps.Map | null>(null);
-  const [mapType, setMapType] = useState<'roadmap' | 'hybrid'>('roadmap');
-  const [center] = useState({ lat: 53.5461, lng: -113.4938 }); // Edmonton
+  const [mapType, setMapType] = useState<'roadmap' | 'hybrid'>(() => {
+    const primary = readJSON<any>(nsKey(currentUser?.id, 'mapType'), null);
+    if (primary === 'roadmap' || primary === 'hybrid') return primary;
+    const fallback = readJSON<any>('mapType::guest', null);
+    return (fallback === 'roadmap' || fallback === 'hybrid') ? fallback : 'roadmap';
+  });
+  const [center, setCenter] = useState<{ lat: number; lng: number }>(() => {
+    const saved = readJSON<{ lat: number; lng: number; zoom: number } | null>(nsKey(currentUser?.id, 'mapViewport'), null);
+    return saved && typeof saved.lat === 'number' && typeof saved.lng === 'number' ? { lat: saved.lat, lng: saved.lng } : DEFAULT_CENTER;
+  });
+  const [zoom, setZoom] = useState<number>(() => {
+    const saved = readJSON<{ lat: number; lng: number; zoom: number } | null>(nsKey(currentUser?.id, 'mapViewport'), null);
+    return saved && typeof saved.zoom === 'number' ? saved.zoom : DEFAULT_ZOOM;
+  });
+  const [bounds, setBounds] = useState<google.maps.LatLngBoundsLiteral | null>(null);
   
   // Data state
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -164,26 +179,14 @@ export default function HomePage() {
   const drawingManagerRef = useRef<google.maps.drawing.DrawingManager | null>(null);
   const [drawingForProspect, setDrawingForProspect] = useState<Prospect | null>(null);
 
-  // Google Maps loader
+  // Google Maps loader (locked to .env key only)
   const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    id: 'google-map-script',
+    googleMapsApiKey: (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '') as string,
     libraries,
   });
 
-  // Reset state when user changes
-  useEffect(() => {
-    const handleUserChange = () => {
-      setProspects([]);
-      setSubmarkets([]);
-      setTouches([]);
-      setSelectedProspect(null);
-      setIsEditPanelOpen(false);
-      setEditingProspectId(null);
-    };
-    
-    window.addEventListener('userChanged', handleUserChange);
-    return () => window.removeEventListener('userChanged', handleUserChange);
-  }, []);
+  // Avoid resetting local state on user change; we invalidate queries instead (see listener below)
 
   // Use React Query for authenticated data fetching
   const { data: prospectsData = [], refetch: refetchProspects } = useQuery<Prospect[]>({
@@ -210,19 +213,14 @@ export default function HomePage() {
     }
   }, [currentUser?.id]);
   
-  // Refetch data when user changes
+  // Refetch data when user changes (stable listener to avoid update loops)
   useEffect(() => {
     const handleUserChange = () => {
-      if (currentUser) {
-        refetchProspects();
-      }
+      queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
     };
-    
     window.addEventListener('userChanged', handleUserChange);
-    return () => {
-      window.removeEventListener('userChanged', handleUserChange);
-    };
-  }, [currentUser?.id, refetchProspects]); // Use currentUser?.id to avoid infinite loop
+    return () => window.removeEventListener('userChanged', handleUserChange);
+  }, []);
 
   // Save data to user-scoped localStorage
   const saveData = useCallback(() => {
@@ -251,6 +249,40 @@ export default function HomePage() {
   useEffect(() => {
     writeJSON(nsKey(currentUser?.id, 'selectedSubmarkets'), Array.from(selectedSubmarkets));
   }, [selectedSubmarkets, currentUser?.id]);
+
+  // Load map type when user changes
+  useEffect(() => {
+    const primary = readJSON<any>(nsKey(currentUser?.id, 'mapType'), null);
+    const fallback = readJSON<any>('mapType::guest', null);
+    const next = (primary === 'roadmap' || primary === 'hybrid')
+      ? primary
+      : ((fallback === 'roadmap' || fallback === 'hybrid') ? fallback : 'roadmap');
+    setMapType(next);
+  }, [currentUser?.id]);
+
+  // Persist map type per user
+  useEffect(() => {
+    writeJSON(nsKey(currentUser?.id, 'mapType'), mapType);
+  }, [mapType, currentUser?.id]);
+
+  // Apply map type immediately to the Google Map instance
+  useEffect(() => {
+    if (map) {
+      map.setMapTypeId(mapType);
+    }
+  }, [map, mapType]);
+
+  // Load viewport when user changes
+  useEffect(() => {
+    const saved = readJSON<{ lat: number; lng: number; zoom: number } | null>(nsKey(currentUser?.id, 'mapViewport'), null);
+    if (saved) {
+      setCenter({ lat: saved.lat, lng: saved.lng });
+      setZoom(saved.zoom ?? DEFAULT_ZOOM);
+    } else {
+      setCenter(DEFAULT_CENTER);
+      setZoom(DEFAULT_ZOOM);
+    }
+  }, [currentUser?.id]);
 
   // Filter prospects based on status and submarket
   const filteredProspects = prospects.filter(prospect => {
@@ -366,6 +398,8 @@ export default function HomePage() {
         const response = await apiRequest('POST', '/api/prospects', newProspectData);
         const savedProspect = await response.json();
         setProspects(prev => [...prev, savedProspect]);
+        setSelectedProspect(savedProspect);
+        setIsEditPanelOpen(true);
         
         queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
         
@@ -522,7 +556,8 @@ export default function HomePage() {
     
     try {
       const newProspectData = {
-        name: searchPin.businessName || searchPin.address, // Use business name if available
+        // Map address to Property tab (Address field is `name`)
+        name: searchPin.address,
         geometry: {
           type: 'Point' as const,
           coordinates: [searchPin.lng, searchPin.lat] as [number, number]
@@ -530,7 +565,9 @@ export default function HomePage() {
         status: 'prospect' as ProspectStatusType,
         notes: '',
         submarketId: inferSubmarketFromPoint(searchPin) || '',
+        // Also persist business metadata and map company to Contact tab
         businessName: searchPin.businessName || undefined,
+        contactCompany: searchPin.businessName || undefined,
         websiteUrl: searchPin.websiteUrl || undefined
       };
 
@@ -542,6 +579,8 @@ export default function HomePage() {
       
       // Add to prospects list
       setProspects(prev => [...prev, savedProspect]);
+      setSelectedProspect(savedProspect);
+      setIsEditPanelOpen(true);
       
       // Invalidate query cache to refresh
       queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
@@ -785,10 +824,9 @@ export default function HomePage() {
     }
   }, [selectedProspect, toast]);
 
-  // API key change handler
-  const handleApiKeyChange = useCallback((newApiKey: string) => {
-    // Handle API key change if needed
-    console.log('API key changed:', newApiKey);
+  // API key change handler (no-op; use .env key)
+  const handleApiKeyChange = useCallback((_newApiKey: string) => {
+    // Intentionally no-op: key is sourced from VITE_GOOGLE_MAPS_API_KEY only.
   }, []);
 
   if (!isLoaded) {
@@ -803,13 +841,13 @@ export default function HomePage() {
   }
 
   return (
-    <div style={{ position: 'relative', height: '100vh', width: '100%', overflow: 'hidden' }}>
+    <div style={{ position: 'relative', height: 'calc(100vh - 4rem)', width: '100%', overflow: 'hidden' }}>
       {/* Map Canvas */}
       <div style={{ position: 'absolute', inset: 0 }}>
         <GoogleMap
           mapContainerStyle={{ width: '100%', height: '100%' }}
           center={center}
-          zoom={11}
+          zoom={zoom}
           onLoad={onMapLoad}
           onUnmount={onMapUnmount}
           mapTypeId={mapType}
@@ -822,6 +860,31 @@ export default function HomePage() {
             rotateControl: false,
             fullscreenControl: true,
             gestureHandling: 'greedy'
+          }}
+          onIdle={() => {
+            if (!map) return;
+            const c = map.getCenter();
+            const z = map.getZoom();
+            if (c) {
+              const next = { lat: c.lat(), lng: c.lng() };
+              // Persist viewport only; avoid setting React state here to prevent render loops
+              writeJSON(nsKey(currentUser?.id, 'mapViewport'), { ...next, zoom: z ?? DEFAULT_ZOOM });
+            }
+            const b = map.getBounds?.();
+            if (b) {
+              const ne = b.getNorthEast();
+              const sw = b.getSouthWest();
+              const nextBounds = { north: ne.lat(), east: ne.lng(), south: sw.lat(), west: sw.lng() } as const;
+              setBounds((prev) => (
+                prev &&
+                prev.north === nextBounds.north &&
+                prev.east === nextBounds.east &&
+                prev.south === nextBounds.south &&
+                prev.west === nextBounds.west
+                  ? prev
+                  : { ...nextBounds }
+              ));
+            }
           }}
         >
           {/* Drawing Manager */}
@@ -963,7 +1026,11 @@ export default function HomePage() {
             map.panTo({ lat: location.lat, lng: location.lng });
             map.setZoom(15);
           }
+          setCenter({ lat: location.lat, lng: location.lng });
+          setZoom(15);
         }}
+        bounds={bounds}
+        defaultCenter={DEFAULT_CENTER}
         onPolygon={handleDrawPolygon}
         onPin={() => {
           if (drawingManagerRef.current) {
@@ -976,6 +1043,17 @@ export default function HomePage() {
           }
           toast({ title: 'Pan Tool', description: 'Pan/hand tool selected. You can now move the map.' });
         }}
+        mapType={mapType}
+        onMapTypeChange={setMapType}
+        onMyLocation={() => {
+          if (map) {
+            map.panTo(DEFAULT_CENTER);
+            map.setZoom(DEFAULT_ZOOM);
+          }
+          setCenter(DEFAULT_CENTER);
+          setZoom(DEFAULT_ZOOM);
+          writeJSON(nsKey(currentUser?.id, 'mapViewport'), { ...DEFAULT_CENTER, zoom: DEFAULT_ZOOM });
+        }}
       />
 
       {/* Developer Settings - Keep at bottom right but with margin */}
@@ -983,7 +1061,7 @@ export default function HomePage() {
         className="absolute bottom-4 right-4"
         style={{ pointerEvents: 'auto' }}
       >
-        <DeveloperSettings onApiKeyChange={handleApiKeyChange} />
+        <DeveloperSettings />
       </div>
 
       {/* Control Panel - Slides in from left */}
@@ -1314,6 +1392,8 @@ export default function HomePage() {
                       const response = await apiRequest('POST', '/api/prospects', newProspectData);
                       const savedProspect = await response.json();
                       setProspects(prev => [...prev, savedProspect]);
+                      setSelectedProspect(savedProspect);
+                      setIsEditPanelOpen(true);
                       
                       queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
                       
@@ -1331,8 +1411,47 @@ export default function HomePage() {
                         variant: "destructive"
                       });
                     }
+                  } else if (selectedProspect) {
+                    // Explicit save for existing record (PATCH full payload)
+                    try {
+                      const updateData = {
+                        name: selectedProspect.name,
+                        status: selectedProspect.status,
+                        notes: selectedProspect.notes || '',
+                        geometry: selectedProspect.geometry,
+                        submarketId: selectedProspect.submarketId,
+                        followUpTimeframe: selectedProspect.followUpTimeframe,
+                        contactName: selectedProspect.contactName,
+                        contactEmail: selectedProspect.contactEmail,
+                        contactPhone: selectedProspect.contactPhone,
+                        contactCompany: selectedProspect.contactCompany,
+                        size: selectedProspect.size,
+                        acres: selectedProspect.acres,
+                        businessName: selectedProspect.businessName,
+                        websiteUrl: selectedProspect.websiteUrl
+                      };
+
+                      const response = await apiRequest('PATCH', `/api/prospects/${selectedProspect.id}`, updateData);
+                      const savedProspect = await response.json();
+                      setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
+                      setSelectedProspect(savedProspect);
+                      setIsEditPanelOpen(true);
+
+                      queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
+
+                      toast({
+                        title: "Prospect updated",
+                        description: "All changes have been saved.",
+                      });
+                    } catch (error) {
+                      console.error('Error updating prospect:', error);
+                      toast({
+                        title: "Error updating prospect",
+                        description: "Failed to save changes to database.",
+                        variant: "destructive"
+                      });
+                    }
                   }
-                  setIsEditPanelOpen(false);
                 }}
                 className="bg-blue-600 hover:bg-blue-700 flex-1 h-8 text-xs"
                 title="Save Changes"

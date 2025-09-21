@@ -4,6 +4,11 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Ensure full-height layout from root */
+html, body, #root {
+  height: 100%;
+}
+
 
 :root {
   --background: hsl(0 0% 100%);

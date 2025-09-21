@@ -22,6 +22,7 @@ import {
   Menu,
   X
 } from 'lucide-react'
+import { Table } from 'lucide-react'
 import { Link, useLocation } from 'wouter'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useState } from 'react'
@@ -51,7 +52,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
       {/* Top Navigation */}
       <nav className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -157,6 +158,25 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </TooltipTrigger>
                 <TooltipContent>
                   <p>Requirements</p>
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link 
+                    href="/app/market-comps" 
+                    className={`p-3 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                      isActive('/app/market-comps') 
+                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30 opacity-100' 
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 opacity-70 hover:opacity-100'
+                    }`}
+                    aria-label="Market Comps"
+                  >
+                    <Table size={22} />
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Market Comps</p>
                 </TooltipContent>
               </Tooltip>
 
@@ -353,6 +373,27 @@ export function AppLayout({ children }: AppLayoutProps) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Link 
+                    href="/app/market-comps" 
+                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
+                      isActive('/app/market-comps') 
+                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                    onClick={() => setMobileMenuOpen(false)}
+                    aria-label="Market Comps"
+                  >
+                    <Table size={20} />
+                    <span className="font-medium">Market Comps</span>
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p>Market Comps</p>
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link 
                     href="/app/profile" 
                     className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
                       isActive('/app/profile') 
@@ -376,7 +417,7 @@ export function AppLayout({ children }: AppLayoutProps) {
       </nav>
 
       {/* Main Content */}
-      <main className="flex-1">
+      <main className="flex-1 min-h-0">
         {children}
       </main>
     </div>
