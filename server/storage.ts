@@ -560,7 +560,7 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
 
-    // Then update the corresponding skill XP
+    // Then update the corresponding skill XP and streaks
     const currentSkills = await this.getBrokerSkills(activityData.userId);
     const updateData: any = {};
     
@@ -579,9 +579,25 @@ export class DatabaseStorage implements IStorage {
         break;
     }
 
-    // Update the skills record
+    // Daily streak update (consistency) – increment when crossing day boundary
+    const now = new Date();
+    const last = currentSkills.lastActivity ? new Date(currentSkills.lastActivity) : null;
+    let streakDays = currentSkills.streakDays || 0;
+    if (!last) {
+      streakDays = 1;
+    } else {
+      const lastDay = new Date(last.getFullYear(), last.getMonth(), last.getDate());
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const diffDays = Math.floor((today.getTime() - lastDay.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays === 1) {
+        streakDays += 1;
+      } else if (diffDays > 1) {
+        streakDays = 1;
+      }
+    }
+
     await db.update(brokerSkills)
-      .set({ ...updateData, updatedAt: new Date() })
+      .set({ ...updateData, lastActivity: now, streakDays, updatedAt: now })
       .where(eq(brokerSkills.userId, activityData.userId));
 
     return activity;

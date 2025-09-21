@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { useAuth } from '@/contexts/AuthContext'
 import { useLocation } from 'wouter'
 import { useEffect, useState } from 'react'
@@ -6,11 +7,13 @@ import { MapPin, BarChart3, Users, Loader2, Sparkles, ArrowRight, CheckCircle } 
 import { useToast } from '@/hooks/use-toast'
 
 export default function Landing() {
-  const { user, loading, signInWithGoogle } = useAuth()
+  const { user, loading, signInWithGoogle, signInWithEmail } = useAuth()
   const [, setLocation] = useLocation()
   const [isSigningIn, setIsSigningIn] = useState(false)
   const [isDemoMode, setIsDemoMode] = useState(false)
   const [popupUrl, setPopupUrl] = useState<string | null>(null)
+  const [email, setEmail] = useState('')
+  const [isSendingLink, setIsSendingLink] = useState(false)
   const { toast } = useToast()
   
   // Detect iframe environment
@@ -56,6 +59,20 @@ export default function Landing() {
     // Set demo flag and reload page to ensure proper initialization
     localStorage.setItem('demo-mode', 'true')
     window.location.href = '/app'
+  }
+
+  const handleSendMagicLink = async () => {
+    if (isSendingLink || !email) return
+    setIsSendingLink(true)
+    try {
+      await signInWithEmail(email)
+      toast({ title: 'Magic link sent', description: 'Check your email to complete sign-in.' })
+    } catch (err: any) {
+      console.error('Magic link error:', err)
+      toast({ title: 'Failed to send magic link', description: err.message ?? 'Please try again.', variant: 'destructive' })
+    } finally {
+      setIsSendingLink(false)
+    }
   }
 
   if (loading) {
@@ -117,6 +134,27 @@ export default function Landing() {
                     </>
                   )}
                 </Button>
+
+                {/* Magic Link (Email) */}
+                <div className="w-full space-y-2">
+                  <div className="flex gap-2">
+                    <Input
+                      type="email"
+                      placeholder="you@example.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="flex-1 h-12"
+                    />
+                    <Button
+                      onClick={handleSendMagicLink}
+                      disabled={isSendingLink || !email || isSigningIn}
+                      className="h-12"
+                    >
+                      {isSendingLink ? 'Sending…' : 'Send link'}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-gray-600 text-center">Or sign in with a one-time email link.</p>
+                </div>
                 
                 {/* OAuth fallback for Replit iframe restrictions */}
                 {popupUrl && (

@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Download, MapIcon, Satellite, ChevronLeft, ChevronRight, X, Save, Trash2, Filter, ChevronDown, ChevronUp, User, LogOut, Settings, Edit3 } from 'lucide-react';
+import { MapControls } from '@/features/map/MapControls';
 
 // Standardized size options for consistent use across Prospects and Requirements
 const STANDARD_SIZE_OPTIONS = [
@@ -441,39 +442,52 @@ export default function HomePage() {
     }
   }, [prospects, toast]);
 
-  // CSV export handler
+  // CSV export handler (round-trip: WKT for polygons, POINT for points)
   const exportToCSV = useCallback(() => {
-    const csvData = filteredProspects.map(prospect => ({
-      name: prospect.name,
-      status: prospect.status,
-      notes: prospect.notes,
-      lat: prospect.geometry.type === 'Point' ? 
-           (prospect.geometry.coordinates as [number, number])[1] : 
-           (prospect.geometry.coordinates as [number, number][][])[0][0][1],
-      lng: prospect.geometry.type === 'Point' ? 
-           (prospect.geometry.coordinates as [number, number])[0] : 
-           (prospect.geometry.coordinates as [number, number][][])[0][0][0],
-      submarketId: (prospect as any).submarketId || '',
-      lastContactDate: (prospect as any).lastContactDate || '',
-      createdDate: prospect.createdDate
-    }));
+    const wktFromGeometry = (geometry: any): string => {
+      if (!geometry) return ''
+      if (geometry.type === 'Point') {
+        const [lng, lat] = geometry.coordinates as [number, number]
+        return `POINT(${lng} ${lat})`
+      }
+      if (geometry.type === 'Polygon') {
+        const rings: [number, number][][] = Array.isArray(geometry.coordinates[0][0])
+          ? geometry.coordinates
+          : [geometry.coordinates]
+        // Only export exterior ring for now
+        const ring = rings[0]
+        const pairs = ring.map(([lng, lat]) => `${lng} ${lat}`).join(', ')
+        return `POLYGON((${pairs}))`
+      }
+      return ''
+    }
 
-    const headers = ['name', 'status', 'notes', 'lat', 'lng', 'submarketId', 'lastContactDate', 'createdDate'];
-    const csvContent = [
+    const rows = filteredProspects.map(p => ({
+      name: p.name,
+      status: p.status,
+      notes: p.notes,
+      coordinates: wktFromGeometry(p.geometry),
+      submarketId: (p as any).submarketId || '',
+      lastContactDate: (p as any).lastContactDate || '',
+      createdDate: p.createdDate,
+    }))
+
+    const headers = ['name', 'status', 'notes', 'coordinates', 'submarketId', 'lastContactDate', 'createdDate']
+    const csv = [
       headers.join(','),
-      ...csvData.map(row => headers.map(header => `"${row[header as keyof typeof row]}"`).join(','))
-    ].join('\n');
+      ...rows.map(r => headers.map(h => `"${(r as any)[h] ?? ''}"`).join(','))
+    ].join('\n')
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `prospects-${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }, [filteredProspects]);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', `prospects-${new Date().toISOString().split('T')[0]}.csv`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }, [filteredProspects])
 
   // Prospect click handler
   const handleProspectClick = useCallback((prospect: Prospect) => {
@@ -555,21 +569,21 @@ export default function HomePage() {
 
   // Handle drawing polygon for point prospects
   const handleDrawPolygon = useCallback(() => {
-    if (!drawingManagerRef.current || !selectedProspect) return;
-    
-    // Set the prospect we're drawing for
-    setDrawingForProspect(selectedProspect);
-    
-    // Close the edit panel temporarily to allow drawing
-    setIsEditPanelOpen(false);
+    if (!drawingManagerRef.current) return;
+
+    if (selectedProspect) {
+      // If a prospect is selected, we are drawing for it.
+      setDrawingForProspect(selectedProspect);
+      setIsEditPanelOpen(false); // Close panel to allow drawing
+      toast({
+        title: "Draw Mode Enabled",
+        description: `Click on the map to draw an area for ${selectedProspect.name}.`,
+      });
+    }
     
     // Set drawing mode to polygon
     drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.POLYGON);
     
-    toast({
-      title: "Draw Mode Enabled",
-      description: "Click on the map to draw a polygon area for this prospect.",
-    });
   }, [selectedProspect, toast]);
 
   // Enable polygon editing
@@ -585,12 +599,46 @@ export default function HomePage() {
     setOriginalPolygonCoordinates(originalCoords);
     setEditingProspectId(prospectId);
     
-    // Enable polygon editing without auto-save
+    // Enable polygon editing with debounced auto-save on vertex edits
     setTimeout(() => {
       const polygon = polygonRefs.current.get(prospectId);
       if (polygon) {
         polygon.setEditable(true);
         polygon.setDraggable(true);
+        const path = polygon.getPath();
+
+        let timer: any = null;
+        const scheduleSave = () => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(async () => {
+            const coords: [number, number][] = [];
+            for (let i = 0; i < path.getLength(); i++) {
+              const pt = path.getAt(i);
+              coords.push([pt.lng(), pt.lat()]);
+            }
+            if (coords.length > 0) coords.push(coords[0]);
+            const newGeom = { type: 'Polygon' as const, coordinates: [coords] };
+            const acres = calculatePolygonAcres(newGeom);
+            try {
+              const response = await apiRequest('PATCH', `/api/prospects/${prospectId}`, {
+                geometry: newGeom,
+                acres: acres ? acres.toString() : undefined
+              });
+              const saved = await response.json();
+              setProspects(prev => prev.map(p => p.id === saved.id ? saved : p));
+              if (selectedProspect && selectedProspect.id === saved.id) {
+                setSelectedProspect(saved);
+              }
+            } catch (err) {
+              console.error('Auto-save polygon error:', err);
+            }
+          }, 500); // debounce 500ms
+        };
+
+        // Attach listeners
+        path.addListener('set_at', scheduleSave);
+        path.addListener('insert_at', scheduleSave);
+        path.addListener('remove_at', scheduleSave);
       }
     }, 100);
   }, [prospects]);
@@ -716,7 +764,7 @@ export default function HomePage() {
     try {
       // Delete from database
       await apiRequest('DELETE', `/api/prospects/${selectedProspect.id}`);
-      setProspects(prev => prev.filter(p => p.id !== selectedProspect.id));
+  setProspects(prev => prev.filter(p => p.id !== selectedProspect.id));
       setSelectedProspect(null);
       setIsEditPanelOpen(false);
       
@@ -782,7 +830,7 @@ export default function HomePage() {
               onLoad={onDrawingManagerLoad}
               onOverlayComplete={onOverlayComplete}
               options={{
-                drawingControl: true,
+                drawingControl: false,
                 drawingControlOptions: {
                   position: window.google?.maps?.ControlPosition?.TOP_LEFT,
                   drawingModes: [
@@ -907,149 +955,35 @@ export default function HomePage() {
         </GoogleMap>
       </div>
 
-      {/* Floating UI Container - Non-blocking */}
-      <div style={{ pointerEvents: 'none', position: 'absolute', inset: 0, zIndex: 40 }}>
-        
+      {/* Map Controls - Top Left (authoritative) */}
+      <MapControls
+        onSearch={(location) => {
+          handleLocationFound(location);
+          if (map) {
+            map.panTo({ lat: location.lat, lng: location.lng });
+            map.setZoom(15);
+          }
+        }}
+        onPolygon={handleDrawPolygon}
+        onPin={() => {
+          if (drawingManagerRef.current) {
+            drawingManagerRef.current.setDrawingMode(window.google.maps.drawing.OverlayType.MARKER);
+          }
+        }}
+        onPan={() => {
+          if (drawingManagerRef.current) {
+            drawingManagerRef.current.setDrawingMode(null);
+          }
+          toast({ title: 'Pan Tool', description: 'Pan/hand tool selected. You can now move the map.' });
+        }}
+      />
 
-
-        {/* Search Bar - Bottom Center */}
-        <div 
-          className="absolute bottom-20 left-1/2 transform -translate-x-1/2"
-          style={{ pointerEvents: 'auto' }}
-        >
-          <SearchComponent 
-            prospects={prospects}
-            map={map}
-            onProspectSelect={handleProspectClick}
-            onLocationFound={handleLocationFound}
-          />
-        </div>
-
-        {/* Filters Panel - Bottom Left */}
-        <div 
-          className="absolute bottom-20 left-4 flex flex-col gap-3"
-          style={{ pointerEvents: 'auto' }}
-        >
-          {isLegendOpen ? (
-            <div className="bg-white rounded-lg shadow-lg border">
-              <div 
-                className="flex items-center justify-between p-3 pb-2 cursor-pointer hover:bg-gray-50 rounded-t-lg"
-                onClick={() => setIsLegendOpen(false)}
-              >
-                <div className="text-sm font-semibold">Filters</div>
-                <ChevronDown className="h-4 w-4 text-gray-400" />
-              </div>
-              <div className="px-3 pb-3 space-y-1">
-                {Object.entries(STATUS_COLORS).map(([status, color]) => (
-                  <div
-                    key={status}
-                    className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded text-xs"
-                    onClick={() => {
-                      const newFilters = new Set(statusFilters);
-                      if (statusFilters.has(status as ProspectStatusType)) {
-                        newFilters.delete(status as ProspectStatusType);
-                      } else {
-                        newFilters.add(status as ProspectStatusType);
-                      }
-                      setStatusFilters(newFilters);
-                    }}
-                  >
-                    <div 
-                      className="w-3 h-3 rounded-full border" 
-                      style={{ backgroundColor: color }}
-                    />
-                    <span className="capitalize flex-1">
-                      {status.replace('_', ' ')}
-                    </span>
-                    {statusFilters.has(status as ProspectStatusType) && (
-                      <span className="text-green-600">✓</span>
-                    )}
-                  </div>
-                ))}
-                
-                {/* Submarket Filters */}
-                {submarketOptions.length > 0 && (
-                  <>
-                    <div className="border-t border-gray-200 mt-2 pt-2">
-                      <div className="text-xs font-medium text-gray-700 mb-1">Submarkets</div>
-                      {submarketOptions.map((submarketName) => (
-                        <div
-                          key={submarketName}
-                          className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded text-xs"
-                          onClick={() => {
-                            const newFilters = new Set(selectedSubmarkets);
-                            if (selectedSubmarkets.has(submarketName)) {
-                              newFilters.delete(submarketName);
-                            } else {
-                              newFilters.add(submarketName);
-                            }
-                            setSelectedSubmarkets(newFilters);
-                          }}
-                        >
-                          <div className="w-3 h-3 rounded border bg-blue-100 border-blue-300" />
-                          <span className="flex-1">{submarketName}</span>
-                          {selectedSubmarkets.has(submarketName) && (
-                            <span className="text-green-600">✓</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-                
-                <button
-                  onClick={() => {
-                    setStatusFilters(new Set(Object.keys(STATUS_COLORS) as ProspectStatusType[]));
-                    setSelectedSubmarkets(new Set());
-                  }}
-                  className="text-xs text-blue-600 hover:underline mt-2 w-full text-left"
-                >
-                  Clear all filters
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div 
-              className="bg-white rounded-lg shadow-lg border border-gray-200 hover:bg-gray-50 cursor-pointer p-3"
-              onClick={() => setIsLegendOpen(true)}
-            >
-              <div className="flex items-center justify-center">
-                <Filter className="h-5 w-5 text-gray-700" />
-              </div>
-            </div>
-          )}
-
-          {/* Map View Toggle */}
-          <div className="bg-white rounded-lg shadow-lg border border-gray-200 p-1">
-            <Button
-              onClick={() => setMapType(mapType === 'roadmap' ? 'hybrid' : 'roadmap')}
-              className="w-full h-8"
-              variant="ghost"
-              size="sm"
-            >
-              {mapType === 'roadmap' ? (
-                <>
-                  <Satellite className="h-4 w-4 mr-2" />
-                  Hybrid
-                </>
-              ) : (
-                <>
-                  <MapIcon className="h-4 w-4 mr-2" />
-                  Map
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
-
-
-        {/* Developer Settings - Keep at bottom right but with margin */}
-        <div 
-          className="absolute bottom-4 right-4"
-          style={{ pointerEvents: 'auto' }}
-        >
-          <DeveloperSettings onApiKeyChange={handleApiKeyChange} />
-        </div>
+      {/* Developer Settings - Keep at bottom right but with margin */}
+      <div 
+        className="absolute bottom-4 right-4"
+        style={{ pointerEvents: 'auto' }}
+      >
+        <DeveloperSettings onApiKeyChange={handleApiKeyChange} />
       </div>
 
       {/* Control Panel - Slides in from left */}
@@ -1487,6 +1421,46 @@ export default function HomePage() {
                 setShowImportDialog(false);
               }} 
             />
+          </div>
+        </div>
+      )}
+      {/* Legend Toggle */}
+      <Button
+        onClick={() => setIsLegendOpen(!isLegendOpen)}
+        className="absolute bottom-4 left-4 z-20 bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
+        variant="outline"
+        size="sm"
+      >
+        {isLegendOpen ? (
+          <ChevronDown className="h-4 w-4" />
+        ) : (
+          <ChevronUp className="h-4 w-4" />
+        )}
+      </Button>
+
+      {/* Clickable Legend */}
+      {isLegendOpen && (
+        <div className="absolute bottom-4 left-16 bg-white/95 backdrop-blur-sm shadow-lg border border-gray-200 z-10 p-3 rounded">
+          <h3 className="text-sm font-semibold text-gray-800 mb-2">Status Legend</h3>
+          <div className="space-y-1">
+            {Object.entries(STATUS_COLORS).map(([status, color]) => {
+              const isActive = statusFilters.has(status as ProspectStatusType)
+              return (
+                <div
+                  key={status}
+                  className={`flex items-center text-xs cursor-pointer p-1 rounded transition-colors ${isActive ? 'bg-gray-100' : 'hover:bg-gray-50 opacity-50'}`}
+                  onClick={() => {
+                    const next = new Set(statusFilters)
+                    if (isActive) next.delete(status as ProspectStatusType)
+                    else next.add(status as ProspectStatusType)
+                    setStatusFilters(next)
+                  }}
+                >
+                  <div className="w-3 h-3 rounded mr-2" style={{ backgroundColor: color }} />
+                  <span className="text-gray-700">{status.replace('_',' ')}</span>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

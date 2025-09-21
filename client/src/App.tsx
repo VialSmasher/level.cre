@@ -1,4 +1,4 @@
-import React from "react";
+// import React from "react"; (remove if not needed)
 import { Switch, Route } from "wouter";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";

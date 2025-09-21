@@ -3,7 +3,10 @@ import { createServer, type Server } from "http";
 import jwt from "jsonwebtoken";
 import { storage } from "./storage";
 import { getUserId, requireAuth } from "./auth";
+import { z } from 'zod';
+import { ProspectGeometry, ProspectStatus, FollowUpTimeframe } from '@shared/schema';
 import { createClient } from '@supabase/supabase-js';
+import { pool } from './db';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Supabase client for server-side OAuth
@@ -66,33 +69,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.redirect('/app');
   });
 
-  // Get current authenticated user
-  app.get('/api/auth/session', async (req, res) => {
-    const session = (req.session as any)?.supabaseSession;
-    const userId = (req.session as any)?.userId;
-    
-    if (session && userId) {
-      try {
-        const user = await storage.getUser(userId);
-        if (user) {
-          res.json({ user, session });
-        } else {
-          res.status(404).json({ error: 'User not found' });
-        }
-      } catch (error) {
-        res.status(500).json({ error: 'Failed to get user' });
-      }
-    } else {
-      res.status(401).json({ error: 'Not authenticated' });
-    }
-  });
+  // Removed stateful session endpoint (stateless auth only)
 
-  // Logout endpoint
-  app.post('/api/auth/logout', async (req, res) => {
-    req.session = req.session || {};
-    delete (req.session as any).supabaseSession;
-    delete (req.session as any).userId;
-    
+  // Logout endpoint (stateless) – nothing to clear server-side
+  app.post('/api/auth/logout', async (_req, res) => {
     res.json({ success: true });
   });
   // User endpoint - returns demo user for unauthenticated requests, real user for authenticated requests
@@ -123,21 +103,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
     
-    // Fall back to demo user
-    const demoUser = {
-      id: 'demo-user',
-      email: 'demo@example.com',
-      firstName: 'Demo',
-      lastName: 'User',
-      profileImageUrl: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-    res.json(demoUser);
-  });
-
-  // Demo bypass route for testing
-  app.post('/api/auth/demo', async (req, res) => {
+    // Fall back to demo user and ensure the row exists for FK constraints
     try {
       const demoUser = await storage.upsertUser({
         id: 'demo-user',
@@ -146,11 +112,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lastName: 'User',
         profileImageUrl: null,
       });
-      
-      // Create a demo session
-      req.session = req.session || {};
-      (req.session as any).demoUser = demoUser;
-      
+      res.json({
+        id: demoUser.id,
+        email: demoUser.email,
+        firstName: demoUser.firstName || 'Demo',
+        lastName: demoUser.lastName || 'User',
+        profileImageUrl: demoUser.profileImageUrl || null,
+        createdAt: demoUser.createdAt || new Date(),
+        updatedAt: demoUser.updatedAt || new Date(),
+      });
+    } catch (e) {
+      console.error('Error ensuring demo user exists:', e);
+      res.status(500).json({ message: 'Failed to load demo user' });
+    }
+  });
+
+  // Demo bypass route for testing (stateless)
+  app.post('/api/auth/demo', async (_req, res) => {
+    try {
+      const demoUser = await storage.upsertUser({
+        id: 'demo-user',
+        email: 'demo@example.com',
+        firstName: 'Demo',
+        lastName: 'User',
+        profileImageUrl: null,
+      });
       res.json(demoUser);
     } catch (error) {
       console.error("Error creating demo user:", error);
@@ -158,16 +144,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Check demo auth status
+  // Demo auth status (stateless) – use X-Demo-Mode header
   app.get('/api/auth/demo/user', async (req, res) => {
-    const demoUser = (req.session as any)?.demoUser;
-    if (demoUser) {
-      res.json(demoUser);
-    } else {
-      res.status(401).json({ message: "Not authenticated" });
+    if (req.headers['x-demo-mode'] === 'true') {
+      return res.json({
+        id: 'demo-user',
+        email: 'demo@example.com',
+        firstName: 'Demo',
+        lastName: 'User',
+        profileImageUrl: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
     }
+    res.status(401).json({ message: 'Not authenticated' });
   });
-
   // Profile routes
   app.get('/api/profile', requireAuth, async (req, res) => {
     try {
@@ -289,14 +280,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/prospects', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      const prospect = await storage.createProspect({
-        ...req.body,
-        userId
+      // Validate payload to match client shape (uses GeoJSON geometry)
+      const ProspectInputSchema = z.object({
+        name: z.string().min(1),
+        status: ProspectStatus.default('prospect'),
+        notes: z.string().optional().default(''),
+        geometry: ProspectGeometry,
+        submarketId: z.string().optional(),
+        lastContactDate: z.string().optional(),
+        followUpTimeframe: FollowUpTimeframe.optional(),
+        // Contact and business info
+        contactName: z.string().optional(),
+        contactEmail: z.string().optional(),
+        contactPhone: z.string().optional(),
+        contactCompany: z.string().optional(),
+        size: z.string().optional(),
+        acres: z.string().optional(),
+        businessName: z.string().optional(),
+        websiteUrl: z.string().optional(),
       });
+
+      const parseResult = ProspectInputSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        console.error('Prospect validation error:', parseResult.error);
+        return res.status(400).json({ message: 'Invalid prospect data', error: parseResult.error.errors });
+      }
+
+      const prospect = await storage.createProspect({ ...parseResult.data, userId });
       res.status(201).json(prospect);
-    } catch (error) {
-      console.error("Error creating prospect:", error);
-      res.status(500).json({ message: "Failed to create prospect" });
+    } catch (e) {
+      if (e instanceof Error) {
+        console.error('Error creating prospect:', e.message, e.stack);
+        res.status(500).json({ message: 'Failed to create prospect', error: e.message });
+      } else {
+        console.error('Error creating prospect:', e);
+        res.status(500).json({ message: 'Failed to create prospect', error: String(e) });
+      }
     }
   });
 
@@ -439,6 +458,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching broker skills:', error);
       res.status(500).json({ message: 'Failed to fetch broker skills' });
+    }
+  });
+
+  // Diagnostics: check DB connectivity and required tables
+  app.get('/api/_diag/db', async (_req, res) => {
+    try {
+      await pool.query('SELECT 1');
+      const required = [
+        'users','profiles','prospects','submarkets','requirements',
+        'touches','contact_interactions','broker_skills','skill_activities'
+      ];
+      const { rows } = await pool.query(
+        `SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public'`
+      );
+      const present = new Set(rows.map((r: any) => r.tablename));
+      const missing = required.filter(t => !present.has(t));
+      res.json({ ok: true, missing, present: Array.from(present) });
+    } catch (err: any) {
+      res.status(500).json({ ok: false, message: err.message });
     }
   });
 

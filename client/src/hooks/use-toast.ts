@@ -168,10 +168,12 @@ function toast({ ...props }: Toast) {
   }
 }
 
-function useToast() {
-  const [state, setState] = React.useState<State>(memoryState)
+import { useState, useEffect } from 'react';
 
-  React.useEffect(() => {
+function useToast() {
+  const [state, setState] = useState<State>(memoryState)
+
+  useEffect(() => {
     listeners.push(setState)
     return () => {
       const index = listeners.indexOf(setState)
