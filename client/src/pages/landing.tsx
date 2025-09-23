@@ -104,7 +104,7 @@ export default function Landing() {
 
               <div className="space-y-6">
                 <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-gray-900 via-blue-800 to-indigo-800 bg-clip-text text-transparent leading-tight max-w-[24ch] mx-auto">
-                  Commercial Real Estate Prospect Mapping
+                  level CRE
                 </h1>
                 <p className="text-lg md:text-xl text-gray-700 max-w-[55ch] mx-auto leading-relaxed font-light">
                   Visualize, track, and manage your commercial real estate opportunities with powerful mapping tools, analytics, and pipeline management.
