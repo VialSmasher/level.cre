@@ -3,7 +3,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import { devUser } from './src/auth/devUser.js';
+import { devUser } from './src/auth/devUser';
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { pool } from './db';
@@ -131,11 +131,12 @@ app.get('/api/ping', (req, res) => {
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
+    const status = err?.status || err?.statusCode || 500;
+    const message = err?.message || 'Internal Server Error';
+    if (app.get('env') === 'development') {
+      console.error(err);
+    }
     res.status(status).json({ message });
-    throw err;
   });
 
   // importantly only setup vite in development and after
