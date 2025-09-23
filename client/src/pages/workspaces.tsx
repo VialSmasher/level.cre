@@ -98,6 +98,12 @@ export default function WorkspacesIndex() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const { data: listings = [], isLoading } = useQuery<ListingRow[]>({ queryKey: ['/api/listings'] });
+  const { data: shared = [] } = useQuery<ListingRow[]>({ queryKey: ['/api/listings', 'shared'], queryFn: async () => {
+    const res = await apiRequest('GET', '/api/listings?scope=shared');
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) return [] as any;
+    return res.json();
+  }});
 
   // Remember the last place inside the Workspaces section
   useEffect(() => {
@@ -237,6 +243,46 @@ export default function WorkspacesIndex() {
               </CardContent>
             </Card>
           ))}
+
+          {shared.length > 0 && (
+            <Card className="col-span-full mt-2">
+              <CardHeader className="pb-2">
+                <CardTitle>Shared With Me</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {shared.map((l) => (
+                    <Card
+                      key={l.id}
+                      className="group relative cursor-pointer transition-shadow hover:shadow-md hover:border-blue-300"
+                      onClick={() => {
+                        try {
+                          localStorage.setItem('lastWorkspaceId', l.id);
+                          localStorage.setItem('lastWorkspacesLocation', `/app/workspaces/${l.id}`);
+                          localStorage.setItem('lastListingsLocation', `/app/listings/${l.id}`);
+                        } catch {}
+                        setLocation(`/app/workspaces/${l.id}`);
+                      }}
+                    >
+                      <CardHeader className="pb-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <CardTitle className="text-lg leading-tight truncate">
+                            {l.title || l.address}
+                          </CardTitle>
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">
+                            {new Date(l.createdAt || Date.now()).toLocaleDateString()}
+                          </span>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-sm text-muted-foreground">Prospects: {l.prospectCount ?? 0}</div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 

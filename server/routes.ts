@@ -12,15 +12,109 @@ function isDemo(req: Request): boolean {
   return req.headers['x-demo-mode'] === 'true' || process.env.VITE_DEMO_MODE === '1' || process.env.DEMO_MODE === '1';
 }
 import { createClient } from '@supabase/supabase-js';
-import { pool } from './db';
+import { pool, db } from './db';
+import { listings, listingMembers, users, profiles, listingProspects } from '@shared/schema';
+import { and, eq, sql } from 'drizzle-orm';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Supabase client for server-side OAuth
-  const supabaseUrl = process.env.VITE_SUPABASE_URL;
-  const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
   const supabase = (supabaseUrl && supabaseKey) 
     ? createClient(supabaseUrl, supabaseKey)
     : null;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+  const supabaseAdmin = (supabaseUrl && supabaseServiceKey) ? createClient(supabaseUrl, supabaseServiceKey) : null;
+
+  // Helpers: membership + role checks
+  async function getListingRole(userId: string, listingId: string): Promise<'owner' | 'editor' | 'viewer' | null> {
+    try {
+      // Owner check
+      const [row] = await db.select().from(listings).where(eq(listings.id, listingId));
+      if (!row) return null;
+      if (row.userId === userId) return 'owner';
+      const [member] = await db.select().from(listingMembers).where(and(eq(listingMembers.listingId, listingId), eq(listingMembers.userId, userId)));
+      return (member?.role as any) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function requireViewAccess(req: Request, listingId: string): Promise<'owner' | 'editor' | 'viewer'> {
+    const userId = getUserId(req);
+    if (isDemo(req)) {
+      // Demo: owner if found under caller, else check membership store
+      const owned = await demo.getListing(userId, listingId);
+      if (owned) return 'owner';
+      const role = await demo.getListingMemberRole(listingId, userId);
+      if (role) return role as any;
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    }
+    const role = await getListingRole(userId, listingId);
+    if (!role) throw Object.assign(new Error('Forbidden'), { status: 403 });
+    return role;
+  }
+
+  async function requireEditAccess(req: Request, listingId: string): Promise<'owner' | 'editor'> {
+    const role = await requireViewAccess(req, listingId);
+    if (role === 'owner' || role === 'editor') return role;
+    throw Object.assign(new Error('Forbidden'), { status: 403 });
+  }
+
+  async function requireOwnerAccess(req: Request, listingId: string): Promise<'owner'> {
+    const role = await requireViewAccess(req, listingId);
+    if (role === 'owner') return 'owner';
+    throw Object.assign(new Error('Forbidden'), { status: 403 });
+  }
+
+  // Helper: find userId by email using Supabase Admin if available, else local tables
+  async function findUserIdByEmail(email: string): Promise<{ id: string, email: string } | null> {
+    const normalized = String(email || '').trim().toLowerCase();
+    if (!normalized) return null;
+    if (isDemo({ headers: {} } as any)) {
+      if (normalized === 'demo@example.com') return { id: 'demo-user', email: 'demo@example.com' };
+      return null;
+    }
+    try {
+      // Prefer users table
+      const [u] = await db.select().from(users).where(eq(users.email, normalized));
+      if (u) return { id: u.id, email: u.email || normalized } as any;
+    } catch {}
+    try {
+      const [p] = await db.select().from(profiles).where(eq(profiles.email, normalized));
+      if (p) return { id: p.id, email: p.email || normalized } as any;
+    } catch {}
+    try {
+      if (supabaseAdmin) {
+        // @ts-ignore - admin API types may vary
+        const { data, error } = await (supabaseAdmin as any).auth.admin.getUserByEmail(normalized);
+        if (!error && data?.user) {
+          return { id: data.user.id, email: data.user.email || normalized };
+        }
+      }
+    } catch {}
+    return null;
+  }
+
+  // Helper: resolve a user's email by id via local tables, then Supabase admin if necessary
+  async function resolveEmailByUserId(userId: string): Promise<string | null> {
+    try {
+      const [u] = await db.select().from(users).where(eq(users.id, userId));
+      if (u?.email) return u.email;
+    } catch {}
+    try {
+      const [p] = await db.select().from(profiles).where(eq(profiles.id, userId));
+      if (p?.email) return p.email as any;
+    } catch {}
+    try {
+      if (supabaseAdmin) {
+        // @ts-ignore admin API
+        const { data, error } = await (supabaseAdmin as any).auth.admin.getUserById(userId);
+        if (!error && data?.user) return data.user.email || null;
+      }
+    } catch {}
+    return null;
+  }
 
   const GOOGLE_ENABLED = (process.env.VITE_ENABLE_GOOGLE_AUTH === '1' || process.env.VITE_ENABLE_GOOGLE_AUTH === 'true');
 
@@ -277,6 +371,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/listings', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      const scope = String((req.query.scope as string) || '').toLowerCase();
+      if (scope === 'shared') {
+        if (isDemo(req)) {
+          const list = await demo.getListingsSharedWith(userId);
+          return res.json(list);
+        }
+        // Shared with current user via listing_members
+        const rows = await db
+          .select({
+            id: listings.id,
+            userId: listings.userId,
+            title: listings.title,
+            address: listings.address,
+            lat: listings.lat,
+            lng: listings.lng,
+            submarket: listings.submarket,
+            createdAt: listings.createdAt,
+            archivedAt: listings.archivedAt,
+            prospectCount: sql<number>`COALESCE((SELECT COUNT(*)::int FROM ${listingProspects} lp WHERE lp.listing_id = ${listings.id}), 0)`,
+          })
+          .from(listings)
+          .innerJoin(listingMembers, and(eq(listingMembers.listingId, listings.id), eq(listingMembers.userId, userId)))
+          .where(and(eq(sql`COALESCE(${listings.archivedAt} IS NULL, TRUE)`, true)));
+        return res.json(rows);
+      }
       if (isDemo(req)) {
         const list = await demo.getListings(userId);
         // Filter out archived items to match DB behavior
@@ -340,13 +459,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/listings/:id', requireAuth, async (req, res) => {
     try {
-      const userId = getUserId(req);
+      // Allow owner or members to view
+      await requireViewAccess(req, req.params.id);
       if (isDemo(req)) {
-        const demoListing = await demo.getListing(userId, req.params.id);
+        const demoListing = await demo.getListingAny(req.params.id);
         if (!demoListing) return res.status(404).json({ message: 'Listing not found' });
         return res.json(demoListing);
       }
-      const listing = await storage.getListing(req.params.id, userId);
+      const listing = await storage.getListingAny(req.params.id);
       if (!listing) return res.status(404).json({ message: 'Listing not found' });
       res.json(listing);
     } catch (error) {
@@ -391,14 +511,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/listings/:id/prospects', requireAuth, async (req, res) => {
     try {
-      const userId = getUserId(req);
+      await requireViewAccess(req, req.params.id);
       if (isDemo(req)) {
-        const links = await demo.getListingLinks(userId, req.params.id);
-        const allProspects = await demo.getProspects(userId);
-        const linked = links.map((lnk) => allProspects.find((p: any) => p.id === lnk.prospectId)).filter(Boolean);
-        return res.json(linked);
+        const links = await demo.getListingLinksAll(req.params.id);
+        const allProspects = await demo.getProspectsAll();
+        const set = new Set(links.map((l: any) => l.prospectId));
+        const items = (allProspects || []).filter((p: any) => set.has(p.id));
+        return res.json(items);
       }
-      const items = await storage.getListingProspects(req.params.id, userId);
+      const items = await storage.getListingProspectsAny(req.params.id);
       res.json(items);
     } catch (error) {
       console.error('Error fetching listing prospects:', error);
@@ -408,14 +529,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/listings/:id/prospects', requireAuth, async (req, res) => {
     try {
-      const userId = getUserId(req);
+      await requireEditAccess(req, req.params.id);
       const { prospectId } = req.body || {};
       if (!prospectId) return res.status(400).json({ message: 'prospectId is required' });
       if (isDemo(req)) {
+        const userId = getUserId(req);
         await demo.linkProspect(userId, req.params.id, prospectId);
         return res.status(201).json({ ok: true });
       }
-      await storage.linkProspectToListing({ listingId: req.params.id, prospectId, userId });
+      await storage.linkProspectToListingAny({ listingId: req.params.id, prospectId });
       res.status(201).json({ ok: true });
     } catch (error) {
       console.error('Error linking prospect:', error);
@@ -426,13 +548,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/listings/:id/prospects/:prospectId', requireAuth, async (req, res) => {
     try {
-      const userId = getUserId(req);
+      await requireEditAccess(req, req.params.id);
       if (isDemo(req)) {
+        const userId = getUserId(req);
         const okDemo = await demo.unlinkProspect(userId, req.params.id, req.params.prospectId);
         if (!okDemo) return res.status(404).json({ message: 'Not linked' });
         return res.status(204).send();
       }
-      const ok = await storage.unlinkProspectFromListing({ listingId: req.params.id, prospectId: req.params.prospectId, userId });
+      const ok = await storage.unlinkProspectFromListingAny({ listingId: req.params.id, prospectId: req.params.prospectId });
       if (!ok) return res.status(404).json({ message: 'Not linked' });
       res.status(204).send();
     } catch (error) {
@@ -443,14 +566,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/listings/:id/export', requireAuth, async (req, res) => {
     try {
+      await requireViewAccess(req, req.params.id);
       const userId = getUserId(req);
       const { start, end } = req.query as any;
       if (isDemo(req)) {
         const interactionsAll = await demo.getInteractions(userId);
         const interactions = (interactionsAll || []).filter((i: any) => i.listingId === req.params.id)
           .filter((i: any) => (!start || i.date >= start) && (!end || i.date <= end));
-        const links = await demo.getListingLinks(userId, req.params.id);
-        const allProspects = await demo.getProspects(userId);
+        const links = await demo.getListingLinksAll(req.params.id);
+        const allProspects = await demo.getProspectsAll();
         const prospectMap = new Map(allProspects.map((p: any) => [p.id, p]));
         const byType: Record<string, number> = {};
         interactions.forEach((i: any) => { byType[i.type] = (byType[i.type] || 0) + 1; });
@@ -505,6 +629,112 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error exporting listing CSV:', error);
       res.status(500).json({ message: 'Failed to export CSV' });
+    }
+  });
+
+  // Listing members (sharing)
+  app.get('/api/listings/:id/members', requireAuth, async (req, res) => {
+    try {
+      // Any member (viewer/editor/owner) can view members list
+      await requireViewAccess(req, req.params.id);
+      if (isDemo(req)) {
+        const list = await demo.getListingMembers(req.params.id);
+        // Include owner
+        const owner = await demo.getListingOwner(req.params.id);
+        const ownerEntry = owner ? [{ userId: owner.userId, role: 'owner', email: owner.email }] : [];
+        return res.json([...ownerEntry, ...list]);
+      }
+      // Fetch owner
+      const [listRow] = await db.select().from(listings).where(eq(listings.id, req.params.id));
+      if (!listRow) return res.status(404).json({ message: 'Listing not found' });
+      // Fetch members
+      const members = await db.select().from(listingMembers).where(eq(listingMembers.listingId, req.params.id));
+      // Resolve basic email from users/profiles
+      const results: any[] = [];
+      // Owner entry
+      let ownerEmail: string | null = await resolveEmailByUserId(listRow.userId);
+      results.push({ userId: listRow.userId, role: 'owner', email: ownerEmail });
+      for (const m of members) {
+        const email = await resolveEmailByUserId(m.userId);
+        results.push({ userId: m.userId, role: m.role, email });
+      }
+      res.json(results);
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
+      console.error('Error fetching listing members:', error);
+      res.status(500).json({ message: 'Failed to fetch listing members' });
+    }
+  });
+
+  app.post('/api/listings/:id/members', requireAuth, async (req, res) => {
+    try {
+      await requireOwnerAccess(req, req.params.id);
+      const { email, role } = req.body || {};
+      if (!email) return res.status(400).json({ error: 'email is required' });
+      if (isDemo(req)) {
+        // Explicitly disallow invites in demo mode
+        return res.status(400).json({ error: 'Invites disabled in demo mode' });
+      }
+      const roleValue = (role === 'editor' || role === 'viewer') ? role : 'viewer';
+      // Lookup user by email
+      const found = await findUserIdByEmail(email);
+      if (!found) return res.status(404).json({ error: 'User not found' });
+      // Upsert member
+      await db
+        .insert(listingMembers)
+        .values({ listingId: req.params.id, userId: found.id, role: roleValue })
+        .onConflictDoUpdate({ target: [listingMembers.listingId, listingMembers.userId], set: { role: roleValue } });
+      return res.status(201).json({ userId: found.id, email: found.email, role: roleValue });
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
+      console.error('Error adding listing member:', error);
+      res.status(500).json({ message: 'Failed to add listing member' });
+    }
+  });
+
+  app.patch('/api/listings/:id/members/:userId', requireAuth, async (req, res) => {
+    try {
+      await requireOwnerAccess(req, req.params.id);
+      const role = req.body?.role;
+      if (!role || !['owner', 'editor', 'viewer'].includes(role)) return res.status(400).json({ message: 'Invalid role' });
+      if (isDemo(req)) {
+        await demo.updateListingMember(req.params.id, req.params.userId, role);
+        return res.json({ ok: true });
+      }
+      // Disallow changing owner record via members table
+      const [row] = await db.select().from(listings).where(eq(listings.id, req.params.id));
+      if (row && row.userId === req.params.userId) return res.status(400).json({ message: 'Cannot change owner role' });
+      await db.update(listingMembers)
+        .set({ role })
+        .where(and(eq(listingMembers.listingId, req.params.id), eq(listingMembers.userId, req.params.userId)));
+      res.json({ ok: true });
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
+      console.error('Error updating listing member:', error);
+      res.status(500).json({ message: 'Failed to update listing member' });
+    }
+  });
+
+  app.delete('/api/listings/:id/members/:userId', requireAuth, async (req, res) => {
+    try {
+      await requireOwnerAccess(req, req.params.id);
+      if (isDemo(req)) {
+        await demo.removeListingMember(req.params.id, req.params.userId);
+        return res.status(204).send();
+      }
+      // Prevent removing owner
+      const [row] = await db.select().from(listings).where(eq(listings.id, req.params.id));
+      if (row && row.userId === req.params.userId) return res.status(400).json({ message: 'Cannot remove owner' });
+      await db.delete(listingMembers).where(and(eq(listingMembers.listingId, req.params.id), eq(listingMembers.userId, req.params.userId)));
+      res.status(204).send();
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
+      console.error('Error removing listing member:', error);
+      res.status(500).json({ message: 'Failed to remove listing member' });
     }
   });
 
@@ -1191,6 +1421,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         nextFollowUp: req.body.nextFollowUp || null,
         listingId: req.body.listingId || null,
       };
+      if (interactionData.listingId) {
+        // Require edit access when attaching to a listing
+        await requireEditAccess(req, interactionData.listingId);
+      }
       if (isDemo(req)) {
         const created = { id: randomUUID(), ...interactionData, createdAt: new Date().toISOString() };
         await demo.addInteraction(userId, created);

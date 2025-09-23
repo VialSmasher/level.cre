@@ -10,6 +10,7 @@ type DemoData = {
   marketComps?: Record<string, any[]>;
   listings?: Record<string, any[]>; // workspaces
   listingLinks?: Record<string, { listingId: string; prospectId: string }[]>; // links
+  listingMembers?: Record<string, { userId: string; role: 'viewer'|'editor' }[]>; // by listingId
 };
 
 const dataPath = path.resolve(import.meta.dirname, 'demo-data.json');
@@ -21,7 +22,7 @@ async function load(): Promise<void> {
     const raw = await fs.promises.readFile(dataPath, 'utf8');
     cache = JSON.parse(raw) as DemoData;
   } catch (e: any) {
-    cache = { prospects: {}, profiles: {}, interactions: {}, requirements: {}, submarkets: {}, marketComps: {}, listings: {}, listingLinks: {} };
+    cache = { prospects: {}, profiles: {}, interactions: {}, requirements: {}, submarkets: {}, marketComps: {}, listings: {}, listingLinks: {}, listingMembers: {} };
     await save();
   }
 }
@@ -164,7 +165,7 @@ export async function deleteRequirement(userId: string, id: string): Promise<boo
 }
 
 export async function reset(): Promise<void> {
-  cache = { prospects: {}, profiles: {}, interactions: {}, requirements: {}, submarkets: {}, marketComps: {}, listings: {}, listingLinks: {} };
+  cache = { prospects: {}, profiles: {}, interactions: {}, requirements: {}, submarkets: {}, marketComps: {}, listings: {}, listingLinks: {}, listingMembers: {} };
   await save();
 }
 
@@ -266,6 +267,17 @@ export async function getListing(userId: string, id: string): Promise<any | null
   return list.find((l) => l.id === id) || null;
 }
 
+export async function getListingAny(id: string): Promise<any | null> {
+  await ensureLoaded();
+  const maps = cache!.listings || {};
+  for (const uid of Object.keys(maps)) {
+    const list = maps[uid] || [];
+    const found = list.find((l) => l.id === id);
+    if (found) return found;
+  }
+  return null;
+}
+
 export async function archiveListing(userId: string, id: string): Promise<boolean> {
   await ensureLoaded();
   const list = cache!.listings?.[userId] || [];
@@ -298,6 +310,23 @@ export async function getListingLinks(userId: string, listingId: string): Promis
   return all.filter((x) => x.listingId === listingId);
 }
 
+export async function getListingLinksAll(listingId: string): Promise<{ listingId: string; prospectId: string }[]> {
+  await ensureLoaded();
+  const byUser = cache!.listingLinks || {};
+  const merged: { listingId: string; prospectId: string }[] = [];
+  for (const uid of Object.keys(byUser)) {
+    const arr = (byUser[uid] || []).filter((x) => x.listingId === listingId);
+    merged.push(...arr);
+  }
+  const seen = new Set<string>();
+  return merged.filter((x) => {
+    const key = `${x.listingId}:${x.prospectId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export async function linkProspect(userId: string, listingId: string, prospectId: string): Promise<void> {
   await ensureLoaded();
   if (!cache!.listingLinks) cache!.listingLinks = {} as Record<string, { listingId: string; prospectId: string }[]>;
@@ -317,4 +346,85 @@ export async function unlinkProspect(userId: string, listingId: string, prospect
   const changed = next.length !== all.length;
   if (changed) await save();
   return changed;
+}
+
+export async function getListingsSharedWith(userId: string): Promise<any[]> {
+  await ensureLoaded();
+  const result: any[] = [];
+  const lm = cache!.listingMembers || {};
+  for (const listingId of Object.keys(lm)) {
+    const arr = lm[listingId] || [];
+    if (arr.find((m) => m.userId === userId)) {
+      const listing = await getListingAny(listingId);
+      if (listing && !listing.archivedAt) result.push({ ...listing, prospectCount: 0 });
+    }
+  }
+  return result;
+}
+
+// Members (sharing)
+export async function getListingMembers(listingId: string): Promise<{ userId: string; role: string; email?: string }[]> {
+  await ensureLoaded();
+  const arr = cache!.listingMembers?.[listingId] || [];
+  return arr.map((m) => ({ userId: m.userId, role: m.role, email: cache!.profiles?.[m.userId]?.email })) as any;
+}
+
+export async function addListingMember(listingId: string, userId: string, role: 'viewer'|'editor'): Promise<void> {
+  await ensureLoaded();
+  if (!cache!.listingMembers) cache!.listingMembers = {} as any;
+  const arr = cache!.listingMembers[listingId] || [];
+  const idx = arr.findIndex((m) => m.userId === userId);
+  if (idx === -1) arr.push({ userId, role }); else arr[idx].role = role;
+  cache!.listingMembers[listingId] = arr;
+  await save();
+}
+
+export async function updateListingMember(listingId: string, userId: string, role: 'viewer'|'editor'|'owner'): Promise<void> {
+  await ensureLoaded();
+  if (!cache!.listingMembers) cache!.listingMembers = {} as any;
+  const arr = cache!.listingMembers[listingId] || [];
+  const idx = arr.findIndex((m) => m.userId === userId);
+  if (idx !== -1) {
+    if (role === 'owner') return; // owner role derived from creator
+    arr[idx].role = role as any;
+    cache!.listingMembers[listingId] = arr;
+    await save();
+  }
+}
+
+export async function removeListingMember(listingId: string, userId: string): Promise<void> {
+  await ensureLoaded();
+  const arr = cache!.listingMembers?.[listingId] || [];
+  cache!.listingMembers![listingId] = arr.filter((m) => m.userId !== userId);
+  await save();
+}
+
+export async function getListingMemberRole(listingId: string, userId: string): Promise<'viewer'|'editor'|null> {
+  await ensureLoaded();
+  const arr = cache!.listingMembers?.[listingId] || [];
+  const m = arr.find((x) => x.userId === userId);
+  return (m?.role as any) || null;
+}
+
+export async function getListingOwner(listingId: string): Promise<{ userId: string; email?: string } | null> {
+  await ensureLoaded();
+  const maps = cache!.listings || {};
+  for (const uid of Object.keys(maps)) {
+    const list = maps[uid] || [];
+    if (list.find((l) => l.id === listingId)) {
+      const email = cache!.profiles?.[uid]?.email;
+      return { userId: uid, email };
+    }
+  }
+  return null;
+}
+
+export async function getProspectsAll(): Promise<any[]> {
+  await ensureLoaded();
+  const byUser = cache!.prospects || {};
+  const out: any[] = [];
+  for (const uid of Object.keys(byUser)) {
+    out.push(...(byUser[uid] || []));
+  }
+  return out;
 }

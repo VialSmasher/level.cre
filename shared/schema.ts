@@ -11,6 +11,7 @@ import {
   integer,
   pgEnum,
   unique,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 
 // Prospect status enum
@@ -223,6 +224,25 @@ export type Listing = typeof listings.$inferSelect;
 export type InsertListing = typeof listings.$inferInsert;
 
 // listingProspects is defined after prospects table to satisfy references
+
+// Listing members (sharing) table
+export const listingMembers = pgTable(
+  "listing_members",
+  {
+    listingId: varchar("listing_id").notNull().references(() => listings.id, { onDelete: 'cascade' }),
+    userId: varchar("user_id").notNull().references(() => users.id),
+    role: varchar("role").notNull().default('viewer'), // 'owner' | 'editor' | 'viewer'
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.listingId, table.userId], name: 'PK_listing_members' }),
+    index("IDX_listing_members_listing").on(table.listingId),
+    index("IDX_listing_members_user").on(table.userId),
+  ],
+);
+
+export type ListingMember = typeof listingMembers.$inferSelect;
+export type InsertListingMember = typeof listingMembers.$inferInsert;
 
 // Contact interactions table
 export const contactInteractions = pgTable(

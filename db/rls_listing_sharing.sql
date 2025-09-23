@@ -1,0 +1,100 @@
+-- Reference RLS policy snippets for workspace sharing (listings + listing_members)
+-- These are documentation only; apply in your DB as needed.
+
+-- 1) Allow selecting a listing if caller is owner OR in listing_members
+-- Assuming auth.uid() returns the current user id (Supabase)
+-- Enable RLS
+-- ALTER TABLE listings ENABLE ROW LEVEL SECURITY;
+-- Policies
+-- CREATE POLICY "listings_select_owner_or_member" ON listings
+--   FOR SELECT USING (
+--     user_id = auth.uid()
+--     OR EXISTS (
+--       SELECT 1 FROM listing_members lm
+--       WHERE lm.listing_id = listings.id AND lm.user_id = auth.uid()
+--     )
+--   );
+
+-- 2) listing_prospects read/write only when caller is owner/editor; viewers can read
+-- Enable RLS
+-- ALTER TABLE listing_prospects ENABLE ROW LEVEL SECURITY;
+-- Read policy (owner + members including viewers)
+-- CREATE POLICY "listing_prospects_select_owner_or_member" ON listing_prospects
+--   FOR SELECT USING (
+--     EXISTS (
+--       SELECT 1 FROM listings l
+--       LEFT JOIN listing_members lm ON lm.listing_id = l.id AND lm.user_id = auth.uid()
+--       WHERE l.id = listing_prospects.listing_id
+--         AND (l.user_id = auth.uid() OR lm.user_id IS NOT NULL)
+--     )
+--   );
+-- Write policy (owner + editors only)
+-- CREATE POLICY "listing_prospects_modify_owner_or_editor" ON listing_prospects
+--   FOR INSERT WITH CHECK (
+--     EXISTS (
+--       SELECT 1 FROM listings l
+--       LEFT JOIN listing_members lm ON lm.listing_id = l.id AND lm.user_id = auth.uid()
+--       WHERE l.id = listing_prospects.listing_id
+--         AND (l.user_id = auth.uid() OR (lm.user_id IS NOT NULL AND lm.role = 'editor'))
+--     )
+--   )
+--   FOR UPDATE USING (
+--     EXISTS (
+--       SELECT 1 FROM listings l
+--       LEFT JOIN listing_members lm ON lm.listing_id = l.id AND lm.user_id = auth.uid()
+--       WHERE l.id = listing_prospects.listing_id
+--         AND (l.user_id = auth.uid() OR (lm.user_id IS NOT NULL AND lm.role = 'editor'))
+--     )
+--   )
+--   FOR DELETE USING (
+--     EXISTS (
+--       SELECT 1 FROM listings l
+--       LEFT JOIN listing_members lm ON lm.listing_id = l.id AND lm.user_id = auth.uid()
+--       WHERE l.id = listing_prospects.listing_id
+--         AND (l.user_id = auth.uid() OR (lm.user_id IS NOT NULL AND lm.role = 'editor'))
+--     )
+--   );
+
+-- 3) contact_interactions RLS: read allowed for viewers; write allowed for owner/editor
+-- ALTER TABLE contact_interactions ENABLE ROW LEVEL SECURITY;
+-- Read policy
+-- CREATE POLICY "interactions_select_owner_or_member" ON contact_interactions
+--   FOR SELECT USING (
+--     listing_id IS NULL -- allow global interactions by owner only via separate policy if needed
+--     OR EXISTS (
+--       SELECT 1 FROM listings l
+--       LEFT JOIN listing_members lm ON lm.listing_id = l.id AND lm.user_id = auth.uid()
+--       WHERE l.id = contact_interactions.listing_id
+--         AND (l.user_id = auth.uid() OR lm.user_id IS NOT NULL)
+--     )
+--   );
+-- Write policy
+-- CREATE POLICY "interactions_modify_owner_or_editor" ON contact_interactions
+--   FOR INSERT WITH CHECK (
+--     listing_id IS NULL
+--     OR EXISTS (
+--       SELECT 1 FROM listings l
+--       LEFT JOIN listing_members lm ON lm.listing_id = l.id AND lm.user_id = auth.uid()
+--       WHERE l.id = contact_interactions.listing_id
+--         AND (l.user_id = auth.uid() OR (lm.user_id IS NOT NULL AND lm.role = 'editor'))
+--     )
+--   )
+--   FOR UPDATE USING (
+--     listing_id IS NULL
+--     OR EXISTS (
+--       SELECT 1 FROM listings l
+--       LEFT JOIN listing_members lm ON lm.listing_id = l.id AND lm.user_id = auth.uid()
+--       WHERE l.id = contact_interactions.listing_id
+--         AND (l.user_id = auth.uid() OR (lm.user_id IS NOT NULL AND lm.role = 'editor'))
+--     )
+--   )
+--   FOR DELETE USING (
+--     listing_id IS NULL
+--     OR EXISTS (
+--       SELECT 1 FROM listings l
+--       LEFT JOIN listing_members lm ON lm.listing_id = l.id AND lm.user_id = auth.uid()
+--       WHERE l.id = contact_interactions.listing_id
+--         AND (l.user_id = auth.uid() OR (lm.user_id IS NOT NULL AND lm.role = 'editor'))
+--     )
+--   );
+

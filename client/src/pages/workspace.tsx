@@ -16,9 +16,11 @@ import { apiRequest } from '@/lib/queryClient';
 import type { Prospect } from '@shared/schema';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
-import { Save, X, Edit3, Trash2, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { Save, X, Edit3, Trash2, ArrowLeft, ChevronDown, ChevronUp, Share2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 // Using Google DrawingManager (not Terra) to match main map behavior
+import { ShareWorkspaceDialog } from '@/components/ShareWorkspaceDialog';
+import { useAuth } from '@/contexts/AuthContext';
 
 type Listing = {
   id: string;
@@ -38,10 +40,21 @@ export default function Workspace() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   const { data: listing } = useQuery<Listing>({ queryKey: ['/api/listings', listingId], enabled: !!listingId });
   const { data: linkedProspects = [], refetch: refetchLinked } = useQuery<Prospect[]>({ queryKey: ['/api/listings', listingId, 'prospects'], enabled: !!listingId });
   const { data: allProspects = [] } = useQuery<Prospect[]>({ queryKey: ['/api/prospects'] });
+  const { data: members = [] } = useQuery<{ userId: string; role: 'owner'|'editor'|'viewer'; email?: string|null }[]>({ queryKey: ['/api/listings', listingId, 'members'], enabled: !!listingId });
+
+  const isOwner = !!(listing && user && listing.userId === user.id);
+  const myRole = isOwner ? 'owner' : (members.find((m) => m.userId === user?.id)?.role || null);
+  const can = {
+    view: isOwner || !!myRole,
+    edit: isOwner || myRole === 'editor',
+    share: isOwner,
+  };
+  const [shareOpen, setShareOpen] = useState(false);
 
   useEffect(() => {
     // Remember last opened workspace
@@ -205,6 +218,7 @@ export default function Workspace() {
   const lastEditedIdRef = useRef<string | null>(null);
 
   const flushQueuedSave = useCallback(async () => {
+    if (!can.edit) return;
     const id = lastEditedIdRef.current || selectedProspect?.id || null;
     if (!id) return;
     const patch = pendingPatchRef.current;
@@ -222,9 +236,10 @@ export default function Workspace() {
         Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev
       );
     } catch {}
-  }, [queryClient, listingId, selectedProspect]);
+  }, [queryClient, listingId, selectedProspect, can.edit]);
 
   const queueUpdate = useCallback((field: keyof Prospect, value: any, opts?: { flush?: boolean }) => {
+    if (!can.edit) return;
     if (!selectedProspect) return;
     const id = selectedProspect.id;
     // Reset timer if switching prospects while typing
@@ -254,13 +269,14 @@ export default function Workspace() {
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = window.setTimeout(() => { saveTimerRef.current = null; void flushQueuedSave(); }, 450);
     }
-  }, [listingId, queryClient, flushQueuedSave, selectedProspect]);
+  }, [listingId, queryClient, flushQueuedSave, selectedProspect, can.edit]);
 
   const updateSelectedProspect = useCallback((field: keyof Prospect, value: any) => {
     queueUpdate(field, value);
   }, [queueUpdate]);
 
   const deleteSelectedProspect = useCallback(async () => {
+    if (!can.edit) return;
     if (!selectedProspect) return;
     try {
       await apiRequest('DELETE', `/api/prospects/${selectedProspect.id}`);
@@ -269,9 +285,10 @@ export default function Workspace() {
       queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
       toast({ title: 'Prospect Deleted' });
     } catch {}
-  }, [selectedProspect, listingId]);
+  }, [selectedProspect, listingId, can.edit]);
 
   const enablePolygonEditing = useCallback((prospectId: string) => {
+    if (!can.edit) return;
     const prospect = linkedProspects.find(p => p.id === prospectId);
     if (!prospect || prospect.geometry.type !== 'Polygon') return;
     const original = (prospect.geometry.coordinates[0] as [number, number][]);
@@ -291,7 +308,7 @@ export default function Workspace() {
         path.addListener('set_at', scheduleSave); path.addListener('insert_at', scheduleSave); path.addListener('remove_at', scheduleSave);
       }
     }, 100);
-  }, [linkedProspects, listingId]);
+  }, [linkedProspects, listingId, can.edit]);
 
   const savePolygonChanges = useCallback(() => {
     setEditingProspectId(null); const polygon = selectedProspect ? polygonRefs.current.get(selectedProspect.id) : null; if (polygon) { polygon.setEditable(false); polygon.setDraggable(false); }
@@ -360,7 +377,10 @@ export default function Workspace() {
         {isLoaded && apiKey && (
           <div style={{ position: 'absolute', inset: 0 }}>
             {/* Overlay: back button and workspace name (top-right) */}
-            <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
+            <div
+              className="absolute top-4 z-[1000] pointer-events-auto flex items-center gap-2"
+              style={{ right: isEditPanelOpen ? 352 : 16 }}
+            >
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -379,6 +399,14 @@ export default function Workspace() {
                 </TooltipContent>
               </Tooltip>
               <Badge variant="secondary" className="shadow">{listing?.title || listing?.address}</Badge>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="secondary" size="sm" className="h-8 shadow" onClick={() => setShareOpen(true)}>
+                    <Share2 className="h-4 w-4 mr-1"/> Share
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent><p>Share workspace</p></TooltipContent>
+              </Tooltip>
             </div>
             <GoogleMap
               onLoad={onMapLoad}
@@ -559,7 +587,7 @@ export default function Workspace() {
               <div style={{ position: 'absolute', top: 76, left: 16, zIndex: 50 }}>
                 <div className="bg-white p-2 rounded shadow border">
                   <div className="text-sm mb-2">{searchPin.address}</div>
-                  <Button size="sm" onClick={() => createAndLink.mutate()} disabled={createAndLink.isPending}>{createAndLink.isPending ? 'Adding...' : 'Add as Prospect'}</Button>
+                  <Button size="sm" onClick={() => createAndLink.mutate()} disabled={createAndLink.isPending || !can.edit}>{createAndLink.isPending ? 'Adding...' : 'Add as Prospect'}</Button>
                 </div>
               </div>
             )}
@@ -768,8 +796,8 @@ export default function Workspace() {
               {selectedProspect.geometry.type === 'Polygon' ? (
                 editingProspectId === selectedProspect.id ? (
                   <div className="flex gap-2 flex-1">
-                    <Button onClick={savePolygonChanges} className="bg-green-600 hover:bg-green-700 flex-1 h-8 text-xs"><Save className="h-3.5 w-3.5 mr-1" />Save Changes</Button>
-                    <Button onClick={discardPolygonChanges} variant="outline" className="flex-1 h-8 text-xs hover:bg-red-50 hover:text-red-600 hover:border-red-200"><X className="h-3.5 w-3.5 mr-1" />Discard</Button>
+                    <Button onClick={savePolygonChanges} className="bg-green-600 hover:bg-green-700 flex-1 h-8 text-xs" disabled={!can.edit}><Save className="h-3.5 w-3.5 mr-1" />Save Changes</Button>
+                    <Button onClick={discardPolygonChanges} variant="outline" className="flex-1 h-8 text-xs hover:bg-red-50 hover:text-red-600 hover:border-red-200" disabled={!can.edit}><X className="h-3.5 w-3.5 mr-1" />Discard</Button>
                   </div>
                 ) : (
                   <Tooltip>
@@ -778,6 +806,7 @@ export default function Workspace() {
                         onClick={() => enablePolygonEditing(selectedProspect.id)} 
                         variant="outline" 
                         className="h-8 w-8 p-0"
+                        disabled={!can.edit}
                         aria-label="Edit shape"
                       >
                         <Edit3 className="h-3.5 w-3.5" />
@@ -793,6 +822,7 @@ export default function Workspace() {
                       onClick={() => { drawingManagerRef.current?.setDrawingMode(window.google.maps.drawing.OverlayType.POLYGON); }} 
                       variant="outline" 
                       className="h-8 w-8 p-0"
+                      disabled={!can.edit}
                       aria-label="Draw area"
                     >
                       <Edit3 className="h-3.5 w-3.5" />
@@ -801,11 +831,12 @@ export default function Workspace() {
                   <TooltipContent>Draw area</TooltipContent>
                 </Tooltip>
               )}
-              <Button onClick={deleteSelectedProspect} variant="destructive" className="h-8 px-3 text-xs"><Trash2 className="h-3.5 w-3.5" /></Button>
+              <Button onClick={deleteSelectedProspect} variant="destructive" className="h-8 px-3 text-xs" disabled={!can.edit}><Trash2 className="h-3.5 w-3.5" /></Button>
             </div>
           </div>
         </div>
       )}
+      <ShareWorkspaceDialog listingId={listingId} open={shareOpen} onOpenChange={setShareOpen} canManage={can.share} />
     </div>
   );
 }

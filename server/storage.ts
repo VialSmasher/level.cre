@@ -126,6 +126,12 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
+  // Fetch listing by id regardless of owner (route layer must authorize)
+  async getListingAny(id: string): Promise<Listing | undefined> {
+    const [row] = await db.select().from(listings).where(eq(listings.id, id));
+    return row;
+  }
+
   async createListing(insert: InsertListing & { userId: string }): Promise<Listing> {
     const [row] = await db.insert(listings).values({
       id: insert.id ?? randomUUID(),
@@ -180,6 +186,32 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
+  // Fetch all prospects linked to a listing id regardless of owner
+  async getListingProspectsAny(listingId: string): Promise<Prospect[]> {
+    const rows = await db
+      .select({ p: prospects })
+      .from(listingProspects)
+      .innerJoin(prospects, eq(listingProspects.prospectId, prospects.id))
+      .where(eq(listingProspects.listingId, listingId));
+    return rows.map(({ p }) => ({
+      id: p.id,
+      name: p.name,
+      status: p.status as any,
+      notes: p.notes || "",
+      geometry: p.geometry as any,
+      submarketId: p.submarketId || undefined,
+      lastContactDate: p.lastContactDate || undefined,
+      followUpTimeframe: p.followUpTimeframe as any || undefined,
+      contactName: p.contactName || undefined,
+      contactEmail: p.contactEmail || undefined,
+      contactPhone: p.contactPhone || undefined,
+      contactCompany: p.contactCompany || undefined,
+      size: p.size || undefined,
+      acres: p.acres || undefined,
+      createdDate: p.createdAt?.toISOString() || new Date().toISOString(),
+    }));
+  }
+
   async linkProspectToListing(params: { listingId: string; prospectId: string; userId: string }): Promise<{ ok: true }> {
     // Ensure listing belongs to user
     const listing = await this.getListing(params.listingId, params.userId);
@@ -191,9 +223,22 @@ export class DatabaseStorage implements IStorage {
     return { ok: true };
   }
 
+  // Link prospect to listing without owner check (route must authorize via membership)
+  async linkProspectToListingAny(params: { listingId: string; prospectId: string }): Promise<{ ok: true }> {
+    await db.insert(listingProspects)
+      .values({ id: randomUUID(), listingId: params.listingId, prospectId: params.prospectId, role: 'target' })
+      .onConflictDoNothing({ target: [listingProspects.listingId, listingProspects.prospectId] });
+    return { ok: true };
+  }
+
   async unlinkProspectFromListing(params: { listingId: string; prospectId: string; userId: string }): Promise<boolean> {
     const listing = await this.getListing(params.listingId, params.userId);
     if (!listing) return false;
+    const result = await db.delete(listingProspects).where(and(eq(listingProspects.listingId, params.listingId), eq(listingProspects.prospectId, params.prospectId)));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async unlinkProspectFromListingAny(params: { listingId: string; prospectId: string }): Promise<boolean> {
     const result = await db.delete(listingProspects).where(and(eq(listingProspects.listingId, params.listingId), eq(listingProspects.prospectId, params.prospectId)));
     return (result.rowCount ?? 0) > 0;
   }
