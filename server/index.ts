@@ -18,10 +18,22 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 
 // Allow CORS for configured APP_ORIGIN(s) in any env
-const allowedOrigins = process.env.APP_ORIGIN?.split(',').map(s => s.trim()).filter(Boolean);
-if (allowedOrigins && allowedOrigins.length > 0) {
+const allowedOriginsRaw = process.env.APP_ORIGIN?.split(',').map(s => s.trim()).filter(Boolean) || [];
+if (allowedOriginsRaw.length > 0) {
+  // Support wildcard patterns like https://*.vercel.app via simple glob -> regex conversion
+  const globToRegex = (pattern: string) => {
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+    return new RegExp(`^${escaped}$`);
+  };
+  const exacts = allowedOriginsRaw.filter(o => !o.includes('*'));
+  const regexes = allowedOriginsRaw.filter(o => o.includes('*')).map(globToRegex);
+
   const corsOptions: cors.CorsOptions = {
-    origin: allowedOrigins,
+    origin(origin, callback) {
+      if (!origin) return callback(null, true); // non-browser or same-origin
+      const allowed = exacts.includes(origin) || regexes.some(r => r.test(origin));
+      callback(null, allowed);
+    },
     credentials: true,
     methods: ['GET','POST','PATCH','DELETE','OPTIONS'],
     // Allow custom demo header for stateless demo mode, plus common auth/content headers
