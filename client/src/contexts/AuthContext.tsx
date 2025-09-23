@@ -231,7 +231,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const origin = (appOriginEnv && appOriginEnv.length > 0 ? appOriginEnv : window.location.origin)
         .trim()
         .replace(/\/$/, '')
-      const redirectTo = `${origin}/auth/callback`
+      const redirectTo = (
+        (import.meta.env.VITE_AUTH_REDIRECT_URL as string | undefined)?.trim()
+      ) || `${origin}/auth/callback`
       const { error } = await supabase.auth.signInWithOAuth({ 
         provider: 'google', 
         options: { 
