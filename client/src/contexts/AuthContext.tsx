@@ -64,7 +64,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     
     if (demoModeRequested) {
       // Load demo user immediately from demo endpoint
-      apiRequest('GET', '/auth/demo/user')
+      apiRequest('GET', '/api/auth/demo/user')
         .then(async res => {
           console.log('Demo mode fetch response:', res);
           return res.json();
@@ -196,7 +196,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Clear demo mode when starting Google flow
       localStorage.removeItem('demo-mode')
       // Use server-side OAuth endpoint
-      window.location.href = apiUrl('/auth/google')
+      window.location.href = apiUrl('/api/auth/google')
     } catch (error: any) {
       console.error('OAuth redirect error:', error)
       throw new Error('Failed to initiate Google sign-in')
@@ -216,7 +216,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     
     try {
       // Use server-side logout endpoint
-      const response = await apiRequest('POST', '/auth/logout', {})
+      const response = await apiRequest('POST', '/api/auth/logout', {})
       
       if (response.ok) {
         setUser(null)

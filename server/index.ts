@@ -24,7 +24,8 @@ if (allowedOrigins && allowedOrigins.length > 0) {
     origin: allowedOrigins,
     credentials: true,
     methods: ['GET','POST','PATCH','DELETE','OPTIONS'],
-    allowedHeaders: ['Authorization','Content-Type'],
+    // Allow custom demo header for stateless demo mode, plus common auth/content headers
+    allowedHeaders: ['Authorization','Content-Type','X-Demo-Mode'],
   };
   app.use(cors(corsOptions));
   // Handle preflight for all routes
