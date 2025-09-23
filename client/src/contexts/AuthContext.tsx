@@ -10,6 +10,7 @@ interface AuthContextType {
   loading: boolean
   needsOnboarding: boolean
   isDemoMode: boolean
+  signInWithGoogle: () => Promise<void>
   signInWithEmail: (email: string) => Promise<void>
   signOut: () => Promise<void>
   setNeedsOnboarding: (needs: boolean) => void
@@ -31,6 +32,10 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
+  const DISABLE_ONBOARDING = (
+    import.meta.env.VITE_DISABLE_ONBOARDING === '1' ||
+    import.meta.env.VITE_DISABLE_ONBOARDING === 'true'
+  )
   const [user, setUser] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
@@ -161,17 +166,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
       
       // Check if user needs onboarding (only for real users, not demo)
       if (session?.user && session.user.id !== 'demo-user') {
-        try {
-          const response = await fetch(apiUrl('/profile'), {
-            headers: {
-              'Authorization': `Bearer ${session.access_token}`
-            }
-          })
-          const profile = response.ok ? await response.json() : null
-          setNeedsOnboarding(!profile)
-        } catch (error) {
-          console.error('Error checking profile:', error)
-          setNeedsOnboarding(true) // Default to requiring onboarding on error
+        if (DISABLE_ONBOARDING) {
+          setNeedsOnboarding(false)
+        } else {
+          try {
+            const response = await fetch(apiUrl('/api/profile'), {
+              headers: {
+                'Authorization': `Bearer ${session.access_token}`
+              }
+            })
+            const profile = response.ok ? await response.json() : null
+            setNeedsOnboarding(!profile)
+          } catch (error) {
+            console.error('Error checking profile:', error)
+            // Do not block app on error – allow through and let user set profile later
+            setNeedsOnboarding(false)
+          }
         }
       } else {
         setNeedsOnboarding(false) // Demo users don't need onboarding

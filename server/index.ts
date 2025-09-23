@@ -10,14 +10,25 @@ import { pool } from './db';
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(helmet());
+// Allow API to be consumed cross-origin by the configured frontend
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+}));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 
 // Allow CORS for configured APP_ORIGIN(s) in any env
 const allowedOrigins = process.env.APP_ORIGIN?.split(',').map(s => s.trim()).filter(Boolean);
 if (allowedOrigins && allowedOrigins.length > 0) {
-  app.use(cors({ origin: allowedOrigins, credentials: true }));
+  const corsOptions: cors.CorsOptions = {
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ['GET','POST','PATCH','DELETE','OPTIONS'],
+    allowedHeaders: ['Authorization','Content-Type'],
+  };
+  app.use(cors(corsOptions));
+  // Handle preflight for all routes
+  app.options('*', cors(corsOptions));
 }
 
 if (process.env.NODE_ENV === 'development') {
