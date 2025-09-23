@@ -31,10 +31,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ error: 'Supabase not configured' });
       }
       
-      // Ensure HTTPS for Replit domains (both .replit.app and .replit.dev)
-      const host = req.get('host') || '';
-      const protocol = (host.includes('replit.app') || host.includes('replit.dev')) ? 'https' : req.protocol;
-      const redirectUrl = `${protocol}://${req.get('host')}/app`;
+      // Prefer an explicit app origin for redirect if provided
+      const appOrigin = process.env.APP_ORIGIN?.split(',')[0]?.trim();
+      let redirectUrl: string;
+      if (appOrigin) {
+        redirectUrl = `${appOrigin.replace(/\/$/, '')}/app`;
+      } else {
+        // Fallback to current host
+        const host = req.get('host') || '';
+        const protocol = (host.includes('replit.app') || host.includes('replit.dev')) ? 'https' : req.protocol;
+        redirectUrl = `${protocol}://${host}/app`;
+      }
       
       if (req.app.get('env') === 'development') {
         console.log('OAuth Debug - Host:', req.get('host'));
@@ -87,6 +94,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     
     // Redirect to app - let the client handle the token exchange
+    const appOrigin = process.env.APP_ORIGIN?.split(',')[0]?.trim();
+    if (appOrigin) {
+      return res.redirect(`${appOrigin.replace(/\/$/, '')}/app`);
+    }
     res.redirect('/app');
   });
 
