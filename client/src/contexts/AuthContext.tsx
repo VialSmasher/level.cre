@@ -59,9 +59,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setIsDemoMode(demoModeRequested)
     
     if (demoModeRequested) {
-      // Load demo user immediately, including credentials to get the dev cookie
-      fetch(apiUrl('/auth/user'), {
-        credentials: 'include'
+      // Load demo user immediately from demo endpoint
+      fetch(apiUrl('/auth/demo/user'), {
+        credentials: 'include',
+        headers: { 'X-Demo-Mode': 'true' },
       })
         .then(res => {
           console.log('Demo mode fetch response:', res);

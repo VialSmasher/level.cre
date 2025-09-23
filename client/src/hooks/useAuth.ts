@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { User } from "@shared/schema";
+import { apiRequest } from "@/lib/queryClient";
 
 export function useAuth() {
   const { data: user, isLoading } = useQuery({
@@ -24,10 +25,7 @@ export function useDemoAuth() {
 
   const loginDemo = useMutation({
     mutationFn: async () => {
-      const response = await fetch('/api/auth/demo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const response = await apiRequest('POST', '/api/auth/demo');
       if (!response.ok) throw new Error('Failed to login as demo user');
       return response.json();
     },

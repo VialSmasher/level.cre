@@ -37,18 +37,15 @@ function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; on
 
   const addInteractionMutation = useMutation({
     mutationFn: async (interaction: any) => {
-      return fetch('/api/interactions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prospectId: prospect.id,
-          date: new Date().toISOString(),
-          type: interaction.type,
-          outcome: interaction.outcome,
-          notes: interaction.notes,
-          nextFollowUp: interaction.nextFollowUp || undefined
-        })
-      }).then(res => res.json());
+      const res = await apiRequest('POST', '/api/interactions', {
+        prospectId: prospect.id,
+        date: new Date().toISOString(),
+        type: interaction.type,
+        outcome: interaction.outcome,
+        notes: interaction.notes,
+        nextFollowUp: interaction.nextFollowUp || undefined
+      });
+      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });

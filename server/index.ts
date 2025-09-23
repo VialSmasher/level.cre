@@ -14,9 +14,13 @@ app.use(helmet());
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 
-// Dev CORS only (frontend at 5173)
+// Allow CORS for configured APP_ORIGIN(s) in any env
+const allowedOrigins = process.env.APP_ORIGIN?.split(',').map(s => s.trim()).filter(Boolean);
+if (allowedOrigins && allowedOrigins.length > 0) {
+  app.use(cors({ origin: allowedOrigins, credentials: true }));
+}
+
 if (process.env.NODE_ENV === 'development') {
-  app.use(cors({ origin: process.env.APP_ORIGIN, credentials: true }));
   // Add relaxed CSP for development
   app.use((req, res, next) => {
     res.setHeader('Content-Security-Policy', [

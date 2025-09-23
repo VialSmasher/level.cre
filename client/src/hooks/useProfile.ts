@@ -31,7 +31,7 @@ export function useProfile() {
     try {
       // Create database submarkets for each profile submarket if they don't exist
       for (const submarketName of submarkets) {
-        const response = await fetch('/api/submarkets')
+        const response = await apiRequest('GET', '/api/submarkets')
         if (response.ok) {
           const dbSubmarkets = await response.json()
           const exists = dbSubmarkets.some((s: any) => s.name === submarketName)

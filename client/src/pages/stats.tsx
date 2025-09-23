@@ -5,6 +5,7 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Trophy, TrendingUp, Phone, MapPin, Target, Brain, Zap, Star, Crown } from 'lucide-react';
+import { apiUrl } from '@/lib/api';
 import { BrokerSkillsRow, SkillActivityRow } from '@shared/schema';
 import { useAuth } from '@/contexts/AuthContext';
 import BrickWall from '@/components/BrickWall';
@@ -156,8 +157,8 @@ function Leaderboard() {
     queryFn: async () => {
       const sinceParam = getSinceDate(timeframe);
       const url = sinceParam 
-        ? `/api/leaderboard?since=${encodeURIComponent(sinceParam)}`
-        : '/api/leaderboard';
+        ? apiUrl(`/api/leaderboard?since=${encodeURIComponent(sinceParam)}`)
+        : apiUrl('/api/leaderboard');
       
       // Use the existing auth system
       const { supabase } = await import('@/lib/supabase');
