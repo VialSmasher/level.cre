@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { apiRequest } from '@/lib/queryClient';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
@@ -14,11 +15,7 @@ export function DeveloperSettings({ onApiKeyChange }: DeveloperSettingsProps) {
   const handleResetDemo = async () => {
     try {
       setResetting(true);
-      await fetch('/api/demo/reset', {
-        method: 'POST',
-        headers: { 'X-Demo-Mode': 'true' },
-        credentials: 'include'
-      });
+      await apiRequest('POST', '/api/demo/reset', {});
       window.location.reload();
     } catch (e) {
       console.error('Reset demo failed:', e);

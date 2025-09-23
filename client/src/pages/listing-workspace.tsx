@@ -54,11 +54,14 @@ export default function ListingWorkspace() {
   }, [listingId]);
 
   useEffect(() => {
-    // fetch linked prospects
+    // fetch linked prospects (use apiRequest for consistent auth/demo headers)
     if (listingId) {
-      fetch(`/api/listings/${listingId}/prospects`, { credentials: 'include' }).then(res => res.json()).then(() => {
-        queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
-      }).catch(() => {});
+      apiRequest('GET', `/api/listings/${listingId}/prospects`)
+        .then(r => r.json())
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
+        })
+        .catch(() => {});
     }
   }, [listingId]);
 

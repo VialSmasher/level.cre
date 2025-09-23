@@ -64,11 +64,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     
     if (demoModeRequested) {
       // Load demo user immediately from demo endpoint
-      fetch(apiUrl('/auth/demo/user'), {
-        credentials: 'include',
-        headers: { 'X-Demo-Mode': 'true' },
-      })
-        .then(res => {
+      apiRequest('GET', '/auth/demo/user')
+        .then(async res => {
           console.log('Demo mode fetch response:', res);
           return res.json();
         })
@@ -219,10 +216,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     
     try {
       // Use server-side logout endpoint
-      const response = await fetch(apiUrl('/auth/logout'), { 
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      })
+      const response = await apiRequest('POST', '/auth/logout', {})
       
       if (response.ok) {
         setUser(null)
