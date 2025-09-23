@@ -12,14 +12,23 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   // Check demo mode from localStorage
   const demo = localStorage.getItem('demo-mode') === 'true'
+  // Detect if OAuth is in-flight (PKCE code present). If so, hold navigation.
+  const hasAuthParams = (() => {
+    try {
+      const qs = new URLSearchParams(window.location.search)
+      return qs.has('code')
+    } catch { return false }
+  })()
 
   useEffect(() => {
-    if (!loading && !user && !demo) {
+    if (!loading && !user && !demo && !hasAuthParams) {
+      if (import.meta?.env?.DEV) console.log('[gate] ProtectedRoute redirect -> / (no user)')
       setLocation('/')
     }
-  }, [user, loading, demo, setLocation])
+  }, [user, loading, demo, hasAuthParams, setLocation])
 
-  if (loading) {
+  if (loading || hasAuthParams) {
+    if (import.meta?.env?.DEV && loading) console.log('[gate] ProtectedRoute loading...')
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">

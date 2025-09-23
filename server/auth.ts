@@ -39,6 +39,7 @@ async function verifyBearerJWT(token: string): Promise<JWTPayload | null> {
   }
 }
 
+
 // Supabase JWT verification middleware (stateless)
 export async function verifySupabaseToken(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization

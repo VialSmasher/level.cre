@@ -11,7 +11,9 @@ import { pool } from './db';
 const app = express();
 app.set('trust proxy', 1);
 // Allow API to be consumed cross-origin by the configured frontend
+// Disable Helmet's own CSP so we can send a custom, environment-aware CSP below.
 app.use(helmet({
+  contentSecurityPolicy: false,
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 app.use(express.json({ limit: '1mb' }));
@@ -49,10 +51,12 @@ if (process.env.NODE_ENV === 'development') {
   app.use((req, res, next) => {
     res.setHeader('Content-Security-Policy', [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.googleapis.com https://maps.googleapis.com https://*.google.com https://*.gstatic.com https://maps.gstatic.com",
+      // Allow Vite HMR, dev overlays, and 3rd parties we use
+      "script-src 'self' 'unsafe-eval' 'unsafe-inline' blob: https://*.supabase.co https://*.googleapis.com https://maps.googleapis.com https://*.google.com https://*.gstatic.com https://maps.gstatic.com https://replit.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com",
       "font-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
-      "connect-src 'self' https://*.googleapis.com https://maps.googleapis.com https://*.google.com https://*.gstatic.com https://maps.gstatic.com",
+      // Include ws:/wss: so Vite's HMR and dev websocket can connect
+      "connect-src 'self' ws: wss: https://*.supabase.co https://*.googleapis.com https://maps.googleapis.com https://*.google.com https://*.gstatic.com https://maps.gstatic.com",
       "img-src 'self' data: https: https://*.googleusercontent.com https://*.gstatic.com https://maps.gstatic.com",
       "frame-src https://accounts.google.com"
     ].join('; '));
@@ -64,10 +68,10 @@ if (process.env.NODE_ENV === 'development') {
     // Allow eval and unsafe-inline for OAuth and Maps
     const cspPolicy = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.supabase.co https://*.googleapis.com https://*.google.com https://maps.googleapis.com https://*.gstatic.com https://maps.gstatic.com https://replit.com",
+      "script-src 'self' 'unsafe-eval' 'unsafe-inline' blob: https://*.supabase.co https://*.googleapis.com https://*.google.com https://maps.googleapis.com https://*.gstatic.com https://maps.gstatic.com https://replit.com",
       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com",
       "font-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
-      "connect-src 'self' https://*.supabase.co https://*.googleapis.com https://*.google.com https://maps.googleapis.com https://*.gstatic.com https://maps.gstatic.com",
+      "connect-src 'self' ws: wss: https://*.supabase.co https://*.googleapis.com https://*.google.com https://maps.googleapis.com https://*.gstatic.com https://maps.gstatic.com",
       "img-src 'self' data: https: https://*.googleusercontent.com https://*.gstatic.com https://maps.gstatic.com",
       "frame-src https://accounts.google.com"
     ].join('; ');

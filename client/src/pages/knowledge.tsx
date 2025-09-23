@@ -6,15 +6,14 @@ import { Badge } from '@/components/ui/badge';
 import { Users, Phone, Calendar, Clock } from 'lucide-react';
 import { Prospect, Submarket, ProspectStatusType } from '@shared/schema';
 import { useQuery } from '@tanstack/react-query';
-import { useAuth, useDemoAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 
 export default function Knowledge() {
   const { user } = useAuth();
-  const { demoUser } = useDemoAuth();
   const { profile } = useProfile();
-  const currentUser = user || demoUser;
+  const currentUser = user;
   
   // Load data from database APIs instead of localStorage
   const { data: prospects = [] } = useQuery<Prospect[]>({

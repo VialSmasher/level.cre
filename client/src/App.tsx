@@ -1,5 +1,6 @@
 // import React from "react"; (remove if not needed)
 import { Switch, Route } from "wouter";
+import { lazy, Suspense } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -7,19 +8,20 @@ import { queryClient } from "./lib/queryClient";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/AppLayout";
-import Home from "@/pages/home";
-import Knowledge from "@/pages/knowledge";
-import FollowUp from "@/pages/followup";
-import Stats from "@/pages/stats";
-import Requirements from "@/pages/requirements";
-import MarketComps from "@/pages/market-comps";
-import MapToolsTestPage from "@/pages/map-tools-test";
-import Profile from "@/pages/profile";
-import NotFound from "@/pages/not-found";
-import Landing from "@/pages/landing";
-import Onboarding from "@/pages/onboarding";
-import ListingsIndex from "@/pages/listings";
-import ListingWorkspace from "@/pages/listing-workspace";
+const Home = lazy(() => import("@/pages/home"));
+const Knowledge = lazy(() => import("@/pages/knowledge"));
+const FollowUp = lazy(() => import("@/pages/followup"));
+const Stats = lazy(() => import("@/pages/stats"));
+const Requirements = lazy(() => import("@/pages/requirements"));
+const MarketComps = lazy(() => import("@/pages/market-comps"));
+const MapToolsTestPage = lazy(() => import("@/pages/map-tools-test"));
+const Profile = lazy(() => import("@/pages/profile"));
+const NotFound = lazy(() => import("@/pages/not-found"));
+const Landing = lazy(() => import("@/pages/landing"));
+const Onboarding = lazy(() => import("@/pages/onboarding"));
+const ListingsIndex = lazy(() => import("@/pages/listings"));
+const ListingWorkspace = lazy(() => import("@/pages/listing-workspace"));
+const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useLocation } from "wouter";
@@ -32,12 +34,14 @@ function OnboardingCheck({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Only check for onboarding if user is authenticated and not in demo mode
     if (!loading && user && user.id !== 'demo-user' && needsOnboarding) {
+      if (import.meta?.env?.DEV) console.log('[gate] OnboardingCheck -> /onboarding')
       setLocation('/onboarding')
     }
   }, [loading, user, needsOnboarding, setLocation])
 
   // Show loading while checking auth/profile
   if (loading) {
+    if (import.meta?.env?.DEV) console.log('[gate] OnboardingCheck loading...')
     return null // Avoid flicker
   }
 
@@ -61,21 +65,36 @@ function Router() {
   return (
     <Switch>
       {/* Public routes */}
-      <Route path="/" component={Landing} />
+      <Route path="/" component={() => (
+        <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+          <Landing />
+        </Suspense>
+      )} />
       
       {/* Onboarding route - only for authenticated users */}
       <Route path="/onboarding">
         <ProtectedRoute>
-          <Onboarding />
+          <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+            <Onboarding />
+          </Suspense>
         </ProtectedRoute>
       </Route>
+      
+      {/* OAuth callback (PKCE) */}
+      <Route path="/auth/callback" component={() => (
+        <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+          <AuthCallback />
+        </Suspense>
+      )} />
       
       {/* Protected app routes - flat structure */}
       <Route path="/app">
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Home />
+              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+                <Home />
+              </Suspense>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
@@ -85,7 +104,9 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Knowledge />
+              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+                <Knowledge />
+              </Suspense>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
@@ -95,7 +116,9 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <FollowUp />
+              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+                <FollowUp />
+              </Suspense>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
@@ -105,7 +128,9 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Stats />
+              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+                <Stats />
+              </Suspense>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
@@ -115,7 +140,9 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Requirements />
+              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+                <Requirements />
+              </Suspense>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
@@ -125,7 +152,9 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <ListingsIndex />
+              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+                <ListingsIndex />
+              </Suspense>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
@@ -135,7 +164,9 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <ListingWorkspace />
+              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+                <ListingWorkspace />
+              </Suspense>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
@@ -145,7 +176,9 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <MarketComps />
+              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+                <MarketComps />
+              </Suspense>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
@@ -155,7 +188,9 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <MapToolsTestPage />
+              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+                <MapToolsTestPage />
+              </Suspense>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
@@ -165,7 +200,9 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Profile />
+              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+                <Profile />
+              </Suspense>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
@@ -193,7 +230,11 @@ function Router() {
         return null
       }} />}
       
-      <Route component={NotFound} />
+      <Route component={() => (
+        <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+          <NotFound />
+        </Suspense>
+      )} />
     </Switch>
   )
 }

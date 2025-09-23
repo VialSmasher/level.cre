@@ -35,7 +35,7 @@ import { SearchComponent } from '@/components/SearchComponent';
 import { CSVUploader } from '@/components/CSVUploader';
 import { DeveloperSettings } from '@/components/DeveloperSettings';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth, useDemoAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
@@ -128,11 +128,10 @@ const calculatePolygonAcres = (geometry: any): number | null => {
 export default function HomePage() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const { demoUser } = useDemoAuth();
   const { profile } = useProfile();
   
   // Memoize currentUser to prevent infinite loops
-  const currentUser = useMemo(() => user || demoUser, [user, demoUser]);
+  const currentUser = useMemo(() => user, [user]);
   
   // Use normalized, de-duplicated submarkets for consistent options
   const submarketOptions = uniqueSubmarketNames(profile?.submarkets || []);
@@ -939,27 +938,47 @@ export default function HomePage() {
     });
   }, [editingProspectId, originalPolygonCoordinates, toast]);
 
-  // Update prospect handler - save to database
-  const updateSelectedProspect = useCallback(async (field: keyof Prospect, value: any) => {
+  // Update prospect handler - debounced + optimistic to reduce flicker while typing
+  const homeSaveTimerRef = useRef<number | null>(null);
+  const homePendingPatchRef = useRef<Partial<Prospect>>({});
+  const homeLastEditedIdRef = useRef<string | null>(null);
+
+  const flushHomeQueuedSave = useCallback(async () => {
     if (!selectedProspect) return;
-    
-    const updatedProspect = { ...selectedProspect, [field]: value };
-    setSelectedProspect(updatedProspect);
-    
+    const id = selectedProspect.id;
+    const patch = homePendingPatchRef.current;
+    homePendingPatchRef.current = {};
+    if (!patch || Object.keys(patch).length === 0) return;
     try {
-      // Save to database
-      const response = await apiRequest('PATCH', `/api/prospects/${selectedProspect.id}`, { [field]: value });
+      const response = await apiRequest('PATCH', `/api/prospects/${id}`, patch);
       const savedProspect = await response.json();
       setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
-      
-      // Invalidate React Query cache to refresh knowledge dashboard
+      setSelectedProspect(prev => (prev && prev.id === savedProspect.id ? savedProspect : prev));
+      // Invalidate to refresh any other views using this query
       queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
     } catch (error) {
       console.error('Error updating prospect:', error);
-      // Fallback to local update
-      setProspects(prev => prev.map(p => p.id === updatedProspect.id ? updatedProspect : p));
     }
-  }, [selectedProspect]);
+  }, [selectedProspect, queryClient]);
+
+  const updateSelectedProspect = useCallback((field: keyof Prospect, value: any) => {
+    if (!selectedProspect) return;
+    const id = selectedProspect.id;
+    if (homeLastEditedIdRef.current && homeLastEditedIdRef.current !== id && homeSaveTimerRef.current) {
+      window.clearTimeout(homeSaveTimerRef.current);
+      homeSaveTimerRef.current = null;
+      homePendingPatchRef.current = {};
+    }
+    homeLastEditedIdRef.current = id;
+
+    const updatedProspect = { ...selectedProspect, [field]: value } as Prospect;
+    setSelectedProspect(updatedProspect);
+    setProspects(prev => prev.map(p => p.id === id ? { ...p, [field]: value } as Prospect : p));
+
+    homePendingPatchRef.current = { ...homePendingPatchRef.current, [field]: value };
+    if (homeSaveTimerRef.current) window.clearTimeout(homeSaveTimerRef.current);
+    homeSaveTimerRef.current = window.setTimeout(() => { homeSaveTimerRef.current = null; void flushHomeQueuedSave(); }, 450);
+  }, [selectedProspect, flushHomeQueuedSave]);
 
   // Delete prospect handler - remove from database
   const deleteSelectedProspect = useCallback(async () => {

@@ -16,7 +16,7 @@ import { apiRequest } from '@/lib/queryClient';
 import type { Prospect } from '@shared/schema';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
-import { Save, X, Edit3, Trash2, ArrowLeft } from 'lucide-react';
+import { Save, X, Edit3, Trash2, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 // Using Google DrawingManager (not Terra) to match main map behavior
 
@@ -116,6 +116,53 @@ export default function ListingWorkspace() {
   const [editingProspectId, setEditingProspectId] = useState<string | null>(null);
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
   const [originalPolygonCoordinates, setOriginalPolygonCoordinates] = useState<[number, number][] | null>(null);
+  
+  // Pan to search selection and highlight
+  useEffect(() => {
+    if (searchPin && map) {
+      try {
+        map.panTo({ lat: searchPin.lat, lng: searchPin.lng });
+        map.setZoom(17);
+      } catch {}
+    }
+  }, [searchPin, map]);
+  
+  // Status colors (match /app)
+  const STATUS_COLORS: Record<'prospect'|'contacted'|'listing'|'client'|'no_go', string> = {
+    prospect: '#FBBF24',
+    contacted: '#3B82F6',
+    listing: '#10B981',
+    client: '#8B5CF6',
+    no_go: '#EF4444'
+  };
+  
+  // Status filter UI (match /app behavior): default to all statuses visible
+  type StatusKey = 'prospect'|'contacted'|'listing'|'client'|'no_go';
+  const [statusFilters, setStatusFilters] = useState<Set<StatusKey>>(() => {
+    return new Set(Object.keys(STATUS_COLORS) as StatusKey[]);
+  });
+  const [isLegendOpen, setIsLegendOpen] = useState(true);
+  const filteredLinkedProspects = useMemo(() => {
+    return linkedProspects.filter((p) => statusFilters.has(p.status as StatusKey));
+  }, [linkedProspects, statusFilters]);
+
+  // Persist status filters per workspace id
+  useEffect(() => {
+    if (!listingId) return;
+    try {
+      const raw = localStorage.getItem(`workspaceStatusFilters:${listingId}`);
+      if (raw) {
+        const arr = JSON.parse(raw) as StatusKey[];
+        if (Array.isArray(arr) && arr.length > 0) {
+          setStatusFilters(new Set(arr));
+        }
+      }
+    } catch {}
+  }, [listingId]);
+  useEffect(() => {
+    if (!listingId) return;
+    try { localStorage.setItem(`workspaceStatusFilters:${listingId}`, JSON.stringify(Array.from(statusFilters))); } catch {}
+  }, [statusFilters, listingId]);
 
   // Reuse profile submarkets for dropdowns (normalized + de-duped)
   const { profile } = useProfile();
@@ -129,9 +176,6 @@ export default function ListingWorkspace() {
     '50,000 - 100,000 SF',
     '100,000+ SF'
   ] as const;
-  const STATUS_COLORS: Record<'prospect'|'contacted'|'listing'|'client'|'no_go', string> = {
-    prospect: '#FBBF24', contacted: '#3B82F6', listing: '#10B981', client: '#8B5CF6', no_go: '#EF4444'
-  };
   const FOLLOW_UP_LABELS: Record<'1_month'|'3_month'|'6_month'|'1_year', string> = {
     '1_month': '1 Month', '3_month': '3 Months', '6_month': '6 Months', '1_year': '1 Year'
   };
@@ -153,18 +197,66 @@ export default function ListingWorkspace() {
     } catch { return null; }
   };
 
-  const updateSelectedProspect = useCallback(async (field: keyof Prospect, value: any) => {
+  // Debounced, optimistic field updates to avoid flicker while typing
+  const saveTimerRef = useRef<number | null>(null);
+  const pendingPatchRef = useRef<Partial<Prospect>>({});
+  const lastEditedIdRef = useRef<string | null>(null);
+
+  const flushQueuedSave = useCallback(async () => {
+    const id = lastEditedIdRef.current || selectedProspect?.id || null;
+    if (!id) return;
+    const patch = pendingPatchRef.current;
+    pendingPatchRef.current = {};
+    if (!patch || Object.keys(patch).length === 0) return;
+    try {
+      const res = await apiRequest('PATCH', `/api/prospects/${id}`, patch);
+      const saved = await res.json();
+      setSelectedProspect((prev) => (prev && prev.id === saved.id ? saved : prev));
+      // Keep caches in sync without forcing re-fetches
+      queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) =>
+        Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev
+      );
+      queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) =>
+        Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev
+      );
+    } catch {}
+  }, [queryClient, listingId, selectedProspect]);
+
+  const queueUpdate = useCallback((field: keyof Prospect, value: any, opts?: { flush?: boolean }) => {
     if (!selectedProspect) return;
+    const id = selectedProspect.id;
+    // Reset timer if switching prospects while typing
+    if (lastEditedIdRef.current && lastEditedIdRef.current !== id && saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      pendingPatchRef.current = {};
+    }
+    lastEditedIdRef.current = id;
+
+    // Optimistic UI
     const updated = { ...selectedProspect, [field]: value } as Prospect;
     setSelectedProspect(updated);
-    try {
-      const res = await apiRequest('PATCH', `/api/prospects/${selectedProspect.id}`, { [field]: value });
-      const saved = await res.json();
-      setSelectedProspect(saved);
-      queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
-    } catch {}
-  }, [selectedProspect, listingId]);
+    queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) =>
+      Array.isArray(prev) ? prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)) : prev
+    );
+    queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) =>
+      Array.isArray(prev) ? prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)) : prev
+    );
+
+    // Queue patch with debounce
+    pendingPatchRef.current = { ...pendingPatchRef.current, [field]: value };
+    if (opts?.flush) {
+      if (saveTimerRef.current) { window.clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+      void flushQueuedSave();
+    } else {
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = window.setTimeout(() => { saveTimerRef.current = null; void flushQueuedSave(); }, 450);
+    }
+  }, [listingId, queryClient, flushQueuedSave, selectedProspect]);
+
+  const updateSelectedProspect = useCallback((field: keyof Prospect, value: any) => {
+    queueUpdate(field, value);
+  }, [queueUpdate]);
 
   const deleteSelectedProspect = useCallback(async () => {
     if (!selectedProspect) return;
@@ -192,7 +284,7 @@ export default function ListingWorkspace() {
           if (coords.length > 0) coords.push(coords[0]);
           const newGeom = { type: 'Polygon' as const, coordinates: [coords] };
           const acres = calculatePolygonAcres(newGeom);
-          try { const r = await apiRequest('PATCH', `/api/prospects/${prospectId}`, { geometry: newGeom, acres: acres ? acres.toString() : undefined }); const saved = await r.json(); setSelectedProspect(prev => prev && prev.id === saved.id ? saved : prev); queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] }); } catch {}
+          try { const r = await apiRequest('PATCH', `/api/prospects/${prospectId}`, { geometry: newGeom, acres: acres ? acres.toString() : undefined }); const saved = await r.json(); setSelectedProspect(prev => prev && prev.id === saved.id ? saved : prev); queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev); queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev); } catch {}
         }, 500); };
         path.addListener('set_at', scheduleSave); path.addListener('insert_at', scheduleSave); path.addListener('remove_at', scheduleSave);
       }
@@ -232,7 +324,10 @@ export default function ListingWorkspace() {
       return p;
     },
     onSuccess: (p: any) => {
-      // optimistic: push into state by invalidating
+      // Optimistically add to cache to show immediately
+      queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) =>
+        Array.isArray(prev) ? [...prev, p] : [p]
+      );
       queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
       refetchLinked();
       setSearchPin(null);
@@ -349,7 +444,8 @@ export default function ListingWorkspace() {
                   const res = await apiRequest('POST', '/api/prospects', { name: 'New Prospect', status: 'prospect', notes: '', geometry });
                   const saved = await res.json();
                   await apiRequest('POST', `/api/listings/${listingId}/prospects`, { prospectId: saved.id });
-                  queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
+                  queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
+                  queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'], refetchType: 'active' });
                   refetchLinked();
                   toast({ title: 'Prospect created', description: 'Linked to workspace' });
                   // reset to select
@@ -375,8 +471,23 @@ export default function ListingWorkspace() {
             {subjectPosition && (
               <Marker position={subjectPosition} icon={{ path: window.google?.maps?.SymbolPath?.CIRCLE, fillColor: '#ef4444', fillOpacity: 1, strokeWeight: 2, strokeColor: '#ffffff', scale: 10 }} />
             )}
-            {/* Linked prospects */}
-            {linkedProspects.map((p) => {
+            {/* Search selection pin */}
+            {searchPin && (
+              <Marker
+                position={{ lat: searchPin.lat, lng: searchPin.lng }}
+                icon={{
+                  path: window.google?.maps?.SymbolPath?.CIRCLE,
+                  fillColor: '#7C3AED',
+                  fillOpacity: 1,
+                  strokeWeight: 2,
+                  strokeColor: '#ffffff',
+                  scale: 8,
+                }}
+                title={searchPin.address}
+              />
+            )}
+            {/* Linked prospects (filtered by status) */}
+            {filteredLinkedProspects.map((p) => {
               const color = STATUS_COLORS[p.status as keyof typeof STATUS_COLORS] || '#3B82F6';
               if (p.geometry.type === 'Point') {
                 const [lng, lat] = p.geometry.coordinates as [number, number];
@@ -455,6 +566,45 @@ export default function ListingWorkspace() {
         )}
       </div>
 
+      {/* Status Legend / Filters (bottom-left) */}
+      <Button
+        onClick={() => setIsLegendOpen(!isLegendOpen)}
+        className="absolute bottom-4 left-4 z-20 bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
+        variant="outline"
+        size="sm"
+      >
+        {isLegendOpen ? (
+          <ChevronDown className="h-4 w-4" />
+        ) : (
+          <ChevronUp className="h-4 w-4" />
+        )}
+      </Button>
+      {isLegendOpen && (
+        <div className="absolute bottom-4 left-16 bg-white/95 backdrop-blur-sm shadow-lg border border-gray-200 z-10 p-3 rounded">
+          <h3 className="text-sm font-semibold text-gray-800 mb-2">Status Filters</h3>
+          <div className="space-y-1">
+            {Object.entries(STATUS_COLORS).map(([status, color]) => {
+              const key = status as 'prospect'|'contacted'|'listing'|'client'|'no_go';
+              const isActive = statusFilters.has(key);
+              return (
+                <div
+                  key={status}
+                  className={`flex items-center text-xs cursor-pointer p-1 rounded transition-colors ${isActive ? 'bg-gray-100' : 'hover:bg-gray-50 opacity-50'}`}
+                  onClick={() => {
+                    const next = new Set(statusFilters);
+                    if (isActive) next.delete(key); else next.add(key);
+                    setStatusFilters(next);
+                  }}
+                >
+                  <div className="w-3 h-3 rounded mr-2" style={{ backgroundColor: color }} />
+                  <span className="text-gray-700">{status.replace('_',' ')}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Removed legacy Drawer UI */}
       {isEditPanelOpen && selectedProspect && (
         <div className="absolute top-0 right-0 w-80 max-h-[90vh] flex flex-col bg-white shadow-xl border-l border-gray-200 z-50 overflow-y-auto" style={{ pointerEvents: 'auto' }}>
@@ -466,7 +616,7 @@ export default function ListingWorkspace() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setIsEditPanelOpen(false)}
+                    onClick={() => { void flushQueuedSave(); setIsEditPanelOpen(false); }}
                     className="text-gray-400 hover:text-gray-600 h-6 w-6 p-0"
                     aria-label="Save and close"
                   >
@@ -603,7 +753,7 @@ export default function ListingWorkspace() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    onClick={() => setIsEditPanelOpen(false)}
+                    onClick={() => { void flushQueuedSave(); setIsEditPanelOpen(false); }}
                     variant="outline"
                     className="h-8 w-8 p-0 text-xs"
                     aria-label="Save and close"

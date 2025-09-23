@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { queryClient, apiRequest } from '@/lib/queryClient'
@@ -17,12 +17,40 @@ interface AuthContextType {
   resetClientState: () => void
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined)
+// Dev-safe fallback to avoid hard crashes during HMR/module duplication.
+// If a consumer renders before <AuthProvider> mounts (e.g., after a hot reload),
+// return a conservative no-op context so public pages (like landing) can still render.
+const defaultAuthContext: AuthContextType = {
+  user: null,
+  session: null,
+  loading: true,
+  needsOnboarding: false,
+  isDemoMode: false,
+  signInWithGoogle: async () => {
+    try { window.location.assign('/api/auth/google') } catch {}
+  },
+  signInWithEmail: async () => { throw new Error('Magic link disabled') },
+  signOut: async () => { try { localStorage.removeItem('demo-mode') } catch {}; window.location.replace('/') },
+  setNeedsOnboarding: () => {},
+  resetClientState: () => {},
+}
+
+// Ensure a single shared context instance across HMR/module duplication
+// by caching it on the global object.
+const globalAny = globalThis as any;
+const AuthContext: React.Context<AuthContextType | undefined> =
+  globalAny.__APP_AUTH_CONTEXT || createContext<AuthContextType | undefined>(undefined);
+globalAny.__APP_AUTH_CONTEXT = AuthContext;
 
 export function useAuth() {
   const context = useContext(AuthContext)
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider')
+    // During HMR or early render, gracefully fall back to a safe default.
+    if (import.meta?.env?.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('useAuth used before AuthProvider mounted; returning default fallback context')
+    }
+    return defaultAuthContext
   }
   return context
 }
@@ -41,6 +69,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [loading, setLoading] = useState(true)
   const [needsOnboarding, setNeedsOnboarding] = useState(false)
   const [isDemoMode, setIsDemoMode] = useState(false)
+  const bootstrappedForUserRef = useRef<string | null>(null)
+  
+  // Absolute fail-safe: never let the app hang on a spinner forever
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setLoading((prev) => (prev ? false : prev))
+    }, 4000)
+    return () => clearTimeout(timeout)
+  }, [])
   
   // Reset client state function that pages can call on user change
   const resetClientState = useCallback(() => {
@@ -58,6 +95,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   useEffect(() => {
+    const tStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     // Check if demo mode was requested (allow in production per user request)
     const demoModeRequested = localStorage.getItem('demo-mode') === 'true'
     setIsDemoMode(demoModeRequested)
@@ -105,53 +143,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
     
     if (!supabase) {
-      // No Supabase configured - user needs to authenticate manually or use demo
+      // No Supabase configured and no basic token - user needs to authenticate manually or use demo
       setLoading(false)
       return
     }
 
-    // Handle OAuth callback and session management
-    const handleAuthCallback = async () => {
-      if (!supabase) {
-        setLoading(false)
-        return
-      }
-      
-      // Check for OAuth errors in URL
-      const urlParams = new URLSearchParams(window.location.search)
-      const authError = urlParams.get('error')
-      
-      if (authError) {
-        console.error('OAuth error:', authError)
-        setLoading(false)
-        return
-      }
-      
-      // Check if this is an OAuth callback with hash parameters
-      const hashParams = window.location.hash
-      if (hashParams && (hashParams.includes('access_token') || hashParams.includes('error'))) {
-        console.log('Processing OAuth callback...')
-        // Let Supabase handle the callback
-        await supabase.auth.getSession()
-        // Clear URL parameters after processing
-        window.history.replaceState({}, '', window.location.pathname)
-      }
-      
-      // Get current session
-      const { data: { session } } = await supabase.auth.getSession()
-      setSession(session)
-      setUser(session?.user ?? null)
-      setLoading(false)
-    }
-    
-    handleAuthCallback()
+    // Initialize from current session; the PKCE code exchange happens on /auth/callback page
+    supabase.auth.getSession()
+      .then(({ data }) => {
+        setSession(data.session ?? null)
+        setUser(data.session?.user ?? null)
+      })
+      .catch((e) => {
+        console.error('getSession failed:', e)
+      })
+      .finally(() => setLoading(false))
 
     if (!supabase) return
 
-    // Listen for auth changes  
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    // Listen for auth changes (deduped across HMR)
+    const g: any = globalThis as any
+    const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (import.meta?.env?.DEV) {
+        console.log('[auth] onAuthStateChange:', event, !!session?.user)
+      }
       const prevUserId = user?.id
       setSession(session)
       setUser(session?.user ?? null)
@@ -161,20 +176,29 @@ export function AuthProvider({ children }: AuthProviderProps) {
         resetClientState()
       }
       
-      // Check if user needs onboarding (only for real users, not demo)
+      // Bootstrap profile/config once per login (real users only)
       if (session?.user && session.user.id !== 'demo-user') {
-        if (DISABLE_ONBOARDING) {
-          setNeedsOnboarding(false)
-        } else {
-          try {
-            const res = await apiRequest('GET', '/api/profile')
-            const profile = res.ok ? await res.json() : null
-            setNeedsOnboarding(!profile)
-          } catch (error) {
-            console.error('Error checking profile:', error)
-            // Do not block app on error – allow through and let user set profile later
+        try {
+          if (DISABLE_ONBOARDING) {
             setNeedsOnboarding(false)
+          } else {
+            if (bootstrappedForUserRef.current !== session.user.id) {
+              bootstrappedForUserRef.current = session.user.id
+              const tB0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+              const res = await apiRequest('GET', '/api/bootstrap')
+              const payload = res.ok ? await res.json() : null
+              if (import.meta?.env?.DEV) console.log('[bootstrap]', payload)
+              const profile = payload?.profile ?? null
+              // Seed cache to avoid an immediate '/api/profile' fetch
+              try { queryClient.setQueryData(['/api/profile'], profile) } catch {}
+              setNeedsOnboarding(!profile)
+              const tB1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+              if (import.meta?.env?.DEV) console.log(`[timing] bootstrap in ${Math.round(tB1 - tB0)}ms`)
+            }
           }
+        } catch (error) {
+          console.error('Bootstrap error:', error)
+          setNeedsOnboarding(false)
         }
       } else {
         setNeedsOnboarding(false) // Demo users don't need onboarding
@@ -182,8 +206,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
       
       setLoading(false)
     })
+    // cache subscription globally; if another mount occurs due to HMR, previous sub is fine
+    g.__AUTH_CTX_SUB__ = data.subscription
 
-    return () => subscription.unsubscribe()
+    const tEnd = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    if (import.meta?.env?.DEV) console.log(`[timing] AuthProvider init in ${Math.round(tEnd - tStart)}ms`)
+
+    return () => {
+      try { data.subscription?.unsubscribe?.() } catch {}
+    }
   }, [])
 
   const GOOGLE_ENABLED = (import.meta.env.VITE_ENABLE_GOOGLE_AUTH === '1' || import.meta.env.VITE_ENABLE_GOOGLE_AUTH === 'true')
@@ -195,42 +226,58 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       // Clear demo mode when starting Google flow
       localStorage.removeItem('demo-mode')
-      // Use server-side OAuth endpoint
-      window.location.href = apiUrl('/api/auth/google')
+      if (!supabase) throw new Error('Auth is not configured')
+      const appOriginEnv = (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined)?.trim()
+      const origin = (appOriginEnv && appOriginEnv.length > 0 ? appOriginEnv : window.location.origin)
+        .trim()
+        .replace(/\/$/, '')
+      const redirectTo = `${origin}/auth/callback`
+      const { error } = await supabase.auth.signInWithOAuth({ 
+        provider: 'google', 
+        options: { 
+          redirectTo,
+          queryParams: { prompt: 'select_account', access_type: 'offline' },
+          flowType: 'pkce',
+        } 
+      })
+      if (error) throw error
     } catch (error: any) {
       console.error('OAuth redirect error:', error)
       throw new Error('Failed to initiate Google sign-in')
     }
   }
 
+  const signingOutRef = useRef(false)
   const signOut = async () => {
+    if (signingOutRef.current) return
+    signingOutRef.current = true
     // Check if this is demo mode
     if (user?.id === 'demo-user') {
       // Demo mode sign out - clear demo flag and redirect to landing
-      localStorage.removeItem('demo-mode')
+      try { localStorage.removeItem('demo-mode') } catch {}
       setUser(null)
       setSession(null)
-      window.location.href = '/'
+      window.location.replace('/')
       return
     }
     
     try {
-      // Use server-side logout endpoint
-      const response = await apiRequest('POST', '/api/auth/logout', {})
-      
-      if (response.ok) {
-        setUser(null)
-        setSession(null)
-        window.location.href = '/'
-      } else {
-        throw new Error('Logout failed')
+      // Sign out of Supabase if present
+      if (supabase) {
+        try { await supabase.auth.signOut() } catch {}
       }
+      // Always clear any lingering demo flag (defense-in-depth)
+      try { localStorage.removeItem('demo-mode') } catch {}
+      setUser(null)
+      setSession(null)
+      // Use replace to avoid back-nav returning to protected pages
+      window.location.replace('/')
     } catch (error) {
       console.error('Logout error:', error)
       // Force logout on client side even if server fails
       setUser(null)
       setSession(null)
-      window.location.href = '/'
+      window.location.replace('/')
     }
   }
 
@@ -241,25 +288,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     needsOnboarding,
     isDemoMode,
     signInWithGoogle,
-    // Magic Link sign-in via Supabase email OTP
-    signInWithEmail: async (email: string) => {
-      // Clear demo mode if present
-      localStorage.removeItem('demo-mode')
-      if (!supabase) {
-        throw new Error('Auth is not configured')
-      }
-      // Prefer explicit public app URL when provided; sanitize to avoid stray spaces
-      const appOriginEnv = (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined)?.trim()
-      const origin = (appOriginEnv && appOriginEnv.length > 0 ? appOriginEnv : window.location.origin)
-        .trim()
-        .replace(/\/$/, '')
-      const redirectTo = `${origin}/app`
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: redirectTo, shouldCreateUser: true }
-      })
-      if (error) throw error
-    },
+    // Magic Link removed; we will rely on Google OAuth
+    signInWithEmail: async (_email: string) => { throw new Error('Magic link disabled') },
     signOut,
     setNeedsOnboarding,
     resetClientState,

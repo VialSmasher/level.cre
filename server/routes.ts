@@ -31,28 +31,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ error: 'Supabase not configured' });
       }
       
-      // Prefer an explicit app origin for redirect if provided
-      const appOrigin = process.env.APP_ORIGIN?.split(',')[0]?.trim();
+      // Prefer an explicit, non-wildcard app origin for redirect if provided
+      const originCandidates = (process.env.APP_ORIGIN || '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+      const reqHost = (req.get('host') || '').toLowerCase();
+      // Prefer an explicit origin that matches current host (if any)
+      const appOrigin = originCandidates.find(o => {
+        if (o.includes('*')) return false;
+        try {
+          const u = new URL(o);
+          return reqHost === u.host.toLowerCase();
+        } catch { return false }
+      });
+      // Fallback protocol inference for logs and building the URL
+      const host = req.get('host') || '';
+      const inferredProtocol = (host.includes('replit.app') || host.includes('replit.dev')) ? 'https' : req.protocol;
       let redirectUrl: string;
       if (appOrigin) {
-        redirectUrl = `${appOrigin.replace(/\/$/, '')}/app`;
+        redirectUrl = `${appOrigin.replace(/\/$/, '')}/auth/callback`;
       } else {
         // Fallback to current host
-        const host = req.get('host') || '';
-        const protocol = (host.includes('replit.app') || host.includes('replit.dev')) ? 'https' : req.protocol;
-        redirectUrl = `${protocol}://${host}/app`;
+        redirectUrl = `${inferredProtocol}://${host}/auth/callback`;
       }
       
       if (req.app.get('env') === 'development') {
-        console.log('OAuth Debug - Host:', req.get('host'));
-        console.log('OAuth Debug - Protocol:', protocol);
+        console.log('OAuth Debug - Host:', host);
+        console.log('OAuth Debug - Protocol:', inferredProtocol);
         console.log('OAuth Debug - Redirect URL:', redirectUrl);
       }
       
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: redirectUrl
+          redirectTo: redirectUrl,
+          queryParams: { prompt: 'select_account', access_type: 'offline' },
+          flowType: 'pkce',
         }
       });
       
@@ -78,14 +93,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   }
 
-  // OAuth callback endpoint that Supabase/Google expects
+  // OAuth callback endpoint that Supabase/Google might hit (proxy -> client callback)
   app.get('/api/auth/callback', async (req, res) => {
     if (req.app.get('env') === 'development') {
       console.log('OAuth Callback - Query params:', req.query);
       console.log('OAuth Callback - Headers:', req.headers);
     }
     
-    // Handle OAuth callback - redirect to app
+    // Handle OAuth callback - redirect to client callback preserving query
     const { code, error: authError } = req.query;
     
     if (authError) {
@@ -93,12 +108,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.redirect(`/?error=${encodeURIComponent(authError as string)}`);
     }
     
-    // Redirect to app - let the client handle the token exchange
+    // Redirect to client callback with original query string; client will exchange the code
     const appOrigin = process.env.APP_ORIGIN?.split(',')[0]?.trim();
+    const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
     if (appOrigin) {
-      return res.redirect(`${appOrigin.replace(/\/$/, '')}/app`);
+      return res.redirect(`${appOrigin.replace(/\/$/, '')}/auth/callback${qs}`);
     }
-    res.redirect('/app');
+    res.redirect(`/auth/callback${qs}`);
   });
 
   // Removed stateful session endpoint (stateless auth only)
@@ -107,6 +123,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/auth/logout', async (_req, res) => {
     res.json({ success: true });
   });
+
+  // Basic email+password login removed in favor of Google OAuth
   
   // Demo: reset persisted demo data (safe no-op outside demo mode)
   app.post('/api/demo/reset', async (req, res) => {
@@ -196,6 +214,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     res.status(401).json({ message: 'Not authenticated' });
   });
+
+  // Unified bootstrap endpoint
+  app.get('/api/bootstrap', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const fromDemo = isDemo(req);
+      let profile: any = null;
+      if (fromDemo) {
+        profile = await demo.getProfile(userId);
+      } else {
+        profile = await storage.getProfile(userId);
+      }
+      // user payload: prefer JWT claims if present
+      let user: any = { id: userId };
+      const authHeader = req.headers.authorization;
+      try {
+        if (authHeader?.startsWith('Bearer ')) {
+          const decoded = jwt.decode(authHeader.slice(7)) as any;
+          if (decoded) {
+            user = {
+              id: decoded.sub || userId,
+              email: decoded.email,
+              user_metadata: decoded.user_metadata,
+              app_metadata: decoded.app_metadata,
+              created_at: decoded.created_at,
+            };
+          }
+        }
+      } catch {}
+
+      // Minimal app config
+      const config = {
+        features: {
+          googleEnabled: (process.env.VITE_ENABLE_GOOGLE_AUTH === '1' || process.env.VITE_ENABLE_GOOGLE_AUTH === 'true')
+        }
+      };
+
+      res.json({ user, profile, config });
+    } catch (error: any) {
+      console.error('Bootstrap error:', error?.message || error);
+      res.status(500).json({ message: 'Failed to bootstrap' });
+    }
+  });
   // Profile routes
   app.get('/api/profile', requireAuth, async (req, res) => {
     try {
@@ -236,8 +297,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post('/api/listings', requireAuth, async (req, res) => {
+    const t0 = Date.now();
     try {
       const userId = getUserId(req);
+      console.log(`[route] POST /api/listings user=${userId} bodyKeys=${Object.keys(req.body||{}).join(',')}`);
       const { title, address, lat, lng, submarket, dealType, size, price } = req.body || {};
       if (!title || String(title).trim() === '') {
         return res.status(400).json({ message: 'title is required' });
@@ -266,6 +329,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         submarket, 
         // avoid inserting columns that may not exist without migrations
       });
+      const t1 = Date.now();
+      console.log(`[route] POST /api/listings -> 201 in ${t1 - t0}ms user=${userId}`);
       res.status(201).json(listing);
     } catch (error) {
       console.error('Error creating listing:', error);
@@ -692,8 +757,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post('/api/prospects', requireAuth, async (req, res) => {
+    const t0 = Date.now();
     try {
       const userId = getUserId(req);
+      console.log(`[route] POST /api/prospects user=${userId} bodyKeys=${Object.keys(req.body||{}).join(',')}`);
       // Validate payload to match client shape (uses GeoJSON geometry)
       const ProspectInputSchema = z.object({
         name: z.string().min(1),
@@ -731,6 +798,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const prospect = await storage.createProspect({ ...parseResult.data, userId });
+      const t1 = Date.now();
+      console.log(`[route] POST /api/prospects -> 201 in ${t1 - t0}ms user=${userId}`);
       res.status(201).json(prospect);
     } catch (e) {
       if (e instanceof Error) {

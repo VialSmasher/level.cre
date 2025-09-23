@@ -1,5 +1,4 @@
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { useAuth } from '@/contexts/AuthContext'
 import { useLocation } from 'wouter'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
@@ -10,20 +9,17 @@ import { useToast } from '@/hooks/use-toast'
 const FeatureCards = lazy(() => import('@/components/FeatureCards'))
 
 export default function Landing() {
-  const { user, loading, signInWithEmail, signInWithGoogle } = useAuth()
+  const { user, loading, signInWithGoogle } = useAuth()
   const [, setLocation] = useLocation()
   const [isSigningIn, setIsSigningIn] = useState(false)
   const [isDemoMode, setIsDemoMode] = useState(false)
-  const [email, setEmail] = useState('')
-  const [showEmail, setShowEmail] = useState(true)
-  const [emailSentTo, setEmailSentTo] = useState<string | null>(null)
-  const [isSendingLink, setIsSendingLink] = useState(false)
+  const [showEmail, setShowEmail] = useState(false)
   const { toast } = useToast()
   const hasPrefetched = useRef(false)
   const ENABLE_GOOGLE = (import.meta.env.VITE_ENABLE_GOOGLE_AUTH === '1' || import.meta.env.VITE_ENABLE_GOOGLE_AUTH === 'true')
   
   // Detect iframe environment (kept for potential future use)
-  const emailValid = /.+@.+\..+/.test(email)
+  const emailValid = false
 
   // Prefetch app modules when CTA is visible or hovered
   const prefetchApp = () => {
@@ -38,6 +34,18 @@ export default function Landing() {
     const t = setTimeout(prefetchApp, 300)
     return () => clearTimeout(t)
   }, [])
+
+  // Optional: auto-redirect authenticated users from '/' to '/app'.
+  // Disabled by default so the landing/login page is visible even if signed in.
+  const AUTO_REDIRECT_AUTHENTICATED = (
+    import.meta.env.VITE_AUTO_REDIRECT_AUTHENTICATED === '1' ||
+    import.meta.env.VITE_AUTO_REDIRECT_AUTHENTICATED === 'true'
+  )
+  useEffect(() => {
+    if (AUTO_REDIRECT_AUTHENTICATED && !loading && user && user.id !== 'demo-user') {
+      setLocation('/app')
+    }
+  }, [AUTO_REDIRECT_AUTHENTICATED, loading, user, setLocation])
 
   const handleGoogle = async () => {
     if (!ENABLE_GOOGLE) return
@@ -62,20 +70,7 @@ export default function Landing() {
     window.location.href = '/app'
   }
 
-  const handleSendMagicLink = async () => {
-    if (isSendingLink || !emailValid) return
-    setIsSendingLink(true)
-    try {
-      await signInWithEmail(email)
-      setEmailSentTo(email)
-      toast({ title: 'Magic link sent', description: 'Check your email to complete sign-in.' })
-    } catch (err: any) {
-      console.error('Magic link error:', err)
-      toast({ title: 'Failed to send magic link', description: err.message ?? 'Please try again.', variant: 'destructive' })
-    } finally {
-      setIsSendingLink(false)
-    }
-  }
+  // Password and magic link login removed; use Google or Demo Mode.
 
   if (loading) {
     return (
@@ -118,7 +113,21 @@ export default function Landing() {
               
               {/* CTAs */}
               <div className="flex flex-col gap-4 justify-center items-center max-w-sm mx-auto pt-4">
-                {ENABLE_GOOGLE && (
+                {/* If already authenticated, offer a clear path into the app */}
+                {!loading && user && user.id !== 'demo-user' ? (
+                  <>
+                    <Button
+                      onMouseEnter={prefetchApp}
+                      onClick={() => setLocation('/app')}
+                      className="group relative w-full h-12 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-medium rounded-xl focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
+                      aria-label="Continue to app"
+                    >
+                      Continue to App
+                      <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
+                    </Button>
+                    <div className="text-xs text-gray-600">Signed in as {user.email}</div>
+                  </>
+                ) : ENABLE_GOOGLE && (
                   <Button
                     onMouseEnter={prefetchApp}
                     onClick={handleGoogle}
@@ -145,38 +154,7 @@ export default function Landing() {
                     )}
                   </Button>
                 )}
-                {/* Email sign-in */}
-                <div className="w-full text-center">
-                  <div className="w-full flex flex-col gap-2">
-                    <div className="flex gap-2 w-full">
-                      <Input
-                        type="email"
-                        placeholder="you@company.com"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && emailValid) handleSendMagicLink()
-                        }}
-                        className="flex-1 h-11"
-                        aria-label="Email address"
-                      />
-                      <Button
-                        onClick={handleSendMagicLink}
-                        disabled={isSendingLink || !emailValid || isSigningIn}
-                        className="h-11"
-                      >
-                        {isSendingLink ? 'Sending…' : 'Send link'}
-                      </Button>
-                    </div>
-                    <div className="text-xs text-gray-600" aria-live="polite">
-                      {emailSentTo ? (
-                        <span>Magic link sent to <span className="font-medium">{emailSentTo}</span>.</span>
-                      ) : (
-                        <span>No password required. One-time link only.</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                {/* Email and password login removed */}
                 
                 {/* Demo Mode Option */}
                 <div className="text-gray-500 text-sm font-medium">or</div>
@@ -210,7 +188,7 @@ export default function Landing() {
               <div className="flex flex-wrap justify-center items-center gap-6 pt-6 text-sm text-gray-600">
                 <div className="flex items-center gap-2">
                   <CheckCircle className="w-4 h-4 text-green-500" />
-                  Secure magic link • No password stored
+                  Secure sign-in via Google
                 </div>
                 <div className="flex items-center gap-2">
                   <CheckCircle className="w-4 h-4 text-green-500" />
