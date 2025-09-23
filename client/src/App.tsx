@@ -19,12 +19,12 @@ const Profile = lazy(() => import("@/pages/profile"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const Landing = lazy(() => import("@/pages/landing"));
 const Onboarding = lazy(() => import("@/pages/onboarding"));
-const ListingsIndex = lazy(() => import("@/pages/listings"));
-const ListingWorkspace = lazy(() => import("@/pages/listing-workspace"));
+const WorkspacesIndex = lazy(() => import("@/pages/workspaces"));
+const Workspace = lazy(() => import("@/pages/workspace"));
 const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useRoute } from "wouter";
 
 // Component to handle onboarding check and routing
 function OnboardingCheck({ children }: { children: React.ReactNode }) {
@@ -148,29 +148,42 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/app/listings">
+      <Route path="/app/workspaces">
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
               <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
-                <ListingsIndex />
+                <WorkspacesIndex />
               </Suspense>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
       </Route>
 
-      <Route path="/app/listings/:id">
+      <Route path="/app/workspaces/:id">
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
               <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
-                <ListingWorkspace />
+                <Workspace />
               </Suspense>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
       </Route>
+
+      {/* Legacy routes -> redirect to new workspace URLs */}
+      <Route path="/app/listings" component={() => { 
+        const [, setLocation] = useLocation(); 
+        setLocation('/app/workspaces'); 
+        return null; 
+      }} />
+      <Route path="/app/listings/:id" component={() => { 
+        const [, setLocation] = useLocation(); 
+        const [, params] = useRoute('/app/listings/:id'); 
+        setLocation(`/app/workspaces/${(params as any)?.id}`); 
+        return null; 
+      }} />
 
       <Route path="/app/market-comps">
         <ProtectedRoute>

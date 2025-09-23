@@ -8,7 +8,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
-import { Archive, Trash2 } from 'lucide-react';
+import { Archive, MoreHorizontal, Trash2 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 type ListingRow = {
   id: string;
@@ -49,9 +55,11 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
       toast({ title: 'Workspace created', description: 'Opening workspace...' });
       try {
         localStorage.setItem('lastWorkspaceId', listing.id);
+        localStorage.setItem('lastWorkspacesLocation', `/app/workspaces/${listing.id}`);
+        // Backwards-compat for older nav state
         localStorage.setItem('lastListingsLocation', `/app/listings/${listing.id}`);
       } catch {}
-      setLocation(`/app/listings/${listing.id}`);
+      setLocation(`/app/workspaces/${listing.id}`);
     },
     onError: async (err: any) => {
       const message = err?.message || 'Failed to create workspace';
@@ -84,7 +92,7 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
   );
 }
 
-export default function ListingsIndex() {
+export default function WorkspacesIndex() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -93,7 +101,11 @@ export default function ListingsIndex() {
 
   // Remember the last place inside the Workspaces section
   useEffect(() => {
-    try { localStorage.setItem('lastListingsLocation', '/app/listings'); } catch {}
+    try { 
+      localStorage.setItem('lastWorkspacesLocation', '/app/workspaces'); 
+      // Backwards-compat for older nav state
+      localStorage.setItem('lastListingsLocation', '/app/listings'); 
+    } catch {}
   }, []);
 
   const archiveMutation = useMutation({
@@ -125,71 +137,102 @@ export default function ListingsIndex() {
   });
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
+    <div className="p-6 max-w-6xl mx-auto">
+      <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Workspaces</h1>
         <Button onClick={() => setOpen(true)}>Create Workspace</Button>
       </div>
       {isLoading ? (
         <div>Loading...</div>
       ) : (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {listings.length === 0 && (
-            <Card>
-              <CardHeader><CardTitle>No workspaces yet</CardTitle></CardHeader>
+            <Card className="col-span-full">
+              <CardHeader>
+                <CardTitle>No workspaces yet</CardTitle>
+              </CardHeader>
               <CardContent>
-                <p className="text-sm text-gray-600">Create your first workspace to start scoping prospects.</p>
+                <p className="text-sm text-muted-foreground">Create your first workspace to start scoping prospects.</p>
               </CardContent>
             </Card>
           )}
-          {listings.map(l => (
+
+          {listings.map((l) => (
             <Card
               key={l.id}
-              className="hover:border-blue-300 cursor-pointer"
+              className="group relative cursor-pointer transition-shadow hover:shadow-md hover:border-blue-300"
               onClick={() => {
                 try {
                   localStorage.setItem('lastWorkspaceId', l.id);
+                  localStorage.setItem('lastWorkspacesLocation', `/app/workspaces/${l.id}`);
+                  // Backwards-compat for older nav state
                   localStorage.setItem('lastListingsLocation', `/app/listings/${l.id}`);
                 } catch {}
-                setLocation(`/app/listings/${l.id}`)
+                setLocation(`/app/workspaces/${l.id}`);
               }}
             >
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-lg">{l.title || l.address}</CardTitle>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-500">{new Date(l.createdAt || Date.now()).toLocaleDateString()}</span>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8"
-                    title="Archive workspace"
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); archiveMutation.mutate(l.id); }}
-                    disabled={archiveMutation.isPending}
-                  >
-                    <Archive className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8 text-red-600 hover:text-red-700"
-                    title="Delete workspace"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      if (confirm('Delete this workspace? This cannot be undone.')) {
-                        deleteMutation.mutate(l.id);
-                      }
-                    }}
-                    disabled={deleteMutation.isPending}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between gap-2">
+                  <CardTitle className="text-lg leading-tight truncate">
+                    {l.title || l.address}
+                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {new Date(l.createdAt || Date.now()).toLocaleDateString()}
+                    </span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          aria-label="Workspace actions"
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setLocation(`/app/workspaces/${l.id}`);
+                          }}
+                        >
+                          Open
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            archiveMutation.mutate(l.id);
+                          }}
+                          disabled={archiveMutation.isPending}
+                        >
+                          <Archive className="h-4 w-4" /> Archive
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="text-red-600 focus:text-red-700"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (confirm('Delete this workspace? This cannot be undone.')) {
+                              deleteMutation.mutate(l.id);
+                            }
+                          }}
+                          disabled={deleteMutation.isPending}
+                        >
+                          <Trash2 className="h-4 w-4" /> Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="flex flex-wrap items-center gap-6 text-sm text-gray-700">
-                  <div><span className="font-medium">Prospects:</span> {l.prospectCount}</div>
-                  <div><span className="font-medium">Created:</span> {new Date(l.createdAt || Date.now()).toLocaleDateString()}</div>
+                <div className="text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">Prospects:</span> {l.prospectCount}
                 </div>
               </CardContent>
             </Card>

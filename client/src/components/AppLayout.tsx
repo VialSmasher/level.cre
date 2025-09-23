@@ -37,13 +37,15 @@ export function AppLayout({ children }: AppLayoutProps) {
   const [location] = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   // Decide where the Workspace nav goes: last place visited in the Workspaces section
-  const listingsHref = (() => {
+  const workspacesHref = (() => {
     try {
-      const lastLoc = typeof window !== 'undefined' ? localStorage.getItem('lastListingsLocation') : null
-      if (lastLoc && lastLoc.startsWith('/app/listings')) return lastLoc
-      return '/app/listings'
+      const lastNew = typeof window !== 'undefined' ? localStorage.getItem('lastWorkspacesLocation') : null
+      if (lastNew && lastNew.startsWith('/app/workspaces')) return lastNew
+      const lastOld = typeof window !== 'undefined' ? localStorage.getItem('lastListingsLocation') : null
+      if (lastOld && lastOld.startsWith('/app/listings')) return lastOld.replace('/app/listings', '/app/workspaces')
+      return '/app/workspaces'
     } catch {
-      return '/app/listings';
+      return '/app/workspaces';
     }
   })()
 
@@ -59,8 +61,8 @@ export function AppLayout({ children }: AppLayoutProps) {
     if (path === '/app') {
       return location === '/app' || location === '/app/'
     }
-    if (path === '/app/listings') {
-      return location === '/app/listings' || location.startsWith('/app/listings/')
+    if (path === '/app/workspaces') {
+      return location === '/app/workspaces' || location.startsWith('/app/workspaces/')
     }
     return location === path
   }
@@ -102,19 +104,19 @@ export function AppLayout({ children }: AppLayoutProps) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Link 
-                    href={listingsHref} 
+                    href={workspacesHref} 
                     className={`p-3 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                      isActive('/app/listings') 
+                      isActive('/app/workspaces') 
                         ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30 opacity-100' 
                         : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 opacity-70 hover:opacity-100'
                     }`}
-                    aria-label="Listing Workspace"
+                    aria-label="Workspaces"
                   >
                     <Briefcase size={22} />
                   </Link>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Listing Workspace</p>
+                  <p>Workspaces</p>
                 </TooltipContent>
               </Tooltip>
 
@@ -322,21 +324,21 @@ export function AppLayout({ children }: AppLayoutProps) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Link 
-                    href={listingsHref} 
+                    href={workspacesHref} 
                     className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/listings') 
+                      isActive('/app/workspaces') 
                         ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
                         : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
                     }`}
                     onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Listing Workspace"
+                    aria-label="Workspaces"
                   >
                     <Briefcase size={20} />
-                    <span className="font-medium">Listing Workspace</span>
+                    <span className="font-medium">Workspaces</span>
                   </Link>
                 </TooltipTrigger>
                 <TooltipContent side="right">
-                  <p>Listing Workspace</p>
+                  <p>Workspaces</p>
                 </TooltipContent>
               </Tooltip>
 

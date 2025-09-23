@@ -32,8 +32,8 @@ type Listing = {
 
 const libraries: any = ['drawing', 'geometry', 'places'];
 
-export default function ListingWorkspace() {
-  const [, params] = useRoute('/app/listings/:id');
+export default function Workspace() {
+  const [, params] = useRoute('/app/workspaces/:id');
   const listingId = params?.id as string;
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -48,6 +48,8 @@ export default function ListingWorkspace() {
     if (listingId) {
       try {
         localStorage.setItem('lastWorkspaceId', listingId);
+        localStorage.setItem('lastWorkspacesLocation', `/app/workspaces/${listingId}`);
+        // Backwards-compat for older nav state
         localStorage.setItem('lastListingsLocation', `/app/listings/${listingId}`);
       } catch {}
     }
@@ -365,7 +367,7 @@ export default function ListingWorkspace() {
                     variant="secondary"
                     size="icon"
                     className="h-8 w-8 shadow"
-                    onClick={() => setLocation('/app/listings')}
+                  onClick={() => setLocation('/app/workspaces')}
                     aria-label="Exit workspace"
                     title="Exit workspace"
                   >

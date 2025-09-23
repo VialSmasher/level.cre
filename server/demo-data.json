@@ -2085,7 +2085,8 @@
             53.66590317062964
           ]
         },
-        "createdDate": "2025-09-23T18:08:21.133Z"
+        "createdDate": "2025-09-23T18:08:21.133Z",
+        "followUpTimeframe": "6_month"
       },
       {
         "id": "3dfafc1d-cba9-49db-9652-edb212707e47",
@@ -2451,6 +2452,139 @@
           ]
         },
         "createdDate": "2025-09-23T19:56:31.264Z"
+      },
+      {
+        "id": "e531eed1-478d-420b-a3b0-1b7e505ea659",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.73137934570312,
+                53.62761899898143
+              ],
+              [
+                -113.65790827636718,
+                53.62761899898143
+              ],
+              [
+                -113.65790827636718,
+                53.53549097870004
+              ],
+              [
+                -113.73137934570312,
+                53.53549097870004
+              ],
+              [
+                -113.73137934570312,
+                53.62761899898143
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-23T20:28:54.032Z"
+      },
+      {
+        "id": "e67ed592-c20a-4b27-bef6-a93b3ca0ed26",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.77051813964843,
+            53.61336452386366
+          ]
+        },
+        "createdDate": "2025-09-23T20:28:55.690Z"
+      },
+      {
+        "id": "9f7850b9-c0ea-45bc-ad7b-6e585d133a0f",
+        "name": "Cushman & Wakefield Edmonton, 102 Ave NW, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.4930446,
+            53.5433891
+          ]
+        },
+        "contactCompany": "Cushman & Wakefield Edmonton",
+        "businessName": "Cushman & Wakefield Edmonton",
+        "websiteUrl": "http://www.cwedm.com/",
+        "createdDate": "2025-09-23T20:29:00.178Z"
+      },
+      {
+        "id": "93fe7bc1-cace-40cf-a6c0-5f5df2c1cdb4",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.90922053222656,
+                53.637797819921595
+              ],
+              [
+                -113.8515423095703,
+                53.637797819921595
+              ],
+              [
+                -113.8515423095703,
+                53.490577234017834
+              ],
+              [
+                -113.90922053222656,
+                53.490577234017834
+              ],
+              [
+                -113.90922053222656,
+                53.637797819921595
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-23T20:29:22.013Z"
+      },
+      {
+        "id": "6ffea4bc-f5f5-4f6a-a173-ff1a6bb2b9da",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.70940668945312,
+                53.65855500083331
+              ],
+              [
+                -113.54667170410156,
+                53.65855500083331
+              ],
+              [
+                -113.54667170410156,
+                53.534674790013284
+              ],
+              [
+                -113.70940668945312,
+                53.534674790013284
+              ],
+              [
+                -113.70940668945312,
+                53.65855500083331
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-23T20:29:23.583Z"
       }
     ]
   },
@@ -2466,6 +2600,13 @@
     "demo-user-2": {
       "id": "demo-user-2",
       "name": "Teammate Two"
+    },
+    "a8ea73b9-cf94-45cc-a556-cfbf036da8a4": {
+      "id": "a8ea73b9-cf94-45cc-a556-cfbf036da8a4",
+      "submarkets": [
+        "nisku"
+      ],
+      "updatedAt": "2025-09-23T20:33:25.284Z"
     }
   },
   "interactions": {
@@ -3455,6 +3596,32 @@
         "type": "meeting",
         "date": "2025-09-21T17:20:14.745Z"
       }
+    ],
+    "a8ea73b9-cf94-45cc-a556-cfbf036da8a4": [
+      {
+        "id": "2e48f7c3-4b10-4f2f-b9b4-d8df6e6f40f2",
+        "userId": "a8ea73b9-cf94-45cc-a556-cfbf036da8a4",
+        "prospectId": "2206d6b9-af36-43df-b80c-1f98233661b6",
+        "date": "2025-09-23T20:09:56.233Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-23T20:09:57.662Z"
+      },
+      {
+        "id": "cba3b5b1-a147-4a33-b8ec-67fdec21e60c",
+        "userId": "a8ea73b9-cf94-45cc-a556-cfbf036da8a4",
+        "prospectId": "2206d6b9-af36-43df-b80c-1f98233661b6",
+        "date": "2025-09-23T20:09:56.647Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-23T20:09:58.045Z"
+      }
     ]
   },
   "requirements": {
@@ -3504,6 +3671,25 @@
         "id": "demo-user-2-r2",
         "title": "Buyer search 2 acres",
         "createdAt": "2025-09-21T17:20:14.745Z"
+      }
+    ],
+    "a8ea73b9-cf94-45cc-a556-cfbf036da8a4": [
+      {
+        "id": "7937e548-fc2e-4a82-922d-f9dc3990eed3",
+        "userId": "a8ea73b9-cf94-45cc-a556-cfbf036da8a4",
+        "title": "1231",
+        "source": "JLL",
+        "location": "",
+        "contactName": "",
+        "contactEmail": "",
+        "contactPhone": "",
+        "spaceSize": "5,000 - 10,000 SF",
+        "timeline": null,
+        "status": "expired",
+        "tags": [],
+        "notes": "",
+        "createdAt": "2025-09-23T20:33:20.226Z",
+        "updatedAt": "2025-09-23T20:33:20.226Z"
       }
     ]
   },
@@ -3653,6 +3839,17 @@
         "createdAt": "2025-09-21T18:25:46.318Z",
         "updatedAt": "2025-09-21T18:25:46.318Z"
       }
+    ],
+    "a8ea73b9-cf94-45cc-a556-cfbf036da8a4": [
+      {
+        "id": "425ae8c4-093f-45e1-b8c0-bd423dbd3b50",
+        "userId": "a8ea73b9-cf94-45cc-a556-cfbf036da8a4",
+        "name": "nisku",
+        "color": "#c31bbe",
+        "isActive": true,
+        "createdAt": "2025-09-23T20:33:25.237Z",
+        "updatedAt": "2025-09-23T20:33:25.237Z"
+      }
     ]
   },
   "marketComps": {
@@ -3767,6 +3964,34 @@
         "id": "demo-user-2-c1",
         "address": "123 Main St",
         "createdAt": "2025-09-17T17:20:14.745Z"
+      }
+    ],
+    "a8ea73b9-cf94-45cc-a556-cfbf036da8a4": [
+      {
+        "id": "bbd4ed18-eded-4d81-90b5-49e77817a535",
+        "userId": "a8ea73b9-cf94-45cc-a556-cfbf036da8a4",
+        "address": "123",
+        "submarket": null,
+        "assetType": "Building",
+        "buildingSize": null,
+        "landSize": null,
+        "sourceLink": null,
+        "notes": null,
+        "dealType": "lease",
+        "tenant": null,
+        "termMonths": null,
+        "rate": "10.00",
+        "rateType": null,
+        "commencement": "2025-09-04",
+        "concessions": null,
+        "saleDate": null,
+        "buyer": null,
+        "seller": null,
+        "price": null,
+        "pricePerSf": null,
+        "pricePerAcre": null,
+        "createdAt": "2025-09-23T20:33:06.734Z",
+        "updatedAt": "2025-09-23T20:33:06.734Z"
       }
     ]
   },
@@ -3916,6 +4141,39 @@
         "submarket": null,
         "createdAt": "2025-09-23T18:47:34.939Z",
         "archivedAt": null
+      },
+      {
+        "id": "3ea7a74d-05b3-4299-a9da-0825c8af2a57",
+        "userId": "a8ea73b9-cf94-45cc-a556-cfbf036da8a4",
+        "title": "TEst12 123",
+        "address": "TEst12 123",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-23T20:04:41.759Z",
+        "archivedAt": null
+      },
+      {
+        "id": "346ddac1-6918-487e-9541-96838c817d07",
+        "userId": "a8ea73b9-cf94-45cc-a556-cfbf036da8a4",
+        "title": "test",
+        "address": "test",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-23T20:28:51.158Z",
+        "archivedAt": null
+      },
+      {
+        "id": "11199b0e-b495-4b52-8627-465fd5b73f11",
+        "userId": "a8ea73b9-cf94-45cc-a556-cfbf036da8a4",
+        "title": "sdasddadadas S",
+        "address": "sdasddadadas S",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-23T20:29:19.421Z",
+        "archivedAt": null
       }
     ]
   },
@@ -4054,6 +4312,26 @@
       {
         "listingId": "48237e3e-4248-4047-8d95-ae625e5a7e62",
         "prospectId": "481338d5-086b-4a5b-ba96-90effc0cef24"
+      },
+      {
+        "listingId": "346ddac1-6918-487e-9541-96838c817d07",
+        "prospectId": "e531eed1-478d-420b-a3b0-1b7e505ea659"
+      },
+      {
+        "listingId": "346ddac1-6918-487e-9541-96838c817d07",
+        "prospectId": "e67ed592-c20a-4b27-bef6-a93b3ca0ed26"
+      },
+      {
+        "listingId": "346ddac1-6918-487e-9541-96838c817d07",
+        "prospectId": "9f7850b9-c0ea-45bc-ad7b-6e585d133a0f"
+      },
+      {
+        "listingId": "11199b0e-b495-4b52-8627-465fd5b73f11",
+        "prospectId": "93fe7bc1-cace-40cf-a6c0-5f5df2c1cdb4"
+      },
+      {
+        "listingId": "11199b0e-b495-4b52-8627-465fd5b73f11",
+        "prospectId": "6ffea4bc-f5f5-4f6a-a173-ff1a6bb2b9da"
       }
     ]
   }

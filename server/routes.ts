@@ -508,6 +508,237 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Workspaces alias routes (mirror Listings endpoints)
+  // These provide a stable, user-facing naming while preserving DB schema names
+  app.get('/api/workspaces', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const list = await demo.getListings(userId);
+        const active = list.filter((l: any) => !l.archivedAt);
+        const links = await Promise.all(active.map(async (l: any) => {
+          const linked = await demo.getListingLinks(userId, l.id);
+          return { ...l, prospectCount: linked.length };
+        }));
+        return res.json(links);
+      }
+      const list = await storage.getListings(userId);
+      res.json(list);
+    } catch (error) {
+      console.error('Error fetching workspaces:', error);
+      res.status(500).json({ message: 'Failed to fetch workspaces' });
+    }
+  });
+
+  app.post('/api/workspaces', requireAuth, async (req, res) => {
+    const t0 = Date.now();
+    try {
+      const userId = getUserId(req);
+      const { title, address, lat, lng, submarket } = req.body || {};
+      if (!title || String(title).trim() === '') {
+        return res.status(400).json({ message: 'title is required' });
+      }
+      if (isDemo(req)) {
+        const item = {
+          id: randomUUID(),
+          userId,
+          title: title.trim(),
+          address: address || title.trim(),
+          lat: lat || '',
+          lng: lng || '',
+          submarket: submarket || null,
+          createdAt: new Date().toISOString(),
+          archivedAt: null,
+        };
+        await demo.addListing(userId, item);
+        return res.status(201).json({ ...item, prospectCount: 0 });
+      }
+      const listing = await storage.createListing({ 
+        userId, 
+        title: title || address || 'Workspace', 
+        address: (address && String(address).trim() !== '') ? address : (title || 'Workspace'), 
+        lat: lat != null && lat !== '' ? String(lat) : null, 
+        lng: lng != null && lng !== '' ? String(lng) : null, 
+        submarket, 
+      });
+      const t1 = Date.now();
+      console.log(`[route] POST /api/workspaces -> 201 in ${t1 - t0}ms user=${userId}`);
+      res.status(201).json(listing);
+    } catch (error) {
+      console.error('Error creating workspace:', error);
+      res.status(500).json({ message: 'Failed to create workspace' });
+    }
+  });
+
+  app.get('/api/workspaces/:id', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const demoListing = await demo.getListing(userId, req.params.id);
+        if (!demoListing) return res.status(404).json({ message: 'Workspace not found' });
+        return res.json(demoListing);
+      }
+      const listing = await storage.getListing(req.params.id, userId);
+      if (!listing) return res.status(404).json({ message: 'Workspace not found' });
+      res.json(listing);
+    } catch (error) {
+      console.error('Error getting workspace:', error);
+      res.status(500).json({ message: 'Failed to get workspace' });
+    }
+  });
+
+  app.post('/api/workspaces/:id/archive', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const okDemo = await demo.archiveListing(userId, req.params.id);
+        if (!okDemo) return res.status(404).json({ message: 'Workspace not found' });
+        return res.json({ ok: true });
+      }
+      const ok = await storage.archiveListing(req.params.id, userId);
+      if (!ok) return res.status(404).json({ message: 'Workspace not found' });
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error archiving workspace:', error);
+      res.status(500).json({ message: 'Failed to archive workspace' });
+    }
+  });
+
+  app.delete('/api/workspaces/:id', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const okDemo = await demo.deleteListing(userId, req.params.id);
+        if (!okDemo) return res.status(404).json({ message: 'Workspace not found' });
+        return res.json({ ok: true });
+      }
+      const ok = await storage.deleteListing(req.params.id, userId);
+      if (!ok) return res.status(404).json({ message: 'Workspace not found' });
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error deleting workspace:', error);
+      res.status(500).json({ message: 'Failed to delete workspace' });
+    }
+  });
+
+  app.get('/api/workspaces/:id/prospects', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const links = await demo.getListingLinks(userId, req.params.id);
+        const allProspects = await demo.getProspects(userId);
+        const set = new Set(links.map((l: any) => l.prospectId));
+        const list = (allProspects || []).filter((p: any) => set.has(p.id));
+        return res.json(list);
+      }
+      const list = await storage.getListingProspects(req.params.id, userId);
+      res.json(list);
+    } catch (error) {
+      console.error('Error fetching workspace prospects:', error);
+      res.status(500).json({ message: 'Failed to fetch workspace prospects' });
+    }
+  });
+
+  app.post('/api/workspaces/:id/prospects', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const { prospectId } = req.body || {};
+      if (!prospectId) return res.status(400).json({ message: 'prospectId is required' });
+      if (isDemo(req)) {
+        await demo.linkProspect(userId, req.params.id, prospectId);
+        return res.status(201).json({ ok: true });
+      }
+      await storage.linkProspectToListing({ listingId: req.params.id, prospectId, userId });
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      console.error('Error linking prospect:', error);
+      res.status(500).json({ message: 'Failed to link prospect' });
+    }
+  });
+
+  app.delete('/api/workspaces/:id/prospects/:prospectId', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const okDemo = await demo.unlinkProspect(userId, req.params.id, req.params.prospectId);
+        if (!okDemo) return res.status(404).json({ message: 'Not linked' });
+        return res.status(204).send();
+      }
+      const ok = await storage.unlinkProspectFromListing({ listingId: req.params.id, prospectId: req.params.prospectId, userId });
+      if (!ok) return res.status(404).json({ message: 'Not linked' });
+      res.status(204).send();
+    } catch (error) {
+      console.error('Error unlinking prospect:', error);
+      res.status(500).json({ message: 'Failed to unlink prospect' });
+    }
+  });
+
+  app.get('/api/workspaces/:id/export', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const { start, end } = req.query as any;
+      if (isDemo(req)) {
+        const interactionsAll = await demo.getInteractions(userId);
+        const interactions = (interactionsAll || []).filter((i: any) => i.listingId === req.params.id)
+          .filter((i: any) => (!start || i.date >= start) && (!end || i.date <= end));
+        const links = await demo.getListingLinks(userId, req.params.id);
+        const allProspects = await demo.getProspects(userId);
+        const prospectMap = new Map(allProspects.map((p: any) => [p.id, p]));
+        const byType: Record<string, number> = {};
+        interactions.forEach((i: any) => { byType[i.type] = (byType[i.type] || 0) + 1; });
+        const lines: string[] = [];
+        lines.push('Summary');
+        lines.push('Type,Count');
+        Object.entries(byType).forEach(([t, c]) => lines.push(`${t},${c}`));
+        lines.push('');
+        lines.push('Details');
+        lines.push('Date,Type,Prospect,Address,Notes,NextSteps');
+        interactions.forEach((i: any) => {
+          const p: any = prospectMap.get(i.prospectId);
+          const name = p?.name?.replaceAll(',', ' ') || '';
+          const address = p?.name?.replaceAll(',', ' ') || '';
+          const notes = (i.notes || '').replaceAll('\n', ' ').replaceAll(',', ' ');
+          const next = (i.nextFollowUp || '').replaceAll(',', ' ');
+          lines.push(`${i.date},${i.type},${name},${address},${notes},${next}`);
+        });
+        const csv = lines.join('\n');
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="workspace-${req.params.id}-export.csv"`);
+        return res.send(csv);
+      }
+      const listing = await storage.getListing(req.params.id, userId);
+      if (!listing) return res.status(404).json({ message: 'Workspace not found' });
+      const interactions = await storage.getContactInteractions(userId, undefined, req.params.id, start, end);
+      const lp = await storage.getListingProspects(req.params.id, userId);
+      const prospectMap = new Map(lp.map(p => [p.id, p]));
+      const byType: Record<string, number> = {};
+      interactions.forEach(i => { byType[i.type] = (byType[i.type] || 0) + 1; });
+      const summaryRows = Object.entries(byType).map(([type, count]) => ({ type, count }));
+      const lines: string[] = [];
+      lines.push('Summary');
+      lines.push('Type,Count');
+      summaryRows.forEach(r => lines.push(`${r.type},${r.count}`));
+      lines.push('');
+      lines.push('Details');
+      lines.push('Date,Type,Prospect,Address,Notes,NextSteps');
+      interactions.forEach(i => {
+        const p = prospectMap.get(i.prospectId as any);
+        const name = p?.name?.replaceAll(',', ' ') || '';
+        const address = p?.name?.replaceAll(',', ' ') || '';
+        const notes = (i.notes || '').replaceAll('\n', ' ').replaceAll(',', ' ');
+        const next = (i.nextFollowUp || '').replaceAll(',', ' ');
+        lines.push(`${i.date},${i.type},${name},${address},${notes},${next}`);
+      });
+      const csv = lines.join('\n');
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="workspace-${req.params.id}-export.csv"`);
+      res.send(csv);
+    } catch (error) {
+      console.error('Error exporting workspace CSV:', error);
+      res.status(500).json({ message: 'Failed to export CSV' });
+    }
+  });
+
   app.post('/api/profile', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
