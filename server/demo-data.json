@@ -3432,17 +3432,6 @@
         "archivedAt": "2025-09-22T16:26:17.641Z"
       },
       {
-        "id": "73e9464a-1fce-404a-a0de-fbf0e4cd851d",
-        "userId": "demo-user",
-        "title": "teat",
-        "address": "teat",
-        "lat": "",
-        "lng": "",
-        "submarket": null,
-        "createdAt": "2025-09-22T16:26:51.671Z",
-        "archivedAt": null
-      },
-      {
         "id": "77dd20b5-472e-4bb2-8486-742dc1f58db4",
         "userId": "demo-user",
         "title": "test",
@@ -3589,10 +3578,6 @@
       {
         "listingId": "7cc3da60-8724-444c-b3b5-e28a656d0e68",
         "prospectId": "f536110a-e2fb-4568-a90a-8e3ff0d8f70f"
-      },
-      {
-        "listingId": "73e9464a-1fce-404a-a0de-fbf0e4cd851d",
-        "prospectId": "1fafecf1-e020-43ad-9815-37214375153f"
       },
       {
         "listingId": "46b08efe-88c1-4821-abb4-6f9cf20f9b3a",
