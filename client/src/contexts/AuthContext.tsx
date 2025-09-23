@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { queryClient } from '@/lib/queryClient'
+import { queryClient, apiRequest } from '@/lib/queryClient'
 import { apiUrl } from '@/lib/api'
 
 interface AuthContextType {
@@ -170,12 +170,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
           setNeedsOnboarding(false)
         } else {
           try {
-            const response = await fetch(apiUrl('/api/profile'), {
-              headers: {
-                'Authorization': `Bearer ${session.access_token}`
-              }
-            })
-            const profile = response.ok ? await response.json() : null
+            const res = await apiRequest('GET', '/api/profile')
+            const profile = res.ok ? await res.json() : null
             setNeedsOnboarding(!profile)
           } catch (error) {
             console.error('Error checking profile:', error)
@@ -258,7 +254,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (!supabase) {
         throw new Error('Auth is not configured')
       }
-      const redirectTo = `${window.location.origin}/app`
+      // Prefer explicit public app URL when provided; sanitize to avoid stray spaces
+      const appOriginEnv = (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined)?.trim()
+      const origin = (appOriginEnv && appOriginEnv.length > 0 ? appOriginEnv : window.location.origin)
+        .trim()
+        .replace(/\/$/, '')
+      const redirectTo = `${origin}/app`
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: { emailRedirectTo: redirectTo, shouldCreateUser: true }
