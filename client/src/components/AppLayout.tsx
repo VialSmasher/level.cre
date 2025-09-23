@@ -14,6 +14,7 @@ import {
   ChevronDown, 
   Trophy,
   Map,
+  Briefcase,
   Brain,
   RotateCcw,
   BarChart3,
@@ -35,6 +36,16 @@ export function AppLayout({ children }: AppLayoutProps) {
   const { user, signOut } = useAuth()
   const [location] = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  // Decide where the Workspace nav goes: last place visited in the Workspaces section
+  const listingsHref = (() => {
+    try {
+      const lastLoc = typeof window !== 'undefined' ? localStorage.getItem('lastListingsLocation') : null
+      if (lastLoc && lastLoc.startsWith('/app/listings')) return lastLoc
+      return '/app/listings'
+    } catch {
+      return '/app/listings';
+    }
+  })()
 
   const handleSignOut = async () => {
     try {
@@ -47,6 +58,9 @@ export function AppLayout({ children }: AppLayoutProps) {
   const isActive = (path: string) => {
     if (path === '/app') {
       return location === '/app' || location === '/app/'
+    }
+    if (path === '/app/listings') {
+      return location === '/app/listings' || location.startsWith('/app/listings/')
     }
     return location === path
   }
@@ -82,6 +96,25 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </TooltipTrigger>
                 <TooltipContent>
                   <p>Map</p>
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link 
+                    href={listingsHref} 
+                    className={`p-3 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                      isActive('/app/listings') 
+                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30 opacity-100' 
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 opacity-70 hover:opacity-100'
+                    }`}
+                    aria-label="Listing Workspace"
+                  >
+                    <Briefcase size={22} />
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Listing Workspace</p>
                 </TooltipContent>
               </Tooltip>
 
@@ -289,6 +322,27 @@ export function AppLayout({ children }: AppLayoutProps) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Link 
+                    href={listingsHref} 
+                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
+                      isActive('/app/listings') 
+                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                    onClick={() => setMobileMenuOpen(false)}
+                    aria-label="Listing Workspace"
+                  >
+                    <Briefcase size={20} />
+                    <span className="font-medium">Listing Workspace</span>
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p>Listing Workspace</p>
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link 
                     href="/app/knowledge" 
                     className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
                       isActive('/app/knowledge') 
@@ -417,7 +471,7 @@ export function AppLayout({ children }: AppLayoutProps) {
       </nav>
 
       {/* Main Content */}
-      <main className="flex-1 min-h-0">
+      <main className="flex-1 min-h-0 flex flex-col">
         {children}
       </main>
     </div>

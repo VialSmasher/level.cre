@@ -3,25 +3,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { 
-  BarChart3, 
-  Users, 
-  Phone, 
-  Activity, 
-  Calendar, 
-  Target,
-  AlertCircle,
-  Clock
-} from 'lucide-react';
-import { 
-  Prospect, 
-  Submarket, 
-  ProspectStatusType,
-  Requirement
-} from '@shared/schema';
+import { Users, Phone, Calendar, Clock } from 'lucide-react';
+import { Prospect, Submarket, ProspectStatusType } from '@shared/schema';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth, useDemoAuth } from '@/hooks/useAuth';
 import { useProfile } from '@/hooks/useProfile';
+import { uniqueSubmarketNames } from '@/lib/submarkets';
 
 export default function Knowledge() {
   const { user } = useAuth();
@@ -43,8 +30,8 @@ export default function Knowledge() {
     enabled: !!currentUser, // Only fetch when user is available
   });
   
-  // Use profile submarkets as filter options (these are strings, not objects)
-  const submarketOptions = profile?.submarkets || [];
+  // Use normalized, de-duplicated submarkets as filter options
+  const submarketOptions = uniqueSubmarketNames(profile?.submarkets || []);
 
   // Fetch interactions data from database instead of localStorage
   const { data: interactions = [] } = useQuery<any[]>({
@@ -52,11 +39,7 @@ export default function Knowledge() {
     enabled: !!currentUser, // Only fetch when user is available
   });
 
-  // Fetch requirements data
-  const { data: requirements = [] } = useQuery<Requirement[]>({
-    queryKey: ['/api/requirements'],
-    enabled: !!currentUser, // Only fetch when user is available
-  });
+  // Removed requirements data for simplified dashboard
 
   // Reset state when user changes
   useEffect(() => {
@@ -76,83 +59,43 @@ export default function Knowledge() {
   }, [prospects, selectedSubmarket]);
 
   const analytics = useMemo(() => {
-    // Requirements analytics - reward for logging market intelligence
-    const requirementsCount = requirements.length;
-    const activeRequirements = requirements.filter(req => req.status === 'active').length;
-    const recentRequirements = requirements.filter(req => {
-      if (!req.createdAt) return false;
-      const created = new Date(req.createdAt);
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-      return created > thirtyDaysAgo;
-    }).length;
-
-    // Much more demanding requirements scoring for serious brokers
-    // Great brokers should have extensive market intelligence
-    const requirementsScore = Math.min(100, (requirementsCount * 2) + (recentRequirements * 1));
-    
-    // Original analytics continue here...
     const total = filteredProspects.length;
-    
+
     // Contact coverage: % with status != 'prospect'
     const contacted = filteredProspects.filter(p => p.status !== 'prospect').length;
     const contactPercent = total > 0 ? (contacted / total) * 100 : 0;
-    
-    // Activity coverage: % with >= 1 interaction
-    const withActivity = filteredProspects.filter(p => 
-      interactions.some(i => i.prospectId === p.id)
-    ).length;
-    const activityPercent = total > 0 ? (withActivity / total) * 100 : 0;
-    
-    // Freshness: % with interaction in last 30 days (more demanding)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    
+
+    // Freshness: % with interaction in last 60 days
+    const sixtyDaysAgo = new Date();
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+
     const recentActivity = filteredProspects.filter(p => {
       const prospectInteractions = interactions.filter(i => i.prospectId === p.id);
-      return prospectInteractions.some(i => new Date(i.date || i.createdAt) > thirtyDaysAgo);
+      return prospectInteractions.some(i => new Date(i.date || i.createdAt) > sixtyDaysAgo);
     }).length;
     const freshnessPercent = total > 0 ? (recentActivity / total) * 100 : 0;
-    
-    // Much more challenging Knowledge Score calculation
-    // Divided by 10 to make it realistically difficult
-    const rawScore = (
-      (contactPercent * 0.25) + 
-      (activityPercent * 0.35) + 
-      (freshnessPercent * 0.25) + 
-      (requirementsScore * 0.15)
-    );
-    const score = Math.round(rawScore / 10);
 
-    // Lists for gaps and stale
-    const noTouches = filteredProspects.filter(p => 
-      !interactions.some(i => i.prospectId === p.id)
-    );
-    
+    // Lists for gaps and stale (stale relative to 60 days)
+    const noTouches = filteredProspects.filter(p => !interactions.some(i => i.prospectId === p.id));
     const staleProspects = filteredProspects.filter(p => {
       const prospectInteractions = interactions.filter(i => i.prospectId === p.id);
       if (prospectInteractions.length === 0) return true;
-      const latestInteraction = Math.max(...prospectInteractions.map(i => new Date(i.date || i.createdAt).getTime()));
-      return new Date(latestInteraction) <= thirtyDaysAgo;
+      const latestInteraction = Math.max(
+        ...prospectInteractions.map(i => new Date(i.date || i.createdAt).getTime())
+      );
+      return new Date(latestInteraction) <= sixtyDaysAgo;
     });
 
     return {
       total,
       contacted,
-      withActivity,
       recentActivity,
       contactPercent,
-      activityPercent,
       freshnessPercent,
-      score,
       noTouches,
       staleProspects,
-      // Requirements data
-      requirementsCount,
-      activeRequirements,
-      recentRequirements,
-      requirementsScore
     };
-  }, [filteredProspects, interactions, requirements]);
+  }, [filteredProspects, interactions]);
 
   const ProgressRing = ({ progress, size = 60 }: { progress: number; size?: number }) => {
     const safeProgress = progress || 0;
@@ -193,12 +136,7 @@ export default function Knowledge() {
     );
   };
 
-  const getScoreColor = (score: number) => {
-    const safeScore = score || 0;
-    if (safeScore >= 8) return 'text-green-600';  // Great performance (80+ in old system)
-    if (safeScore >= 5) return 'text-yellow-600'; // Good performance (50+ in old system)
-    return 'text-red-600';                        // Needs improvement
-  };
+  // Removed Knowledge Score color helper
 
   const getStatusColor = (status: ProspectStatusType) => {
     const colors = {
@@ -250,8 +188,8 @@ export default function Knowledge() {
           </div>
         )}
 
-        {/* Analytics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+        {/* Analytics Cards (simplified) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Assets</CardTitle>
@@ -278,20 +216,6 @@ export default function Knowledge() {
 
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Activity Coverage</CardTitle>
-              <Activity className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent className="flex items-center justify-between">
-              <div>
-                <div className="text-2xl font-bold">{analytics.withActivity}</div>
-                <p className="text-xs text-muted-foreground">with touches</p>
-              </div>
-              <ProgressRing progress={analytics.activityPercent} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Freshness</CardTitle>
               <Calendar className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
@@ -301,16 +225,6 @@ export default function Knowledge() {
                 <p className="text-xs text-muted-foreground">last 60 days</p>
               </div>
               <ProgressRing progress={analytics.freshnessPercent} />
-            </CardContent>
-          </Card>
-
-          <Card className="border-2 border-yellow-200 bg-yellow-50">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Knowledge Score</CardTitle>
-              <Target className="h-4 w-4 text-yellow-600" />
-            </CardHeader>
-            <CardContent className="flex items-center justify-center">
-              <ProgressRing progress={analytics.score} size={80} />
             </CardContent>
           </Card>
 

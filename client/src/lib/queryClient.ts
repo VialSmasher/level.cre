@@ -40,6 +40,7 @@ export async function apiRequest(
   const fullUrl = apiUrl(url);
   const authHeaders = await getAuthHeaders();
   const headers: Record<string, string> = { ...authHeaders };
+  headers['Accept'] = 'application/json';
   
   if (data) {
     headers["Content-Type"] = "application/json";
@@ -53,6 +54,17 @@ export async function apiRequest(
   });
 
   await throwIfResNotOk(res);
+
+  // Guard against HTML fallthrough (e.g., dev proxy/back-end not handling route)
+  const ct = res.headers.get('content-type') || '';
+  if (res.ok && url.startsWith('/api') && ct.includes('text/html')) {
+    // Convert a misleading 200 HTML fallback into an actionable error
+    const body = await res.text();
+    throw new Error(
+      'Received HTML from API endpoint. Backend route may be missing or dev proxy not forwarding. ' +
+      'Ensure the server is running and that Demo Mode is enabled or you are authenticated.'
+    );
+  }
   return res;
 }
 

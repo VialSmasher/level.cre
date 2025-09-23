@@ -1,27 +1,24 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { apiRequest } from '@/lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Trophy, TrendingUp, Phone, MapPin, Target, Brain, Zap, Star, Crown } from 'lucide-react';
-import { apiUrl } from '@/lib/api';
 import { BrokerSkillsRow, SkillActivityRow } from '@shared/schema';
 import { useAuth } from '@/contexts/AuthContext';
 import BrickWall from '@/components/BrickWall';
 
 // XP calculation helpers
 const getLevel = (xp: number): number => {
-  if (xp === 0) return 1;
-  // Runescape-style XP curve: level = floor(sqrt(xp / 83) + 1)
-  // Adjusted for broker context: roughly 1000 XP per level early on, scaling up
-  return Math.min(99, Math.floor(Math.sqrt(xp / 100) + 1));
+  // Level 0 at 0 XP; Level 1 at 100 XP
+  return Math.min(99, Math.floor(Math.sqrt(xp / 100)));
 };
 
 const getXpForLevel = (level: number): number => {
-  if (level <= 1) return 0;
-  // Inverse of level formula
-  return Math.floor(((level - 1) ** 2) * 100);
+  // Threshold XP for reaching a given level (L^2 * 100)
+  return Math.floor((level ** 2) * 100);
 };
 
 const getXpToNextLevel = (currentXp: number): number => {
@@ -33,12 +30,10 @@ const getXpToNextLevel = (currentXp: number): number => {
 const getProgressToNextLevel = (currentXp: number): number => {
   const currentLevel = getLevel(currentXp);
   if (currentLevel >= 99) return 100;
-  
   const currentLevelXp = getXpForLevel(currentLevel);
   const nextLevelXp = getXpForLevel(currentLevel + 1);
-  const progressXp = currentXp - currentLevelXp;
-  const totalNeeded = nextLevelXp - currentLevelXp;
-  
+  const progressXp = Math.max(0, currentXp - currentLevelXp);
+  const totalNeeded = Math.max(1, nextLevelXp - currentLevelXp);
   return Math.floor((progressXp / totalNeeded) * 100);
 };
 
@@ -76,13 +71,41 @@ interface SkillCardProps {
   xp: number;
   icon: React.ComponentType<any>;
   description: string;
+  skillKey: 'prospecting' | 'followUp' | 'consistency' | 'marketKnowledge';
 }
 
-function SkillCard({ name, xp, icon: Icon, description }: SkillCardProps) {
+function SkillCard({ name, xp, icon: Icon, description, skillKey }: SkillCardProps) {
   const level = getLevel(xp);
   const progress = getProgressToNextLevel(xp);
   const xpToNext = getXpToNextLevel(xp);
   const levelColor = getLevelColor(level);
+  const actionsToNext = (() => {
+    if (xpToNext <= 0) return '';
+    const ceilDiv = (a: number, b: number) => Math.ceil(a / b);
+    switch (skillKey) {
+      case 'prospecting': {
+        const items = ceilDiv(xpToNext, 25);
+        return `${items} prospect${items === 1 ? '' : 's'} to next level`;
+      }
+      case 'followUp': {
+        const calls = ceilDiv(xpToNext, 15);
+        const emails = ceilDiv(xpToNext, 10);
+        const greedyCalls = Math.floor(xpToNext / 15);
+        const remainder = xpToNext - greedyCalls * 15;
+        const greedyEmails = remainder > 0 ? ceilDiv(remainder, 10) : 0;
+        const example = `${greedyCalls} call${greedyCalls === 1 ? '' : 's'}${greedyEmails ? ` + ${greedyEmails} email${greedyEmails === 1 ? '' : 's'}` : ''}`;
+        return `${calls} call${calls === 1 ? '' : 's'} or ${emails} email${emails === 1 ? '' : 's'} (e.g., ${example})`;
+      }
+      case 'consistency': {
+        const days = ceilDiv(xpToNext, 100);
+        return `${days} active day${days === 1 ? '' : 's'}`;
+      }
+      case 'marketKnowledge': {
+        const reqs = ceilDiv(xpToNext, 20);
+        return `${reqs} requirement${reqs === 1 ? '' : 's'}`;
+      }
+    }
+  })();
 
   return (
     <Card className="relative overflow-hidden">
@@ -116,8 +139,8 @@ function SkillCard({ name, xp, icon: Icon, description }: SkillCardProps) {
           </div>
           <Progress value={progress} className="h-2" />
           {xpToNext > 0 && (
-            <div className="text-xs text-gray-500 text-center">
-              {xpToNext.toLocaleString()} XP to next level
+            <div className="text-xs text-gray-600 text-center">
+              {actionsToNext}
             </div>
           )}
         </div>
@@ -139,75 +162,21 @@ function SkillCard({ name, xp, icon: Icon, description }: SkillCardProps) {
 function Leaderboard() {
   const { user } = useAuth();
   const currentUser = user;
-  
-  const [timeframe, setTimeframe] = useState<'7d' | '30d' | 'all'>('all');
 
-  // Calculate since date based on timeframe
-  const getSinceDate = (timeframe: string) => {
-    if (timeframe === 'all') return undefined;
-    const days = timeframe === '7d' ? 7 : 30;
-    const since = new Date();
-    since.setDate(since.getDate() - days);
-    return since.toISOString();
-  };
-
-  // Fetch leaderboard data - only if not in demo mode
+  // Fetch all-time leaderboard data (no timeframe)
   const { data: leaderboardResponse, isLoading, error } = useQuery({
-    queryKey: ['/api/leaderboard', timeframe],
+    queryKey: ['/api/leaderboard'],
     queryFn: async () => {
-      const sinceParam = getSinceDate(timeframe);
-      const url = sinceParam 
-        ? apiUrl(`/api/leaderboard?since=${encodeURIComponent(sinceParam)}`)
-        : apiUrl('/api/leaderboard');
-      
-      // Use the existing auth system
-      const { supabase } = await import('@/lib/supabase');
-      const headers: Record<string, string> = {};
-      
-      if (supabase) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
-          headers['Authorization'] = `Bearer ${session.access_token}`;
-        }
-      }
-      
-      const response = await fetch(url, { 
-        headers,
-        credentials: 'include'
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch leaderboard: ${response.status}`);
-      }
-      
-      return await response.json();
+      const res = await apiRequest('GET', '/api/leaderboard');
+      return await res.json();
     },
-    enabled: !!currentUser && currentUser.id !== 'demo-user', // Only fetch if user exists and not demo
-    staleTime: 30000, // 30 seconds
-    refetchInterval: false, // Don't auto-refetch
-    refetchOnWindowFocus: false, // Don't refetch on window focus
+    enabled: !!currentUser, // allow in demo mode too
+    staleTime: 30000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
   });
 
   const leaderboard = leaderboardResponse?.data || [];
-
-  if (currentUser?.id === 'demo-user') {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Crown className="h-5 w-5 text-yellow-500" />
-            Market Leader
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-8 text-gray-500">
-            <Crown className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-            <p>Leaderboard hidden in Demo Mode</p>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
 
   return (
     <Card>
@@ -217,19 +186,6 @@ function Leaderboard() {
             <Crown className="h-5 w-5 text-yellow-500" />
             Market Leader
           </CardTitle>
-          <div className="flex gap-1">
-            {(['7d', '30d', 'all'] as const).map((period) => (
-              <Button
-                key={period}
-                variant={timeframe === period ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setTimeframe(period)}
-                className="text-xs px-3 py-1"
-              >
-                {period === 'all' ? 'All' : period.toUpperCase()}
-              </Button>
-            ))}
-          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -403,6 +359,7 @@ export default function StatsPage() {
                 xp={skills?.prospecting || 0}
                 icon={MapPin}
                 description="Adding prospects, mapping areas, discovering opportunities"
+                skillKey="prospecting"
               />
               
               <SkillCard
@@ -410,6 +367,7 @@ export default function StatsPage() {
                 xp={skills?.followUp || 0}
                 icon={Phone}
                 description="Calls, emails, meetings, and consistent communication"
+                skillKey="followUp"
               />
               
               <SkillCard
@@ -417,6 +375,7 @@ export default function StatsPage() {
                 xp={skills?.consistency || 0}
                 icon={Zap}
                 description="Daily activity streaks and regular engagement patterns"
+                skillKey="consistency"
               />
               
               <SkillCard
@@ -424,6 +383,7 @@ export default function StatsPage() {
                 xp={skills?.marketKnowledge || 0}
                 icon={Brain}
                 description="Requirements tracking, market research, and industry insights"
+                skillKey="marketKnowledge"
               />
             </div>
           </div>

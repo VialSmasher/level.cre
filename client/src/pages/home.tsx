@@ -1,5 +1,17 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { GoogleMap, useJsApiLoader, DrawingManager, Marker, Polygon, InfoWindow } from '@react-google-maps/api';
+import {
+  TerraDraw,
+  TerraDrawSelectMode,
+  TerraDrawPointMode,
+  TerraDrawLineStringMode,
+  TerraDrawFreehandLineStringMode,
+  TerraDrawPolygonMode,
+  TerraDrawRectangleMode,
+  TerraDrawCircleMode,
+  type GeoJSONStoreFeatures,
+} from 'terra-draw';
+import { TerraDrawGoogleMapsAdapter } from 'terra-draw-google-maps-adapter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -7,6 +19,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Download, MapIcon, Satellite, ChevronLeft, ChevronRight, X, Save, Trash2, Filter, ChevronDown, ChevronUp, User, LogOut, Settings, Edit3 } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MapControls } from '@/features/map/MapControls';
 
 // Standardized size options for consistent use across Prospects and Requirements
@@ -24,6 +37,7 @@ import { DeveloperSettings } from '@/components/DeveloperSettings';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth, useDemoAuth } from '@/hooks/useAuth';
 import { useProfile } from '@/hooks/useProfile';
+import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { queryClient, apiRequest } from '@/lib/queryClient';
@@ -120,8 +134,8 @@ export default function HomePage() {
   // Memoize currentUser to prevent infinite loops
   const currentUser = useMemo(() => user || demoUser, [user, demoUser]);
   
-  // Use profile submarkets as single source of truth (same as Knowledge page)
-  const submarketOptions = profile?.submarkets || [];
+  // Use normalized, de-duplicated submarkets for consistent options
+  const submarketOptions = uniqueSubmarketNames(profile?.submarkets || []);
   
   // Map state
   const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton
@@ -142,6 +156,16 @@ export default function HomePage() {
     return saved && typeof saved.zoom === 'number' ? saved.zoom : DEFAULT_ZOOM;
   });
   const [bounds, setBounds] = useState<google.maps.LatLngBoundsLiteral | null>(null);
+
+  // Terra Draw state
+  const terraDrawRef = useRef<TerraDraw | null>(null);
+  const terraAdapterRef = useRef<any | null>(null);
+  const terraStartedRef = useRef<boolean>(false);
+  const terraBridgeAttachedRef = useRef<boolean>(false);
+  const terraReboundDoneRef = useRef<boolean>(false);
+  type TerraMode = 'select' | 'point' | 'linestring' | 'freehand-linestring' | 'polygon' | 'rectangle' | 'circle';
+  const [terraMode, setTerraMode] = useState<TerraMode>('select');
+  const [terraFeatures, setTerraFeatures] = useState<GeoJSONStoreFeatures[]>([]);
   
   // Data state
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -178,6 +202,8 @@ export default function HomePage() {
   // Drawing state
   const drawingManagerRef = useRef<google.maps.drawing.DrawingManager | null>(null);
   const [drawingForProspect, setDrawingForProspect] = useState<Prospect | null>(null);
+  const drawingForProspectRef = useRef<Prospect | null>(null);
+  useEffect(() => { drawingForProspectRef.current = drawingForProspect; }, [drawingForProspect]);
 
   // Google Maps loader (locked to .env key only)
   const { isLoaded } = useJsApiLoader({
@@ -295,9 +321,102 @@ export default function HomePage() {
   // Map event handlers
   const onMapLoad = useCallback((map: google.maps.Map) => {
     setMap(map);
+
+    // Initialise Terra Draw (non-invasive test layer)
+    try {
+      console.log('[Terra] Initialising on map load');
+      const adapter = new TerraDrawGoogleMapsAdapter({ lib: google.maps, map });
+      // Adapter will bind to Google's interactive pane on 'ready' below
+      const draw = new TerraDraw({
+        adapter,
+        modes: [
+          new TerraDrawSelectMode(),
+          new TerraDrawPointMode(),
+          new TerraDrawLineStringMode(),
+          new TerraDrawFreehandLineStringMode(),
+          new TerraDrawPolygonMode(),
+          new TerraDrawRectangleMode(),
+          new TerraDrawCircleMode(),
+        ],
+      });
+      draw.on('ready', () => {
+        if (terraReboundDoneRef.current) return;
+        try {
+          const root = map.getDiv() as HTMLDivElement;
+          // @ts-ignore ensure events come from a stable element
+          adapter.getMapEventElement = () => root;
+          draw.stop();
+          draw.start();
+          draw.setMode('select');
+          terraReboundDoneRef.current = true;
+          console.log('[Terra] rebound to map root');
+        } catch (e) {
+          console.warn('[Terra] unable to bind to map root', e);
+        }
+      });
+      draw.on('finish', async (id) => {
+        const feature = draw.getSnapshotFeature(id as any);
+        const snap = draw.getSnapshot();
+        console.log('[Terra] finish', feature);
+        setTerraFeatures(snap);
+
+        // If we are drawing for a selected prospect and it's a polygon, save it
+        const target = drawingForProspectRef.current;
+        if (target && feature && feature.geometry && feature.geometry.type === 'Polygon') {
+          try {
+            const newGeom = {
+              type: 'Polygon' as const,
+              coordinates: feature.geometry.coordinates as [number, number][][],
+            };
+            const acres = calculatePolygonAcres(newGeom);
+            const response = await apiRequest('PATCH', `/api/prospects/${target.id}` , {
+              geometry: newGeom,
+              acres: acres ? acres.toString() : undefined,
+            });
+            const saved = await response.json();
+            setProspects(prev => prev.map(p => p.id === saved.id ? saved : p));
+            if (selectedProspect && selectedProspect.id === saved.id) {
+              setSelectedProspect(saved);
+            }
+            toast({ title: 'Area saved', description: acres ? `${acres.toFixed(2)} acres` : 'Polygon saved' });
+          } catch (err) {
+            console.error('Failed to save polygon from Terra', err);
+            toast({ title: 'Save failed', description: 'Could not save polygon to prospect', variant: 'destructive' });
+          } finally {
+            setDrawingForProspect(null);
+            setTerraModeSafe('select');
+          }
+        }
+      });
+      draw.on('change', () => {
+        const snap = draw.getSnapshot();
+        console.log('[Terra] change', snap);
+        setTerraFeatures(snap);
+      });
+      // Defer starting Terra until map projection/bounds are ready (first idle)
+      terraDrawRef.current = draw;
+      terraAdapterRef.current = adapter;
+      setTerraMode('select');
+      // Styles will be applied after Terra starts (onIdle)
+
+      // expose for debugging
+      // @ts-expect-error
+      (window as any).__terra = draw;
+      console.log('[Terra] mode:', draw.getMode(), 'state:', draw.getModeState());
+
+      // Terra prepared
+    } catch (err) {
+      console.error('Terra Draw init failed:', err);
+    }
   }, []);
 
   const onMapUnmount = useCallback(() => {
+    try { terraDrawRef.current?.stop(); } catch {}
+    terraDrawRef.current = null;
+    terraAdapterRef.current = null;
+    terraStartedRef.current = false;
+    terraBridgeAttachedRef.current = false;
+    terraReboundDoneRef.current = false;
     setMap(null);
   }, []);
 
@@ -339,6 +458,24 @@ export default function HomePage() {
       };
       
       polygon.setMap(null); // Remove the temporary overlay
+    } else if (e.type === 'rectangle') {
+      const rect = e.overlay as google.maps.Rectangle;
+      const bounds = rect.getBounds();
+      if (bounds) {
+        const ne = bounds.getNorthEast();
+        const sw = bounds.getSouthWest();
+        const nw = new google.maps.LatLng(ne.lat(), sw.lng());
+        const se = new google.maps.LatLng(sw.lat(), ne.lng());
+        const ring: [number, number][] = [
+          [nw.lng(), nw.lat()],
+          [ne.lng(), ne.lat()],
+          [se.lng(), se.lat()],
+          [sw.lng(), sw.lat()],
+          [nw.lng(), nw.lat()],
+        ];
+        geometry = { type: 'Polygon' as const, coordinates: [ring] };
+      }
+      rect.setMap(null);
     }
 
     const acres = calculatePolygonAcres(geometry);
@@ -625,6 +762,34 @@ export default function HomePage() {
     
   }, [selectedProspect, toast]);
 
+  // Terra Draw handlers
+  const setTerraModeSafe = useCallback((mode: TerraMode) => {
+    // Disable Google DrawingManager when using Terra Draw to avoid conflicts
+    drawingManagerRef.current?.setDrawingMode(null);
+    if (!terraDrawRef.current) return;
+    try {
+      console.log('[Terra] setMode', mode);
+      terraDrawRef.current.setMode(mode);
+      setTerraMode(mode);
+      // Adjust map interactions to prioritise drawing
+      if (map) {
+        const drawing = mode !== 'select';
+        map.setOptions({
+          draggable: !drawing,
+          disableDoubleClickZoom: drawing,
+        } as google.maps.MapOptions);
+      }
+    } catch (e) {
+      console.error('Failed to set Terra mode', e);
+    }
+  }, [map]);
+
+  const clearTerra = useCallback(() => {
+    try { terraDrawRef.current?.clear(); } catch {}
+    setTerraFeatures([]);
+    setTerraModeSafe('select');
+  }, [setTerraModeSafe]);
+
   // Enable polygon editing
   const enablePolygonEditing = useCallback((prospectId: string) => {
     // Find the prospect to get original coordinates
@@ -885,33 +1050,84 @@ export default function HomePage() {
                   : { ...nextBounds }
               ));
             }
+            // Start Terra once after projection/bounds are ready
+            if (!terraStartedRef.current && terraDrawRef.current) {
+              try {
+                const draw = terraDrawRef.current;
+                draw.start();
+                draw.setMode('select');
+                // Apply high-contrast styles now that Terra is enabled
+                try {
+                  draw.updateModeOptions('polygon', {
+                    styles: {
+                      fillColor: '#2563EB',
+                      fillOpacity: 0.2,
+                      outlineColor: '#2563EB',
+                      outlineWidth: 2,
+                      closingPointColor: '#2563EB',
+                      closingPointOutlineColor: '#ffffff',
+                      closingPointOutlineWidth: 2,
+                      closingPointWidth: 6,
+                      editedPointColor: '#10B981',
+                      editedPointOutlineColor: '#ffffff',
+                      editedPointOutlineWidth: 2,
+                      editedPointWidth: 6,
+                      coordinatePointColor: '#2563EB',
+                      coordinatePointOutlineColor: '#ffffff',
+                      coordinatePointOutlineWidth: 2,
+                      coordinatePointWidth: 5,
+                      snappingPointColor: '#F59E0B',
+                      snappingPointOutlineColor: '#ffffff',
+                      snappingPointOutlineWidth: 2,
+                      snappingPointWidth: 6,
+                    },
+                  } as any);
+                  draw.updateModeOptions('rectangle', {
+                    styles: {
+                      fillColor: '#059669',
+                      fillOpacity: 0.2,
+                      outlineColor: '#059669',
+                      outlineWidth: 2,
+                    },
+                  } as any);
+                } catch (styleErr) {
+                  console.warn('[Terra] Failed to set styles after start', styleErr);
+                }
+                terraStartedRef.current = true;
+                console.log('[Terra] started after idle');
+              } catch (e) {
+                console.warn('[Terra] failed to start after idle', e);
+              }
+            }
           }}
         >
-          {/* Drawing Manager */}
+          {/* Google DrawingManager re-enabled */}
           {isLoaded && (
             <DrawingManager
               onLoad={onDrawingManagerLoad}
               onOverlayComplete={onOverlayComplete}
               options={{
                 drawingControl: false,
-                drawingControlOptions: {
-                  position: window.google?.maps?.ControlPosition?.TOP_LEFT,
-                  drawingModes: [
-                    window.google?.maps?.drawing?.OverlayType?.MARKER,
-                    window.google?.maps?.drawing?.OverlayType?.POLYGON,
-                  ],
-                },
                 polygonOptions: {
                   fillColor: '#3B82F6',
                   fillOpacity: 0.15,
                   strokeWeight: 2,
                   strokeColor: '#3B82F6',
-                  clickable: false,
+                  clickable: true,
                   editable: false,
                   zIndex: 1,
                 },
                 markerOptions: {
                   draggable: false,
+                },
+                rectangleOptions: {
+                  fillColor: '#059669',
+                  fillOpacity: 0.15,
+                  strokeWeight: 2,
+                  strokeColor: '#059669',
+                  clickable: true,
+                  editable: false,
+                  zIndex: 1,
                 },
               }}
             />
@@ -928,6 +1144,7 @@ export default function HomePage() {
                   key={prospect.id}
                   position={{ lat, lng }}
                   onClick={() => handleProspectClick(prospect)}
+                  clickable={terraMode === 'select'}
                   icon={{
                     path: window.google?.maps?.SymbolPath?.CIRCLE,
                     fillColor: color,
@@ -1031,10 +1248,18 @@ export default function HomePage() {
         }}
         bounds={bounds}
         defaultCenter={DEFAULT_CENTER}
-        onPolygon={handleDrawPolygon}
+        onPolygon={() => {
+          if (selectedProspect) {
+            setDrawingForProspect(selectedProspect);
+            toast({ title: 'Draw Mode', description: `Draw an area for ${selectedProspect.name}.` });
+          }
+          if (drawingManagerRef.current) {
+            drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.POLYGON);
+          }
+        }}
         onPin={() => {
           if (drawingManagerRef.current) {
-            drawingManagerRef.current.setDrawingMode(window.google.maps.drawing.OverlayType.MARKER);
+            drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.MARKER);
           }
         }}
         onPan={() => {
@@ -1054,6 +1279,13 @@ export default function HomePage() {
           setZoom(DEFAULT_ZOOM);
           writeJSON(nsKey(currentUser?.id, 'mapViewport'), { ...DEFAULT_CENTER, zoom: DEFAULT_ZOOM });
         }}
+        onRectangle={() => {
+          if (drawingManagerRef.current) {
+            drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.RECTANGLE);
+          }
+        }}
+        onSelect={() => setTerraModeSafe('select')}
+        activeTerraMode={terraMode as any}
       />
 
       {/* Developer Settings - Keep at bottom right but with margin */}
@@ -1140,19 +1372,26 @@ export default function HomePage() {
               <h2 className="text-sm font-semibold text-gray-800">
                 Edit Prospect
               </h2>
-              <Button 
-                variant="ghost" 
-                size="sm"
-                onClick={() => setIsEditPanelOpen(false)}
-                className="text-gray-400 hover:text-gray-600 h-6 w-6 p-0"
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => setIsEditPanelOpen(false)}
+                    className="text-gray-400 hover:text-gray-600 h-6 w-6 p-0"
+                    aria-label="Save and close"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left">Save and close</TooltipContent>
+              </Tooltip>
             </div>
           </div>
 
           {/* Body - Auto Height with Tabs */}
           <div className="px-4 py-3 space-y-4">
+            <p className="text-[11px] text-gray-500">Changes save automatically</p>
             <Tabs defaultValue="property" className="space-y-4">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="property" className="text-xs">Property</TabsTrigger>
@@ -1367,98 +1606,20 @@ export default function HomePage() {
           {/* Footer - Sticky */}
           <div className="sticky bottom-0 z-10 bg-white border-t px-4 py-3">
             <div className="flex gap-2">
-              <Button 
-                onClick={async () => {
-                  if (selectedProspect?.id === 'temp-prospect') {
-                    // Create new prospect in database
-                    try {
-                      console.log('Creating new prospect:', selectedProspect);
-                      const newProspectData = {
-                        name: selectedProspect.name,
-                        status: selectedProspect.status,
-                        notes: selectedProspect.notes || '',
-                        geometry: selectedProspect.geometry,
-                        submarketId: selectedProspect.submarketId,
-                        followUpTimeframe: selectedProspect.followUpTimeframe,
-                        contactName: selectedProspect.contactName,
-                        contactEmail: selectedProspect.contactEmail,
-                        contactPhone: selectedProspect.contactPhone,
-                        contactCompany: selectedProspect.contactCompany,
-                        size: selectedProspect.size,
-                        businessName: selectedProspect.businessName,
-                        websiteUrl: selectedProspect.websiteUrl
-                      };
-
-                      const response = await apiRequest('POST', '/api/prospects', newProspectData);
-                      const savedProspect = await response.json();
-                      setProspects(prev => [...prev, savedProspect]);
-                      setSelectedProspect(savedProspect);
-                      setIsEditPanelOpen(true);
-                      
-                      queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
-                      
-                      toast({
-                        title: "Prospect saved successfully",
-                        description: "Prospect has been added to your map."
-                      });
-                      
-                      console.log('Prospect saved:', savedProspect);
-                    } catch (error) {
-                      console.error('Error saving prospect:', error);
-                      toast({
-                        title: "Error saving prospect",
-                        description: "Failed to save prospect to database.",
-                        variant: "destructive"
-                      });
-                    }
-                  } else if (selectedProspect) {
-                    // Explicit save for existing record (PATCH full payload)
-                    try {
-                      const updateData = {
-                        name: selectedProspect.name,
-                        status: selectedProspect.status,
-                        notes: selectedProspect.notes || '',
-                        geometry: selectedProspect.geometry,
-                        submarketId: selectedProspect.submarketId,
-                        followUpTimeframe: selectedProspect.followUpTimeframe,
-                        contactName: selectedProspect.contactName,
-                        contactEmail: selectedProspect.contactEmail,
-                        contactPhone: selectedProspect.contactPhone,
-                        contactCompany: selectedProspect.contactCompany,
-                        size: selectedProspect.size,
-                        acres: selectedProspect.acres,
-                        businessName: selectedProspect.businessName,
-                        websiteUrl: selectedProspect.websiteUrl
-                      };
-
-                      const response = await apiRequest('PATCH', `/api/prospects/${selectedProspect.id}`, updateData);
-                      const savedProspect = await response.json();
-                      setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
-                      setSelectedProspect(savedProspect);
-                      setIsEditPanelOpen(true);
-
-                      queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
-
-                      toast({
-                        title: "Prospect updated",
-                        description: "All changes have been saved.",
-                      });
-                    } catch (error) {
-                      console.error('Error updating prospect:', error);
-                      toast({
-                        title: "Error updating prospect",
-                        description: "Failed to save changes to database.",
-                        variant: "destructive"
-                      });
-                    }
-                  }
-                }}
-                className="bg-blue-600 hover:bg-blue-700 flex-1 h-8 text-xs"
-                title="Save Changes"
-              >
-                <Save className="h-3.5 w-3.5 mr-1" />
-                Save
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() => setIsEditPanelOpen(false)}
+                    variant="outline"
+                    className="h-8 w-8 p-0 text-xs"
+                    aria-label="Save and close"
+                    title="Save and close"
+                  >
+                    <Save className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Save and close</TooltipContent>
+              </Tooltip>
               
               {selectedProspect.geometry.type === 'Polygon' ? (
                 editingProspectId === selectedProspect.id ? (
@@ -1483,27 +1644,37 @@ export default function HomePage() {
                     </Button>
                   </div>
                 ) : (
-                  // Show Edit button when not editing
-                  <Button 
-                    onClick={() => enablePolygonEditing(selectedProspect.id)}
-                    variant="outline"
-                    className="flex-1 h-8 text-xs"
-                    title="Edit Polygon Points"
-                  >
-                    <Edit3 className="h-3.5 w-3.5 mr-1" />
-                    Edit Shape
-                  </Button>
+                  // Show Edit button when not editing (icon-only)
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        onClick={() => enablePolygonEditing(selectedProspect.id)}
+                        variant="outline"
+                        className="h-8 w-8 p-0"
+                        aria-label="Edit shape"
+                        title="Edit shape"
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Edit shape</TooltipContent>
+                  </Tooltip>
                 )
               ) : (
-                <Button 
-                  onClick={() => handleDrawPolygon()}
-                  variant="outline"
-                  className="flex-1 h-8 text-xs"
-                  title="Draw Polygon Area"
-                >
-                  <Edit3 className="h-3.5 w-3.5 mr-1" />
-                  Draw Area
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      onClick={() => handleDrawPolygon()}
+                      variant="outline"
+                      className="h-8 w-8 p-0"
+                      aria-label="Draw area"
+                      title="Draw area"
+                    >
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Draw area</TooltipContent>
+                </Tooltip>
               )}
               
               <Button 

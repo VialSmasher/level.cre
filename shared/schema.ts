@@ -10,6 +10,7 @@ import {
   text,
   integer,
   pgEnum,
+  unique,
 } from "drizzle-orm/pg-core";
 
 // Prospect status enum
@@ -196,18 +197,54 @@ export type Profile = typeof profiles.$inferSelect;
 export type InsertProfile = typeof profiles.$inferInsert;
 export type UpdateProfile = Partial<InsertProfile>;
 
+// Listings (Workspace) tables
+export const listings = pgTable(
+  "listings",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id),
+    title: varchar("title").notNull(),
+    address: varchar("address"),
+    lat: varchar("lat"),
+    lng: varchar("lng"),
+    submarket: varchar("submarket"),
+    dealType: varchar("deal_type"), // lease | sale
+    size: varchar("size"),
+    price: varchar("price"),
+    createdAt: timestamp("created_at").defaultNow(),
+    archivedAt: timestamp("archived_at"),
+  },
+  (table) => [
+    index("IDX_listings_user").on(table.userId),
+  ],
+);
+
+export type Listing = typeof listings.$inferSelect;
+export type InsertListing = typeof listings.$inferInsert;
+
+// listingProspects is defined after prospects table to satisfy references
+
 // Contact interactions table
-export const contactInteractions = pgTable("contact_interactions", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
-  prospectId: varchar("prospect_id").notNull().references(() => prospects.id, { onDelete: 'cascade' }),
-  date: varchar("date").notNull(),
-  type: varchar("type").notNull(), // call, email, meeting, note
-  outcome: varchar("outcome").notNull(), // contacted, no_answer, left_message, scheduled_meeting, not_interested, follow_up_later
-  notes: varchar("notes").default(""),
-  nextFollowUp: varchar("next_follow_up"),
-  createdAt: timestamp("created_at").defaultNow(),
-});
+export const contactInteractions = pgTable(
+  "contact_interactions",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id),
+    prospectId: varchar("prospect_id").notNull().references(() => prospects.id, { onDelete: 'cascade' }),
+    listingId: varchar("listing_id").references(() => listings.id),
+    date: varchar("date").notNull(),
+    type: varchar("type").notNull(), // call, email, meeting, note, tour, proposal
+    outcome: varchar("outcome").notNull(), // contacted, no_answer, left_message, scheduled_meeting, not_interested, follow_up_later
+    notes: varchar("notes").default(""),
+    nextFollowUp: varchar("next_follow_up"),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_interactions_user").on(table.userId),
+    index("IDX_interactions_listing").on(table.listingId),
+    index("IDX_interactions_prospect").on(table.prospectId),
+  ],
+);
 
 // Prospects table with user association
 export const prospects = pgTable("prospects", {
@@ -231,6 +268,26 @@ export const prospects = pgTable("prospects", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+// Listing <-> Prospect link table (after prospects)
+export const listingProspects = pgTable(
+  "listing_prospects",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    listingId: varchar("listing_id").notNull().references(() => listings.id, { onDelete: 'cascade' }),
+    prospectId: varchar("prospect_id").notNull().references(() => prospects.id, { onDelete: 'cascade' }),
+    role: varchar("role").notNull().default("target"),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_listing_prospects_listing").on(table.listingId),
+    index("IDX_listing_prospects_prospect").on(table.prospectId),
+    unique("UQ_listing_prospect").on(table.listingId, table.prospectId),
+  ],
+);
+
+export type ListingProspect = typeof listingProspects.$inferSelect;
+export type InsertListingProspect = typeof listingProspects.$inferInsert;
 
 // Submarkets table with user association
 export const submarkets = pgTable("submarkets", {
@@ -268,6 +325,38 @@ export const requirements = pgTable("requirements", {
   status: varchar("status").default("active"), // active, fulfilled, expired
   tags: varchar("tags").array().default(sql`ARRAY[]::varchar[]`),
   notes: varchar("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Market comps table with user association
+export const marketComps = pgTable("market_comps", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  // Base fields
+  address: varchar("address").notNull(),
+  submarket: varchar("submarket"),
+  assetType: varchar("asset_type").notNull(), // Building | Land | Other
+  buildingSize: varchar("building_size"), // SF
+  landSize: varchar("land_size"), // acres (string to allow decimals)
+  sourceLink: varchar("source_link"),
+  notes: varchar("notes"),
+  // Deal type
+  dealType: varchar("deal_type").notNull(), // lease | sale
+  // Lease fields
+  tenant: varchar("tenant"),
+  termMonths: integer("term_months"),
+  rate: varchar("rate"),
+  rateType: varchar("rate_type"), // Net | Gross | NNN
+  commencement: varchar("commencement"),
+  concessions: varchar("concessions"),
+  // Sale fields
+  saleDate: varchar("sale_date"),
+  buyer: varchar("buyer"),
+  seller: varchar("seller"),
+  price: varchar("price"),
+  pricePerSf: varchar("price_per_sf"),
+  pricePerAcre: varchar("price_per_acre"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -348,6 +437,51 @@ export const InsertRequirementSchema = RequirementSchema.omit({
 
 export type Requirement = z.infer<typeof RequirementSchema>;
 export type InsertRequirement = z.infer<typeof InsertRequirementSchema>;
+
+// Market Comps
+export const MarketCompAssetType = z.enum(["Building", "Land", "Other"]);
+export const MarketCompDealType = z.enum(["lease", "sale"]);
+export const MarketCompRateType = z.enum(["Net", "Gross", "NNN"]);
+
+export const MarketCompSchema = z.object({
+  id: z.string().optional(),
+  userId: z.string().optional(),
+  // Base fields
+  address: z.string().min(1, "Address is required"),
+  submarket: z.string().optional(),
+  assetType: MarketCompAssetType,
+  buildingSize: z.string().optional(), // store as string to allow flexibility
+  landSize: z.string().optional(),     // acres, string to allow decimals
+  sourceLink: z.string().optional(),
+  notes: z.string().optional(),
+  // Deal type
+  dealType: MarketCompDealType,
+  // Lease fields
+  tenant: z.string().optional(),
+  termMonths: z.number().optional(),
+  rate: z.string().optional(),
+  rateType: MarketCompRateType.optional(),
+  commencement: z.string().optional(), // YYYY-MM-DD
+  concessions: z.string().optional(),  // TI / Free Rent
+  // Sale fields
+  saleDate: z.string().optional(),     // YYYY-MM-DD
+  buyer: z.string().optional(),
+  seller: z.string().optional(),
+  price: z.string().optional(),        // store as string; client can format as currency
+  pricePerSf: z.string().optional(),
+  pricePerAcre: z.string().optional(),
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
+});
+
+export const InsertMarketCompSchema = MarketCompSchema.omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type MarketComp = z.infer<typeof MarketCompSchema>;
+export type InsertMarketComp = z.infer<typeof InsertMarketCompSchema>;
 
 // Broker Skills XP System - Runescape-style leveling (0-99)
 export const brokerSkills = pgTable("broker_skills", {

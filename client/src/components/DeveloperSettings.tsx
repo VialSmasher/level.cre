@@ -1,32 +1,29 @@
 import { useState } from 'react';
-import { Settings, Eye, EyeOff } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-interface DeveloperSettingsProps {
-  onApiKeyChange: (key: string) => void;
-}
+interface DeveloperSettingsProps { onApiKeyChange?: (key: string) => void }
 
 export function DeveloperSettings({ onApiKeyChange }: DeveloperSettingsProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [showKey, setShowKey] = useState(false);
-  const [keyInput, setKeyInput] = useState('');
+  const [resetting, setResetting] = useState(false);
 
-  const handleSave = () => {
-    const trimmedKey = keyInput.trim();
-    localStorage.setItem('google-maps-api-key-override', trimmedKey);
-    onApiKeyChange(trimmedKey);
-    setIsOpen(false);
-  };
-
-  const handleClear = () => {
-    setKeyInput('');
-    localStorage.removeItem('google-maps-api-key-override');
-    onApiKeyChange('');
-    setIsOpen(false);
+  const handleResetDemo = async () => {
+    try {
+      setResetting(true);
+      await fetch('/api/demo/reset', {
+        method: 'POST',
+        headers: { 'X-Demo-Mode': 'true' },
+        credentials: 'include'
+      });
+      window.location.reload();
+    } catch (e) {
+      console.error('Reset demo failed:', e);
+      setResetting(false);
+    }
   };
 
   return (
@@ -58,47 +55,16 @@ export function DeveloperSettings({ onApiKeyChange }: DeveloperSettingsProps) {
           </DialogHeader>
           
           <div className="space-y-4">
-            <div>
-              <Label htmlFor="api-key" className="text-sm font-medium">
-                Google Maps API Key Override
-              </Label>
-              <div className="mt-1 flex gap-2">
-                <div className="relative flex-1">
-                  <Input
-                    id="api-key"
-                    type={showKey ? 'text' : 'password'}
-                    value={keyInput}
-                    onChange={(e) => setKeyInput(e.target.value)}
-                    placeholder="Enter your API key..."
-                    className="pr-10"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                    onClick={() => setShowKey(!showKey)}
-                  >
-                    {showKey ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
+            <div className="pt-3">
+              <Label className="text-sm font-medium">Demo Utilities</Label>
+              <div className="mt-2 flex gap-2">
+                <Button onClick={handleResetDemo} variant="destructive" disabled={resetting}>
+                  {resetting ? 'Resetting…' : 'Reset Demo Data'}
+                </Button>
               </div>
               <p className="mt-2 text-xs text-gray-600">
-                💡 Remember to restrict your API key by HTTP referrer in Google Cloud Console for security.
+                Clears demo prospects, requirements, interactions, and profile.
               </p>
-            </div>
-            
-            <div className="flex gap-2">
-              <Button onClick={handleSave} className="flex-1">
-                Save Override
-              </Button>
-              <Button onClick={handleClear} variant="outline">
-                Clear
-              </Button>
             </div>
           </div>
         </DialogContent>

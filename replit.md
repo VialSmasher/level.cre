@@ -89,3 +89,44 @@ Preferred communication style: Simple, everyday language.
 - **Form Handling**: React Hook Form with Zod resolvers for form validation
 - **Date Utilities**: date-fns for date manipulation and formatting
 - **Utility Libraries**: clsx and tailwind-merge for conditional styling
+
+## Auth Modes
+
+- Demo Mode: Instant access with seeded demo data. Triggered by the “Start Demo Mode” button or `localStorage.setItem('demo-mode','true')`.
+- Magic Link (Email): Passwordless sign-in via Supabase email OTP. Always available.
+- Google OAuth (Optional): Toggled via env flag and requires Supabase configuration.
+
+### Toggle Google OAuth
+
+- Set the env flag in your environment or `.env` file at repo root:
+  - `VITE_ENABLE_GOOGLE_AUTH=0` disables Google OAuth (default)
+  - `VITE_ENABLE_GOOGLE_AUTH=1` enables Google OAuth
+- When enabled, the landing page shows a “Continue with Google” button and the server exposes `/api/auth/google`.
+- Restart dev servers or rebuild so both client (Vite) and server pick up the change.
+  - Dev: `npm run dev`
+  - Build: `npm run build && npm start`
+
+### Requirements when enabling Google OAuth
+
+- Supabase project configured with Google provider and redirect URLs.
+- These env vars must be present (already supported by the app):
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
+
+## Deploying
+
+- Provision a managed Postgres (Supabase/Neon/RDS). Ensure SSL is enabled.
+- Set these env vars in your host (do not commit `.env`):
+  - `DATABASE_URL` (must allow SSL; required)
+  - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (for OAuth; optional if demo only)
+  - `JWT_SECRET` (cookie signing; any strong random string)
+- Prepare the database schema on the live DB:
+  - `npm run db:prepare` (ensures `pgcrypto` then runs Drizzle push)
+- Build and start:
+  - `npm run build && npm start`
+- Health checks:
+  - `GET /health` (verifies DB connection)
+
+Notes
+- The schema uses `gen_random_uuid()`, which requires the `pgcrypto` extension. The `db:prepare` script runs `CREATE EXTENSION IF NOT EXISTS pgcrypto` safely.
+- In demo mode (`VITE_DEMO_MODE=1`), most routes work without a JWT; for production, provide a valid Supabase JWT in the `Authorization: Bearer <token>` header.

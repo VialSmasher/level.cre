@@ -12,10 +12,14 @@ import Knowledge from "@/pages/knowledge";
 import FollowUp from "@/pages/followup";
 import Stats from "@/pages/stats";
 import Requirements from "@/pages/requirements";
+import MarketComps from "@/pages/market-comps";
+import MapToolsTestPage from "@/pages/map-tools-test";
 import Profile from "@/pages/profile";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import Onboarding from "@/pages/onboarding";
+import ListingsIndex from "@/pages/listings";
+import ListingWorkspace from "@/pages/listing-workspace";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useLocation } from "wouter";
@@ -116,6 +120,46 @@ function Router() {
           </OnboardingCheck>
         </ProtectedRoute>
       </Route>
+
+      <Route path="/app/listings">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <ListingsIndex />
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/app/listings/:id">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <ListingWorkspace />
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/app/market-comps">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <MarketComps />
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/app/map-tools-test">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <MapToolsTestPage />
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
       
       <Route path="/app/profile">
         <ProtectedRoute>
@@ -136,6 +180,11 @@ function Router() {
       {user && <Route path="/requirements" component={() => { 
         const [, setLocation] = useLocation()
         setLocation('/app/requirements')
+        return null
+      }} />}
+      {user && <Route path="/market-comps" component={() => { 
+        const [, setLocation] = useLocation()
+        setLocation('/app/market-comps')
         return null
       }} />}
       {user && <Route path="/profile" component={() => { 

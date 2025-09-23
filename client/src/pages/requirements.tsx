@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Plus, Edit, Trash2, Tag, Building, Users, Clock, MapPin } from "lucide-react";
 import { Requirement, InsertRequirement, Submarket } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
+import { uniqueSubmarketNames } from "@/lib/submarkets";
 
 // Standardized size options for consistent use across Prospects and Requirements
 const STANDARD_SIZE_OPTIONS = [
@@ -102,6 +103,12 @@ export default function RequirementsPage() {
     retry: 3,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
+  
+  // Build unique submarket options (case-insensitive), always include 'Other' once
+  const submarketOptions = uniqueSubmarketNames([
+    ...submarkets.map(s => s.name),
+    'Other',
+  ]);
   
   // Debug submarkets
   useEffect(() => {
@@ -288,9 +295,8 @@ export default function RequirementsPage() {
           
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button onClick={resetForm} className="flex items-center gap-2">
+              <Button onClick={resetForm} size="icon" aria-label="Add Requirement" title="Add Requirement">
                 <Plus className="h-4 w-4" />
-                Add Requirement
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-md">
@@ -351,12 +357,11 @@ export default function RequirementsPage() {
                       <SelectValue placeholder="Select submarket" />
                     </SelectTrigger>
                     <SelectContent>
-                      {submarkets.map((submarket) => (
-                        <SelectItem key={submarket.id} value={submarket.name}>
-                          {submarket.name}
+                      {submarketOptions.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
                         </SelectItem>
                       ))}
-                      <SelectItem value="Other">Other</SelectItem>
                     </SelectContent>
                   </Select>
                   {submarketstLoading && <p className="text-sm text-gray-500 mt-1">Loading submarkets...</p>}
@@ -378,6 +383,23 @@ export default function RequirementsPage() {
                           {sizeOption}
                         </SelectItem>
                       ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="status">Status</Label>
+                  <Select
+                    value={formData.status || "active"}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, status: value as any }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="fulfilled">Fulfilled</SelectItem>
+                      <SelectItem value="expired">Expired</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

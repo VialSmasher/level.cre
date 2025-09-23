@@ -8,14 +8,28 @@ import {
   type ContactInteractionRow, type InsertContactInteraction,
   type BrokerSkillsRow, type InsertBrokerSkills,
   type SkillActivityRow, type InsertSkillActivity,
-  prospects, requirements, submarkets, touches, users, profiles, contactInteractions, brokerSkills, skillActivities
+  type MarketComp, type InsertMarketComp,
+  type Listing, type InsertListing,
+  type InsertListingProspect,
+  prospects, requirements, submarkets, touches, users, profiles, contactInteractions, brokerSkills, skillActivities, marketComps,
+  listings, listingProspects
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, gte, ne, sql } from "drizzle-orm";
+import { eq, and, desc, gte, ne, sql, between } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 // Updated interface with user-specific CRUD methods
 export interface IStorage {
+  // Listings (workspace)
+  getListings(userId: string): Promise<(Listing & { prospectCount: number })[]>;
+  getListing(id: string, userId: string): Promise<Listing | undefined>;
+  createListing(listing: InsertListing & { userId: string }): Promise<Listing>;
+  archiveListing(id: string, userId: string): Promise<boolean>;
+  deleteListing(id: string, userId: string): Promise<boolean>;
+  getListingProspects(listingId: string, userId: string): Promise<Prospect[]>;
+  linkProspectToListing(params: { listingId: string; prospectId: string; userId: string }): Promise<{ ok: true }>;
+  unlinkProspectFromListing(params: { listingId: string; prospectId: string; userId: string }): Promise<boolean>;
+
   // Prospects operations with user filtering
   getProspect(id: string, userId: string): Promise<Prospect | undefined>;
   getAllProspects(userId: string): Promise<Prospect[]>;
@@ -33,6 +47,13 @@ export interface IStorage {
   createRequirement(requirement: InsertRequirement & { userId: string }): Promise<Requirement>;
   updateRequirement(id: string, userId: string, requirement: Partial<Requirement>): Promise<Requirement | undefined>;
   deleteRequirement(id: string, userId: string): Promise<boolean>;
+
+  // Market comps operations with user filtering
+  getMarketComp(id: string, userId: string): Promise<MarketComp | undefined>;
+  getAllMarketComps(userId: string): Promise<MarketComp[]>;
+  createMarketComp(comp: InsertMarketComp & { userId: string }): Promise<MarketComp>;
+  updateMarketComp(id: string, userId: string, comp: Partial<MarketComp>): Promise<MarketComp | undefined>;
+  deleteMarketComp(id: string, userId: string): Promise<boolean>;
   
   // Submarkets operations with user filtering
   getSubmarket(id: string, userId: string): Promise<Submarket | undefined>;
@@ -55,8 +76,8 @@ export interface IStorage {
   updateProfile(userId: string, profile: UpdateProfile): Promise<Profile | undefined>;
 
   // Contact interaction operations with user filtering
-  getContactInteractions(userId: string, prospectId?: string): Promise<ContactInteractionRow[]>;
-  createContactInteraction(interaction: InsertContactInteraction & { userId: string }): Promise<ContactInteractionRow>;
+  getContactInteractions(userId: string, prospectId?: string, listingId?: string, start?: string, end?: string): Promise<ContactInteractionRow[]>;
+  createContactInteraction(interaction: InsertContactInteraction & { userId: string; listingId?: string | null }): Promise<ContactInteractionRow>;
   deleteContactInteraction(id: string, userId: string): Promise<boolean>;
 
   // Broker Skills operations
@@ -67,6 +88,115 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  // Listings (workspace)
+  async getListings(userId: string): Promise<(Listing & { prospectCount: number })[]> {
+    // Fetch listings and counts of linked prospects
+    const rows = await db
+      .select({
+        id: listings.id,
+        userId: listings.userId,
+        title: listings.title,
+        address: listings.address,
+        lat: listings.lat,
+        lng: listings.lng,
+        submarket: listings.submarket,
+        createdAt: listings.createdAt,
+        archivedAt: listings.archivedAt,
+        prospectCount: sql<number>`COALESCE((SELECT COUNT(*)::int FROM ${listingProspects} lp WHERE lp.listing_id = ${listings.id}), 0)`,
+      })
+      .from(listings)
+      .where(and(eq(listings.userId, userId), eq(sql`COALESCE(${listings.archivedAt} IS NULL, TRUE)`, true))) as any;
+
+    return rows.map((r: any) => ({
+      id: r.id,
+      userId: r.userId,
+      title: r.title,
+      address: r.address,
+      lat: r.lat,
+      lng: r.lng,
+      submarket: r.submarket,
+      createdAt: r.createdAt,
+      archivedAt: r.archivedAt,
+      prospectCount: r.prospectCount ?? 0,
+    }));
+  }
+
+  async getListing(id: string, userId: string): Promise<Listing | undefined> {
+    const [row] = await db.select().from(listings).where(and(eq(listings.id, id), eq(listings.userId, userId)));
+    return row;
+  }
+
+  async createListing(insert: InsertListing & { userId: string }): Promise<Listing> {
+    const [row] = await db.insert(listings).values({
+      id: insert.id ?? randomUUID(),
+      userId: insert.userId,
+      title: insert.title,
+      address: insert.address,
+      lat: (insert.lat ?? '') as any,
+      lng: (insert.lng ?? '') as any,
+      submarket: insert.submarket ?? null,
+      dealType: (insert as any).dealType ?? null,
+      size: (insert as any).size ?? null,
+      price: (insert as any).price ?? null,
+    }).returning();
+    return row;
+  }
+
+  async archiveListing(id: string, userId: string): Promise<boolean> {
+    const [row] = await db.update(listings).set({ archivedAt: new Date() }).where(and(eq(listings.id, id), eq(listings.userId, userId))).returning();
+    return !!row;
+  }
+
+  async deleteListing(id: string, userId: string): Promise<boolean> {
+    // Delete listing; cascades remove listingProspects via FK
+    const [row] = await db.delete(listings).where(and(eq(listings.id, id), eq(listings.userId, userId))).returning();
+    return !!row;
+  }
+
+  async getListingProspects(listingId: string, userId: string): Promise<Prospect[]> {
+    // join link table to prospects, enforce user's prospects
+    const rows = await db
+      .select({ p: prospects })
+      .from(listingProspects)
+      .innerJoin(prospects, eq(listingProspects.prospectId, prospects.id))
+      .innerJoin(listings, eq(listingProspects.listingId, listings.id))
+      .where(and(eq(listingProspects.listingId, listingId), eq(listings.userId, userId)));
+    return rows.map(({ p }) => ({
+      id: p.id,
+      name: p.name,
+      status: p.status as any,
+      notes: p.notes || "",
+      geometry: p.geometry as any,
+      submarketId: p.submarketId || undefined,
+      lastContactDate: p.lastContactDate || undefined,
+      followUpTimeframe: p.followUpTimeframe as any || undefined,
+      contactName: p.contactName || undefined,
+      contactEmail: p.contactEmail || undefined,
+      contactPhone: p.contactPhone || undefined,
+      contactCompany: p.contactCompany || undefined,
+      size: p.size || undefined,
+      acres: p.acres || undefined,
+      createdDate: p.createdAt?.toISOString() || new Date().toISOString(),
+    }));
+  }
+
+  async linkProspectToListing(params: { listingId: string; prospectId: string; userId: string }): Promise<{ ok: true }> {
+    // Ensure listing belongs to user
+    const listing = await this.getListing(params.listingId, params.userId);
+    if (!listing) throw new Error('Listing not found');
+    // Insert link idempotently
+    await db.insert(listingProspects)
+      .values({ id: randomUUID(), listingId: params.listingId, prospectId: params.prospectId, role: 'target' })
+      .onConflictDoNothing({ target: [listingProspects.listingId, listingProspects.prospectId] });
+    return { ok: true };
+  }
+
+  async unlinkProspectFromListing(params: { listingId: string; prospectId: string; userId: string }): Promise<boolean> {
+    const listing = await this.getListing(params.listingId, params.userId);
+    if (!listing) return false;
+    const result = await db.delete(listingProspects).where(and(eq(listingProspects.listingId, params.listingId), eq(listingProspects.prospectId, params.prospectId)));
+    return (result.rowCount ?? 0) > 0;
+  }
   // User operations for Replit Auth
   async getUser(id: string): Promise<User | undefined> {
     const [result] = await db.select().from(users).where(eq(users.id, id));
@@ -218,6 +348,193 @@ export class DatabaseStorage implements IStorage {
 
   async deleteRequirement(id: string, userId: string): Promise<boolean> {
     const result = await db.delete(requirements).where(and(eq(requirements.id, id), eq(requirements.userId, userId)));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // Market comps operations with user filtering
+  async getMarketComp(id: string, userId: string): Promise<MarketComp | undefined> {
+    const [result] = await db.select().from(marketComps).where(and(eq(marketComps.id, id), eq(marketComps.userId, userId)));
+    if (!result) return undefined;
+    return {
+      id: result.id,
+      userId: result.userId,
+      address: result.address,
+      submarket: result.submarket || undefined,
+      assetType: result.assetType as any,
+      buildingSize: result.buildingSize || undefined,
+      landSize: result.landSize || undefined,
+      sourceLink: result.sourceLink || undefined,
+      notes: result.notes || undefined,
+      dealType: result.dealType as any,
+      tenant: result.tenant || undefined,
+      termMonths: result.termMonths || undefined,
+      rate: result.rate || undefined,
+      rateType: result.rateType as any || undefined,
+      commencement: result.commencement || undefined,
+      concessions: result.concessions || undefined,
+      saleDate: result.saleDate || undefined,
+      buyer: result.buyer || undefined,
+      seller: result.seller || undefined,
+      price: result.price || undefined,
+      pricePerSf: result.pricePerSf || undefined,
+      pricePerAcre: result.pricePerAcre || undefined,
+      createdAt: result.createdAt?.toISOString(),
+      updatedAt: result.updatedAt?.toISOString(),
+    };
+  }
+
+  async getAllMarketComps(userId: string): Promise<MarketComp[]> {
+    const results = await db.select().from(marketComps).where(eq(marketComps.userId, userId));
+    return results.map(result => ({
+      id: result.id,
+      userId: result.userId,
+      address: result.address,
+      submarket: result.submarket || undefined,
+      assetType: result.assetType as any,
+      buildingSize: result.buildingSize || undefined,
+      landSize: result.landSize || undefined,
+      sourceLink: result.sourceLink || undefined,
+      notes: result.notes || undefined,
+      dealType: result.dealType as any,
+      tenant: result.tenant || undefined,
+      termMonths: result.termMonths || undefined,
+      rate: result.rate || undefined,
+      rateType: result.rateType as any || undefined,
+      commencement: result.commencement || undefined,
+      concessions: result.concessions || undefined,
+      saleDate: result.saleDate || undefined,
+      buyer: result.buyer || undefined,
+      seller: result.seller || undefined,
+      price: result.price || undefined,
+      pricePerSf: result.pricePerSf || undefined,
+      pricePerAcre: result.pricePerAcre || undefined,
+      createdAt: result.createdAt?.toISOString(),
+      updatedAt: result.updatedAt?.toISOString(),
+    }));
+  }
+
+  async createMarketComp(insertComp: InsertMarketComp & { userId: string }): Promise<MarketComp> {
+    const [result] = await db.insert(marketComps).values({
+      userId: insertComp.userId,
+      address: insertComp.address,
+      submarket: insertComp.submarket,
+      assetType: insertComp.assetType,
+      buildingSize: insertComp.buildingSize,
+      landSize: insertComp.landSize,
+      sourceLink: insertComp.sourceLink,
+      notes: insertComp.notes,
+      dealType: insertComp.dealType,
+      tenant: insertComp.tenant,
+      termMonths: insertComp.termMonths,
+      rate: insertComp.rate,
+      rateType: insertComp.rateType,
+      commencement: insertComp.commencement,
+      concessions: insertComp.concessions,
+      saleDate: insertComp.saleDate,
+      buyer: insertComp.buyer,
+      seller: insertComp.seller,
+      price: insertComp.price,
+      pricePerSf: insertComp.pricePerSf,
+      pricePerAcre: insertComp.pricePerAcre,
+    }).returning();
+
+    // Award XP for market knowledge
+    await this.addSkillActivity({
+      userId: insertComp.userId,
+      skillType: 'marketKnowledge',
+      action: 'add_market_comp',
+      xpGained: 20,
+      relatedId: result.id,
+      multiplier: 1,
+    });
+
+    return {
+      id: result.id,
+      userId: result.userId,
+      address: result.address,
+      submarket: result.submarket || undefined,
+      assetType: result.assetType as any,
+      buildingSize: result.buildingSize || undefined,
+      landSize: result.landSize || undefined,
+      sourceLink: result.sourceLink || undefined,
+      notes: result.notes || undefined,
+      dealType: result.dealType as any,
+      tenant: result.tenant || undefined,
+      termMonths: result.termMonths || undefined,
+      rate: result.rate || undefined,
+      rateType: result.rateType as any || undefined,
+      commencement: result.commencement || undefined,
+      concessions: result.concessions || undefined,
+      saleDate: result.saleDate || undefined,
+      buyer: result.buyer || undefined,
+      seller: result.seller || undefined,
+      price: result.price || undefined,
+      pricePerSf: result.pricePerSf || undefined,
+      pricePerAcre: result.pricePerAcre || undefined,
+      createdAt: result.createdAt?.toISOString(),
+      updatedAt: result.updatedAt?.toISOString(),
+    };
+  }
+
+  async updateMarketComp(id: string, userId: string, updates: Partial<MarketComp>): Promise<MarketComp | undefined> {
+    const [result] = await db.update(marketComps)
+      .set({
+        ...(updates.address !== undefined && { address: updates.address }),
+        ...(updates.submarket !== undefined && { submarket: updates.submarket }),
+        ...(updates.assetType !== undefined && { assetType: updates.assetType }),
+        ...(updates.buildingSize !== undefined && { buildingSize: updates.buildingSize }),
+        ...(updates.landSize !== undefined && { landSize: updates.landSize }),
+        ...(updates.sourceLink !== undefined && { sourceLink: updates.sourceLink }),
+        ...(updates.notes !== undefined && { notes: updates.notes }),
+        ...(updates.dealType !== undefined && { dealType: updates.dealType }),
+        ...(updates.tenant !== undefined && { tenant: updates.tenant }),
+        ...(updates.termMonths !== undefined && { termMonths: updates.termMonths }),
+        ...(updates.rate !== undefined && { rate: updates.rate }),
+        ...(updates.rateType !== undefined && { rateType: updates.rateType }),
+        ...(updates.commencement !== undefined && { commencement: updates.commencement }),
+        ...(updates.concessions !== undefined && { concessions: updates.concessions }),
+        ...(updates.saleDate !== undefined && { saleDate: updates.saleDate }),
+        ...(updates.buyer !== undefined && { buyer: updates.buyer }),
+        ...(updates.seller !== undefined && { seller: updates.seller }),
+        ...(updates.price !== undefined && { price: updates.price }),
+        ...(updates.pricePerSf !== undefined && { pricePerSf: updates.pricePerSf }),
+        ...(updates.pricePerAcre !== undefined && { pricePerAcre: updates.pricePerAcre }),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(marketComps.id, id), eq(marketComps.userId, userId)))
+      .returning();
+
+    if (!result) return undefined;
+    return {
+      id: result.id,
+      userId: result.userId,
+      address: result.address,
+      submarket: result.submarket || undefined,
+      assetType: result.assetType as any,
+      buildingSize: result.buildingSize || undefined,
+      landSize: result.landSize || undefined,
+      sourceLink: result.sourceLink || undefined,
+      notes: result.notes || undefined,
+      dealType: result.dealType as any,
+      tenant: result.tenant || undefined,
+      termMonths: result.termMonths || undefined,
+      rate: result.rate || undefined,
+      rateType: result.rateType as any || undefined,
+      commencement: result.commencement || undefined,
+      concessions: result.concessions || undefined,
+      saleDate: result.saleDate || undefined,
+      buyer: result.buyer || undefined,
+      seller: result.seller || undefined,
+      price: result.price || undefined,
+      pricePerSf: result.pricePerSf || undefined,
+      pricePerAcre: result.pricePerAcre || undefined,
+      createdAt: result.createdAt?.toISOString(),
+      updatedAt: result.updatedAt?.toISOString(),
+    };
+  }
+
+  async deleteMarketComp(id: string, userId: string): Promise<boolean> {
+    const result = await db.delete(marketComps).where(and(eq(marketComps.id, id), eq(marketComps.userId, userId)));
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -470,21 +787,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Contact interaction operations with user filtering
-  async getContactInteractions(userId: string, prospectId?: string): Promise<ContactInteractionRow[]> {
-    if (prospectId) {
-      const results = await db.select().from(contactInteractions)
-        .where(and(eq(contactInteractions.userId, userId), eq(contactInteractions.prospectId, prospectId)))
-        .orderBy(contactInteractions.createdAt);
-      return results;
-    } else {
-      const results = await db.select().from(contactInteractions)
-        .where(eq(contactInteractions.userId, userId))
-        .orderBy(contactInteractions.createdAt);
-      return results;
-    }
+  async getContactInteractions(userId: string, prospectId?: string, listingId?: string, start?: string, end?: string): Promise<ContactInteractionRow[]> {
+    const whereClauses: any[] = [eq(contactInteractions.userId, userId)];
+    if (prospectId) whereClauses.push(eq(contactInteractions.prospectId, prospectId));
+    if (listingId) whereClauses.push(eq(contactInteractions.listingId, listingId));
+    if (start && end) whereClauses.push(between(contactInteractions.date, start, end));
+    const results = await db.select().from(contactInteractions)
+      .where(and(...whereClauses))
+      .orderBy(contactInteractions.createdAt);
+    return results;
   }
 
-  async createContactInteraction(interactionData: InsertContactInteraction & { userId: string }): Promise<ContactInteractionRow> {
+  async createContactInteraction(interactionData: InsertContactInteraction & { userId: string; listingId?: string | null }): Promise<ContactInteractionRow> {
     const [result] = await db.insert(contactInteractions)
       .values({
         ...interactionData,
@@ -614,74 +928,46 @@ export class DatabaseStorage implements IStorage {
   async getLeaderboard({ userId, orgId, since }: { userId: string, orgId?: string, since?: Date }): Promise<any[]> {
     // Helper function to calculate level from XP (same as stats page)
     const getLevel = (xp: number): number => {
-      if (xp === 0) return 1;
-      return Math.min(99, Math.floor(Math.sqrt(xp / 100) + 1));
+      // Match client logic: Level 0 at 0 XP; Level 1 at 100 XP
+      return Math.min(99, Math.floor(Math.sqrt(xp / 100)));
     };
 
     try {
-      if (since) {
-        // Time-based query: aggregate from skill_activities within window
-        const results = await db.select({
-          userId: skillActivities.userId,
-          userEmail: users.email,
-          displayName: profiles.name,
-          xpProspect: sql<number>`COALESCE(SUM(CASE WHEN ${skillActivities.skillType} = 'prospecting' THEN ${skillActivities.xpGained} ELSE 0 END), 0)`,
-          xpFollowup: sql<number>`COALESCE(SUM(CASE WHEN ${skillActivities.skillType} = 'followUp' THEN ${skillActivities.xpGained} ELSE 0 END), 0)`,
-        })
-        .from(skillActivities)
-        .innerJoin(users, eq(skillActivities.userId, users.id))
-        .leftJoin(profiles, eq(users.id, profiles.id))
-        .where(and(
-          gte(skillActivities.timestamp, since),
-          ne(users.id, 'demo-user') // Exclude demo user
-        ))
-        .groupBy(skillActivities.userId, users.email, profiles.name);
+      // All-time leaderboard: read from broker_skills only
+      const results = await db.select({
+        userId: users.id,
+        userEmail: users.email,
+        displayName: profiles.name,
+        prospectingXp: brokerSkills.prospecting,
+        followUpXp: brokerSkills.followUp,
+        consistencyXp: brokerSkills.consistency,
+        marketKnowledgeXp: brokerSkills.marketKnowledge,
+      })
+      .from(users)
+      .leftJoin(brokerSkills, eq(users.id, brokerSkills.userId))
+      .leftJoin(profiles, eq(users.id, profiles.id))
+      .where(ne(users.id, 'demo-user')); // Exclude demo user
 
-        // Calculate levels and sort
-        const leaderboard = results.map(row => ({
+      // Calculate levels and sort
+      const leaderboard = results.map(row => {
+        const lPros = getLevel(row.prospectingXp || 0);
+        const lFup = getLevel(row.followUpXp || 0);
+        const lCons = getLevel(row.consistencyXp || 0);
+        const lMk = getLevel(row.marketKnowledgeXp || 0);
+        return {
           user_id: row.userId,
           user_email: row.userEmail || '',
           display_name: row.displayName || row.userEmail?.split('@')[0] || 'Unknown',
-          level_total: getLevel((row.xpProspect || 0) + (row.xpFollowup || 0)),
-          xp_total: (row.xpProspect || 0) + (row.xpFollowup || 0),
-        }));
-
-        // Sort by level_total DESC, then by xp_total DESC
-        return leaderboard.sort((a, b) => {
-          if (a.level_total !== b.level_total) return b.level_total - a.level_total;
-          return b.xp_total - a.xp_total;
-        });
-      } else {
-        // Total query: read from broker_skills
-        const results = await db.select({
-          userId: users.id,
-          userEmail: users.email,
-          displayName: profiles.name,
-          prospectingXp: brokerSkills.prospecting,
-          followUpXp: brokerSkills.followUp,
-          consistencyXp: brokerSkills.consistency,
-          marketKnowledgeXp: brokerSkills.marketKnowledge,
-        })
-        .from(users)
-        .leftJoin(brokerSkills, eq(users.id, brokerSkills.userId))
-        .leftJoin(profiles, eq(users.id, profiles.id))
-        .where(ne(users.id, 'demo-user')); // Exclude demo user
-
-        // Calculate levels and sort
-        const leaderboard = results.map(row => ({
-          user_id: row.userId,
-          user_email: row.userEmail || '',
-          display_name: row.displayName || row.userEmail?.split('@')[0] || 'Unknown',
-          level_total: getLevel((row.prospectingXp || 0) + (row.followUpXp || 0) + (row.consistencyXp || 0) + (row.marketKnowledgeXp || 0)),
+          level_total: lPros + lFup + lCons + lMk,
           xp_total: (row.prospectingXp || 0) + (row.followUpXp || 0),
-        }));
+        };
+      });
 
-        // Sort by level_total DESC, then by xp_total DESC
-        return leaderboard.sort((a, b) => {
-          if (a.level_total !== b.level_total) return b.level_total - a.level_total;
-          return b.xp_total - a.xp_total;
-        });
-      }
+      // Sort by level_total DESC, then by xp_total DESC
+      return leaderboard.sort((a, b) => {
+        if (a.level_total !== b.level_total) return b.level_total - a.level_total;
+        return b.xp_total - a.xp_total;
+      });
     } catch (error) {
       console.error('Error fetching leaderboard:', error);
       return [];

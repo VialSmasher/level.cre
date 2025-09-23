@@ -1,10 +1,16 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import jwt from "jsonwebtoken";
 import { storage } from "./storage";
 import { getUserId, requireAuth } from "./auth";
 import { z } from 'zod';
 import { ProspectGeometry, ProspectStatus, FollowUpTimeframe } from '@shared/schema';
+import { randomUUID } from 'crypto';
+import * as demo from './demoStore';
+
+function isDemo(req: Request): boolean {
+  return req.headers['x-demo-mode'] === 'true' || process.env.VITE_DEMO_MODE === '1' || process.env.DEMO_MODE === '1';
+}
 import { createClient } from '@supabase/supabase-js';
 import { pool } from './db';
 
@@ -16,46 +22,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     ? createClient(supabaseUrl, supabaseKey)
     : null;
 
-  // Simple redirect to Google OAuth - let Supabase handle everything
-  app.get('/api/auth/google', async (req, res) => {
-    if (!supabase) {
-      return res.status(500).json({ error: 'Supabase not configured' });
-    }
-    
-    // Ensure HTTPS for Replit domains (both .replit.app and .replit.dev)
-    const host = req.get('host') || '';
-    const protocol = (host.includes('replit.app') || host.includes('replit.dev')) ? 'https' : req.protocol;
-    const redirectUrl = `${protocol}://${req.get('host')}/app`;
-    
-    console.log('OAuth Debug - Host:', req.get('host'));
-    console.log('OAuth Debug - Protocol:', protocol);
-    console.log('OAuth Debug - Redirect URL:', redirectUrl);
-    
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: redirectUrl
+  const GOOGLE_ENABLED = (process.env.VITE_ENABLE_GOOGLE_AUTH === '1' || process.env.VITE_ENABLE_GOOGLE_AUTH === 'true');
+
+  if (GOOGLE_ENABLED) {
+    // Simple redirect to Google OAuth - let Supabase handle everything
+    app.get('/api/auth/google', async (req, res) => {
+      if (!supabase) {
+        return res.status(500).json({ error: 'Supabase not configured' });
+      }
+      
+      // Ensure HTTPS for Replit domains (both .replit.app and .replit.dev)
+      const host = req.get('host') || '';
+      const protocol = (host.includes('replit.app') || host.includes('replit.dev')) ? 'https' : req.protocol;
+      const redirectUrl = `${protocol}://${req.get('host')}/app`;
+      
+      if (req.app.get('env') === 'development') {
+        console.log('OAuth Debug - Host:', req.get('host'));
+        console.log('OAuth Debug - Protocol:', protocol);
+        console.log('OAuth Debug - Redirect URL:', redirectUrl);
+      }
+      
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl
+        }
+      });
+      
+      if (error) {
+        console.error('OAuth initiation error:', error);
+        return res.redirect(`/?error=${encodeURIComponent(error.message)}`);
+      }
+      
+      if (req.app.get('env') === 'development') {
+        console.log('OAuth Debug - Generated URL:', data.url);
+      }
+      
+      if (data.url) {
+        res.redirect(data.url);
+      } else {
+        res.redirect('/?error=no_oauth_url');
       }
     });
-    
-    if (error) {
-      console.error('OAuth initiation error:', error);
-      return res.redirect(`/?error=${encodeURIComponent(error.message)}`);
-    }
-    
-    console.log('OAuth Debug - Generated URL:', data.url);
-    
-    if (data.url) {
-      res.redirect(data.url);
-    } else {
-      res.redirect('/?error=no_oauth_url');
-    }
-  });
+  } else {
+    // Google OAuth disabled
+    app.get('/api/auth/google', async (_req, res) => {
+      return res.status(503).json({ error: 'Google OAuth is temporarily disabled' });
+    });
+  }
 
   // OAuth callback endpoint that Supabase/Google expects
   app.get('/api/auth/callback', async (req, res) => {
-    console.log('OAuth Callback - Query params:', req.query);
-    console.log('OAuth Callback - Headers:', req.headers);
+    if (req.app.get('env') === 'development') {
+      console.log('OAuth Callback - Query params:', req.query);
+      console.log('OAuth Callback - Headers:', req.headers);
+    }
     
     // Handle OAuth callback - redirect to app
     const { code, error: authError } = req.query;
@@ -74,6 +95,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Logout endpoint (stateless) – nothing to clear server-side
   app.post('/api/auth/logout', async (_req, res) => {
     res.json({ success: true });
+  });
+  
+  // Demo: reset persisted demo data (safe no-op outside demo mode)
+  app.post('/api/demo/reset', async (req, res) => {
+    if (!isDemo(req)) return res.status(403).json({ ok: false, message: 'Not in demo mode' });
+    try {
+      await demo.reset();
+      res.json({ ok: true });
+    } catch (e: any) {
+      console.error('Demo reset error:', e);
+      res.status(500).json({ ok: false, message: e.message || 'Failed to reset demo data' });
+    }
   });
   // User endpoint - returns demo user for unauthenticated requests, real user for authenticated requests
   app.get('/api/auth/user', async (req, res) => {
@@ -103,28 +136,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
     
-    // Fall back to demo user and ensure the row exists for FK constraints
-    try {
-      const demoUser = await storage.upsertUser({
+    // Fall back to demo user without touching DB in demo mode
+    if (isDemo(req)) {
+      return res.json({
         id: 'demo-user',
         email: 'demo@example.com',
         firstName: 'Demo',
         lastName: 'User',
         profileImageUrl: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
       });
-      res.json({
-        id: demoUser.id,
-        email: demoUser.email,
-        firstName: demoUser.firstName || 'Demo',
-        lastName: demoUser.lastName || 'User',
-        profileImageUrl: demoUser.profileImageUrl || null,
-        createdAt: demoUser.createdAt || new Date(),
-        updatedAt: demoUser.updatedAt || new Date(),
-      });
-    } catch (e) {
-      console.error('Error ensuring demo user exists:', e);
-      res.status(500).json({ message: 'Failed to load demo user' });
     }
+
+    // If not demo mode and no JWT, treat as unauthenticated
+    res.status(401).json({ message: 'Not authenticated' });
   });
 
   // Demo bypass route for testing (stateless)
@@ -163,11 +189,246 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/profile', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        const profile = await demo.getProfile(userId);
+        return res.json(profile);
+      }
       const profile = await storage.getProfile(userId);
       res.json(profile);
     } catch (error) {
       console.error("Error fetching profile:", error);
       res.status(500).json({ message: "Failed to fetch profile" });
+    }
+  });
+
+  // Listings (workspace) routes
+  app.get('/api/listings', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const list = await demo.getListings(userId);
+        // Filter out archived items to match DB behavior
+        const active = list.filter((l: any) => !l.archivedAt);
+        // Enrich with prospect counts
+        const links = await Promise.all(active.map(async (l: any) => {
+          const linked = await demo.getListingLinks(userId, l.id);
+          return { ...l, prospectCount: linked.length };
+        }));
+        return res.json(links);
+      }
+      const list = await storage.getListings(userId);
+      res.json(list);
+    } catch (error) {
+      console.error('Error fetching listings:', error);
+      res.status(500).json({ message: 'Failed to fetch listings' });
+    }
+  });
+
+  app.post('/api/listings', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const { title, address, lat, lng, submarket, dealType, size, price } = req.body || {};
+      if (!title || String(title).trim() === '') {
+        return res.status(400).json({ message: 'title is required' });
+      }
+      if (isDemo(req)) {
+        const item = {
+          id: randomUUID(),
+          userId,
+          title: title.trim(),
+          address: address || title.trim(),
+          lat: lat || '',
+          lng: lng || '',
+          submarket: submarket || null,
+          createdAt: new Date().toISOString(),
+          archivedAt: null,
+        };
+        await demo.addListing(userId, item);
+        return res.status(201).json({ ...item, prospectCount: 0 });
+      }
+      const listing = await storage.createListing({ 
+        userId, 
+        title: title || address || 'Workspace', 
+        address: (address && String(address).trim() !== '') ? address : (title || 'Workspace'), 
+        lat: lat != null && lat !== '' ? String(lat) : null, 
+        lng: lng != null && lng !== '' ? String(lng) : null, 
+        submarket, 
+        // avoid inserting columns that may not exist without migrations
+      });
+      res.status(201).json(listing);
+    } catch (error) {
+      console.error('Error creating listing:', error);
+      res.status(500).json({ message: 'Failed to create listing' });
+    }
+  });
+
+  app.get('/api/listings/:id', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const demoListing = await demo.getListing(userId, req.params.id);
+        if (!demoListing) return res.status(404).json({ message: 'Listing not found' });
+        return res.json(demoListing);
+      }
+      const listing = await storage.getListing(req.params.id, userId);
+      if (!listing) return res.status(404).json({ message: 'Listing not found' });
+      res.json(listing);
+    } catch (error) {
+      console.error('Error getting listing:', error);
+      res.status(500).json({ message: 'Failed to get listing' });
+    }
+  });
+
+  app.post('/api/listings/:id/archive', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const okDemo = await demo.archiveListing(userId, req.params.id);
+        if (!okDemo) return res.status(404).json({ message: 'Listing not found' });
+        return res.json({ ok: true });
+      }
+      const ok = await storage.archiveListing(req.params.id, userId);
+      if (!ok) return res.status(404).json({ message: 'Listing not found' });
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error archiving listing:', error);
+      res.status(500).json({ message: 'Failed to archive listing' });
+    }
+  });
+
+  app.delete('/api/listings/:id', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const okDemo = await demo.deleteListing(userId, req.params.id);
+        if (!okDemo) return res.status(404).json({ message: 'Listing not found' });
+        return res.json({ ok: true });
+      }
+      const ok = await storage.deleteListing(req.params.id, userId);
+      if (!ok) return res.status(404).json({ message: 'Listing not found' });
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('Error deleting listing:', error);
+      res.status(500).json({ message: 'Failed to delete listing' });
+    }
+  });
+
+  app.get('/api/listings/:id/prospects', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const links = await demo.getListingLinks(userId, req.params.id);
+        const allProspects = await demo.getProspects(userId);
+        const linked = links.map((lnk) => allProspects.find((p: any) => p.id === lnk.prospectId)).filter(Boolean);
+        return res.json(linked);
+      }
+      const items = await storage.getListingProspects(req.params.id, userId);
+      res.json(items);
+    } catch (error) {
+      console.error('Error fetching listing prospects:', error);
+      res.status(500).json({ message: 'Failed to fetch listing prospects' });
+    }
+  });
+
+  app.post('/api/listings/:id/prospects', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const { prospectId } = req.body || {};
+      if (!prospectId) return res.status(400).json({ message: 'prospectId is required' });
+      if (isDemo(req)) {
+        await demo.linkProspect(userId, req.params.id, prospectId);
+        return res.status(201).json({ ok: true });
+      }
+      await storage.linkProspectToListing({ listingId: req.params.id, prospectId, userId });
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      console.error('Error linking prospect:', error);
+      // Handle unique violation gracefully
+      return res.status(200).json({ ok: true });
+    }
+  });
+
+  app.delete('/api/listings/:id/prospects/:prospectId', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const okDemo = await demo.unlinkProspect(userId, req.params.id, req.params.prospectId);
+        if (!okDemo) return res.status(404).json({ message: 'Not linked' });
+        return res.status(204).send();
+      }
+      const ok = await storage.unlinkProspectFromListing({ listingId: req.params.id, prospectId: req.params.prospectId, userId });
+      if (!ok) return res.status(404).json({ message: 'Not linked' });
+      res.status(204).send();
+    } catch (error) {
+      console.error('Error unlinking prospect:', error);
+      res.status(500).json({ message: 'Failed to unlink prospect' });
+    }
+  });
+
+  app.get('/api/listings/:id/export', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const { start, end } = req.query as any;
+      if (isDemo(req)) {
+        const interactionsAll = await demo.getInteractions(userId);
+        const interactions = (interactionsAll || []).filter((i: any) => i.listingId === req.params.id)
+          .filter((i: any) => (!start || i.date >= start) && (!end || i.date <= end));
+        const links = await demo.getListingLinks(userId, req.params.id);
+        const allProspects = await demo.getProspects(userId);
+        const prospectMap = new Map(allProspects.map((p: any) => [p.id, p]));
+        const byType: Record<string, number> = {};
+        interactions.forEach((i: any) => { byType[i.type] = (byType[i.type] || 0) + 1; });
+        const lines: string[] = [];
+        lines.push('Summary');
+        lines.push('Type,Count');
+        Object.entries(byType).forEach(([t, c]) => lines.push(`${t},${c}`));
+        lines.push('');
+        lines.push('Details');
+        lines.push('Date,Type,Prospect,Address,Notes,NextSteps');
+        interactions.forEach((i: any) => {
+          const p: any = prospectMap.get(i.prospectId);
+          const name = p?.name?.replaceAll(',', ' ') || '';
+          const address = p?.name?.replaceAll(',', ' ') || '';
+          const notes = (i.notes || '').replaceAll('\n', ' ').replaceAll(',', ' ');
+          const next = (i.nextFollowUp || '').replaceAll(',', ' ');
+          lines.push(`${i.date},${i.type},${name},${address},${notes},${next}`);
+        });
+        const csv = lines.join('\n');
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="listing-${req.params.id}-export.csv"`);
+        return res.send(csv);
+      }
+      const listing = await storage.getListing(req.params.id, userId);
+      if (!listing) return res.status(404).json({ message: 'Listing not found' });
+      const interactions = await storage.getContactInteractions(userId, undefined, req.params.id, start, end);
+      const lp = await storage.getListingProspects(req.params.id, userId);
+      const prospectMap = new Map(lp.map(p => [p.id, p]));
+      const byType: Record<string, number> = {};
+      interactions.forEach(i => { byType[i.type] = (byType[i.type] || 0) + 1; });
+      const summaryRows = Object.entries(byType).map(([type, count]) => ({ type, count }));
+      // Build CSV
+      const lines: string[] = [];
+      lines.push('Summary');
+      lines.push('Type,Count');
+      summaryRows.forEach(r => lines.push(`${r.type},${r.count}`));
+      lines.push('');
+      lines.push('Details');
+      lines.push('Date,Type,Prospect,Address,Notes,NextSteps');
+      interactions.forEach(i => {
+        const p = prospectMap.get(i.prospectId as any);
+        const name = p?.name?.replaceAll(',', ' ') || '';
+        const address = p?.name?.replaceAll(',', ' ') || '';
+        const notes = (i.notes || '').replaceAll('\n', ' ').replaceAll(',', ' ');
+        const next = (i.nextFollowUp || '').replaceAll(',', ' ');
+        lines.push(`${i.date},${i.type},${name},${address},${notes},${next}`);
+      });
+      const csv = lines.join('\n');
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename="listing-${req.params.id}-export.csv"`);
+      res.send(csv);
+    } catch (error) {
+      console.error('Error exporting listing CSV:', error);
+      res.status(500).json({ message: 'Failed to export CSV' });
     }
   });
 
@@ -181,6 +442,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         id: userId,
         ...req.body
       };
+      if (isDemo(req)) {
+        const saved = await demo.setProfile(userId, profileData);
+        return res.json(saved);
+      }
       const profile = await storage.createProfile(profileData);
       console.log("Profile created successfully:", profile);
       res.json(profile);
@@ -194,11 +459,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/profile', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        const updated = await demo.updateProfile(userId, req.body);
+        return res.json(updated);
+      }
       const profile = await storage.updateProfile(userId, req.body);
       if (!profile) {
         return res.status(404).json({ message: "Profile not found" });
       }
-
+      
       // Sync submarkets from profile to submarkets table - disabled for now
       // if (req.body.submarkets) {
       //   await syncProfileSubmarkets(userId, req.body.submarkets);
@@ -215,6 +484,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/requirements', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        const list = await demo.getRequirements(userId);
+        return res.json(list);
+      }
       const requirements = await storage.getAllRequirements(userId);
       res.json(requirements);
     } catch (error) {
@@ -226,6 +499,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/requirements', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        const created = {
+          id: randomUUID(),
+          userId,
+          title: req.body.title,
+          source: req.body.source ?? null,
+          location: req.body.location ?? null,
+          contactName: req.body.contactName ?? null,
+          contactEmail: req.body.contactEmail ?? null,
+          contactPhone: req.body.contactPhone ?? null,
+          spaceSize: req.body.spaceSize ?? null,
+          timeline: req.body.timeline ?? null,
+          status: req.body.status || 'active',
+          tags: req.body.tags || [],
+          notes: req.body.notes ?? null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await demo.addRequirement(userId, created);
+        return res.status(201).json(created);
+      }
       const requirement = await storage.createRequirement({
         ...req.body,
         userId
@@ -240,6 +534,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/requirements/:id', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        const updated = await demo.updateRequirement(userId, req.params.id, req.body);
+        if (!updated) return res.status(404).json({ message: 'Requirement not found' });
+        return res.json(updated);
+      }
       const requirement = await storage.updateRequirement(req.params.id, userId, req.body);
       if (!requirement) {
         return res.status(404).json({ message: "Requirement not found" });
@@ -254,6 +553,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete('/api/requirements/:id', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        const ok = await demo.deleteRequirement(userId, req.params.id);
+        if (!ok) return res.status(404).json({ message: 'Requirement not found' });
+        return res.status(204).send();
+      }
       const deleted = await storage.deleteRequirement(req.params.id, userId);
       if (!deleted) {
         return res.status(404).json({ message: "Requirement not found" });
@@ -265,10 +569,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Market Comps routes with user association
+  app.get('/api/market-comps', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const list = await demo.getMarketComps(userId);
+        return res.json(list);
+      }
+      const comps = await storage.getAllMarketComps(userId);
+      res.json(comps);
+    } catch (error) {
+      console.error('Error fetching market comps:', error);
+      res.status(500).json({ message: 'Failed to fetch market comps' });
+    }
+  });
+
+  app.post('/api/market-comps', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const created = {
+          id: randomUUID(),
+          userId,
+          address: req.body.address,
+          submarket: req.body.submarket ?? null,
+          assetType: req.body.assetType,
+          buildingSize: req.body.buildingSize ?? null,
+          landSize: req.body.landSize ?? null,
+          sourceLink: req.body.sourceLink ?? null,
+          notes: req.body.notes ?? null,
+          dealType: req.body.dealType,
+          tenant: req.body.tenant ?? null,
+          termMonths: req.body.termMonths ?? null,
+          rate: req.body.rate ?? null,
+          rateType: req.body.rateType ?? null,
+          commencement: req.body.commencement ?? null,
+          concessions: req.body.concessions ?? null,
+          saleDate: req.body.saleDate ?? null,
+          buyer: req.body.buyer ?? null,
+          seller: req.body.seller ?? null,
+          price: req.body.price ?? null,
+          pricePerSf: req.body.pricePerSf ?? null,
+          pricePerAcre: req.body.pricePerAcre ?? null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await demo.addMarketComp(userId, created);
+        return res.status(201).json(created);
+      }
+      const comp = await storage.createMarketComp({ ...req.body, userId });
+      res.status(201).json(comp);
+    } catch (error) {
+      console.error('Error creating market comp:', error);
+      res.status(500).json({ message: 'Failed to create market comp' });
+    }
+  });
+
+  app.patch('/api/market-comps/:id', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const updated = await demo.updateMarketComp(userId, req.params.id, req.body);
+        if (!updated) return res.status(404).json({ message: 'Market comp not found' });
+        return res.json(updated);
+      }
+      const comp = await storage.updateMarketComp(req.params.id, userId, req.body);
+      if (!comp) {
+        return res.status(404).json({ message: 'Market comp not found' });
+      }
+      res.json(comp);
+    } catch (error) {
+      console.error('Error updating market comp:', error);
+      res.status(500).json({ message: 'Failed to update market comp' });
+    }
+  });
+
+  app.delete('/api/market-comps/:id', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) {
+        const ok = await demo.deleteMarketComp(userId, req.params.id);
+        if (!ok) return res.status(404).json({ message: 'Market comp not found' });
+        return res.status(204).send();
+      }
+      const deleted = await storage.deleteMarketComp(req.params.id, userId);
+      if (!deleted) {
+        return res.status(404).json({ message: 'Market comp not found' });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error('Error deleting market comp:', error);
+      res.status(500).json({ message: 'Failed to delete market comp' });
+    }
+  });
+
   // Prospects routes with user association
   app.get('/api/prospects', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        const list = await demo.getProspects(userId);
+        return res.json(list);
+      }
       const prospects = await storage.getAllProspects(userId);
       res.json(prospects);
     } catch (error) {
@@ -306,6 +709,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: 'Invalid prospect data', error: parseResult.error.errors });
       }
 
+      if (isDemo(req)) {
+        const created = {
+          id: randomUUID(),
+          ...parseResult.data,
+          createdDate: new Date().toISOString(),
+        };
+        await demo.addProspect(userId, created);
+        return res.status(201).json(created);
+      }
+
       const prospect = await storage.createProspect({ ...parseResult.data, userId });
       res.status(201).json(prospect);
     } catch (e) {
@@ -322,6 +735,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/prospects/:id', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        const updated = await demo.updateProspect(userId, req.params.id, req.body);
+        if (!updated) return res.status(404).json({ message: 'Prospect not found' });
+        return res.json(updated);
+      }
       const prospect = await storage.updateProspect(req.params.id, userId, req.body);
       if (!prospect) {
         return res.status(404).json({ message: "Prospect not found" });
@@ -336,6 +754,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete('/api/prospects/:id', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        await demo.deleteProspect(userId, req.params.id);
+        return res.status(204).send();
+      }
       const deleted = await storage.deleteProspect(req.params.id, userId);
       if (!deleted) {
         return res.status(404).json({ message: "Prospect not found" });
@@ -351,6 +773,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/submarkets', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        const list = await demo.getSubmarkets(userId);
+        return res.json(list);
+      }
       const submarkets = await storage.getAllSubmarkets(userId);
       res.json(submarkets);
     } catch (error) {
@@ -362,6 +788,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/submarkets', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        const created = {
+          id: randomUUID(),
+          userId,
+          name: req.body.name,
+          color: req.body.color || null,
+          isActive: !!req.body.isActive,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await demo.addSubmarket(userId, created);
+        return res.status(201).json(created);
+      }
       const submarket = await storage.createSubmarket({
         ...req.body,
         userId
@@ -376,6 +815,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/submarkets/:id', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        const updated = await demo.updateSubmarket(userId, req.params.id, req.body);
+        if (!updated) return res.status(404).json({ message: 'Submarket not found' });
+        return res.json(updated);
+      }
       const submarket = await storage.updateSubmarket(req.params.id, userId, req.body);
       if (!submarket) {
         return res.status(404).json({ message: "Submarket not found" });
@@ -390,6 +834,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete('/api/submarkets/:id', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        const ok = await demo.deleteSubmarket(userId, req.params.id);
+        if (!ok) return res.status(404).json({ message: 'Submarket not found' });
+        return res.status(204).send();
+      }
       const deleted = await storage.deleteSubmarket(req.params.id, userId);
       if (!deleted) {
         return res.status(404).json({ message: "Submarket not found" });
@@ -406,6 +855,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       const prospectId = req.query.prospectId as string;
+      if (isDemo(req)) {
+        const interactions = await demo.getInteractions(userId, prospectId);
+        return res.json(interactions);
+      }
       const interactions = await storage.getContactInteractions(userId, prospectId);
       res.json(interactions);
     } catch (error) {
@@ -424,9 +877,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         type: req.body.type,
         outcome: req.body.outcome,
         notes: req.body.notes || '',
-        nextFollowUp: req.body.nextFollowUp || null
+        nextFollowUp: req.body.nextFollowUp || null,
+        listingId: req.body.listingId || null,
       };
-      
+      if (isDemo(req)) {
+        const created = { id: randomUUID(), ...interactionData, createdAt: new Date().toISOString() };
+        await demo.addInteraction(userId, created);
+        return res.json(created);
+      }
+
       const interaction = await storage.createContactInteraction(interactionData);
       res.json(interaction);
     } catch (error) {
@@ -438,6 +897,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete('/api/interactions/:id', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        const ok = await demo.deleteInteraction(userId, req.params.id);
+        if (!ok) return res.status(404).json({ message: 'Interaction not found' });
+        return res.status(204).send();
+      }
       const deleted = await storage.deleteContactInteraction(req.params.id, userId);
       if (!deleted) {
         return res.status(404).json({ message: 'Interaction not found' });
@@ -453,6 +917,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/skills', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      if (isDemo(req)) {
+        // Compute demo skills from demo data
+        const [prospects, interactions, requirements, comps] = await Promise.all([
+          demo.getProspects(userId),
+          demo.getInteractions(userId),
+          demo.getRequirements(userId),
+          demo.getMarketComps(userId),
+        ]);
+
+        const prospectingXp = (prospects?.length || 0) * 25; // Add prospect
+
+        const followUpXp = (interactions || []).reduce((sum: number, i: any) => {
+          if (i.type === 'call') return sum + 15;
+          if (i.type === 'email') return sum + 10;
+          if (i.type === 'meeting') return sum + 25;
+          return sum + 10; // note/other
+        }, 0);
+
+        const marketKnowledgeXp = ((requirements?.length || 0) + (comps?.length || 0)) * 20;
+
+        // Consistency: 100 XP per distinct active day
+        const daysSet = new Set(
+          (interactions || []).map((i: any) => new Date(i.date || i.createdAt).toDateString())
+        );
+        const streakDays = daysSet.size > 0 ? Math.min(daysSet.size, 99) : 0;
+        const consistencyXp = streakDays * 100;
+        const lastActivity = (interactions || []).length > 0
+          ? new Date((interactions || [])[(interactions || []).length - 1].date || Date.now()).toISOString()
+          : new Date().toISOString();
+
+        return res.json({
+          id: 'demo-skill',
+          userId,
+          prospecting: prospectingXp,
+          followUp: followUpXp,
+          consistency: consistencyXp,
+          marketKnowledge: marketKnowledgeXp,
+          lastActivity,
+          streakDays,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
       const skills = await storage.getBrokerSkills(userId);
       res.json(skills);
     } catch (error) {
@@ -462,11 +969,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Diagnostics: check DB connectivity and required tables
-  app.get('/api/_diag/db', async (_req, res) => {
+  app.get('/api/_diag/db', async (req, res) => {
+    // Hide diagnostics outside development to avoid schema leakage
+    if (req.app.get('env') !== 'development') {
+      return res.status(404).send('Not found');
+    }
     try {
       await pool.query('SELECT 1');
       const required = [
-        'users','profiles','prospects','submarkets','requirements',
+        'users','profiles','prospects','submarkets','requirements','market_comps',
         'touches','contact_interactions','broker_skills','skill_activities'
       ];
       const { rows } = await pool.query(
@@ -483,7 +994,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/skill-activities', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      const activities = await storage.getSkillActivities(userId);
+      const limitRaw = (req.query.limit as string) || '';
+      const limit = Math.max(1, Math.min(1500, Number.parseInt(limitRaw || '0') || 0)) || 50;
+      if (isDemo(req)) {
+        const [prospects, interactions, requirements, comps] = await Promise.all([
+          demo.getProspects(userId),
+          demo.getInteractions(userId),
+          demo.getRequirements(userId),
+          demo.getMarketComps(userId),
+        ]);
+
+        const interactionActivities = (interactions || []).map((i: any) => {
+          const action = i.type === 'call' ? 'phone_call' : i.type === 'email' ? 'email_sent' : i.type === 'meeting' ? 'meeting_held' : 'note_added';
+          const xp = i.type === 'call' ? 15 : i.type === 'email' ? 10 : i.type === 'meeting' ? 25 : 10;
+          return {
+            id: i.id,
+            userId,
+            skillType: 'followUp',
+            action,
+            xpGained: xp,
+            timestamp: new Date(i.date || i.createdAt || Date.now()),
+            relatedId: i.prospectId,
+            multiplier: 1,
+          };
+        });
+
+        const prospectActivities = (prospects || []).map((p: any) => ({
+          id: p.id,
+          userId,
+          skillType: 'prospecting',
+          action: 'add_prospect',
+          xpGained: 25,
+          timestamp: new Date(p.createdAt || p.createdDate || Date.now()),
+          relatedId: p.id,
+          multiplier: 1,
+        }));
+
+        const requirementActivities = (requirements || []).map((r: any) => ({
+          id: r.id,
+          userId,
+          skillType: 'marketKnowledge',
+          action: 'add_requirement',
+          xpGained: 20,
+          timestamp: new Date(r.createdAt || Date.now()),
+          relatedId: r.id,
+          multiplier: 1,
+        }));
+
+        const compActivities = (comps || []).map((c: any) => ({
+          id: c.id,
+          userId,
+          skillType: 'marketKnowledge',
+          action: 'add_market_comp',
+          xpGained: 20,
+          timestamp: new Date(c.createdAt || Date.now()),
+          relatedId: c.id,
+          multiplier: 1,
+        }));
+
+        const activities = [
+          ...interactionActivities,
+          ...prospectActivities,
+          ...requirementActivities,
+          ...compActivities,
+        ]
+          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+          .slice(0, limit);
+
+        return res.json(activities);
+      }
+      const activities = await storage.getSkillActivities(userId, limit);
       res.json(activities);
     } catch (error) {
       console.error('Error fetching skill activities:', error);
@@ -502,7 +1082,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         relatedId: req.body.relatedId || null,
         multiplier: req.body.multiplier || 1
       };
-      
+      if (isDemo(req)) {
+        return res.json({ id: randomUUID(), ...activityData, timestamp: new Date().toISOString() });
+      }
+
       const activity = await storage.addSkillActivity(activityData);
       res.json(activity);
     } catch (error) {
@@ -514,21 +1097,114 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/leaderboard', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      const { orgId, since } = req.query;
-      
-      // Parse since parameter if provided
-      let sinceDate: Date | undefined;
-      if (since && typeof since === 'string') {
-        sinceDate = new Date(since);
-        if (isNaN(sinceDate.getTime())) {
-          return res.status(400).json({ error: 'Invalid since parameter' });
+      const { orgId } = req.query;
+
+      // Demo mode: synthesize a simple all-time leaderboard for two demo users
+      if (isDemo(req)) {
+        const demoUserId = 'demo-user';
+        const rivalUserId = 'demo-user-2';
+
+        // Ensure profiles exist
+        const [demoProfile, rivalProfile] = await Promise.all([
+          demo.getProfile(demoUserId),
+          demo.getProfile(rivalUserId)
+        ]);
+        if (!demoProfile) {
+          await demo.setProfile(demoUserId, { id: demoUserId, name: 'Demo User' });
         }
+        if (!rivalProfile) {
+          await demo.setProfile(rivalUserId, { id: rivalUserId, name: 'Teammate Two' });
+        }
+
+        // Seed minimal data for rival if empty
+        const [rPros, rInts, rReqs, rComps] = await Promise.all([
+          demo.getProspects(rivalUserId),
+          demo.getInteractions(rivalUserId),
+          demo.getRequirements(rivalUserId),
+          demo.getMarketComps(rivalUserId),
+        ]);
+        if ((rPros?.length || 0) === 0 && (rInts?.length || 0) === 0 && (rReqs?.length || 0) === 0 && (rComps?.length || 0) === 0) {
+          // Create a few seed items
+          const now = Date.now();
+          // Prospects
+          for (let i = 0; i < 3; i++) {
+            await demo.addProspect(rivalUserId, { id: `${rivalUserId}-p${i}`, name: `Rival Prospect ${i+1}`, createdAt: new Date(now - i*86400000).toISOString() });
+          }
+          // Interactions
+          await demo.addInteraction(rivalUserId, { id: `${rivalUserId}-i1`, type: 'call', date: new Date(now - 3*86400000).toISOString() });
+          await demo.addInteraction(rivalUserId, { id: `${rivalUserId}-i2`, type: 'email', date: new Date(now - 2*86400000).toISOString() });
+          await demo.addInteraction(rivalUserId, { id: `${rivalUserId}-i3`, type: 'meeting', date: new Date(now - 1*86400000).toISOString() });
+          // Requirements
+          await demo.addRequirement(rivalUserId, { id: `${rivalUserId}-r1`, title: 'Tenant need 5k sf', createdAt: new Date(now - 4*86400000).toISOString() });
+          await demo.addRequirement(rivalUserId, { id: `${rivalUserId}-r2`, title: 'Buyer search 2 acres', createdAt: new Date(now - 1*86400000).toISOString() });
+          // Market comp
+          await demo.addMarketComp(rivalUserId, { id: `${rivalUserId}-c1`, address: '123 Main St', createdAt: new Date(now - 5*86400000).toISOString() });
+        }
+
+        // Compute XP similar to skills endpoint
+        // Match client level logic (L = floor(sqrt(xp/100)))
+        const levelFromXp = (xp: number) => Math.min(99, Math.floor(Math.sqrt(xp / 100)));
+
+        async function compute(user: string) {
+          const [prospects, interactions, requirements, comps] = await Promise.all([
+            demo.getProspects(user),
+            demo.getInteractions(user),
+            demo.getRequirements(user),
+            demo.getMarketComps(user),
+          ]);
+          const prospectingXp = (prospects?.length || 0) * 25;
+          const followUpXp = (interactions || []).reduce((sum: number, i: any) => {
+            if (i.type === 'call') return sum + 15;
+            if (i.type === 'email') return sum + 10;
+            if (i.type === 'meeting') return sum + 25;
+            return sum + 10; // note/other
+          }, 0);
+          const marketKnowledgeXp = ((requirements?.length || 0) + (comps?.length || 0)) * 20;
+          // Consistency: 100 XP per distinct active day
+          const daysSet = new Set(
+            (interactions || []).map((i: any) => new Date(i.date || i.createdAt).toDateString())
+          );
+          const streakDays = daysSet.size > 0 ? Math.min(daysSet.size, 99) : 0;
+          const consistencyXp = streakDays * 100;
+          const level =
+            levelFromXp(prospectingXp) +
+            levelFromXp(followUpXp) +
+            levelFromXp(consistencyXp) +
+            levelFromXp(marketKnowledgeXp);
+          return { prospectingXp, followUpXp, marketKnowledgeXp, consistencyXp, level };
+        }
+
+        const [demoStats, rivalStats, demoName, rivalName] = await Promise.all([
+          compute(demoUserId),
+          compute(rivalUserId),
+          demo.getProfile(demoUserId).then(p => p?.name || 'Demo User'),
+          demo.getProfile(rivalUserId).then(p => p?.name || 'Teammate Two'),
+        ]);
+
+        const data = [
+          {
+            user_id: demoUserId,
+            user_email: 'demo@example.com',
+            display_name: demoName,
+            level_total: demoStats.level,
+            xp_total: demoStats.prospectingXp + demoStats.followUpXp,
+          },
+          {
+            user_id: rivalUserId,
+            user_email: 'teammate@example.com',
+            display_name: rivalName,
+            level_total: rivalStats.level,
+            xp_total: rivalStats.prospectingXp + rivalStats.followUpXp,
+          },
+        ].sort((a, b) => (b.level_total - a.level_total) || (b.xp_total - a.xp_total));
+
+        return res.json({ data });
       }
 
       const leaderboard = await storage.getLeaderboard({
         userId,
         orgId: orgId as string,
-        since: sinceDate
+        since: undefined,
       });
 
       res.json({ data: leaderboard });

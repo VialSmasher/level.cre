@@ -10,7 +10,6 @@ interface AuthContextType {
   loading: boolean
   needsOnboarding: boolean
   isDemoMode: boolean
-  signInWithGoogle: () => Promise<void>
   signInWithEmail: (email: string) => Promise<void>
   signOut: () => Promise<void>
   setNeedsOnboarding: (needs: boolean) => void
@@ -184,11 +183,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => subscription.unsubscribe()
   }, [])
 
+  const GOOGLE_ENABLED = (import.meta.env.VITE_ENABLE_GOOGLE_AUTH === '1' || import.meta.env.VITE_ENABLE_GOOGLE_AUTH === 'true')
+
   const signInWithGoogle = async () => {
-    console.log('Starting server-side Google OAuth flow...')
-    
+    if (!GOOGLE_ENABLED) {
+      throw new Error('Google OAuth disabled')
+    }
     try {
-      // Use server-side OAuth endpoint - bypasses CSP issues completely
+      // Clear demo mode when starting Google flow
+      localStorage.removeItem('demo-mode')
+      // Use server-side OAuth endpoint
       window.location.href = apiUrl('/auth/google')
     } catch (error: any) {
       console.error('OAuth redirect error:', error)

@@ -1,0 +1,3615 @@
+{
+  "prospects": {
+    "demo-user": [
+      {
+        "id": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.87591822509765,
+            53.632708716409326
+          ]
+        },
+        "createdDate": "2025-09-21T05:02:10.282Z",
+        "followUpTimeframe": "3_month"
+      },
+      {
+        "id": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.64177210693359,
+            53.63718715991373
+          ]
+        },
+        "createdDate": "2025-09-21T05:02:11.617Z",
+        "followUpTimeframe": "3_month"
+      },
+      {
+        "id": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.85257227783202,
+            53.52222596305898
+          ]
+        },
+        "createdDate": "2025-09-21T05:02:13.133Z",
+        "followUpTimeframe": "1_month"
+      },
+      {
+        "id": "d010a302-c74b-4051-9c6e-7853febd3fed",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.55868800048827,
+            53.586267757659904
+          ]
+        },
+        "createdDate": "2025-09-21T05:02:16.895Z",
+        "followUpTimeframe": "6_month"
+      },
+      {
+        "id": "df0b560d-5d8a-416c-b369-78176e402a42",
+        "name": "New marker",
+        "status": "listing",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.96586878662109,
+            53.633115867281944
+          ]
+        },
+        "createdDate": "2025-09-21T05:39:02.552Z",
+        "followUpTimeframe": "6_month",
+        "size": "25,000 - 50,000 SF"
+      },
+      {
+        "id": "ac9d5cb8-d6b7-4922-adb7-59533753a1fc",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -114.00157435302734,
+            53.567106174989576
+          ]
+        },
+        "createdDate": "2025-09-21T05:39:03.604Z"
+      },
+      {
+        "id": "4ae49314-cc52-4675-b62c-4a4a4237e858",
+        "name": "New marker",
+        "status": "client",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.77017481689452,
+            53.655503115031934
+          ]
+        },
+        "createdDate": "2025-09-21T05:39:04.934Z"
+      },
+      {
+        "id": "8c4a23ab-0f23-457e-9c64-905acf8d4302",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.73103602294921,
+            53.55894967579059
+          ]
+        },
+        "createdDate": "2025-09-21T05:39:06.153Z"
+      },
+      {
+        "id": "03428613-4762-488f-b20c-5fc563ac27bc",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -114.02217371826171,
+            53.64980567035316
+          ]
+        },
+        "createdDate": "2025-09-21T05:39:20.937Z"
+      },
+      {
+        "id": "2c369aca-16be-4e2b-baf5-7e9be12184f3",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.96174891357421,
+            53.61682676753855
+          ]
+        },
+        "createdDate": "2025-09-21T05:39:21.800Z"
+      },
+      {
+        "id": "312eb6fe-daf3-4885-b3b4-6cac05fd298d",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.81206019287109,
+            53.66242040566687
+          ]
+        },
+        "createdDate": "2025-09-21T05:39:23.019Z"
+      },
+      {
+        "id": "aa1fbab9-cc31-416a-af68-a259442f6790",
+        "name": "New marker",
+        "status": "no_go",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.78184779052734,
+            53.67381111577364
+          ]
+        },
+        "createdDate": "2025-09-21T05:39:24.266Z"
+      },
+      {
+        "id": "1ad3f2b9-3c3d-41c0-bba1-30264151e567",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.54083521728515,
+            53.65672389586665
+          ]
+        },
+        "createdDate": "2025-09-21T05:40:11.794Z"
+      },
+      {
+        "id": "2ef2bd8b-2598-4f5a-89d0-45a7a29eaf33",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.58512385253906,
+            53.756707663627616
+          ]
+        },
+        "createdDate": "2025-09-21T17:41:38.923Z"
+      },
+      {
+        "id": "c27c9222-e5d5-4372-ab97-e02771cbcc73",
+        "name": "New polygon",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -112.14253844281774,
+                52.82057690769913
+              ],
+              [
+                -112.1518081571732,
+                52.81274404298928
+              ],
+              [
+                -112.1254581358109,
+                52.809631254515885
+              ],
+              [
+                -112.1364444639359,
+                52.822962797896466
+              ],
+              [
+                -112.14253844281774,
+                52.82057690769913
+              ]
+            ]
+          ]
+        },
+        "acres": "317.12225555898",
+        "createdDate": "2025-09-21T18:46:48.687Z"
+      },
+      {
+        "id": "f03bb9c1-233d-4aaf-9597-19071395e7a7",
+        "name": "Cushman & Wakefield Edmonton, 102 Ave NW, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.4930446,
+            53.5433891
+          ]
+        },
+        "submarketId": "",
+        "createdDate": "2025-09-21T18:57:27.906Z"
+      },
+      {
+        "id": "c2deb5b4-d09d-4902-9866-c73dd6b75014",
+        "name": "Farrow Sandwiches Jasper Ave, Jasper Avenue, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.5021367,
+            53.5412542
+          ]
+        },
+        "submarketId": "",
+        "createdDate": "2025-09-21T19:03:29.691Z"
+      },
+      {
+        "id": "ac503545-357b-4aa4-9639-d3d29dc2fa96",
+        "name": "Cushman & Wakefield Edmonton, 102 Ave NW, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.49357217834454,
+                53.54389422831546
+              ],
+              [
+                -113.49248320148449,
+                53.543916767858235
+              ],
+              [
+                -113.49244028614025,
+                53.54340737126222
+              ],
+              [
+                -113.49348634765606,
+                53.543308195990775
+              ],
+              [
+                -113.4937277464674,
+                53.54365080048878
+              ],
+              [
+                -113.49357217834454,
+                53.54389422831546
+              ]
+            ]
+          ]
+        },
+        "submarketId": "Nisku",
+        "contactCompany": "Cushman & Wakefield Edmonton",
+        "businessName": "Cushman & Wakefield Edmonton",
+        "websiteUrl": "http://www.cwedm.com/",
+        "createdDate": "2025-09-21T19:18:15.716Z",
+        "acres": "1.1729743803616821"
+      },
+      {
+        "id": "c22d9e8d-3ee9-4d60-b3b2-7df2c6963bc6",
+        "name": "Tim Hortons, 111 Street Northwest, Edmonton, AB",
+        "status": "listing",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.5110008,
+            53.54588409999999
+          ]
+        },
+        "submarketId": "",
+        "contactCompany": "Tim Hortons",
+        "businessName": "Tim Hortons",
+        "websiteUrl": "http://locations.timhortons.ca/en/ab/edmonton/10365-111-st",
+        "createdDate": "2025-09-21T20:03:49.041Z",
+        "followUpTimeframe": "1_month"
+      },
+      {
+        "id": "2553e7bb-769e-497b-b1e3-b181a2272830",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.64291239999042,
+            53.556467728910796
+          ]
+        },
+        "createdDate": "2025-09-21T21:48:17.503Z"
+      },
+      {
+        "id": "155720a5-17a3-4916-ba16-872c4511a481",
+        "name": "New rectangle",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.86643716788856,
+                53.66628350856663
+              ],
+              [
+                -113.8549358556327,
+                53.66628350856663
+              ],
+              [
+                -113.8549358556327,
+                53.66101983267841
+              ],
+              [
+                -113.86643716788856,
+                53.66101983267841
+              ],
+              [
+                -113.86643716788856,
+                53.66628350856663
+              ]
+            ]
+          ]
+        },
+        "acres": "109.84264124164285",
+        "createdDate": "2025-09-22T05:05:28.303Z"
+      },
+      {
+        "id": "eb4b0e09-6968-4b40-a909-f8921dc8b86f",
+        "name": "New rectangle",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.61674901516157,
+                53.58948845945635
+              ],
+              [
+                -113.58464833767134,
+                53.58948845945635
+              ],
+              [
+                -113.58464833767134,
+                53.570430275377205
+              ],
+              [
+                -113.61674901516157,
+                53.570430275377205
+              ],
+              [
+                -113.61674901516157,
+                53.58948845945635
+              ]
+            ]
+          ]
+        },
+        "acres": "1112.221463065905",
+        "createdDate": "2025-09-22T13:13:10.080Z"
+      },
+      {
+        "id": "f5f3c52e-508e-4429-896d-9a42e5b2d259",
+        "name": "New rectangle",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.60785455223363,
+                53.60096756351463
+              ],
+              [
+                -113.61798257347387,
+                53.59077985822785
+              ],
+              [
+                -113.65214318748754,
+                53.60157874771223
+              ],
+              [
+                -113.6035630178098,
+                53.60443082370635
+              ],
+              [
+                -113.60785455223363,
+                53.60096756351463
+              ]
+            ]
+          ]
+        },
+        "acres": "557.3878579140153",
+        "createdDate": "2025-09-22T13:13:20.278Z"
+      },
+      {
+        "id": "3efc6212-4413-46b2-bcb9-3a6378d0e5d6",
+        "name": "New rectangle",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.6995217275266,
+                53.584767959774716
+              ],
+              [
+                -113.66175622459691,
+                53.584767959774716
+              ],
+              [
+                -113.66175622459691,
+                53.56733881215554
+              ],
+              [
+                -113.6995217275266,
+                53.56733881215554
+              ],
+              [
+                -113.6995217275266,
+                53.584767959774716
+              ]
+            ]
+          ]
+        },
+        "acres": "1196.7600918870185",
+        "createdDate": "2025-09-22T13:13:33.935Z"
+      },
+      {
+        "id": "f7ce1c47-93e9-4b50-8f40-512ead760601",
+        "name": "109065 118 Avenue Northwest, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.5076648,
+            53.5704045
+          ]
+        },
+        "createdDate": "2025-09-22T13:57:45.084Z"
+      },
+      {
+        "id": "1257b838-5251-46c0-a032-c88eaa7e3751",
+        "name": "New Prospect",
+        "status": "listing",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.7966106689453,
+                53.6380013712931
+              ],
+              [
+                -113.6256359375,
+                53.6380013712931
+              ],
+              [
+                -113.6256359375,
+                53.56384376404631
+              ],
+              [
+                -113.7966106689453,
+                53.56384376404631
+              ],
+              [
+                -113.7966106689453,
+                53.6380013712931
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T14:11:46.557Z"
+      },
+      {
+        "id": "1dd25d72-b6d0-44e1-9600-bff7038aa8cf",
+        "name": "McCoy Global, 14755 121A Avenue Northwest, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.5758454,
+            53.5731011
+          ]
+        },
+        "createdDate": "2025-09-22T14:12:31.832Z"
+      },
+      {
+        "id": "337f901c-9aa4-4750-9afa-7c245e219e0f",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.39972956542968,
+            53.61438286030052
+          ]
+        },
+        "createdDate": "2025-09-22T14:29:46.395Z"
+      },
+      {
+        "id": "3d4f3d93-be55-4f00-bf1b-79f6b01be890",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.60023005371093,
+            53.60949462139796
+          ]
+        },
+        "createdDate": "2025-09-22T14:42:51.451Z"
+      },
+      {
+        "id": "3356ad06-068f-48b8-8c1a-32c9ecbd5ff3",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.4230755126953,
+                53.65428229884439
+              ],
+              [
+                -113.350977734375,
+                53.65428229884439
+              ],
+              [
+                -113.350977734375,
+                53.58504493738226
+              ],
+              [
+                -113.4230755126953,
+                53.58504493738226
+              ],
+              [
+                -113.4230755126953,
+                53.65428229884439
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T14:59:33.590Z"
+      },
+      {
+        "id": "4ea98794-6c85-47eb-965a-251380f95bae",
+        "name": "New Prospect",
+        "status": "client",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.61121638183593,
+                53.679912015322394
+              ],
+              [
+                -113.57894404296874,
+                53.679912015322394
+              ],
+              [
+                -113.57894404296874,
+                53.66160666568715
+              ],
+              [
+                -113.61121638183593,
+                53.66160666568715
+              ],
+              [
+                -113.61121638183593,
+                53.679912015322394
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T14:59:42.748Z"
+      },
+      {
+        "id": "3cf6fabe-20ee-4873-86c5-a839fe2d446f",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.6043499267578,
+            53.62822979748866
+          ]
+        },
+        "createdDate": "2025-09-22T14:59:48.562Z"
+      },
+      {
+        "id": "ea4ed47a-ceac-4aee-9c64-d8b389792e0f",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.99333460693359,
+            53.600938841538664
+          ]
+        },
+        "createdDate": "2025-09-22T15:05:58.414Z"
+      },
+      {
+        "id": "19050879-d018-4de5-97d1-48e1560dc310",
+        "name": "New Prospect",
+        "status": "contacted",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.70700343017577,
+                53.657537730116275
+              ],
+              [
+                -113.77498133544921,
+                53.699835463221916
+              ],
+              [
+                -113.77223475341796,
+                53.64899168683257
+              ],
+              [
+                -113.70700343017577,
+                53.657537730116275
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T15:37:13.490Z"
+      },
+      {
+        "id": "11f292b6-e110-48de-bc27-d1f5f97f8fd2",
+        "name": "New Prospect",
+        "status": "client",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.83952601318359,
+                53.67950531617576
+              ],
+              [
+                -113.69395716552734,
+                53.67950531617576
+              ],
+              [
+                -113.69395716552734,
+                53.61030936718138
+              ],
+              [
+                -113.83952601318359,
+                53.61030936718138
+              ],
+              [
+                -113.83952601318359,
+                53.67950531617576
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T15:48:18.328Z"
+      },
+      {
+        "id": "72b62c7b-0f25-4a87-a4c9-7f110f338590",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.96739283662532,
+            53.664057164590304
+          ]
+        },
+        "createdDate": "2025-09-22T15:53:15.033Z"
+      },
+      {
+        "id": "b4c3ad89-1cb0-49e4-a978-23d2e0665c01",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.84913905029296,
+                53.61030936718138
+              ],
+              [
+                -113.77292139892577,
+                53.61030936718138
+              ],
+              [
+                -113.77292139892577,
+                53.58789812966232
+              ],
+              [
+                -113.84913905029296,
+                53.58789812966232
+              ],
+              [
+                -113.84913905029296,
+                53.61030936718138
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T15:59:24.915Z"
+      },
+      {
+        "id": "f5f42946-adf7-4f50-b25d-eed898fcf831",
+        "name": "New Prospect",
+        "status": "client",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.68503077392577,
+                53.68682529999186
+              ],
+              [
+                -113.58890040283202,
+                53.68682529999186
+              ],
+              [
+                -113.58890040283202,
+                53.66201353764093
+              ],
+              [
+                -113.68503077392577,
+                53.66201353764093
+              ],
+              [
+                -113.68503077392577,
+                53.68682529999186
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T15:59:27.669Z"
+      },
+      {
+        "id": "cea34b30-496e-43dc-af16-2ad3c70c8bd9",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.85325892333984,
+                53.61601214751167
+              ],
+              [
+                -113.72966273193359,
+                53.61601214751167
+              ],
+              [
+                -113.72966273193359,
+                53.53324642195415
+              ],
+              [
+                -113.85325892333984,
+                53.53324642195415
+              ],
+              [
+                -113.85325892333984,
+                53.61601214751167
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T15:59:45.651Z"
+      },
+      {
+        "id": "3d42ab76-9e84-4140-8927-2d1ff5cfe2f3",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.81137354736327,
+                53.65916535147964
+              ],
+              [
+                -113.77566798095702,
+                53.65916535147964
+              ],
+              [
+                -113.77566798095702,
+                53.63637293281888
+              ],
+              [
+                -113.81137354736327,
+                53.63637293281888
+              ],
+              [
+                -113.81137354736327,
+                53.65916535147964
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T15:59:57.911Z"
+      },
+      {
+        "id": "d0d3d2b9-4df0-4609-9532-e3a413e120cf",
+        "name": "Cushman & Wakefield Edmonton, 102 Ave NW, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.4930446,
+            53.5433891
+          ]
+        },
+        "submarketId": "",
+        "contactCompany": "Cushman & Wakefield Edmonton",
+        "businessName": "Cushman & Wakefield Edmonton",
+        "websiteUrl": "http://www.cwedm.com/",
+        "createdDate": "2025-09-22T16:02:21.392Z"
+      },
+      {
+        "id": "39acf5a8-566f-4058-aa17-f68f739ea369",
+        "name": "Cushman & Wakefield Edmonton, 102 Ave NW, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.4930446,
+            53.5433891
+          ]
+        },
+        "createdDate": "2025-09-22T16:02:28.488Z"
+      },
+      {
+        "id": "78733e91-bbb1-4b6c-a1aa-39ea39740f27",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.83746607666015,
+                53.640850987363535
+              ],
+              [
+                -113.75369532470702,
+                53.640850987363535
+              ],
+              [
+                -113.75369532470702,
+                53.53814348327861
+              ],
+              [
+                -113.83746607666015,
+                53.53814348327861
+              ],
+              [
+                -113.83746607666015,
+                53.640850987363535
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T16:07:53.354Z"
+      },
+      {
+        "id": "b8812b21-153c-40a3-8bda-0f8b8d0bd088",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.6040066040039,
+                53.69658329935078
+              ],
+              [
+                -113.49071009521484,
+                53.69658329935078
+              ],
+              [
+                -113.49071009521484,
+                53.64329336220387
+              ],
+              [
+                -113.6040066040039,
+                53.64329336220387
+              ],
+              [
+                -113.6040066040039,
+                53.69658329935078
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T16:07:55.384Z"
+      },
+      {
+        "id": "c184166a-0531-49f5-85ff-cf3c13ef7c16",
+        "name": "New rectangle",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -112.86429275234963,
+                53.72871702257078
+              ],
+              [
+                -112.52920974453713,
+                53.72871702257078
+              ],
+              [
+                -112.52920974453713,
+                53.50959907621769
+              ],
+              [
+                -112.86429275234963,
+                53.50959907621769
+              ],
+              [
+                -112.86429275234963,
+                53.72871702257078
+              ]
+            ]
+          ]
+        },
+        "acres": "133358.74208793778",
+        "createdDate": "2025-09-22T16:08:34.612Z"
+      },
+      {
+        "id": "8861e59a-98c4-4db2-97b8-396acdecd834",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.8841579711914,
+                53.633115867281944
+              ],
+              [
+                -113.79489405517577,
+                53.633115867281944
+              ],
+              [
+                -113.79489405517577,
+                53.5609889480421
+              ],
+              [
+                -113.8841579711914,
+                53.5609889480421
+              ],
+              [
+                -113.8841579711914,
+                53.633115867281944
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T16:09:32.281Z"
+      },
+      {
+        "id": "497fddac-65b2-45a7-a98a-4be78a6ab613",
+        "name": "Tim Hortons, 111 Street Northwest, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.5110008,
+            53.54588409999999
+          ]
+        },
+        "createdDate": "2025-09-22T16:09:40.191Z"
+      },
+      {
+        "id": "f14ee245-b087-4893-8b32-81df267d88af",
+        "name": "Rebel Heart Trucking, 121 Avenue Northeast, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.3150353,
+            53.57434869999999
+          ]
+        },
+        "createdDate": "2025-09-22T16:09:58.750Z"
+      },
+      {
+        "id": "01054d65-471a-4a4a-927c-d07385abe9fe",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.53425142229004,
+                53.55931041807938
+              ],
+              [
+                -113.52656957567139,
+                53.55931041807938
+              ],
+              [
+                -113.52656957567139,
+                53.55296260815517
+              ],
+              [
+                -113.53425142229004,
+                53.55296260815517
+              ],
+              [
+                -113.53425142229004,
+                53.55931041807938
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T16:29:32.962Z"
+      },
+      {
+        "id": "3234101c-da2d-4684-91e2-d74689f1f707",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.55064508378906,
+                53.55890255531048
+              ],
+              [
+                -113.54300615251465,
+                53.55890255531048
+              ],
+              [
+                -113.54300615251465,
+                53.55319206365772
+              ],
+              [
+                -113.55064508378906,
+                53.55319206365772
+              ],
+              [
+                -113.55064508378906,
+                53.55890255531048
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T16:29:34.914Z"
+      },
+      {
+        "id": "b7c17cf0-bb08-46e7-a84f-c3df8908de3c",
+        "name": "Tim Hortons, 111 Street Northwest, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.5110008,
+            53.54588409999999
+          ]
+        },
+        "createdDate": "2025-09-22T16:31:14.911Z"
+      },
+      {
+        "id": "f536110a-e2fb-4568-a90a-8e3ff0d8f70f",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.17575824257676,
+                53.643589862796084
+              ],
+              [
+                -113.01508319374864,
+                53.643589862796084
+              ],
+              [
+                -113.01508319374864,
+                53.55598375185219
+              ],
+              [
+                -113.17575824257676,
+                53.55598375185219
+              ],
+              [
+                -113.17575824257676,
+                53.643589862796084
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T16:34:05.904Z"
+      },
+      {
+        "id": "82b7c49c-f4b4-47a5-a873-e56cdef87ff2",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.72863276367187,
+                53.61845596043561
+              ],
+              [
+                -113.55903132324218,
+                53.61845596043561
+              ],
+              [
+                -113.55903132324218,
+                53.545896005431764
+              ],
+              [
+                -113.72863276367187,
+                53.545896005431764
+              ],
+              [
+                -113.72863276367187,
+                53.61845596043561
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T16:34:32.491Z",
+        "followUpTimeframe": "1_year"
+      },
+      {
+        "id": "a4f1f3ee-a4e7-488a-9401-8ff419c8f646",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.69430048828124,
+                53.6380013712931
+              ],
+              [
+                -113.63318903808593,
+                53.6380013712931
+              ],
+              [
+                -113.63318903808593,
+                53.59482650900869
+              ],
+              [
+                -113.69430048828124,
+                53.59482650900869
+              ],
+              [
+                -113.69430048828124,
+                53.6380013712931
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T16:34:50.021Z"
+      },
+      {
+        "id": "63ee0a01-a55f-4466-a070-919c25edec4a",
+        "name": "Freudenberg-Nok Inc, 36 Avenue, Nisku, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.5081176,
+            53.3816947
+          ]
+        },
+        "submarketId": "",
+        "contactCompany": "Freudenberg Oil & Gas Canada Inc",
+        "businessName": "Freudenberg Oil & Gas Canada Inc",
+        "websiteUrl": "http://www.fogt.com/",
+        "createdDate": "2025-09-22T16:37:27.646Z"
+      },
+      {
+        "id": "d37e44fa-42fd-4cb7-97f3-25eab7f613fb",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.54186518554687,
+            53.72706247195854
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:33.126Z"
+      },
+      {
+        "id": "97456377-bfb5-4860-9ca6-c5911a9b3c61",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.45946772460937,
+            53.71243522492285
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:34.576Z"
+      },
+      {
+        "id": "bf5f8348-c013-46eb-bb51-23194c951ba8",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.67875251883233,
+            53.72030069566172
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:36.949Z"
+      },
+      {
+        "id": "b72dd930-576c-4f9a-8294-23dbcfee5fc6",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.7432971965667,
+            53.721925892625485
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:38.162Z"
+      },
+      {
+        "id": "917ba47d-3930-4a68-9995-ad0f335f049c",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.70827827566826,
+            53.72314474913328
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:39.434Z"
+      },
+      {
+        "id": "d94cc079-6810-4b76-862a-88f9a93dff9b",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.88886604422295,
+            53.67029522499455
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:40.771Z"
+      },
+      {
+        "id": "92488a5a-7ee1-49af-8cb0-e21b2939eeea",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.91839180105889,
+            53.6694816370666
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:41.782Z"
+      },
+      {
+        "id": "a0faa5c6-18cb-4a02-9a36-b154ef97f7db",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.92251167410576,
+            53.68859680035428
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:42.608Z"
+      },
+      {
+        "id": "10ee987f-b840-4b3f-9c6c-4e671b2db201",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.88131294363701,
+            53.71379927974612
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:43.504Z"
+      },
+      {
+        "id": "6c7a9c9a-2041-4243-a970-c1f476c5fc0b",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.8916126262542,
+            53.70567109663163
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:44.307Z"
+      },
+      {
+        "id": "e4bb51c6-8e4f-4ef4-bf9d-926a9807dcc0",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.88886604422295,
+            53.6902232222159
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:46.199Z"
+      },
+      {
+        "id": "52b7ceed-37ad-4317-b1d2-a12a826441d2",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.89573249930108,
+            53.70567109663163
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:47.048Z"
+      },
+      {
+        "id": "27e18102-abe6-450d-b2a1-7c431d937e82",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.90603218191826,
+            53.71217376874652
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:47.719Z"
+      },
+      {
+        "id": "947f7ca5-7e75-4559-9e82-fa113ae9266d",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.90465889090264,
+            53.720707000790576
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:48.382Z"
+      },
+      {
+        "id": "408c866b-a5c5-46cb-9c80-dd3415063712",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.8971057903167,
+            53.717862782456464
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:49.231Z"
+      },
+      {
+        "id": "ccc52116-1239-4ebe-9e70-78d94f7edbea",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.72991087851115,
+            53.86007787375359
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:52.145Z"
+      },
+      {
+        "id": "a7749e89-b8c2-4c45-983d-1a135f490701",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.74501707968302,
+            53.877892122396105
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:52.959Z"
+      },
+      {
+        "id": "a8b3f394-16ce-4278-aeed-ad2698171dc4",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.68115904745646,
+            53.85197797978118
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:54.922Z"
+      },
+      {
+        "id": "dbb29f37-8070-422c-ae66-efbd6334c935",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.64133360800334,
+            53.8637223145713
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:55.992Z"
+      },
+      {
+        "id": "4401867a-150d-4717-8cf7-5d322bd8c8e7",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.69489195761271,
+            53.87101024388191
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:56.937Z"
+      },
+      {
+        "id": "9d22956a-5ded-4234-b6a2-4afb2b00c192",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.72304442343302,
+            53.873439271495855
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:57.799Z"
+      },
+      {
+        "id": "482fd3f2-5c6a-4432-bd31-ebed7be506c8",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.77248289999552,
+            53.85886298960192
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:58.808Z"
+      },
+      {
+        "id": "1c438478-d546-47d9-bc59-02daabadca4b",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.74570372519084,
+            53.83658386171927
+          ]
+        },
+        "createdDate": "2025-09-22T16:39:59.713Z"
+      },
+      {
+        "id": "ded75a40-a7b4-420d-ab3a-93d2289747b7",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.70450499472209,
+            53.82928993530157
+          ]
+        },
+        "createdDate": "2025-09-22T16:40:00.962Z"
+      },
+      {
+        "id": "480ba5a8-d0de-405b-b820-d08ba4440f69",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.73471739706584,
+            53.82118408278731
+          ]
+        },
+        "createdDate": "2025-09-22T16:40:02.085Z"
+      },
+      {
+        "id": "db1563e5-50f3-4448-a94b-621c67842a44",
+        "name": "Tim Hortons, 111 Street Northwest, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.5110008,
+            53.54588409999999
+          ]
+        },
+        "createdDate": "2025-09-22T16:40:24.116Z"
+      },
+      {
+        "id": "f4e8865b-8850-465b-9e4c-3040757a8983",
+        "name": "New rectangle",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -111.95718328373074,
+                54.11501729660192
+              ],
+              [
+                -111.81161443607449,
+                54.11501729660192
+              ],
+              [
+                -111.81161443607449,
+                53.801511563783954
+              ],
+              [
+                -111.95718328373074,
+                53.801511563783954
+              ],
+              [
+                -111.95718328373074,
+                54.11501729660192
+              ]
+            ]
+          ]
+        },
+        "acres": "82223.3515526237",
+        "createdDate": "2025-09-22T16:41:23.144Z"
+      },
+      {
+        "id": "1fafecf1-e020-43ad-9815-37214375153f",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.78287775878906,
+                53.639629746905975
+              ],
+              [
+                -113.71215327148437,
+                53.639629746905975
+              ],
+              [
+                -113.71215327148437,
+                53.55487083637102
+              ],
+              [
+                -113.78287775878906,
+                53.55487083637102
+              ],
+              [
+                -113.78287775878906,
+                53.639629746905975
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T16:42:51.337Z"
+      },
+      {
+        "id": "89784bd1-db23-423c-b268-814e99f11b66",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -115.61837713138699,
+            53.87120337051893
+          ]
+        },
+        "createdDate": "2025-09-22T16:45:28.744Z"
+      },
+      {
+        "id": "4eb63db5-d7cc-4c29-90e2-e5ccc847e9b5",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -115.46456853763699,
+            54.0376682878167
+          ]
+        },
+        "createdDate": "2025-09-22T16:45:30.346Z"
+      },
+      {
+        "id": "ca580f1f-8950-452c-ad11-5958f29906cf",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -115.42336980716824,
+            54.02314930009997
+          ]
+        },
+        "createdDate": "2025-09-22T16:45:31.442Z"
+      },
+      {
+        "id": "4323a59f-7049-417c-9650-bf1c8bfdd034",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -114.48403875248074,
+            54.07313780774912
+          ]
+        },
+        "createdDate": "2025-09-22T16:45:33.229Z"
+      },
+      {
+        "id": "070ba45f-ef44-4b07-a69c-f72bddc466a3",
+        "name": "New rectangle",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.40522272949218,
+                53.762796551477244
+              ],
+              [
+                -113.29947932128906,
+                53.762796551477244
+              ],
+              [
+                -113.29947932128906,
+                53.693330884194694
+              ],
+              [
+                -113.40522272949218,
+                53.693330884194694
+              ],
+              [
+                -113.40522272949218,
+                53.762796551477244
+              ]
+            ]
+          ]
+        },
+        "acres": "13307.401371155922",
+        "createdDate": "2025-09-22T17:12:56.301Z"
+      },
+      {
+        "id": "223e62a0-48bd-4ba6-a5f9-c0282c8cbc03",
+        "name": "New rectangle",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.5542248046875,
+                53.79079406627294
+              ],
+              [
+                -113.50135310058593,
+                53.79079406627294
+              ],
+              [
+                -113.50135310058593,
+                53.74574544069927
+              ],
+              [
+                -113.5542248046875,
+                53.74574544069927
+              ],
+              [
+                -113.5542248046875,
+                53.79079406627294
+              ]
+            ]
+          ]
+        },
+        "acres": "4310.812062347892",
+        "createdDate": "2025-09-22T17:12:57.705Z"
+      },
+      {
+        "id": "f6e436a3-239b-4b0c-80ce-8f965f27de71",
+        "name": "New rectangle",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.67713435058593,
+                53.782275060594834
+              ],
+              [
+                -113.63593562011718,
+                53.782275060594834
+              ],
+              [
+                -113.63593562011718,
+                53.740466313089755
+              ],
+              [
+                -113.67713435058593,
+                53.740466313089755
+              ],
+              [
+                -113.67713435058593,
+                53.782275060594834
+              ]
+            ]
+          ]
+        },
+        "acres": "3118.003500736888",
+        "createdDate": "2025-09-22T17:12:59.219Z"
+      },
+      {
+        "id": "e62542c5-cd4f-42f3-869f-ba47ed168677",
+        "name": "New rectangle",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.80553706054687,
+                53.761984750770445
+              ],
+              [
+                -113.77120478515624,
+                53.761984750770445
+              ],
+              [
+                -113.77120478515624,
+                53.71731153918757
+              ],
+              [
+                -113.80553706054687,
+                53.71731153918757
+              ],
+              [
+                -113.80553706054687,
+                53.761984750770445
+              ]
+            ]
+          ]
+        },
+        "acres": "2777.7933791439636",
+        "createdDate": "2025-09-22T17:13:00.619Z"
+      },
+      {
+        "id": "08539caf-3105-4491-9a5f-e51b45ccfba4",
+        "name": "New marker",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -114.83593571883266,
+            54.429674106460475
+          ]
+        },
+        "createdDate": "2025-09-22T17:48:20.118Z"
+      },
+      {
+        "id": "93fe539a-ae27-4041-9fb3-078fd7dedb6f",
+        "name": "New Prospect",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -113.6869364378133,
+                53.55345533361782
+              ],
+              [
+                -113.68274146291401,
+                53.55345533361782
+              ],
+              [
+                -113.68274146291401,
+                53.55176626754652
+              ],
+              [
+                -113.6869364378133,
+                53.55176626754652
+              ],
+              [
+                -113.6869364378133,
+                53.55345533361782
+              ]
+            ]
+          ]
+        },
+        "createdDate": "2025-09-22T18:03:22.589Z"
+      },
+      {
+        "id": "aa0a4695-fa03-4c17-8fb0-61a9ac90b613",
+        "name": "D.B.I. Transport, 107 Avenue Northwest, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.6787033,
+            53.5521621
+          ]
+        },
+        "createdDate": "2025-09-22T18:03:36.452Z"
+      },
+      {
+        "id": "350371fb-3069-473a-912a-3d89c6798bdc",
+        "name": "Tim Hortons, 111 Street Northwest, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.5110008,
+            53.54588409999999
+          ]
+        },
+        "createdDate": "2025-09-22T18:04:37.386Z"
+      },
+      {
+        "id": "5ee60124-df9f-4032-ac26-d391ffaa5959",
+        "name": "Tim Hortons, 111 Street Northwest, Edmonton, AB",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Point",
+          "coordinates": [
+            -113.5110008,
+            53.54588409999999
+          ]
+        },
+        "contactCompany": "Tim Hortons",
+        "businessName": "Tim Hortons",
+        "websiteUrl": "http://locations.timhortons.ca/en/ab/edmonton/10365-111-st",
+        "createdDate": "2025-09-22T18:09:34.902Z"
+      }
+    ],
+    "demo-user-2": [
+      {
+        "id": "demo-user-2-p0",
+        "name": "Rival Prospect 1",
+        "createdAt": "2025-09-22T17:20:14.745Z"
+      },
+      {
+        "id": "demo-user-2-p1",
+        "name": "Rival Prospect 2",
+        "createdAt": "2025-09-21T17:20:14.745Z"
+      },
+      {
+        "id": "demo-user-2-p2",
+        "name": "Rival Prospect 3",
+        "createdAt": "2025-09-20T17:20:14.745Z"
+      }
+    ]
+  },
+  "profiles": {
+    "demo-user": {
+      "id": "demo-user",
+      "submarkets": [
+        "Nisku",
+        "Leduc"
+      ],
+      "updatedAt": "2025-09-21T18:25:46.383Z"
+    },
+    "demo-user-2": {
+      "id": "demo-user-2",
+      "name": "Teammate Two"
+    }
+  },
+  "interactions": {
+    "demo-user": [
+      {
+        "id": "757fd085-9ca8-4881-971d-72085d0cdcfa",
+        "userId": "demo-user",
+        "prospectId": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "date": "2025-09-21T05:14:23.768Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:14:24.703Z"
+      },
+      {
+        "id": "55934b36-0ced-4906-948b-c31c722a6cd5",
+        "userId": "demo-user",
+        "prospectId": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "date": "2025-09-21T05:14:24.631Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:14:25.556Z"
+      },
+      {
+        "id": "24302a75-2c81-45c7-9820-95d39157b596",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:14:25.530Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:14:26.456Z"
+      },
+      {
+        "id": "3d7be05a-5c35-4b2f-8d68-80b2b27277b4",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:14:26.515Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:14:27.444Z"
+      },
+      {
+        "id": "a539e70c-4f4e-48b6-8b82-d2137e756701",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:14:27.404Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:14:28.329Z"
+      },
+      {
+        "id": "ed3d4f68-539f-42d9-bced-860ba46434ef",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:14:28.175Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:14:29.101Z"
+      },
+      {
+        "id": "474c0c4a-d7df-47ba-9d1f-12d00dd60754",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:38:42.887Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:43.871Z"
+      },
+      {
+        "id": "6c46ed62-dac5-471f-8e2c-72bdfbe15672",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:38:43.282Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:44.262Z"
+      },
+      {
+        "id": "d6780d90-5e27-4fb8-a38e-ff55e1b51fc7",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:38:43.646Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:44.633Z"
+      },
+      {
+        "id": "c52d5ee1-bc2a-4c8b-ab5e-c54224cf9fc0",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:38:43.868Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:44.855Z"
+      },
+      {
+        "id": "0a0c08d4-0eab-4605-89e3-04e25c7f4429",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:38:44.009Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:44.986Z"
+      },
+      {
+        "id": "1f6d11b6-9cde-4e81-b882-a007085c13c0",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:38:44.797Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:45.775Z"
+      },
+      {
+        "id": "e28e82f1-5eeb-4081-9a1a-f4da66095e8a",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:38:45.066Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:46.044Z"
+      },
+      {
+        "id": "0f2a04a2-7ed5-40e0-ac37-e100d64e44c4",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:38:45.227Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:46.210Z"
+      },
+      {
+        "id": "81435954-96ab-4811-9711-43355f31f067",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:38:45.733Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:46.718Z"
+      },
+      {
+        "id": "b6ca3646-8a6a-4377-8287-f1df2958e194",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:38:45.879Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:46.871Z"
+      },
+      {
+        "id": "fa077969-50ea-4764-9705-27560c3e09b7",
+        "userId": "demo-user",
+        "prospectId": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "date": "2025-09-21T05:38:46.883Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:47.860Z"
+      },
+      {
+        "id": "3a692751-c188-4e95-9b57-4aab35978126",
+        "userId": "demo-user",
+        "prospectId": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "date": "2025-09-21T05:38:47.034Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:48.012Z"
+      },
+      {
+        "id": "c31b9c34-d939-465c-a4c0-a65af251434f",
+        "userId": "demo-user",
+        "prospectId": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "date": "2025-09-21T05:38:47.166Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:48.152Z"
+      },
+      {
+        "id": "c895434c-e6e8-4974-a816-96e8d0c93f99",
+        "userId": "demo-user",
+        "prospectId": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "date": "2025-09-21T05:38:47.526Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:48.503Z"
+      },
+      {
+        "id": "25694d33-e4df-4c5f-b709-3c215898fca6",
+        "userId": "demo-user",
+        "prospectId": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "date": "2025-09-21T05:38:47.645Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:48.626Z"
+      },
+      {
+        "id": "15b65f54-a5cc-416a-a962-7e67ab5f2294",
+        "userId": "demo-user",
+        "prospectId": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "date": "2025-09-21T05:38:47.918Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:48.923Z"
+      },
+      {
+        "id": "07777802-867a-4c97-b9d8-8b83ff60e703",
+        "userId": "demo-user",
+        "prospectId": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "date": "2025-09-21T05:38:48.301Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:38:49.278Z"
+      },
+      {
+        "id": "4df59662-a100-4e3e-aaac-a8625d08dd6e",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:40:18.693Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:19.677Z"
+      },
+      {
+        "id": "6ff11fa4-9ab6-4f77-af92-5a44e1421c09",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:40:18.842Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:19.822Z"
+      },
+      {
+        "id": "ad520a29-f920-4f8e-90dc-f20d5df87c30",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:40:18.997Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:19.980Z"
+      },
+      {
+        "id": "8e92b246-a01d-4fde-b8e9-9a5be71ea83a",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:40:19.315Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:20.298Z"
+      },
+      {
+        "id": "6913533a-d826-4932-998b-506f17bcb77a",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:40:19.475Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:20.456Z"
+      },
+      {
+        "id": "caeb9c8a-ea41-4828-b248-12f1cbf100ff",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:40:19.745Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:20.731Z"
+      },
+      {
+        "id": "1adf505e-1fbe-4a71-bdf5-0f419a465531",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:40:20.232Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:21.214Z"
+      },
+      {
+        "id": "6bdd702e-f2e2-46b9-bf0c-83e84d6007b5",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:40:20.394Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:21.378Z"
+      },
+      {
+        "id": "cfb9cb03-51c9-4f0f-acf1-dbcd5221a252",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:40:20.541Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:21.534Z"
+      },
+      {
+        "id": "b4050faa-6e6b-418c-bb60-d97213e53ea5",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:40:20.841Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:21.822Z"
+      },
+      {
+        "id": "e480c722-c782-4e2f-91d4-b65ec1b8faae",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T05:40:21.001Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:21.992Z"
+      },
+      {
+        "id": "48ac87b8-c8fc-4456-a4be-403ed59d33f7",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:40:21.883Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:22.882Z"
+      },
+      {
+        "id": "8b21c8fa-97ac-42ea-89ae-02284c74461e",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:40:22.182Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:23.163Z"
+      },
+      {
+        "id": "a897ce0a-29df-42ec-b766-183980bef0e3",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:40:22.335Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:23.326Z"
+      },
+      {
+        "id": "86dbbf53-d66a-4e77-853d-fa09f1c48f52",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:40:22.733Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:23.716Z"
+      },
+      {
+        "id": "fe50a41d-8cde-43e5-9fc9-02861cf6f4a7",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:40:22.901Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:40:23.881Z"
+      },
+      {
+        "id": "7fc5605c-90b5-47dd-a673-b7d9a10e8bd9",
+        "userId": "demo-user",
+        "prospectId": "df0b560d-5d8a-416c-b369-78176e402a42",
+        "date": "2025-09-21T05:48:01.284Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:48:02.296Z"
+      },
+      {
+        "id": "7f1928df-700d-43fa-8249-0eb99ae58b00",
+        "userId": "demo-user",
+        "prospectId": "df0b560d-5d8a-416c-b369-78176e402a42",
+        "date": "2025-09-21T05:48:01.712Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:48:02.714Z"
+      },
+      {
+        "id": "153f2035-025d-4ce3-a178-3f9676d387c7",
+        "userId": "demo-user",
+        "prospectId": "df0b560d-5d8a-416c-b369-78176e402a42",
+        "date": "2025-09-21T05:48:02.413Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:48:03.415Z"
+      },
+      {
+        "id": "3d79128d-e90d-4021-bce4-765d2547bbee",
+        "userId": "demo-user",
+        "prospectId": "df0b560d-5d8a-416c-b369-78176e402a42",
+        "date": "2025-09-21T05:48:02.630Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:48:03.632Z"
+      },
+      {
+        "id": "8b23b010-44e4-461a-afa4-581643cad5fe",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:48:04.043Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:48:05.057Z"
+      },
+      {
+        "id": "d5634a25-2d0a-4fea-8962-40f2fe024af7",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T05:48:04.361Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:48:05.363Z"
+      },
+      {
+        "id": "e957bd66-3be1-4894-b7eb-7075c52cea83",
+        "userId": "demo-user",
+        "prospectId": "d010a302-c74b-4051-9c6e-7853febd3fed",
+        "date": "2025-09-21T05:48:06.803Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:48:07.821Z"
+      },
+      {
+        "id": "c28c4f1f-dc43-4d95-b432-6016561c9eef",
+        "userId": "demo-user",
+        "prospectId": "d010a302-c74b-4051-9c6e-7853febd3fed",
+        "date": "2025-09-21T05:48:07.279Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:48:08.289Z"
+      },
+      {
+        "id": "015fa134-0c82-43fc-9a6a-71ba2f16c38c",
+        "userId": "demo-user",
+        "prospectId": "d010a302-c74b-4051-9c6e-7853febd3fed",
+        "date": "2025-09-21T05:48:07.741Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:48:08.747Z"
+      },
+      {
+        "id": "1539c93c-d1a8-4d72-a16b-0e0875b3db08",
+        "userId": "demo-user",
+        "prospectId": "d010a302-c74b-4051-9c6e-7853febd3fed",
+        "date": "2025-09-21T05:48:08.079Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:48:09.084Z"
+      },
+      {
+        "id": "43704b6b-1364-4cf3-b16f-bfe1f4a417ba",
+        "userId": "demo-user",
+        "prospectId": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "date": "2025-09-21T05:48:08.862Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T05:48:09.867Z"
+      },
+      {
+        "id": "295a0ce7-3cc2-4eaf-b163-397bc3d916b1",
+        "userId": "demo-user",
+        "prospectId": "df0b560d-5d8a-416c-b369-78176e402a42",
+        "date": "2025-09-21T19:56:37.341Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T19:56:37.408Z"
+      },
+      {
+        "id": "0b49587b-1fd8-429c-85fd-ec26766c33f7",
+        "userId": "demo-user",
+        "prospectId": "5394b619-2cb8-4c6b-80f7-6b60b9721f8c",
+        "date": "2025-09-21T19:57:08.684Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T19:57:08.753Z"
+      },
+      {
+        "id": "fc25f60f-d8d6-4f93-88b8-35683d1298c0",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-21T19:57:18.639Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T19:57:18.699Z"
+      },
+      {
+        "id": "54d84d53-52ed-48f9-9565-bbf329bfab59",
+        "userId": "demo-user",
+        "prospectId": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "date": "2025-09-21T19:57:32.364Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "createdAt": "2025-09-21T19:57:32.449Z"
+      },
+      {
+        "id": "c6e4f697-dff4-4705-bf11-3c2a51ea4b31",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:38.544Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:37.441Z"
+      },
+      {
+        "id": "d98fccbf-5af3-4e8d-b219-58b81bec5ff8",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:38.815Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:37.714Z"
+      },
+      {
+        "id": "93b37a0b-dbeb-4dff-bb1c-91cc05f4b0dc",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:38.981Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:37.866Z"
+      },
+      {
+        "id": "25216dd7-2a46-418a-9044-4e8d14cb74ff",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:39.152Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:38.036Z"
+      },
+      {
+        "id": "20a821b9-8961-4763-9ce4-1daa6b160afc",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:39.289Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:38.188Z"
+      },
+      {
+        "id": "5074226a-9c9d-4ae9-a0fe-820fdeb304b4",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:39.557Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:38.440Z"
+      },
+      {
+        "id": "4f7ed61c-b686-4e03-92ec-8058b835f6c7",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:39.813Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:38.701Z"
+      },
+      {
+        "id": "b62c53eb-42c4-45ce-afbe-307b8ef4f9df",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:40.070Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:38.972Z"
+      },
+      {
+        "id": "60c94f80-6262-4a5c-8e0a-48acfe190ded",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:40.335Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:39.216Z"
+      },
+      {
+        "id": "2853391c-e620-4bdb-ad28-b1a4561338d1",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:40.880Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:39.774Z"
+      },
+      {
+        "id": "c319d81f-6a0e-47c2-91a4-35a08acdf561",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:41.157Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:40.040Z"
+      },
+      {
+        "id": "a4494e38-c051-4bd5-a6d1-33b12a8e471d",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:41.429Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:40.317Z"
+      },
+      {
+        "id": "8f0f573b-54c7-4e84-b863-5d4519c8d737",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:41.702Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:40.587Z"
+      },
+      {
+        "id": "b40c233b-dd54-4ce0-886a-f99a7177066a",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:41.955Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:40.840Z"
+      },
+      {
+        "id": "cbd2e26a-d527-4567-ac85-2beb2049ec0f",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:42.093Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:40.985Z"
+      },
+      {
+        "id": "16539ce5-9dee-40ab-9f39-7f9b4e9a9b62",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:50.807Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:49.701Z"
+      },
+      {
+        "id": "8a7f02b0-f6c6-4c67-aaae-cd1146867a69",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:51.077Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:49.968Z"
+      },
+      {
+        "id": "6dac088b-61ea-4616-9f22-f1092217d77d",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:51.347Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:50.234Z"
+      },
+      {
+        "id": "59904fdf-13d3-47b6-889a-fb2d5185862a",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:51.713Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:50.604Z"
+      },
+      {
+        "id": "834487cc-6fda-4aac-af59-771092b9c1d2",
+        "userId": "demo-user",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2",
+        "date": "2025-09-22T15:37:51.977Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T15:37:50.868Z"
+      },
+      {
+        "id": "0055d8ae-35b5-40d9-9524-dee190a3f994",
+        "userId": "demo-user",
+        "prospectId": "82b7c49c-f4b4-47a5-a873-e56cdef87ff2",
+        "date": "2025-09-22T16:40:55.065Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T16:40:54.070Z"
+      },
+      {
+        "id": "509bda69-35a1-47bf-ae7d-5a96e138f479",
+        "userId": "demo-user",
+        "prospectId": "82b7c49c-f4b4-47a5-a873-e56cdef87ff2",
+        "date": "2025-09-22T16:40:55.205Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T16:40:54.216Z"
+      },
+      {
+        "id": "07f3ef77-0ed0-4490-ae48-068ca397ad64",
+        "userId": "demo-user",
+        "prospectId": "82b7c49c-f4b4-47a5-a873-e56cdef87ff2",
+        "date": "2025-09-22T16:40:55.480Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T16:40:54.485Z"
+      },
+      {
+        "id": "9434b3cd-7cff-4ae0-878d-22799a37c2b2",
+        "userId": "demo-user",
+        "prospectId": "82b7c49c-f4b4-47a5-a873-e56cdef87ff2",
+        "date": "2025-09-22T16:40:55.944Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T16:40:54.965Z"
+      },
+      {
+        "id": "e833460b-21d7-46bf-96d9-91b6bbb16b63",
+        "userId": "demo-user",
+        "prospectId": "82b7c49c-f4b4-47a5-a873-e56cdef87ff2",
+        "date": "2025-09-22T16:40:56.218Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T16:40:55.235Z"
+      },
+      {
+        "id": "f41a148d-91f3-46d5-be93-f586173d6108",
+        "userId": "demo-user",
+        "prospectId": "82b7c49c-f4b4-47a5-a873-e56cdef87ff2",
+        "date": "2025-09-22T16:40:56.485Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T16:40:55.506Z"
+      },
+      {
+        "id": "a9129f78-5380-4205-9588-0fadf0081554",
+        "userId": "demo-user",
+        "prospectId": "82b7c49c-f4b4-47a5-a873-e56cdef87ff2",
+        "date": "2025-09-22T16:40:56.786Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T16:40:55.799Z"
+      },
+      {
+        "id": "d21194b4-59c3-4a69-9a53-b795e938c902",
+        "userId": "demo-user",
+        "prospectId": "82b7c49c-f4b4-47a5-a873-e56cdef87ff2",
+        "date": "2025-09-22T16:40:57.137Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T16:40:56.140Z"
+      },
+      {
+        "id": "dcca7bbd-a11e-4ee7-8ad5-4b3f9b575ada",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-22T16:40:58.055Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "Quick call engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T16:40:57.058Z"
+      },
+      {
+        "id": "422abef1-1651-4926-a7c2-d216d4e04526",
+        "userId": "demo-user",
+        "prospectId": "64ba8168-eb23-4f98-956c-0397b930c5ab",
+        "date": "2025-09-22T16:40:58.400Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T16:40:57.418Z"
+      }
+    ],
+    "3e1df863-0f8d-483d-86d4-15de9fc137fc": [
+      {
+        "id": "41178810-ba80-4a10-a026-6397b7ce13c8",
+        "userId": "3e1df863-0f8d-483d-86d4-15de9fc137fc",
+        "prospectId": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "date": "2025-09-22T16:41:14.058Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-09-22T16:41:13.058Z"
+      }
+    ],
+    "demo-user-2": [
+      {
+        "id": "demo-user-2-i1",
+        "type": "call",
+        "date": "2025-09-19T17:20:14.745Z"
+      },
+      {
+        "id": "demo-user-2-i2",
+        "type": "email",
+        "date": "2025-09-20T17:20:14.745Z"
+      },
+      {
+        "id": "demo-user-2-i3",
+        "type": "meeting",
+        "date": "2025-09-21T17:20:14.745Z"
+      }
+    ]
+  },
+  "requirements": {
+    "demo-user": [
+      {
+        "id": "f6f4f0a5-06bf-4232-9237-ba1a18db58d4",
+        "userId": "demo-user",
+        "title": "asdasd",
+        "source": "Avison",
+        "location": "Leduc",
+        "contactName": "",
+        "contactEmail": "",
+        "contactPhone": "",
+        "spaceSize": "5,000 - 10,000 SF",
+        "timeline": null,
+        "status": "active",
+        "tags": [],
+        "notes": "asdsa",
+        "createdAt": "2025-09-22T17:06:46.543Z",
+        "updatedAt": "2025-09-22T17:06:46.543Z"
+      },
+      {
+        "id": "7aa745ca-c893-48fa-92db-774c76a87528",
+        "userId": "demo-user",
+        "title": "rebel",
+        "source": null,
+        "location": "b",
+        "contactName": "",
+        "contactEmail": "",
+        "contactPhone": "",
+        "spaceSize": "10,000 - 25,000 SF",
+        "timeline": null,
+        "status": "fulfilled",
+        "tags": [],
+        "notes": "",
+        "createdAt": "2025-09-22T17:09:48.722Z",
+        "updatedAt": "2025-09-22T17:09:48.722Z"
+      }
+    ],
+    "demo-user-2": [
+      {
+        "id": "demo-user-2-r1",
+        "title": "Tenant need 5k sf",
+        "createdAt": "2025-09-18T17:20:14.745Z"
+      },
+      {
+        "id": "demo-user-2-r2",
+        "title": "Buyer search 2 acres",
+        "createdAt": "2025-09-21T17:20:14.745Z"
+      }
+    ]
+  },
+  "submarkets": {
+    "demo-user": [
+      {
+        "id": "170f277d-8e61-4e1f-99c1-3b8a6ffccc6f",
+        "userId": "demo-user",
+        "name": "a",
+        "color": "#41b",
+        "isActive": true,
+        "createdAt": "2025-09-21T05:47:46.715Z",
+        "updatedAt": "2025-09-21T05:47:46.715Z"
+      },
+      {
+        "id": "d1120d10-206f-46c0-8cdc-496ffc301102",
+        "userId": "demo-user",
+        "name": "a",
+        "color": "#1b71a4",
+        "isActive": true,
+        "createdAt": "2025-09-21T05:47:49.093Z",
+        "updatedAt": "2025-09-21T05:47:49.093Z"
+      },
+      {
+        "id": "ba808e10-4c18-42f3-825c-9c05e03fa0c8",
+        "userId": "demo-user",
+        "name": "s",
+        "color": "#b94aca",
+        "isActive": true,
+        "createdAt": "2025-09-21T05:47:49.194Z",
+        "updatedAt": "2025-09-21T05:47:49.194Z"
+      },
+      {
+        "id": "e9b3fe3c-ab53-4149-b330-0bf1755f7074",
+        "userId": "demo-user",
+        "name": "a",
+        "color": "#4b8843",
+        "isActive": true,
+        "createdAt": "2025-09-21T05:47:51.552Z",
+        "updatedAt": "2025-09-21T05:47:51.552Z"
+      },
+      {
+        "id": "49eea947-e219-4221-9b5b-5233e2d197ef",
+        "userId": "demo-user",
+        "name": "s",
+        "color": "#b43983",
+        "isActive": true,
+        "createdAt": "2025-09-21T05:47:51.664Z",
+        "updatedAt": "2025-09-21T05:47:51.664Z"
+      },
+      {
+        "id": "3dc0cea4-a568-4b1d-8e16-05d96046d570",
+        "userId": "demo-user",
+        "name": "b",
+        "color": "#83012a",
+        "isActive": true,
+        "createdAt": "2025-09-21T05:47:51.773Z",
+        "updatedAt": "2025-09-21T05:47:51.773Z"
+      },
+      {
+        "id": "fc718e48-bfe1-41e5-b9e9-4b0cdaafe68a",
+        "userId": "demo-user",
+        "name": "a",
+        "color": "#63717c",
+        "isActive": true,
+        "createdAt": "2025-09-21T18:25:36.341Z",
+        "updatedAt": "2025-09-21T18:25:36.341Z"
+      },
+      {
+        "id": "66f089b5-40cd-4c03-ac03-e866a30e43c9",
+        "userId": "demo-user",
+        "name": "s",
+        "color": "#fac373",
+        "isActive": true,
+        "createdAt": "2025-09-21T18:25:36.438Z",
+        "updatedAt": "2025-09-21T18:25:36.438Z"
+      },
+      {
+        "id": "73b30bf7-ee00-4383-a7d7-ad913b4001a5",
+        "userId": "demo-user",
+        "name": "a",
+        "color": "#b3b403",
+        "isActive": true,
+        "createdAt": "2025-09-21T18:25:38.474Z",
+        "updatedAt": "2025-09-21T18:25:38.474Z"
+      },
+      {
+        "id": "b8f6f960-5db4-440b-9069-627f0c886ba9",
+        "userId": "demo-user",
+        "name": "s",
+        "color": "#c27896",
+        "isActive": true,
+        "createdAt": "2025-09-21T18:25:38.569Z",
+        "updatedAt": "2025-09-21T18:25:38.569Z"
+      },
+      {
+        "id": "f216855c-a906-4d1f-8a74-544423fac573",
+        "userId": "demo-user",
+        "name": "Nisku",
+        "color": "#71e45d",
+        "isActive": true,
+        "createdAt": "2025-09-21T18:25:38.664Z",
+        "updatedAt": "2025-09-21T18:25:38.664Z"
+      },
+      {
+        "id": "79dcd41b-20b9-4c71-bd04-f18ff9d6b7cc",
+        "userId": "demo-user",
+        "name": "a",
+        "color": "#9ace5b",
+        "isActive": true,
+        "createdAt": "2025-09-21T18:25:42.331Z",
+        "updatedAt": "2025-09-21T18:25:42.331Z"
+      },
+      {
+        "id": "9ec1e287-82f3-47aa-8af3-d9cac717b71a",
+        "userId": "demo-user",
+        "name": "Nisku",
+        "color": "#70157c",
+        "isActive": true,
+        "createdAt": "2025-09-21T18:25:42.444Z",
+        "updatedAt": "2025-09-21T18:25:42.444Z"
+      },
+      {
+        "id": "0d1cc95a-f846-4ac3-bf2d-e1b255b8f8cd",
+        "userId": "demo-user",
+        "name": "Nisku",
+        "color": "#bd71b7",
+        "isActive": true,
+        "createdAt": "2025-09-21T18:25:42.929Z",
+        "updatedAt": "2025-09-21T18:25:42.929Z"
+      },
+      {
+        "id": "f5171fc6-c1d1-4cb0-af4f-68e0bb5d95ae",
+        "userId": "demo-user",
+        "name": "Nisku",
+        "color": "#77d772",
+        "isActive": true,
+        "createdAt": "2025-09-21T18:25:46.220Z",
+        "updatedAt": "2025-09-21T18:25:46.220Z"
+      },
+      {
+        "id": "9fe0d7e2-ec10-4c07-80df-8b101afb4c04",
+        "userId": "demo-user",
+        "name": "Leduc",
+        "color": "#401518",
+        "isActive": true,
+        "createdAt": "2025-09-21T18:25:46.318Z",
+        "updatedAt": "2025-09-21T18:25:46.318Z"
+      }
+    ]
+  },
+  "marketComps": {
+    "demo-user": [
+      {
+        "id": "c40964f2-c9a3-452d-b1f7-0f7b435375d4",
+        "userId": "demo-user",
+        "address": "1234",
+        "submarket": "a",
+        "assetType": "Land",
+        "buildingSize": null,
+        "landSize": null,
+        "sourceLink": null,
+        "notes": null,
+        "dealType": "lease",
+        "tenant": null,
+        "termMonths": 5,
+        "rate": null,
+        "rateType": "Net",
+        "commencement": "2025-09-02",
+        "concessions": null,
+        "saleDate": null,
+        "buyer": null,
+        "seller": null,
+        "price": null,
+        "pricePerSf": null,
+        "pricePerAcre": null,
+        "createdAt": "2025-09-21T19:52:13.188Z",
+        "updatedAt": "2025-09-21T19:52:13.188Z"
+      },
+      {
+        "id": "8aea6f7d-8100-4958-99f2-36a1778e464f",
+        "userId": "demo-user",
+        "address": "123123",
+        "submarket": null,
+        "assetType": "Building",
+        "buildingSize": null,
+        "landSize": null,
+        "sourceLink": null,
+        "notes": null,
+        "dealType": "lease",
+        "tenant": null,
+        "termMonths": 72,
+        "rate": "11.5",
+        "rateType": null,
+        "commencement": null,
+        "concessions": null,
+        "saleDate": "2025-09-03",
+        "buyer": null,
+        "seller": null,
+        "price": "900000",
+        "pricePerSf": null,
+        "pricePerAcre": null,
+        "createdAt": "2025-09-21T19:55:57.438Z",
+        "updatedAt": "2025-09-21T20:16:21.183Z"
+      },
+      {
+        "id": "f74f4e2b-d171-46c4-a64b-93a912397c0d",
+        "userId": "demo-user",
+        "address": "12412313",
+        "submarket": null,
+        "assetType": "Building",
+        "buildingSize": null,
+        "landSize": null,
+        "sourceLink": null,
+        "notes": null,
+        "dealType": "lease",
+        "tenant": null,
+        "termMonths": null,
+        "rate": "9.50",
+        "rateType": null,
+        "commencement": null,
+        "concessions": null,
+        "saleDate": "2025-09-24",
+        "buyer": null,
+        "seller": null,
+        "price": null,
+        "pricePerSf": null,
+        "pricePerAcre": null,
+        "createdAt": "2025-09-21T19:56:02.480Z",
+        "updatedAt": "2025-09-21T20:08:09.798Z"
+      },
+      {
+        "id": "941a8710-e08b-45cc-8ea9-717da4cdd2cf",
+        "userId": "demo-user",
+        "address": "234234",
+        "submarket": null,
+        "assetType": "Building",
+        "buildingSize": null,
+        "landSize": null,
+        "sourceLink": null,
+        "notes": null,
+        "dealType": "sale",
+        "tenant": null,
+        "termMonths": null,
+        "rate": null,
+        "rateType": null,
+        "commencement": null,
+        "concessions": null,
+        "saleDate": null,
+        "buyer": null,
+        "seller": null,
+        "price": null,
+        "pricePerSf": null,
+        "pricePerAcre": null,
+        "createdAt": "2025-09-21T19:57:02.433Z",
+        "updatedAt": "2025-09-21T19:57:02.433Z"
+      }
+    ],
+    "demo-user-2": [
+      {
+        "id": "demo-user-2-c1",
+        "address": "123 Main St",
+        "createdAt": "2025-09-17T17:20:14.745Z"
+      }
+    ]
+  },
+  "listings": {
+    "demo-user": [
+      {
+        "id": "682523dd-90c0-47f5-afc9-ff419d7b2d43",
+        "userId": "demo-user",
+        "title": "nw",
+        "address": "nw",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-22T13:24:43.488Z",
+        "archivedAt": "2025-09-22T16:03:59.830Z"
+      },
+      {
+        "id": "5e89732d-6ed3-4bc0-9951-51a4f530362e",
+        "userId": "demo-user",
+        "title": "test",
+        "address": "test",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-22T13:25:46.473Z",
+        "archivedAt": "2025-09-22T16:02:56.356Z"
+      },
+      {
+        "id": "e98b3aac-6b26-4407-a02b-c80f22e68487",
+        "userId": "demo-user",
+        "title": "465",
+        "address": "465",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-22T13:27:44.067Z",
+        "archivedAt": "2025-09-22T16:01:09.206Z"
+      },
+      {
+        "id": "7726c688-c17c-436b-891a-c2b3aef24a0a",
+        "userId": "demo-user",
+        "title": "456564",
+        "address": "456564",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-22T13:32:39.925Z",
+        "archivedAt": "2025-09-22T16:01:08.344Z"
+      },
+      {
+        "id": "01115cc7-679c-4eee-a3a3-bafae73d9cd8",
+        "userId": "demo-user",
+        "title": "sad",
+        "address": "sad",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-22T13:40:30.477Z",
+        "archivedAt": "2025-09-22T16:01:07.779Z"
+      },
+      {
+        "id": "319f720e-3f0b-4f5d-9e1b-dd80124a8c2b",
+        "userId": "demo-user",
+        "title": "asd",
+        "address": "asd",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-22T14:29:43.410Z",
+        "archivedAt": "2025-09-22T16:01:07.245Z"
+      },
+      {
+        "id": "b2d5385c-ca46-41e3-a712-9b2b7a28191c",
+        "userId": "demo-user",
+        "title": "a",
+        "address": "a",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-22T14:59:46.787Z",
+        "archivedAt": "2025-09-22T16:01:06.284Z"
+      },
+      {
+        "id": "73b70829-2d37-4fd7-aae2-c1553d6766a9",
+        "userId": "demo-user",
+        "title": "test",
+        "address": "test",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-22T16:07:44.507Z",
+        "archivedAt": "2025-09-22T16:26:17.641Z"
+      },
+      {
+        "id": "73e9464a-1fce-404a-a0de-fbf0e4cd851d",
+        "userId": "demo-user",
+        "title": "teat",
+        "address": "teat",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-22T16:26:51.671Z",
+        "archivedAt": null
+      },
+      {
+        "id": "77dd20b5-472e-4bb2-8486-742dc1f58db4",
+        "userId": "demo-user",
+        "title": "test",
+        "address": "test",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-22T16:29:18.573Z",
+        "archivedAt": null
+      },
+      {
+        "id": "7cc3da60-8724-444c-b3b5-e28a656d0e68",
+        "userId": "demo-user",
+        "title": "teas",
+        "address": "teas",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-22T16:34:03.303Z",
+        "archivedAt": null
+      },
+      {
+        "id": "46b08efe-88c1-4821-abb4-6f9cf20f9b3a",
+        "userId": "demo-user",
+        "title": "Franks Building",
+        "address": "Franks Building",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-22T16:46:30.855Z",
+        "archivedAt": null
+      },
+      {
+        "id": "92487dff-215c-4751-9f2e-ff19d86f34e4",
+        "userId": "demo-user",
+        "title": "sad",
+        "address": "sad",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-22T18:21:13.036Z",
+        "archivedAt": null
+      }
+    ]
+  },
+  "listingLinks": {
+    "demo-user": [
+      {
+        "listingId": "682523dd-90c0-47f5-afc9-ff419d7b2d43",
+        "prospectId": "f7ce1c47-93e9-4b50-8f40-512ead760601"
+      },
+      {
+        "listingId": "682523dd-90c0-47f5-afc9-ff419d7b2d43",
+        "prospectId": "1257b838-5251-46c0-a032-c88eaa7e3751"
+      },
+      {
+        "listingId": "682523dd-90c0-47f5-afc9-ff419d7b2d43",
+        "prospectId": "3a8e1411-ff6c-493f-8ec5-94c2291a33e8"
+      },
+      {
+        "listingId": "e98b3aac-6b26-4407-a02b-c80f22e68487",
+        "prospectId": "1dd25d72-b6d0-44e1-9600-bff7038aa8cf"
+      },
+      {
+        "listingId": "682523dd-90c0-47f5-afc9-ff419d7b2d43",
+        "prospectId": "846d2b50-0a21-49c3-9402-7b9bdb2f878f"
+      },
+      {
+        "listingId": "682523dd-90c0-47f5-afc9-ff419d7b2d43",
+        "prospectId": "a6507dac-d25c-424d-b323-fee54f82bb86"
+      },
+      {
+        "listingId": "319f720e-3f0b-4f5d-9e1b-dd80124a8c2b",
+        "prospectId": "337f901c-9aa4-4750-9afa-7c245e219e0f"
+      },
+      {
+        "listingId": "319f720e-3f0b-4f5d-9e1b-dd80124a8c2b",
+        "prospectId": "cf47f724-78de-4abe-a23f-a69e884cb2c7"
+      },
+      {
+        "listingId": "319f720e-3f0b-4f5d-9e1b-dd80124a8c2b",
+        "prospectId": "3d4f3d93-be55-4f00-bf1b-79f6b01be890"
+      },
+      {
+        "listingId": "319f720e-3f0b-4f5d-9e1b-dd80124a8c2b",
+        "prospectId": "9f5014d0-1cd4-465b-9f50-b65244304e95"
+      },
+      {
+        "listingId": "682523dd-90c0-47f5-afc9-ff419d7b2d43",
+        "prospectId": "3356ad06-068f-48b8-8c1a-32c9ecbd5ff3"
+      },
+      {
+        "listingId": "682523dd-90c0-47f5-afc9-ff419d7b2d43",
+        "prospectId": "4ea98794-6c85-47eb-965a-251380f95bae"
+      },
+      {
+        "listingId": "b2d5385c-ca46-41e3-a712-9b2b7a28191c",
+        "prospectId": "3cf6fabe-20ee-4873-86c5-a839fe2d446f"
+      },
+      {
+        "listingId": "682523dd-90c0-47f5-afc9-ff419d7b2d43",
+        "prospectId": "ea4ed47a-ceac-4aee-9c64-d8b389792e0f"
+      },
+      {
+        "listingId": "682523dd-90c0-47f5-afc9-ff419d7b2d43",
+        "prospectId": "f225d09e-6a7f-4261-ae65-57132ad05fd2"
+      },
+      {
+        "listingId": "682523dd-90c0-47f5-afc9-ff419d7b2d43",
+        "prospectId": "19050879-d018-4de5-97d1-48e1560dc310"
+      },
+      {
+        "listingId": "e98b3aac-6b26-4407-a02b-c80f22e68487",
+        "prospectId": "11f292b6-e110-48de-bc27-d1f5f97f8fd2"
+      },
+      {
+        "listingId": "01115cc7-679c-4eee-a3a3-bafae73d9cd8",
+        "prospectId": "b4c3ad89-1cb0-49e4-a978-23d2e0665c01"
+      },
+      {
+        "listingId": "01115cc7-679c-4eee-a3a3-bafae73d9cd8",
+        "prospectId": "f5f42946-adf7-4f50-b25d-eed898fcf831"
+      },
+      {
+        "listingId": "b2d5385c-ca46-41e3-a712-9b2b7a28191c",
+        "prospectId": "cea34b30-496e-43dc-af16-2ad3c70c8bd9"
+      },
+      {
+        "listingId": "01115cc7-679c-4eee-a3a3-bafae73d9cd8",
+        "prospectId": "3d42ab76-9e84-4140-8927-2d1ff5cfe2f3"
+      },
+      {
+        "listingId": "e98b3aac-6b26-4407-a02b-c80f22e68487",
+        "prospectId": "39acf5a8-566f-4058-aa17-f68f739ea369"
+      },
+      {
+        "listingId": "77dd20b5-472e-4bb2-8486-742dc1f58db4",
+        "prospectId": "01054d65-471a-4a4a-927c-d07385abe9fe"
+      },
+      {
+        "listingId": "77dd20b5-472e-4bb2-8486-742dc1f58db4",
+        "prospectId": "3234101c-da2d-4684-91e2-d74689f1f707"
+      },
+      {
+        "listingId": "7cc3da60-8724-444c-b3b5-e28a656d0e68",
+        "prospectId": "f536110a-e2fb-4568-a90a-8e3ff0d8f70f"
+      },
+      {
+        "listingId": "73e9464a-1fce-404a-a0de-fbf0e4cd851d",
+        "prospectId": "1fafecf1-e020-43ad-9815-37214375153f"
+      },
+      {
+        "listingId": "46b08efe-88c1-4821-abb4-6f9cf20f9b3a",
+        "prospectId": "93fe539a-ae27-4041-9fb3-078fd7dedb6f"
+      },
+      {
+        "listingId": "46b08efe-88c1-4821-abb4-6f9cf20f9b3a",
+        "prospectId": "aa0a4695-fa03-4c17-8fb0-61a9ac90b613"
+      },
+      {
+        "listingId": "46b08efe-88c1-4821-abb4-6f9cf20f9b3a",
+        "prospectId": "350371fb-3069-473a-912a-3d89c6798bdc"
+      },
+      {
+        "listingId": "77dd20b5-472e-4bb2-8486-742dc1f58db4",
+        "prospectId": "5ee60124-df9f-4032-ac26-d391ffaa5959"
+      }
+    ]
+  }
+}

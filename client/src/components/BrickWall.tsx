@@ -1,6 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { SkillActivityRow } from '@shared/schema';
-import { Button } from '@/components/ui/button';
 
 // Category colors
 const categoryColors = {
@@ -27,19 +26,11 @@ export default function BrickWall({
   events, 
   unitXp = 10
 }: BrickWallProps) {
-  const [timeWindow, setTimeWindow] = useState<'7d' | '30d' | 'all'>('30d');
+  // All-time view: no time filtering
+  const filteredEvents = events;
 
-  // Filter events by time window
-  const filteredEvents = useMemo(() => {
-    if (timeWindow === 'all') return events;
-    
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - (timeWindow === '7d' ? 7 : 30));
-    
-    return events.filter(event => 
-      event.timestamp && new Date(event.timestamp) >= cutoffDate
-    );
-  }, [events, timeWindow]);
+  // Fixed columns per course (row)
+  const COLS = 60;
 
   // Convert events to bricks
   const bricks = useMemo(() => {
@@ -78,9 +69,32 @@ export default function BrickWall({
 
   // Calculate stats
   const totalXp = bricks.length * unitXp;
-  const hasMoreBricks = filteredEvents.reduce((total, event) => 
-    total + Math.floor((event.xpGained || 0) / unitXp), 0) > 1500;
-  const nextMilestone = Math.ceil(bricks.length / 100) * 100 * unitXp;
+
+  // Chunk bricks into fixed-width courses (rows), oldest → newest
+  const courses: Brick[][] = useMemo(() => {
+    const rows: Brick[][] = [];
+    for (let i = 0; i < bricks.length; i += COLS) {
+      rows.push(bricks.slice(i, i + COLS));
+    }
+    return rows;
+  }, [bricks]);
+
+  // Level thresholds (capstones) using same leveling curve as stats page
+  const getXpForLevel = (level: number): number => Math.floor((level ** 2) * 100);
+  const capstonesByRow = useMemo(() => {
+    const map = new Map<number, number[]>();
+    for (let lvl = 1; lvl <= 99; lvl++) {
+      const xpNeeded = getXpForLevel(lvl);
+      if (xpNeeded > totalXp) break;
+      const bricksNeeded = Math.ceil(xpNeeded / unitXp);
+      if (bricksNeeded <= 0) continue;
+      const rowIndex = Math.floor((bricksNeeded - 1) / COLS);
+      const arr = map.get(rowIndex) || [];
+      arr.push(lvl);
+      map.set(rowIndex, arr);
+    }
+    return map;
+  }, [totalXp, unitXp]);
 
   // Map skill types to categories
   function mapSkillTypeToCategory(skillType: string): string {
@@ -107,45 +121,47 @@ export default function BrickWall({
     });
   }
 
-  // Render brick with milestone check
-  const renderBricks = () => {
-    const elements: JSX.Element[] = [];
-    
-    bricks.forEach((brick, index) => {
-      const color = getCategoryColor(brick.category);
-      const tooltip = `${brick.category} · ${brick.action.replace('_', ' ')} · +${brick.unitXp} XP · ${formatDate(brick.created_at)}`;
-      
-      // Add milestone divider every 100 bricks
-      if (index > 0 && index % 100 === 0) {
-        const milestoneXp = index * unitXp;
-        elements.push(
-          <div
-            key={`milestone-${index}`}
-            className="milestone-divider"
-            style={{ gridColumn: '1 / -1' }}
-          >
-            <div className="milestone-line">
-              <span className="milestone-label">
-                Milestone: {milestoneXp.toLocaleString()} XP
-              </span>
-            </div>
+  // Render bricks into bottom-up courses
+  const renderCourses = () => {
+    return courses.map((course, idx) => {
+      const courseFromBottom = idx + 1; // because we use column-reverse
+      const showTick = courseFromBottom % 10 === 0;
+      const xpAtRow = courseFromBottom * COLS * unitXp;
+      const capstones = capstonesByRow.get(idx) || [];
+      return (
+        <div key={`course-row-${idx}`} className="course-row">
+          <div className="gutter">
+            {showTick ? (
+              <span className="gutter-label">{xpAtRow.toLocaleString()} XP</span>
+            ) : (
+              <span className="gutter-spacer" />
+            )}
           </div>
-        );
-      }
-      
-      // Add the brick
-      elements.push(
-        <div
-          key={brick.id}
-          className="brick"
-          style={{ backgroundColor: color }}
-          title={tooltip}
-          aria-label={tooltip}
-        />
+          <div className="course" aria-label={`Course ${courseFromBottom}`}>
+            {course.map((brick, colIdx) => {
+              const color = getCategoryColor(brick.category);
+              const tooltip = `${brick.category} · ${brick.action.replace('_', ' ')} · +${brick.unitXp} XP · ${formatDate(brick.created_at)}`;
+              return (
+                <div
+                  key={brick.id}
+                  className="brick"
+                  style={{ backgroundColor: color, animationDelay: `${(colIdx % COLS) * 5}ms` }}
+                  title={tooltip}
+                  aria-label={tooltip}
+                />
+              );
+            })}
+            {capstones.length > 0 && (
+              <div className="capstones" aria-hidden>
+                {capstones.map((lvl) => (
+                  <span key={`cap-${lvl}`} className="capstone-pill">Lvl {lvl}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       );
     });
-    
-    return elements;
   };
 
   if (filteredEvents.length === 0) {
@@ -188,12 +204,43 @@ export default function BrickWall({
           color: #6b7280;
         }
 
-        .brick-grid {
+        .stack {
+          display: flex;
+          flex-direction: column-reverse; /* bottom-up build */
+          gap: 2px;
+          margin-bottom: 0.75rem;
+        }
+
+        .course-row {
           display: grid;
-          grid-template-columns: repeat(auto-fill, var(--brick-size-mobile));
+          grid-template-columns: 64px 1fr; /* gutter + course */
+          align-items: center;
+          gap: 8px;
+        }
+
+        .gutter {
+          display: flex;
+          justify-content: flex-end;
+          align-items: center;
+        }
+
+        .gutter-label {
+          font-size: 10px;
+          color: #6b7280;
+          background: #f3f4f6;
+          border: 1px solid #e5e7eb;
+          border-radius: 999px;
+          padding: 2px 6px;
+          white-space: nowrap;
+        }
+
+        .gutter-spacer { height: 1px; }
+
+        .course {
+          display: grid;
+          grid-template-columns: repeat(var(--cols, 60), var(--brick-size-mobile));
           gap: var(--gap-mobile);
-          grid-auto-flow: row;
-          margin-bottom: 1rem;
+          position: relative;
         }
 
         .brick {
@@ -208,34 +255,27 @@ export default function BrickWall({
           transform: scale(1.1);
         }
 
-        .milestone-divider {
-          margin: 8px 0;
-        }
-
-        .milestone-line {
-          height: 1px;
-          background: #e5e7eb;
-          position: relative;
-        }
-
-        .milestone-label {
+        .capstones {
           position: absolute;
-          left: 0;
-          top: -8px;
+          right: -2px;
+          top: 50%;
+          transform: translateY(-50%);
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .capstone-pill {
           font-size: 10px;
-          color: #6b7280;
-          background: #f9fafb;
-          padding: 2px 6px;
-          border-radius: 8px;
-          border: 1px solid #e5e7eb;
-          white-space: nowrap;
+          color: #111827;
+          background: #fde68a;
+          border: 1px solid #fbbf24;
+          padding: 1px 4px;
+          border-radius: 6px;
         }
 
         @media (min-width: 768px) {
-          .brick-grid {
-            grid-template-columns: repeat(auto-fill, var(--brick-size-tablet));
-            gap: var(--gap-tablet);
-          }
+          .course { grid-template-columns: repeat(var(--cols, 60), var(--brick-size-tablet)); gap: var(--gap-tablet); }
           .brick {
             width: var(--brick-size-tablet);
             height: var(--brick-height-tablet);
@@ -243,34 +283,22 @@ export default function BrickWall({
         }
 
         @media (min-width: 1024px) {
-          .brick-grid {
-            grid-template-columns: repeat(auto-fill, var(--brick-size-desktop));
-            gap: var(--gap-desktop);
-          }
+          .course { grid-template-columns: repeat(var(--cols, 60), var(--brick-size-desktop)); gap: var(--gap-desktop); }
           .brick {
             width: var(--brick-size-desktop);
             height: var(--brick-height-desktop);
           }
         }
+
+        @keyframes place {
+          from { transform: scale(0.9); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
+        }
       `}</style>
       
-      {/* Time Window Selector */}
-      <div className="flex gap-1 mb-4">
-        {(['7d', '30d', 'all'] as const).map((period) => (
-          <Button
-            key={period}
-            variant={timeWindow === period ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setTimeWindow(period)}
-            className="text-xs px-3 py-1"
-          >
-            {period === 'all' ? 'All' : period.toUpperCase()}
-          </Button>
-        ))}
-      </div>
-      {/* Foundation Wall Grid */}
-      <div className="brick-grid">
-        {renderBricks()}
+      {/* Foundation wall: bottom-up courses with fixed columns */}
+      <div className="stack" style={{ ['--cols' as any]: COLS }}>
+        {renderCourses()}
       </div>
       {/* Legend */}
       <div className="flex flex-wrap gap-4 text-sm">

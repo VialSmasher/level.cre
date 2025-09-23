@@ -2,51 +2,52 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/contexts/AuthContext'
 import { useLocation } from 'wouter'
-import { useEffect, useState } from 'react'
-import { MapPin, BarChart3, Users, Loader2, Sparkles, ArrowRight, CheckCircle } from 'lucide-react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { Loader2, Sparkles, ArrowRight, CheckCircle } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
+// Lazy-load the feature cards so the login route stays fast
+const FeatureCards = lazy(() => import('@/components/FeatureCards'))
+
 export default function Landing() {
-  const { user, loading, signInWithGoogle, signInWithEmail } = useAuth()
+  const { user, loading, signInWithEmail, signInWithGoogle } = useAuth()
   const [, setLocation] = useLocation()
   const [isSigningIn, setIsSigningIn] = useState(false)
   const [isDemoMode, setIsDemoMode] = useState(false)
-  const [popupUrl, setPopupUrl] = useState<string | null>(null)
   const [email, setEmail] = useState('')
+  const [showEmail, setShowEmail] = useState(true)
+  const [emailSentTo, setEmailSentTo] = useState<string | null>(null)
   const [isSendingLink, setIsSendingLink] = useState(false)
   const { toast } = useToast()
+  const hasPrefetched = useRef(false)
+  const ENABLE_GOOGLE = (import.meta.env.VITE_ENABLE_GOOGLE_AUTH === '1' || import.meta.env.VITE_ENABLE_GOOGLE_AUTH === 'true')
   
-  // Detect iframe environment
-  const inIframe = typeof window !== 'undefined' && window.self !== window.top
+  // Detect iframe environment (kept for potential future use)
+  const emailValid = /.+@.+\..+/.test(email)
 
-  const handleSignIn = async () => {
-    if (isSigningIn) return // Prevent double-clicks
-    
+  // Prefetch app modules when CTA is visible or hovered
+  const prefetchApp = () => {
+    if (hasPrefetched.current) return
+    hasPrefetched.current = true
+    import('@/pages/home')
+    import('@/components/AppLayout')
+  }
+
+  useEffect(() => {
+    // Prefetch app modules shortly after landing load
+    const t = setTimeout(prefetchApp, 300)
+    return () => clearTimeout(t)
+  }, [])
+
+  const handleGoogle = async () => {
+    if (!ENABLE_GOOGLE) return
+    if (isSigningIn) return
     setIsSigningIn(true)
-    setPopupUrl(null) // Clear any previous popup URL
-    
-    // Clear demo mode when starting Google flow
-    localStorage.removeItem('demo-mode')
-    
     try {
       await signInWithGoogle()
-    } catch (error: any) {
-      console.error('Error signing in:', error)
-      
-      // Check if this is a popup blocked error with OAuth URL
-      if (error.message === 'Popup blocked' && error.oauthUrl) {
-        setPopupUrl(error.oauthUrl)
-        toast({
-          title: "Popup blocked",
-          description: "Please click the link below to continue with Google sign-in.",
-          variant: "destructive",
-        })
-      } else {
-        toast({
-          title: "Sign-in failed. Please try again.",
-          variant: "destructive",
-        })
-      }
+    } catch (err: any) {
+      console.error('Google sign-in error:', err)
+      toast({ title: 'Sign-in unavailable', description: err?.message || 'Please try again later', variant: 'destructive' })
     } finally {
       setIsSigningIn(false)
     }
@@ -62,10 +63,11 @@ export default function Landing() {
   }
 
   const handleSendMagicLink = async () => {
-    if (isSendingLink || !email) return
+    if (isSendingLink || !emailValid) return
     setIsSendingLink(true)
     try {
       await signInWithEmail(email)
+      setEmailSentTo(email)
       toast({ title: 'Magic link sent', description: 'Check your email to complete sign-in.' })
     } catch (err: any) {
       console.error('Magic link error:', err)
@@ -116,63 +118,65 @@ export default function Landing() {
               
               {/* CTAs */}
               <div className="flex flex-col gap-4 justify-center items-center max-w-sm mx-auto pt-4">
-                <Button 
-                  onClick={handleSignIn}
-                  disabled={isSigningIn || isDemoMode}
-                  className="group relative w-full h-12 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-medium rounded-xl disabled:opacity-50 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
-                  aria-label="Sign in with Google"
-                >
-                  {isSigningIn ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Signing in...
-                    </>
-                  ) : (
-                    <>
-                      Sign in with Google
-                      <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
-                    </>
-                  )}
-                </Button>
-
-                {/* Magic Link (Email) */}
-                <div className="w-full space-y-2">
-                  <div className="flex gap-2">
-                    <Input
-                      type="email"
-                      placeholder="you@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="flex-1 h-12"
-                    />
-                    <Button
-                      onClick={handleSendMagicLink}
-                      disabled={isSendingLink || !email || isSigningIn}
-                      className="h-12"
-                    >
-                      {isSendingLink ? 'Sending…' : 'Send link'}
-                    </Button>
-                  </div>
-                  <p className="text-xs text-gray-600 text-center">Or sign in with a one-time email link.</p>
-                </div>
-                
-                {/* OAuth fallback for Replit iframe restrictions */}
-                {popupUrl && (
-                  <div className="w-full space-y-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-                    <p className="text-sm text-blue-800 font-medium">
-                      Due to Replit's iframe environment, please click below to complete Google sign-in:
-                    </p>
-                    <a 
-                      href={popupUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 w-full justify-center"
-                    >
-                      Complete Google Sign-in in New Tab
-                      <ArrowRight className="w-4 h-4" />
-                    </a>
-                  </div>
+                {ENABLE_GOOGLE && (
+                  <Button
+                    onMouseEnter={prefetchApp}
+                    onClick={handleGoogle}
+                    disabled={isSigningIn || isDemoMode}
+                    className="group relative w-full h-12 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-medium rounded-xl disabled:opacity-50 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
+                    aria-label="Continue with Google"
+                  >
+                    {isSigningIn ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Signing in...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4 mr-2" viewBox="0 0 533.5 544.3" aria-hidden="true">
+                          <path fill="#4285F4" d="M533.5 278.4c0-18.6-1.6-37-5-54.8H272v103.8h147.5c-6.4 34.7-26 64.1-55.4 83.8v69.6h89.4c52.4-48.2 80-119.3 80-202.4z"/>
+                          <path fill="#34A853" d="M272 544.3c72.6 0 133.6-24 178.2-65.2l-89.4-69.6c-24.8 16.7-56.6 26.5-88.8 26.5-68.3 0-126.2-46.1-147-108.1h-92.2v67.9C77.6 486.8 168.3 544.3 272 544.3z"/>
+                          <path fill="#FBBC05" d="M125 327.9c-10.2-30.6-10.2-64.9 0-95.6v-67.9H32.8c-43.7 86.8-43.7 188.7 0 275.5L125 327.9z"/>
+                          <path fill="#EA4335" d="M272 106.1c37.8-.6 74.2 13.6 101.9 39.9l76.1-76.1C408.6 23.6 341.7-.5 272 0 168.3 0 77.6 57.5 32.8 160.5l92.2 71.8C145.8 152.3 203.7 106.1 272 106.1z"/>
+                        </svg>
+                        Continue with Google
+                        <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
+                      </>
+                    )}
+                  </Button>
                 )}
+                {/* Email sign-in */}
+                <div className="w-full text-center">
+                  <div className="w-full flex flex-col gap-2">
+                    <div className="flex gap-2 w-full">
+                      <Input
+                        type="email"
+                        placeholder="you@company.com"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && emailValid) handleSendMagicLink()
+                        }}
+                        className="flex-1 h-11"
+                        aria-label="Email address"
+                      />
+                      <Button
+                        onClick={handleSendMagicLink}
+                        disabled={isSendingLink || !emailValid || isSigningIn}
+                        className="h-11"
+                      >
+                        {isSendingLink ? 'Sending…' : 'Send link'}
+                      </Button>
+                    </div>
+                    <div className="text-xs text-gray-600" aria-live="polite">
+                      {emailSentTo ? (
+                        <span>Magic link sent to <span className="font-medium">{emailSentTo}</span>.</span>
+                      ) : (
+                        <span>No password required. One-time link only.</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
                 
                 {/* Demo Mode Option */}
                 <div className="text-gray-500 text-sm font-medium">or</div>
@@ -206,70 +210,31 @@ export default function Landing() {
               <div className="flex flex-wrap justify-center items-center gap-6 pt-6 text-sm text-gray-600">
                 <div className="flex items-center gap-2">
                   <CheckCircle className="w-4 h-4 text-green-500" />
-                  Secure Authentication
+                  Secure magic link • No password stored
                 </div>
                 <div className="flex items-center gap-2">
                   <CheckCircle className="w-4 h-4 text-green-500" />
-                  Real-time Sync
+                  You can revoke access anytime
                 </div>
                 <div className="flex items-center gap-2">
                   <CheckCircle className="w-4 h-4 text-green-500" />
-                  Professional Tools
+                  Demo has full features
                 </div>
+              </div>
+              <div className="pt-3 text-xs text-gray-500 flex items-center justify-center gap-3">
+                <a href="#" className="hover:text-gray-700 underline underline-offset-2">Privacy</a>
+                <span>•</span>
+                <a href="#" className="hover:text-gray-700 underline underline-offset-2">Terms</a>
+                <span>•</span>
+                <a href="mailto:support@example.com" className="hover:text-gray-700 underline underline-offset-2">Contact</a>
               </div>
             </div>
           </div>
 
-          {/* Features Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            <div 
-              className="group relative bg-white/80 backdrop-blur-md rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 border border-white/20 hover:bg-white/90 hover:-translate-y-1"
-              tabIndex={0}
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-blue-50/50 to-indigo-50/50 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-              <div className="relative z-10">
-                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-500 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                  <MapPin className="w-6 h-6 text-white" />
-                </div>
-                <h2 className="text-xl font-semibold mb-3 text-gray-900 group-hover:text-blue-700 transition-colors">Interactive Mapping</h2>
-                <p className="text-gray-600 leading-relaxed">
-                  Draw properties as points or polygons on Google Maps with real-time editing.
-                </p>
-              </div>
-            </div>
-            
-            <div 
-              className="group relative bg-white/80 backdrop-blur-md rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 border border-white/20 hover:bg-white/90 hover:-translate-y-1"
-              tabIndex={0}
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-green-50/50 to-emerald-50/50 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-              <div className="relative z-10">
-                <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                  <BarChart3 className="w-6 h-6 text-white" />
-                </div>
-                <h2 className="text-xl font-semibold mb-3 text-gray-900 group-hover:text-green-700 transition-colors">Analytics Dashboard</h2>
-                <p className="text-gray-600 leading-relaxed">
-                  Track coverage, activity, and freshness by submarket.
-                </p>
-              </div>
-            </div>
-            
-            <div 
-              className="group relative bg-white/80 backdrop-blur-md rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 border border-white/20 hover:bg-white/90 hover:-translate-y-1 md:col-span-2 lg:col-span-1"
-              tabIndex={0}
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-purple-50/50 to-violet-50/50 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-              <div className="relative z-10">
-                <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-violet-500 rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                  <Users className="w-6 h-6 text-white" />
-                </div>
-                <h2 className="text-xl font-semibold mb-3 text-gray-900 group-hover:text-purple-700 transition-colors">Pipeline Management</h2>
-                <p className="text-gray-600 leading-relaxed">
-                  Move prospects from first call to client with clear statuses and follow-ups.
-                </p>
-              </div>
-            </div>
-          </div>
+          {/* Features Grid (lazy) */}
+          <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+            <FeatureCards />
+          </Suspense>
         </div>
       </div>
     </div>

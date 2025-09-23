@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -776,21 +777,28 @@ export default function HomePage() {
                 <Edit3 className="mr-2 text-blue-600 h-5 w-5" />
                 Edit Prospect
               </h2>
-              <Button 
-                variant="ghost" 
-                size="sm"
-                onClick={() => {
-                  disablePolygonEditing();
-                  setIsEditPanelOpen(false);
-                }}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-4 w-4" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => {
+                      disablePolygonEditing();
+                      setIsEditPanelOpen(false);
+                    }}
+                    className="text-gray-400 hover:text-gray-600"
+                    aria-label="Save and close"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left">Save and close</TooltipContent>
+              </Tooltip>
             </div>
 
             {/* Form Content */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <p className="text-[11px] text-gray-500">Changes save automatically</p>
               {/* Name */}
               <div>
                 <Label className="text-sm font-medium text-gray-700 mb-2">Name</Label>
@@ -858,15 +866,20 @@ export default function HomePage() {
                         Save Changes
                       </Button>
                     ) : (
-                      <Button
-                        onClick={() => enablePolygonEditing(selectedProspect.id)}
-                        variant="outline"
-                        size="sm"
-                        className="flex-1"
-                      >
-                        <Edit3 className="h-4 w-4 mr-2" />
-                        Edit Shape
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            onClick={() => enablePolygonEditing(selectedProspect.id)}
+                            variant="outline"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            aria-label="Edit shape"
+                          >
+                            <Edit3 className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Edit shape</TooltipContent>
+                      </Tooltip>
                     )}
                   </div>
                   {editingProspectId === selectedProspect.id && (
@@ -955,13 +968,22 @@ export default function HomePage() {
                 </DialogContent>
               </Dialog>
               
-              <Button 
-                onClick={() => setIsEditPanelOpen(false)}
-                className="w-full bg-blue-600 hover:bg-blue-700"
-              >
-                <Save className="mr-2 h-4 w-4" />
-                Save Changes
-              </Button>
+              <div className="flex items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      onClick={() => setIsEditPanelOpen(false)}
+                      variant="outline"
+                      className="h-8 w-8 p-0"
+                      aria-label="Save and close"
+                    >
+                      <Save className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Save and close</TooltipContent>
+                </Tooltip>
+                <div className="flex-1" />
+              </div>
               <Button 
                 onClick={deleteSelectedProspect}
                 variant="destructive"
