@@ -50,8 +50,11 @@ function OnboardingCheck({ children }: { children: React.ReactNode }) {
 
 function Router() {
   const { user, loading } = useAuth()
+  // Always allow the OAuth callback route to render so it can exchange the code,
+  // even while global auth state is still "loading".
+  const [isAuthCallback] = useRoute('/auth/callback')
 
-  if (loading) {
+  if (loading && !isAuthCallback) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
