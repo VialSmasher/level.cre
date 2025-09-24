@@ -1,40 +1,31 @@
 import { Request, Response, NextFunction } from 'express'
 // storage import intentionally omitted in dev/demo to avoid DB calls in restricted environments
-import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose'
+import { jwtVerify, JWTPayload } from 'jose'
 
-// Build Supabase JWKS URL from env
-function getSupabaseUrls() {
-  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
-  if (!supabaseUrl) return { supabaseUrl: undefined, jwksUrl: undefined, issuer: undefined }
-  // Ensure no trailing slash
-  const base = supabaseUrl.replace(/\/$/, '')
-  const jwksUrl = `${base}/auth/v1/jwks`
-  const issuer = `${base}/auth/v1`
-  return { supabaseUrl: base, jwksUrl, issuer }
-}
-
-let remoteJwks: ReturnType<typeof createRemoteJWKSet> | null = null
-function getRemoteJwks() {
-  if (!remoteJwks) {
-    const { jwksUrl } = getSupabaseUrls()
-    if (!jwksUrl) return null
-    remoteJwks = createRemoteJWKSet(new URL(jwksUrl))
-  }
-  return remoteJwks
-}
-
+// Verify JWT using Supabase shared secret (HS256)
 async function verifyBearerJWT(token: string): Promise<JWTPayload | null> {
   try {
-    const jwks = getRemoteJwks()
-    if (!jwks) return null
-    const { issuer } = getSupabaseUrls()
-    const { payload } = await jwtVerify(token, jwks, {
-      issuer,
+    const secret = process.env.SUPABASE_JWT_SECRET
+    if (!secret) {
+      console.error('JWT verify failed: SUPABASE_JWT_SECRET is not set')
+      return null
+    }
+
+    const issuer = (() => {
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
+      if (!supabaseUrl) return undefined
+      return supabaseUrl.replace(/\/$/, '') + '/auth/v1'
+    })()
+
+    const secretKey = new TextEncoder().encode(secret)
+    const { payload } = await jwtVerify(token, secretKey, {
+      issuer, // optional issuer check if env present
+      algorithms: ['HS256'],
       // audience optional; Supabase uses aud: 'authenticated'
     })
     return payload
   } catch (err) {
-    console.error('JWT verify failed:', (err as Error).message)
+    console.error('JWT verify failed (HS256):', (err as Error).message)
     return null
   }
 }
