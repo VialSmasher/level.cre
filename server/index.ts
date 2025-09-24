@@ -1,11 +1,14 @@
 import 'dotenv/config';
 import express, { type Request, Response, NextFunction } from "express";
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import { devUser } from './src/auth/devUser';
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
+import { setupVite, log } from "./vite";
 import { pool } from './db';
 
 const app = express();
@@ -149,7 +152,23 @@ app.get('/api/ping', (req, res) => {
   if (app.get("env") === "development") {
     await setupVite(app, server);
   } else {
-    serveStatic(app);
+    // Serve static frontend from the built client directory.
+    // Backend runs from dist/server, while client is either dist/public (default in this repo)
+    // or directly dist if configured that way. Prefer dist/public if present, else use dist.
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const buildRoot = path.resolve(__dirname, '..'); // dist
+    const candidates = [path.join(buildRoot, 'public'), buildRoot];
+    const publicDir = candidates.find((p) => {
+      try { return fs.existsSync(p) && fs.existsSync(path.join(p, 'index.html')); } catch { return false; }
+    }) || buildRoot;
+
+    app.use(express.static(publicDir, { index: false }));
+    // SPA fallback: serve index.html for non-API routes
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api')) return next();
+      res.sendFile(path.join(publicDir, 'index.html'));
+    });
   }
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
