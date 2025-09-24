@@ -171,14 +171,9 @@ app.get('/api/ping', (req, res) => {
     });
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 3000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  // Bind to the port provided by the environment (e.g., Railway) or 3000 locally.
-  // Always bind on 0.0.0.0 so the process is reachable from the platform's proxy.
-  const rawPort = process.env.PORT || process.env.RAILWAY_PORT || '3000';
-  const port = Number.parseInt(rawPort, 10);
+  // Always bind on 0.0.0.0 and listen on a fixed port.
+  // Ignore environment variables and use port 8080 explicitly.
+  const port = 8080;
   server.listen(port, '0.0.0.0', () => {
     log(`serving on port ${port}`);
   });
