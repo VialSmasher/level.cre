@@ -9,7 +9,14 @@ export default function AuthCallback() {
     let cancelled = false
     async function run() {
       try {
-        await supabase?.auth.exchangeCodeForSession(window.location.href)
+        if (!supabase) {
+          // Surface clearer signal when auth isn't configured in this environment
+          console.error('[auth] Supabase client not configured; cannot exchange PKCE code')
+          window.history.replaceState({}, '', '/')
+          setLocation('/?error=auth_not_configured')
+          return
+        }
+        await supabase.auth.exchangeCodeForSession(window.location.href)
         if (cancelled) return
         // Clean the URL and go to app
         window.history.replaceState({}, '', '/app')
@@ -26,4 +33,3 @@ export default function AuthCallback() {
 
   return null
 }
-
