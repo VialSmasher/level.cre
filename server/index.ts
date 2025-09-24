@@ -1,5 +1,6 @@
 import 'dotenv/config';
 // DEBUG: Temporary log to verify env var loading in Railway. Remove after debugging.
+console.log(`DEBUG ECHO_TEST: ${process.env.ECHO_TEST}`);
 console.log('DEBUG SUPABASE_JWT_SECRET:', process.env.SUPABASE_JWT_SECRET ? `${process.env.SUPABASE_JWT_SECRET.slice(0, 4)}...(${process.env.SUPABASE_JWT_SECRET.length} chars)` : 'undefined');
 import express, { type Request, Response, NextFunction } from "express";
 import path from 'path';
