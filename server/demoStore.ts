@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 type DemoData = {
   prospects: Record<string, any[]>;
@@ -13,7 +14,9 @@ type DemoData = {
   listingMembers?: Record<string, { userId: string; role: 'viewer'|'editor' }[]>; // by listingId
 };
 
-const dataPath = path.resolve(import.meta.dirname, 'demo-data.json');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const dataPath = path.resolve(__dirname, 'demo-data.json');
 let cache: DemoData | null = null;
 let loading: Promise<void> | null = null;
 
