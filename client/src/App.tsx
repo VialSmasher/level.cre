@@ -22,7 +22,6 @@ const Onboarding = lazy(() => import("@/pages/onboarding"));
 const WorkspacesIndex = lazy(() => import("@/pages/workspaces"));
 const Workspace = lazy(() => import("@/pages/workspace"));
 const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
-const PostAuth = lazy(() => import("@/pages/post-auth"));
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
@@ -51,12 +50,11 @@ function OnboardingCheck({ children }: { children: React.ReactNode }) {
 
 function Router() {
   const { user, loading } = useAuth()
-  // Always allow the OAuth callback and post-auth buffer routes to render
+  // Always allow the OAuth callback route to render so it can exchange the code,
   // even while global auth state is still "loading".
   const [isAuthCallback] = useRoute('/auth/callback')
-  const [isPostAuth] = useRoute('/post-auth')
 
-  if (loading && !isAuthCallback && !isPostAuth) {
+  if (loading && !isAuthCallback) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
@@ -89,13 +87,6 @@ function Router() {
       <Route path="/auth/callback" component={() => (
         <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
           <AuthCallback />
-        </Suspense>
-      )} />
-
-      {/* Lightweight post-auth buffer to avoid mounting Maps first */}
-      <Route path="/post-auth" component={() => (
-        <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
-          <PostAuth />
         </Suspense>
       )} />
       

@@ -18,9 +18,9 @@ export default function AuthCallback() {
         }
         await supabase.auth.exchangeCodeForSession(window.location.href)
         if (cancelled) return
-        // Clean the URL and go to a lightweight post-auth buffer page
-        window.history.replaceState({}, '', '/post-auth')
-        setLocation('/post-auth')
+        // Clean the URL and go to app
+        window.history.replaceState({}, '', '/app')
+        setLocation('/app')
       } catch (err) {
         console.error('[auth] PKCE exchange failed', err)
         window.history.replaceState({}, '', '/')
