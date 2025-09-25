@@ -7,7 +7,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { useLocation } from 'wouter'
 import { useAuth } from '@/contexts/AuthContext'
 import { useMutation } from '@tanstack/react-query'
-import { apiRequest } from '@/lib/queryClient'
+import { apiRequest, queryClient } from '@/lib/queryClient'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ChevronRight, ChevronLeft, User, Building, Target } from 'lucide-react'
 
 interface ProfileData {
@@ -23,6 +24,7 @@ export default function Onboarding() {
   const [, setLocation] = useLocation()
   const { user, setNeedsOnboarding } = useAuth()
   const [currentStep, setCurrentStep] = useState(1)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   
   const [profile, setProfile] = useState<ProfileData>({
     name: user?.user_metadata?.full_name || '',
@@ -37,19 +39,46 @@ export default function Onboarding() {
 
   const createProfileMutation = useMutation({
     mutationFn: async (data: ProfileData) => {
-      const response = await apiRequest('POST', '/api/profile', data)
-      return response.json()
+      // Primary attempt: create profile
+      try {
+        const response = await apiRequest('POST', '/api/profile', data)
+        return response.json()
+      } catch (err: any) {
+        // If a profile already exists (e.g., created by a DB trigger),
+        // fall back to updating it so onboarding can complete idempotently.
+        const msg = String(err?.message || '').toLowerCase()
+        const looksLikeConflict = msg.includes('409') || msg.includes('duplicate') || msg.includes('exists')
+        if (looksLikeConflict) {
+          const response = await apiRequest('PATCH', '/api/profile', data)
+          return response.json()
+        }
+        throw err
+      }
     },
-    onSuccess: () => {
+    onSuccess: (profile) => {
+      try { queryClient.setQueryData(['/api/profile'], profile) } catch {}
       setNeedsOnboarding(false)
       setLocation('/app')
     },
-    onError: (error) => {
+    onError: (error: any) => {
       console.error('Error creating profile:', error)
+      const raw = String(error?.message || 'Unknown error')
+      // Try to surface a cleaner message when server returns JSON { message }
+      let friendly = 'We could not save your profile. Please try again.'
+      try {
+        const jsonStart = raw.indexOf('{')
+        if (jsonStart !== -1) {
+          const json = JSON.parse(raw.slice(jsonStart))
+          if (json?.message) friendly = json.message
+        }
+      } catch {}
+      setErrorMessage(friendly)
     }
   })
 
   const handleNext = () => {
+    // Clear any previous error when moving forward/attempting submit
+    if (errorMessage) setErrorMessage(null)
     if (currentStep < 3) {
       setCurrentStep(currentStep + 1)
     } else {
@@ -59,6 +88,7 @@ export default function Onboarding() {
   }
 
   const handleBack = () => {
+    if (errorMessage) setErrorMessage(null)
     if (currentStep > 1) {
       setCurrentStep(currentStep - 1)
     }
@@ -266,6 +296,16 @@ export default function Onboarding() {
         </CardHeader>
         
         <CardContent>
+          {errorMessage && (
+            <div className="mb-4">
+              <Alert variant="destructive">
+                <AlertTitle>There was a problem</AlertTitle>
+                <AlertDescription>
+                  {errorMessage}
+                </AlertDescription>
+              </Alert>
+            </div>
+          )}
           {currentStep === 1 && renderStep1()}
           {currentStep === 2 && renderStep2()}
           {currentStep === 3 && renderStep3()}

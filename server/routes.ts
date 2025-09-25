@@ -983,9 +983,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const saved = await demo.setProfile(userId, profileData);
         return res.json(saved);
       }
-      const profile = await storage.createProfile(profileData);
-      console.log("Profile created successfully:", profile);
-      res.json(profile);
+      try {
+        const profile = await storage.createProfile(profileData);
+        console.log("Profile created successfully:", profile);
+        return res.json(profile);
+      } catch (e: any) {
+        const code = e?.code || e?.originalError?.code;
+        const msg = String(e?.message || '').toLowerCase();
+        // Unique violation (duplicate primary key) -> treat as conflict so client can PATCH
+        if (code === '23505' || msg.includes('duplicate key')) {
+          return res.status(409).json({ message: 'Profile already exists' });
+        }
+        console.error('Error creating profile:', e);
+        console.error('Stack trace:', e?.stack);
+        return res.status(500).json({ message: 'Failed to create profile' });
+      }
     } catch (error: any) {
       console.error("Error creating profile:", error);
       console.error("Stack trace:", error?.stack);
