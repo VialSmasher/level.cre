@@ -703,8 +703,8 @@ export class DatabaseStorage implements IStorage {
       name: insertProspect.name,
       status: insertProspect.status,
       notes: insertProspect.notes,
-      // Wrap GeoJSON with PostGIS constructor and set SRID=4326
-      geometry: sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(insertProspect.geometry)}), 4326)` as any,
+      // Wrap GeoJSON with PostGIS constructor, cast param to text, and set SRID=4326
+      geometry: sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(insertProspect.geometry)}::text), 4326)` as any,
       ...(insertProspect.submarketId && { submarketId: insertProspect.submarketId }),
       ...(insertProspect.lastContactDate && { lastContactDate: insertProspect.lastContactDate }),
       ...(insertProspect.followUpTimeframe && { followUpTimeframe: insertProspect.followUpTimeframe }),
@@ -767,8 +767,8 @@ export class DatabaseStorage implements IStorage {
         ...(updates.name && { name: updates.name }),
         ...(updates.status && { status: updates.status }),
         ...(updates.notes !== undefined && { notes: updates.notes }),
-        // Convert incoming GeoJSON to PostGIS geometry and set SRID=4326
-        ...(updates.geometry && { geometry: sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(updates.geometry)}), 4326)` as any }),
+        // Convert incoming GeoJSON to PostGIS geometry, cast param to text, and set SRID=4326
+        ...(updates.geometry && { geometry: sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(updates.geometry)}::text), 4326)` as any }),
         ...(updates.submarketId !== undefined && { submarketId: updates.submarketId }),
         ...(updates.lastContactDate !== undefined && { lastContactDate: updates.lastContactDate }),
         ...(updates.followUpTimeframe !== undefined && { followUpTimeframe: updates.followUpTimeframe }),

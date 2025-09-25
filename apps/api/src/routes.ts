@@ -118,6 +118,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const GOOGLE_ENABLED = (process.env.VITE_ENABLE_GOOGLE_AUTH === '1' || process.env.VITE_ENABLE_GOOGLE_AUTH === 'true');
 
+  // Lightweight health + readiness probe
+  app.get('/api/health', async (_req, res) => {
+    try {
+      const postgisRes: any = await db.execute(sql`SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='postgis') AS present`);
+      const sridRes: any = await db.execute(sql`SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='chk_prospects_geometry_srid_4326') AS present`);
+      const postgis = Boolean((postgisRes?.rows?.[0] || postgisRes?.[0])?.present);
+      const srid4326Enforced = Boolean((sridRes?.rows?.[0] || sridRes?.[0])?.present);
+      return res.json({ ok: true, postgis, srid4326Enforced });
+    } catch (err) {
+      const e: any = err;
+      console.error('Health check failed:', { message: e?.message, code: e?.code });
+      return res.status(500).json({ ok: false, error: e?.message || 'health failed' });
+    }
+  });
+
   if (GOOGLE_ENABLED) {
     // Simple redirect to Google OAuth - let Supabase handle everything
     app.get('/api/auth/google', async (req, res) => {
@@ -1275,13 +1290,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`[route] POST /api/prospects -> 201 in ${t1 - t0}ms user=${userId}`);
       res.status(201).json(prospect);
     } catch (e) {
-      if (e instanceof Error) {
-        console.error('Error creating prospect:', e.message, e.stack);
-        res.status(500).json({ message: 'Failed to create prospect', error: e.message });
-      } else {
-        console.error('Error creating prospect:', e);
-        res.status(500).json({ message: 'Failed to create prospect', error: String(e) });
-      }
+      const err: any = e;
+      console.error('Error creating prospect:', {
+        message: err?.message,
+        code: err?.code,
+        detail: err?.detail,
+        constraint: err?.constraint,
+        table: err?.table,
+        stack: err?.stack,
+      });
+      res.status(500).json({ message: 'Failed to create prospect', error: err?.message || String(err) });
     }
   });
 
@@ -1298,9 +1316,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Prospect not found" });
       }
       res.json(prospect);
-    } catch (error) {
-      console.error("Error updating prospect:", error);
-      res.status(500).json({ message: "Failed to update prospect" });
+    } catch (e) {
+      const err: any = e;
+      console.error('Error updating prospect:', {
+        message: err?.message,
+        code: err?.code,
+        detail: err?.detail,
+        constraint: err?.constraint,
+        table: err?.table,
+        stack: err?.stack,
+      });
+      res.status(500).json({ message: 'Failed to update prospect', error: err?.message || String(err) });
     }
   });
 
