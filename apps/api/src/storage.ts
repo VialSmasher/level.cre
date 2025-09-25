@@ -633,7 +633,8 @@ export class DatabaseStorage implements IStorage {
       name: insertProspect.name,
       status: insertProspect.status,
       notes: insertProspect.notes,
-      geometry: insertProspect.geometry,
+      // Wrap GeoJSON with PostGIS constructor to satisfy geometry column
+      geometry: sql`ST_GeomFromGeoJSON(${JSON.stringify(insertProspect.geometry)})` as any,
       ...(insertProspect.submarketId && { submarketId: insertProspect.submarketId }),
       ...(insertProspect.lastContactDate && { lastContactDate: insertProspect.lastContactDate }),
       ...(insertProspect.followUpTimeframe && { followUpTimeframe: insertProspect.followUpTimeframe }),
@@ -680,7 +681,8 @@ export class DatabaseStorage implements IStorage {
         ...(updates.name && { name: updates.name }),
         ...(updates.status && { status: updates.status }),
         ...(updates.notes !== undefined && { notes: updates.notes }),
-        ...(updates.geometry && { geometry: updates.geometry }),
+        // Convert incoming GeoJSON to PostGIS geometry
+        ...(updates.geometry && { geometry: sql`ST_GeomFromGeoJSON(${JSON.stringify(updates.geometry)})` as any }),
         ...(updates.submarketId !== undefined && { submarketId: updates.submarketId }),
         ...(updates.lastContactDate !== undefined && { lastContactDate: updates.lastContactDate }),
         ...(updates.followUpTimeframe !== undefined && { followUpTimeframe: updates.followUpTimeframe }),
