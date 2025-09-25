@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
 import { User, Settings, Palette, Bell, Shield, Download, Upload, Plus, X } from "lucide-react";
-import { Prospect, Submarket } from "@shared/schema";
+import { Prospect, Submarket } from "@level-cre/shared/schema";
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 import { useToast } from "@/hooks/use-toast";
 

@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { UpdatedProspect as Prospect } from '@shared/schema';
+import { UpdatedProspect as Prospect } from '@level-cre/shared/schema';
 import Papa from 'papaparse';
 
 interface CSVUploaderProps {

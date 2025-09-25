@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Edit, Plus, Trash2, Banknote, Building2 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { MarketComp, InsertMarketComp, Submarket, MarketCompDealType, MarketCompAssetType } from "@shared/schema";
+import { MarketComp, InsertMarketComp, Submarket, MarketCompDealType, MarketCompAssetType } from "@level-cre/shared/schema";
 import { useProfile } from "@/hooks/useProfile";
 
 export default function MarketCompsPage() {

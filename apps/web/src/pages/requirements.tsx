@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Edit, Trash2, Tag, Building, Users, Clock, MapPin } from "lucide-react";
-import { Requirement, InsertRequirement, Submarket } from "@shared/schema";
+import { Requirement, InsertRequirement, Submarket } from "@level-cre/shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import { uniqueSubmarketNames } from "@/lib/submarkets";
 

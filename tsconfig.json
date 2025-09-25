@@ -17,7 +17,7 @@
     "types": ["node", "vite/client", "google.maps"],
     "paths": {
       "@/*": ["./apps/web/src/*"],
-      "@shared/*": ["./packages/shared/src/*"]
+      "@level-cre/shared/*": ["./packages/shared/src/*"]
     }
   }
 }

@@ -6,7 +6,7 @@ import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Trophy, TrendingUp, Phone, MapPin, Target, Brain, Zap, Star, Crown } from 'lucide-react';
-import { BrokerSkillsRow, SkillActivityRow } from '@shared/schema';
+import { BrokerSkillsRow, SkillActivityRow } from '@level-cre/shared/schema';
 import { useAuth } from '@/contexts/AuthContext';
 import BrickWall from '@/components/BrickWall';
 

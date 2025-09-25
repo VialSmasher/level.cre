@@ -3,7 +3,7 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@shared/*": ["../../packages/shared/src/*"]
+      "@level-cre/shared/*": ["../../packages/shared/src/*"]
     }
   },
   "include": [

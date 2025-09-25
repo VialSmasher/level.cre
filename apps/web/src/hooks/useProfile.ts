@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { apiRequest, queryClient } from '@/lib/queryClient'
-import type { Profile, UpdateProfile } from '@shared/schema'
+import type { Profile, UpdateProfile } from '@level-cre/shared/schema'
 
 export function useProfile() {
   const { data: profile, isLoading, error } = useQuery<Profile | null>({

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Users, Phone, Calendar, Clock } from 'lucide-react';
-import { Prospect, Submarket, ProspectStatusType } from '@shared/schema';
+import { Prospect, Submarket, ProspectStatusType } from '@level-cre/shared/schema';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/hooks/useProfile';

@@ -33,7 +33,7 @@ import {
   MapPin as VisitIcon,
   FileText
 } from 'lucide-react';
-import { UpdatedProspect as Prospect, ProspectStatusType, Submarket, Touch, InsertTouch } from '@shared/schema';
+import { UpdatedProspect as Prospect, ProspectStatusType, Submarket, Touch, InsertTouch } from '@level-cre/shared/schema';
 
 const mapContainerStyle = {
   width: '100%',

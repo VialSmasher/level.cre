@@ -13,7 +13,7 @@
     "db:prepare": "node ./scripts/ensure_pgcrypto.mjs && drizzle-kit push"
   },
   "dependencies": {
-    "@shared": "workspace:*",
+    "@level-cre/shared": "workspace:*",
     "@supabase/supabase-js": "^2.55.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

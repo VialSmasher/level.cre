@@ -1,5 +1,5 @@
 {
-  "name": "@shared",
+  "name": "@level-cre/shared",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -14,4 +14,3 @@
     "drizzle-orm": "^0.44.5"
   }
 }
-

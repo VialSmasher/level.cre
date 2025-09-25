@@ -1,7 +1,7 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 const { Pool } = pg;
-import * as schema from '@shared/schema';
+import * as schema from '@level-cre/shared/schema';
 
 if (!process.env.DATABASE_URL) {
   throw new Error(

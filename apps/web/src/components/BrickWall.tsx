@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { SkillActivityRow } from '@shared/schema';
+import { SkillActivityRow } from '@level-cre/shared/schema';
 
 // Category colors
 const categoryColors = {

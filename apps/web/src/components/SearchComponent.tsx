@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react';
-import type { Prospect } from '@shared/schema';
+import type { Prospect } from '@level-cre/shared/schema';
 
 interface SearchComponentProps {
   prospects: Prospect[];

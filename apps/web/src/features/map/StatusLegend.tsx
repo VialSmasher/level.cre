@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { STATUS_META, type ProspectStatusType } from '@shared/schema';
+import { STATUS_META, type ProspectStatusType } from '@level-cre/shared/schema';
 
 interface StatusLegendProps {
   selected?: Set<ProspectStatusType>;
@@ -46,4 +46,3 @@ export function StatusLegend({ selected, onToggle, defaultOpen = true }: StatusL
     </div>
   );
 }
-

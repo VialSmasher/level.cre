@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { MapControls } from '@/features/map/MapControls';
 import { apiRequest } from '@/lib/queryClient';
-import type { Prospect } from '@shared/schema';
+import type { Prospect } from '@level-cre/shared/schema';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { Save, X, Edit3, Trash2, ArrowLeft, Share2 } from 'lucide-react';
@@ -21,7 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 // Using Google DrawingManager (not Terra) to match main map behavior
 import { ShareWorkspaceDialog } from '@/components/ShareWorkspaceDialog';
 import { useAuth } from '@/contexts/AuthContext';
-import { STATUS_META, type ProspectStatusType } from '@shared/schema';
+import { STATUS_META, type ProspectStatusType } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
 
 type Listing = {
