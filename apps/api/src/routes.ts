@@ -2,6 +2,7 @@ import type { Express, Request } from "express";
 import { createServer, type Server } from "http";
 import jwt from "jsonwebtoken";
 import { storage } from "./storage";
+import { ensureUser } from './ensureUser';
 import { getUserId, requireAuth } from "./auth";
 import { z } from 'zod';
 import { ProspectGeometry, ProspectStatus, FollowUpTimeframe } from '@level-cre/shared/schema';
@@ -328,6 +329,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/bootstrap', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
       const fromDemo = isDemo(req);
       let profile: any = null;
       if (fromDemo) {
@@ -695,7 +700,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Lookup user by email
       const found = await findUserIdByEmail(email);
       if (!found) return res.status(404).json({ error: 'User not found' });
-      // Upsert member
+      // Ensure target user exists for FK, then upsert member
+      await ensureUser(found.id, found.email);
       await db
         .insert(listingMembers)
         .values({ listingId: req.params.id, userId: found.id, role: roleValue })
@@ -987,6 +993,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/profile', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
       console.log("Creating profile for user:", userId);
       console.log("Profile data:", req.body);
       
@@ -1023,6 +1033,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/profile', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
       if (isDemo(req)) {
         const updated = await demo.updateProfile(userId, req.body);
         return res.json(updated);
@@ -1063,6 +1077,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/requirements', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
       if (isDemo(req)) {
         const created = {
           id: randomUUID(),
@@ -1098,6 +1116,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/requirements/:id', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
       if (isDemo(req)) {
         const updated = await demo.updateRequirement(userId, req.params.id, req.body);
         if (!updated) return res.status(404).json({ message: 'Requirement not found' });
@@ -1152,6 +1174,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/market-comps', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
       if (isDemo(req)) {
         const created = {
           id: randomUUID(),
@@ -1193,6 +1219,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/market-comps/:id', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
       if (isDemo(req)) {
         const updated = await demo.updateMarketComp(userId, req.params.id, req.body);
         if (!updated) return res.status(404).json({ message: 'Market comp not found' });
@@ -1248,6 +1278,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const t0 = Date.now();
     try {
       const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
       console.log(`[route] POST /api/prospects user=${userId} bodyKeys=${Object.keys(req.body||{}).join(',')}`);
       // Validate payload to match client shape (uses GeoJSON geometry)
       const ProspectInputSchema = z.object({
@@ -1306,6 +1340,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/prospects/:id', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
       if (isDemo(req)) {
         const updated = await demo.updateProspect(userId, req.params.id, req.body);
         if (!updated) return res.status(404).json({ message: 'Prospect not found' });
@@ -1367,6 +1405,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/submarkets', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
       if (isDemo(req)) {
         const created = {
           id: randomUUID(),
@@ -1394,6 +1436,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch('/api/submarkets/:id', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
       if (isDemo(req)) {
         const updated = await demo.updateSubmarket(userId, req.params.id, req.body);
         if (!updated) return res.status(404).json({ message: 'Submarket not found' });
@@ -1449,6 +1495,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/interactions', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
       const interactionData = {
         userId,
         prospectId: req.body.prospectId,
@@ -1657,6 +1707,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/skill-activities', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
       const activityData = {
         userId,
         skillType: req.body.skillType,
