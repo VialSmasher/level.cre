@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { storage } from "./storage";
 import { getUserId, requireAuth } from "./auth";
 import { z } from 'zod';
-import { ProspectGeometry, ProspectStatus, FollowUpTimeframe } from '@shared/schema';
+import { ProspectGeometry, ProspectStatus, FollowUpTimeframe } from '../../packages/shared/src/schema';
 import { randomUUID } from 'crypto';
 import * as demo from './demoStore';
 
@@ -13,7 +13,7 @@ function isDemo(req: Request): boolean {
 }
 import { createClient } from '@supabase/supabase-js';
 import { pool, db } from './db';
-import { listings, listingMembers, users, profiles, listingProspects } from '@shared/schema';
+import { listings, listingMembers, users, profiles, listingProspects } from '../../packages/shared/src/schema';
 import { and, eq, sql } from 'drizzle-orm';
 
 export async function registerRoutes(app: Express): Promise<Server> {

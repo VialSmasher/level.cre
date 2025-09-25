@@ -1,0 +1,38 @@
+{
+  "name": "@apps/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "tsx -r dotenv/config ../../server/index.ts",
+    "build": "esbuild ../../server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "start": "NODE_ENV=production node dist/index.js",
+    "check": "tsc --noEmit",
+    "db:push": "drizzle-kit push",
+    "db:prepare": "node ../../server/scripts/ensure_pgcrypto.mjs && drizzle-kit push"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.55.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.44.5",
+    "express": "^4.21.2",
+    "helmet": "^8.1.0",
+    "jose": "^5.10.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.12.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.9",
+    "@types/cors": "^2.8.19",
+    "@types/express": "4.17.21",
+    "@types/node": "20.16.11",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.17.0",
+    "typescript": "^5.5.4"
+  }
+}
+

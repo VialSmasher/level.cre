@@ -30,7 +30,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "client", "src"),
-      "@shared": path.resolve(__dirname, "shared"),
+      "@shared": path.resolve(__dirname, "packages", "shared", "src"),
       "@assets": path.resolve(__dirname, "attached_assets"),
     },
   },

@@ -10,7 +10,6 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import { devUser } from './src/auth/devUser';
 import { registerRoutes } from "./routes";
-import { setupVite, log } from "./vite";
 import { pool } from './db';
 
 const app = express();
@@ -148,35 +147,16 @@ app.get('/api/ping', (req, res) => {
     res.status(status).json({ message });
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
-  } else {
-    // Serve static frontend from the built client directory.
-    // Backend runs from dist/server, while client is either dist/public (default in this repo)
-    // or directly dist if configured that way. Prefer dist/public if present, else use dist.
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const buildRoot = path.resolve(__dirname, '..'); // dist
-    const candidates = [path.join(buildRoot, 'public'), buildRoot];
-    const publicDir = candidates.find((p) => {
-      try { return fs.existsSync(p) && fs.existsSync(path.join(p, 'index.html')); } catch { return false; }
-    }) || buildRoot;
-
-    app.use(express.static(publicDir, { index: false }));
-    // SPA fallback: serve index.html for non-API routes
-    app.get('*', (req, res, next) => {
-      if (req.path.startsWith('/api')) return next();
-      res.sendFile(path.join(publicDir, 'index.html'));
-    });
-  }
-
-  // Always bind on 0.0.0.0 and listen on a fixed port.
-  // Ignore environment variables and use port 8080 explicitly.
-  const port = 8080;
+  // In the monorepo, the API runs independently.
+  // Bind on 0.0.0.0 and prefer PORT from env (Railway/Heroku style).
+  const port = Number(process.env.PORT) || 3000;
   server.listen(port, '0.0.0.0', () => {
-    log(`serving on port ${port}`);
+    const formattedTime = new Date().toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+    console.log(`${formattedTime} [express] serving on port ${port}`);
   });
 })();

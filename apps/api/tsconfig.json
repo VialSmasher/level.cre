@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      // Use relative imports in code for shared to keep esbuild happy
+      "@shared/*": ["../../packages/shared/src/*"]
+    }
+  },
+  "include": [
+    "../../server/**/*",
+    "../../packages/shared/src/**/*"
+  ]
+}
+
