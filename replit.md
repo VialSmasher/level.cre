@@ -131,4 +131,4 @@ Notes
 - The schema uses `gen_random_uuid()`, which requires the `pgcrypto` extension. The `db:prepare` script runs `CREATE EXTENSION IF NOT EXISTS pgcrypto` safely.
 - In demo mode (`VITE_DEMO_MODE=1`), most routes work without a JWT; for production, provide a valid Supabase JWT in the `Authorization: Bearer <token>` header.
 
-*PL EDIT SANITY CHECK*
+
