@@ -5,14 +5,15 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "tsx -r dotenv/config ../../server/index.ts",
-    "build": "esbuild ../../server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "dev": "tsx -r dotenv/config src/index.ts",
+    "build": "esbuild src/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
     "db:push": "drizzle-kit push",
-    "db:prepare": "node ../../server/scripts/ensure_pgcrypto.mjs && drizzle-kit push"
+    "db:prepare": "node ./scripts/ensure_pgcrypto.mjs && drizzle-kit push"
   },
   "dependencies": {
+    "@shared": "workspace:*",
     "@supabase/supabase-js": "^2.55.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -35,4 +36,3 @@
     "typescript": "^5.5.4"
   }
 }
-

@@ -3,13 +3,12 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@/*": ["../../client/src/*"],
+      "@/*": ["./src/*"],
       "@shared/*": ["../../packages/shared/src/*"]
     }
   },
   "include": [
-    "../../client/index.html",
-    "../../client/src/**/*"
+    "./index.html",
+    "./src/**/*"
   ]
 }
-

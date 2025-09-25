@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import { devUser } from './src/auth/devUser';
+import { devUser } from './auth/devUser';
 import { registerRoutes } from "./routes";
 import { pool } from './db';
 
@@ -114,7 +114,7 @@ app.use((req, res, next) => {
         logLine = logLine.slice(0, 79) + "…";
       }
 
-      log(logLine);
+      console.log(logLine);
     }
   });
 

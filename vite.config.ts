@@ -29,14 +29,14 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "client", "src"),
+      "@": path.resolve(__dirname, "apps", "web", "src"),
       "@shared": path.resolve(__dirname, "packages", "shared", "src"),
       "@assets": path.resolve(__dirname, "attached_assets"),
     },
   },
-  root: path.resolve(__dirname, "client"),
+  root: path.resolve(__dirname, "apps", "web"),
   build: {
-    outDir: path.resolve(__dirname, "dist/public"),
+    outDir: path.resolve(__dirname, "apps", "web", "dist"),
     emptyOutDir: true,
   },
   server: {

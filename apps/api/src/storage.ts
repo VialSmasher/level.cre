@@ -13,7 +13,7 @@ import {
   type InsertListingProspect,
   prospects, requirements, submarkets, touches, users, profiles, contactInteractions, brokerSkills, skillActivities, marketComps,
   listings, listingProspects
-} from "../../packages/shared/src/schema";
+} from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, gte, ne, sql, between } from "drizzle-orm";
 import { randomUUID } from "crypto";
