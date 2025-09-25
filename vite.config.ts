@@ -14,6 +14,12 @@ const __dirname = path.dirname(__filename);
 export default defineConfig({
   // Load env vars from the repo root (so .env at project root is used)
   envDir: path.resolve(__dirname),
+  esbuild: {
+    // Keep transforms light and modern for CI speed
+    target: 'es2022',
+    drop: ['console', 'debugger'],
+    legalComments: 'none',
+  },
   plugins: [
     react(),
     // Only enable the runtime overlay in development; it uses eval/Function
@@ -36,6 +42,22 @@ export default defineConfig({
   },
   root: path.resolve(__dirname, "apps", "web"),
   build: {
+    target: 'es2022',
+    minify: 'esbuild',
+    sourcemap: false,
+    modulePreload: { polyfill: false },
+    reportCompressedSize: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom'],
+          maps: ['@react-google-maps/api', 'terra-draw', 'terra-draw-google-maps-adapter'],
+          charts: ['recharts'],
+          query: ['@tanstack/react-query'],
+          supabase: ['@supabase/supabase-js'],
+        },
+      },
+    },
     outDir: path.resolve(__dirname, "apps", "web", "dist"),
     emptyOutDir: true,
   },
