@@ -6,7 +6,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "tsx -r dotenv/config src/index.ts",
-    "build": "esbuild src/index.ts --platform=node --packages=external --bundle --format=esm --target=node22 --legal-comments=none --outdir=dist",
+    "build": "esbuild src/index.ts --platform=node --bundle --format=esm --target=node22 --legal-comments=none --outdir=dist --external:@supabase/supabase-js --external:cookie-parser --external:cors --external:dotenv --external:drizzle-orm --external:express --external:helmet --external:jose --external:jsonwebtoken --external:pg --external:zod",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
     "db:push": "drizzle-kit push",
