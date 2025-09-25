@@ -16,11 +16,13 @@ import { apiRequest } from '@/lib/queryClient';
 import type { Prospect } from '@shared/schema';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
-import { Save, X, Edit3, Trash2, ArrowLeft, ChevronDown, ChevronUp, Share2 } from 'lucide-react';
+import { Save, X, Edit3, Trash2, ArrowLeft, Share2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 // Using Google DrawingManager (not Terra) to match main map behavior
 import { ShareWorkspaceDialog } from '@/components/ShareWorkspaceDialog';
 import { useAuth } from '@/contexts/AuthContext';
+import { STATUS_META, type ProspectStatusType } from '@shared/schema';
+import { StatusLegend } from '@/features/map/StatusLegend';
 
 type Listing = {
   id: string;
@@ -142,21 +144,11 @@ export default function Workspace() {
     }
   }, [searchPin, map]);
   
-  // Status colors (match /app)
-  const STATUS_COLORS: Record<'prospect'|'contacted'|'listing'|'client'|'no_go', string> = {
-    prospect: '#FBBF24',
-    contacted: '#3B82F6',
-    listing: '#10B981',
-    client: '#8B5CF6',
-    no_go: '#EF4444'
-  };
-  
-  // Status filter UI (match /app behavior): default to all statuses visible
-  type StatusKey = 'prospect'|'contacted'|'listing'|'client'|'no_go';
+  // Status filter UI: default to all statuses visible
+  type StatusKey = ProspectStatusType;
   const [statusFilters, setStatusFilters] = useState<Set<StatusKey>>(() => {
-    return new Set(Object.keys(STATUS_COLORS) as StatusKey[]);
+    return new Set(Object.keys(STATUS_META) as StatusKey[]);
   });
-  const [isLegendOpen, setIsLegendOpen] = useState(true);
   const filteredLinkedProspects = useMemo(() => {
     return linkedProspects.filter((p) => statusFilters.has(p.status as StatusKey));
   }, [linkedProspects, statusFilters]);
@@ -518,7 +510,7 @@ export default function Workspace() {
             )}
             {/* Linked prospects (filtered by status) */}
             {filteredLinkedProspects.map((p) => {
-              const color = STATUS_COLORS[p.status as keyof typeof STATUS_COLORS] || '#3B82F6';
+              const color = STATUS_META[p.status as ProspectStatusType]?.color || '#3B82F6';
               if (p.geometry.type === 'Point') {
                 const [lng, lat] = p.geometry.coordinates as [number, number];
                 return (
@@ -597,43 +589,17 @@ export default function Workspace() {
       </div>
 
       {/* Status Legend / Filters (bottom-left) */}
-      <Button
-        onClick={() => setIsLegendOpen(!isLegendOpen)}
-        className="absolute bottom-4 left-4 z-20 bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
-        variant="outline"
-        size="sm"
-      >
-        {isLegendOpen ? (
-          <ChevronDown className="h-4 w-4" />
-        ) : (
-          <ChevronUp className="h-4 w-4" />
-        )}
-      </Button>
-      {isLegendOpen && (
-        <div className="absolute bottom-4 left-16 bg-white/95 backdrop-blur-sm shadow-lg border border-gray-200 z-10 p-3 rounded">
-          <h3 className="text-sm font-semibold text-gray-800 mb-2">Status Filters</h3>
-          <div className="space-y-1">
-            {Object.entries(STATUS_COLORS).map(([status, color]) => {
-              const key = status as 'prospect'|'contacted'|'listing'|'client'|'no_go';
-              const isActive = statusFilters.has(key);
-              return (
-                <div
-                  key={status}
-                  className={`flex items-center text-xs cursor-pointer p-1 rounded transition-colors ${isActive ? 'bg-gray-100' : 'hover:bg-gray-50 opacity-50'}`}
-                  onClick={() => {
-                    const next = new Set(statusFilters);
-                    if (isActive) next.delete(key); else next.add(key);
-                    setStatusFilters(next);
-                  }}
-                >
-                  <div className="w-3 h-3 rounded mr-2" style={{ backgroundColor: color }} />
-                  <span className="text-gray-700">{status.replace('_',' ')}</span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
+      <div className="absolute bottom-4 left-4 z-20" style={{ pointerEvents: 'auto' }}>
+        <StatusLegend
+          selected={statusFilters}
+          onToggle={(key) => {
+            const k = key as StatusKey;
+            const next = new Set(statusFilters);
+            if (next.has(k)) next.delete(k); else next.add(k);
+            setStatusFilters(next);
+          }}
+        />
+      </div>
 
       {/* Removed legacy Drawer UI */}
       {isEditPanelOpen && selectedProspect && (
@@ -699,11 +665,11 @@ export default function Workspace() {
                     <Select value={selectedProspect.status} onValueChange={(v) => updateSelectedProspect('status', v)}>
                       <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {Object.keys(STATUS_COLORS).map((s) => (
-                          <SelectItem key={s} value={s}>
+                        {Object.entries(STATUS_META).map(([k, meta]) => (
+                          <SelectItem key={k} value={k}>
                             <span className="inline-flex items-center gap-2">
-                              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: STATUS_COLORS[s as keyof typeof STATUS_COLORS] }} />
-                              {s.replace('_',' ')}
+                              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: meta.color }} />
+                              {meta.label}
                             </span>
                           </SelectItem>
                         ))}

@@ -18,7 +18,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Download, MapIcon, Satellite, ChevronLeft, ChevronRight, X, Save, Trash2, Filter, ChevronDown, ChevronUp, User, LogOut, Settings, Edit3 } from 'lucide-react';
+import { Download, MapIcon, Satellite, ChevronLeft, ChevronRight, X, Save, Trash2, Filter, User, LogOut, Settings, Edit3 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MapControls } from '@/features/map/MapControls';
 
@@ -43,6 +43,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { queryClient, apiRequest } from '@/lib/queryClient';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
+import { STATUS_META, type ProspectStatusType } from '@shared/schema';
+import { StatusLegend } from '@/features/map/StatusLegend';
 
 // Import all necessary types and data
 import type { 
@@ -55,13 +57,7 @@ import type {
 
 const libraries: any = ['drawing', 'geometry', 'places'];
 
-const STATUS_COLORS: Record<ProspectStatusType, string> = {
-  'prospect': '#FBBF24',
-  'contacted': '#3B82F6', 
-  'listing': '#10B981',
-  'client': '#8B5CF6',
-  'no_go': '#EF4444'
-};
+// Colors and labels now come from shared STATUS_META
 
 const FOLLOW_UP_LABELS: Record<FollowUpTimeframeType, string> = {
   '1_month': '1 Month',
@@ -173,7 +169,7 @@ export default function HomePage() {
   
   // Filter state
   const [statusFilters, setStatusFilters] = useState<Set<ProspectStatusType>>(
-    new Set(Object.keys(STATUS_COLORS) as ProspectStatusType[])
+    new Set(Object.keys(STATUS_META) as ProspectStatusType[])
   );
   
   // Add submarket filter state
@@ -185,9 +181,7 @@ export default function HomePage() {
   const [isControlPanelOpen, setIsControlPanelOpen] = useState(() => {
     return readJSON(nsKey(currentUser?.id, 'controlPanelOpen'), false);
   });
-  const [isLegendOpen, setIsLegendOpen] = useState(() => {
-    return readJSON(nsKey(currentUser?.id, 'legendOpen'), true);
-  });
+  // Legend open/close managed inside StatusLegend component
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [isEditPanelOpen, setIsEditPanelOpen] = useState(false);
   const [editingProspectId, setEditingProspectId] = useState<string | null>(null);
@@ -266,9 +260,7 @@ export default function HomePage() {
     writeJSON(nsKey(currentUser?.id, 'controlPanelOpen'), isControlPanelOpen);
   }, [isControlPanelOpen, currentUser?.id]);
 
-  useEffect(() => {
-    writeJSON(nsKey(currentUser?.id, 'legendOpen'), isLegendOpen);
-  }, [isLegendOpen, currentUser?.id]);
+  // No longer persisting legend open state
   
   // Save submarket filter state
   useEffect(() => {
@@ -1154,7 +1146,7 @@ export default function HomePage() {
 
           {/* Render Prospects */}
           {filteredProspects.map((prospect) => {
-            const color = STATUS_COLORS[prospect.status];
+          const color = STATUS_META[prospect.status].color;
             
             if (prospect.geometry.type === 'Point') {
               const [lng, lat] = prospect.geometry.coordinates as [number, number];
@@ -1347,7 +1339,7 @@ export default function HomePage() {
               <div>
                 <h3 className="text-sm font-medium text-gray-800 mb-2">Status Filters</h3>
                 <div className="space-y-2">
-                  {Object.entries(STATUS_COLORS).map(([status, color]) => (
+                  {Object.entries(STATUS_META).map(([status, meta]) => (
                     <label key={status} className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
@@ -1365,11 +1357,9 @@ export default function HomePage() {
                       />
                       <div 
                         className="w-3 h-3 rounded-full border" 
-                        style={{ backgroundColor: color }}
+                        style={{ backgroundColor: meta.color }}
                       />
-                      <span className="text-sm capitalize">
-                        {status.replace('_', ' ')}
-                      </span>
+                      <span className="text-sm">{meta.label}</span>
                     </label>
                   ))}
                 </div>
@@ -1466,9 +1456,12 @@ export default function HomePage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {Object.keys(STATUS_COLORS).map((status) => (
-                          <SelectItem key={status} value={status}>
-                            {status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' ')}
+                        {Object.entries(STATUS_META).map(([k, meta]) => (
+                          <SelectItem key={k} value={k}>
+                            <span className="inline-flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: meta.color }} />
+                              {meta.label}
+                            </span>
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1733,46 +1726,17 @@ export default function HomePage() {
           </div>
         </div>
       )}
-      {/* Legend Toggle */}
-      <Button
-        onClick={() => setIsLegendOpen(!isLegendOpen)}
-        className="absolute bottom-4 left-4 z-20 bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
-        variant="outline"
-        size="sm"
-      >
-        {isLegendOpen ? (
-          <ChevronDown className="h-4 w-4" />
-        ) : (
-          <ChevronUp className="h-4 w-4" />
-        )}
-      </Button>
-
-      {/* Clickable Legend */}
-      {isLegendOpen && (
-        <div className="absolute bottom-4 left-16 bg-white/95 backdrop-blur-sm shadow-lg border border-gray-200 z-10 p-3 rounded">
-          <h3 className="text-sm font-semibold text-gray-800 mb-2">Status Legend</h3>
-          <div className="space-y-1">
-            {Object.entries(STATUS_COLORS).map(([status, color]) => {
-              const isActive = statusFilters.has(status as ProspectStatusType)
-              return (
-                <div
-                  key={status}
-                  className={`flex items-center text-xs cursor-pointer p-1 rounded transition-colors ${isActive ? 'bg-gray-100' : 'hover:bg-gray-50 opacity-50'}`}
-                  onClick={() => {
-                    const next = new Set(statusFilters)
-                    if (isActive) next.delete(status as ProspectStatusType)
-                    else next.add(status as ProspectStatusType)
-                    setStatusFilters(next)
-                  }}
-                >
-                  <div className="w-3 h-3 rounded mr-2" style={{ backgroundColor: color }} />
-                  <span className="text-gray-700">{status.replace('_',' ')}</span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
+      {/* Status Legend (bottom-left) with built-in chevron */}
+      <div className="absolute bottom-4 left-4 z-20" style={{ pointerEvents: 'auto' }}>
+        <StatusLegend
+          selected={statusFilters}
+          onToggle={(key) => {
+            const next = new Set(statusFilters);
+            if (next.has(key)) next.delete(key); else next.add(key);
+            setStatusFilters(next);
+          }}
+        />
+      </div>
     </div>
   );
 }

@@ -20,7 +20,8 @@ export const ProspectStatus = z.enum([
   'contacted', 
   'listing',
   'client',
-  'no_go'
+  'no_go',
+  'development',
 ]);
 
 // Follow-up timeframe enum
@@ -88,6 +89,16 @@ export const InsertProspectSchema = ProspectSchema.omit({
 export type Prospect = z.infer<typeof ProspectSchema>;
 export type InsertProspect = z.infer<typeof InsertProspectSchema>;
 export type ProspectStatusType = z.infer<typeof ProspectStatus>;
+
+// Unified status metadata: labels + colors used across app
+export const STATUS_META: Record<ProspectStatusType, { label: string; color: string }> = {
+  prospect:    { label: 'Prospect',    color: '#EAB308' },
+  contacted:   { label: 'Contacted',   color: '#3B82F6' },
+  listing:     { label: 'Listing',     color: '#10B981' },
+  client:      { label: 'Client',      color: '#8B5CF6' },
+  no_go:       { label: 'No Go',       color: '#EF4444' },
+  development: { label: 'Development', color: '#FB923C' },
+} as const;
 export type FollowUpTimeframeType = z.infer<typeof FollowUpTimeframe>;
 
 // Contact interaction types  
@@ -95,13 +106,10 @@ export type ContactInteractionRow = typeof contactInteractions.$inferSelect;
 export type InsertContactInteraction = typeof contactInteractions.$inferInsert;
 
 // Status color mapping
-export const STATUS_COLORS = {
-  prospect: '#e74c3c',
-  contacted: '#d35400',
-  listing: '#f39c12', 
-  client: '#27ae60',
-  no_go: '#7f8c8d'
-} as const;
+// Back-compat mapping for any legacy imports. Prefer STATUS_META.
+export const STATUS_COLORS = Object.fromEntries(
+  Object.entries(STATUS_META).map(([k, v]) => [k, v.color])
+) as Record<ProspectStatusType, string>;
 
 // Submarket schema
 export const SubmarketSchema = z.object({
