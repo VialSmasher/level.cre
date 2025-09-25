@@ -162,17 +162,33 @@ export class DatabaseStorage implements IStorage {
   async getListingProspects(listingId: string, userId: string): Promise<Prospect[]> {
     // join link table to prospects, enforce user's prospects
     const rows = await db
-      .select({ p: prospects })
+      .select({
+        id: prospects.id,
+        name: prospects.name,
+        status: prospects.status,
+        notes: prospects.notes,
+        geometryJson: sql<string>`ST_AsGeoJSON(${prospects.geometry})`,
+        submarketId: prospects.submarketId,
+        lastContactDate: prospects.lastContactDate,
+        followUpTimeframe: prospects.followUpTimeframe,
+        contactName: prospects.contactName,
+        contactEmail: prospects.contactEmail,
+        contactPhone: prospects.contactPhone,
+        contactCompany: prospects.contactCompany,
+        size: prospects.size,
+        acres: prospects.acres,
+        createdAt: prospects.createdAt,
+      })
       .from(listingProspects)
       .innerJoin(prospects, eq(listingProspects.prospectId, prospects.id))
       .innerJoin(listings, eq(listingProspects.listingId, listings.id))
       .where(and(eq(listingProspects.listingId, listingId), eq(listings.userId, userId)));
-    return rows.map(({ p }) => ({
+    return rows.map((p) => ({
       id: p.id,
       name: p.name,
       status: p.status as any,
       notes: p.notes || "",
-      geometry: p.geometry as any,
+      geometry: JSON.parse(p.geometryJson as any),
       submarketId: p.submarketId || undefined,
       lastContactDate: p.lastContactDate || undefined,
       followUpTimeframe: p.followUpTimeframe as any || undefined,
@@ -189,16 +205,32 @@ export class DatabaseStorage implements IStorage {
   // Fetch all prospects linked to a listing id regardless of owner
   async getListingProspectsAny(listingId: string): Promise<Prospect[]> {
     const rows = await db
-      .select({ p: prospects })
+      .select({
+        id: prospects.id,
+        name: prospects.name,
+        status: prospects.status,
+        notes: prospects.notes,
+        geometryJson: sql<string>`ST_AsGeoJSON(${prospects.geometry})`,
+        submarketId: prospects.submarketId,
+        lastContactDate: prospects.lastContactDate,
+        followUpTimeframe: prospects.followUpTimeframe,
+        contactName: prospects.contactName,
+        contactEmail: prospects.contactEmail,
+        contactPhone: prospects.contactPhone,
+        contactCompany: prospects.contactCompany,
+        size: prospects.size,
+        acres: prospects.acres,
+        createdAt: prospects.createdAt,
+      })
       .from(listingProspects)
       .innerJoin(prospects, eq(listingProspects.prospectId, prospects.id))
       .where(eq(listingProspects.listingId, listingId));
-    return rows.map(({ p }) => ({
+    return rows.map((p) => ({
       id: p.id,
       name: p.name,
       status: p.status as any,
       notes: p.notes || "",
-      geometry: p.geometry as any,
+      geometry: JSON.parse(p.geometryJson as any),
       submarketId: p.submarketId || undefined,
       lastContactDate: p.lastContactDate || undefined,
       followUpTimeframe: p.followUpTimeframe as any || undefined,
@@ -585,45 +617,83 @@ export class DatabaseStorage implements IStorage {
 
   // Prospects operations with user filtering
   async getProspect(id: string, userId: string): Promise<Prospect | undefined> {
-    const [result] = await db.select().from(prospects).where(and(eq(prospects.id, id), eq(prospects.userId, userId)));
-    if (!result) return undefined;
+    const [row] = await db
+      .select({
+        id: prospects.id,
+        name: prospects.name,
+        status: prospects.status,
+        notes: prospects.notes,
+        geometryJson: sql<string>`ST_AsGeoJSON(${prospects.geometry})`,
+        submarketId: prospects.submarketId,
+        lastContactDate: prospects.lastContactDate,
+        followUpTimeframe: prospects.followUpTimeframe,
+        contactName: prospects.contactName,
+        contactEmail: prospects.contactEmail,
+        contactPhone: prospects.contactPhone,
+        contactCompany: prospects.contactCompany,
+        size: prospects.size,
+        acres: prospects.acres,
+        createdAt: prospects.createdAt,
+      })
+      .from(prospects)
+      .where(and(eq(prospects.id, id), eq(prospects.userId, userId)));
+    if (!row) return undefined;
     return {
-      id: result.id,
-      name: result.name,
-      status: result.status as any,
-      notes: result.notes || "",
-      geometry: result.geometry as any,
-      submarketId: result.submarketId || undefined,
-      lastContactDate: result.lastContactDate || undefined,
-      followUpTimeframe: result.followUpTimeframe as any || undefined,
-      contactName: result.contactName || undefined,
-      contactEmail: result.contactEmail || undefined,
-      contactPhone: result.contactPhone || undefined,
-      contactCompany: result.contactCompany || undefined,
-      size: result.size || undefined,
-      acres: result.acres || undefined,
-      createdDate: result.createdAt?.toISOString() || new Date().toISOString()
+      id: row.id,
+      name: row.name,
+      status: row.status as any,
+      notes: row.notes || "",
+      geometry: JSON.parse(row.geometryJson as any),
+      submarketId: row.submarketId || undefined,
+      lastContactDate: row.lastContactDate || undefined,
+      followUpTimeframe: row.followUpTimeframe as any || undefined,
+      contactName: row.contactName || undefined,
+      contactEmail: row.contactEmail || undefined,
+      contactPhone: row.contactPhone || undefined,
+      contactCompany: row.contactCompany || undefined,
+      size: row.size || undefined,
+      acres: row.acres || undefined,
+      createdDate: row.createdAt?.toISOString() || new Date().toISOString()
     };
   }
 
   async getAllProspects(userId: string): Promise<Prospect[]> {
-    const results = await db.select().from(prospects).where(eq(prospects.userId, userId));
-    return results.map(result => ({
-      id: result.id,
-      name: result.name,
-      status: result.status as any,
-      notes: result.notes || "",
-      geometry: result.geometry as any,
-      submarketId: result.submarketId || undefined,
-      lastContactDate: result.lastContactDate || undefined,
-      followUpTimeframe: result.followUpTimeframe as any || undefined,
-      contactName: result.contactName || undefined,
-      contactEmail: result.contactEmail || undefined,
-      contactPhone: result.contactPhone || undefined,
-      contactCompany: result.contactCompany || undefined,
-      size: result.size || undefined,
-      acres: result.acres || undefined,
-      createdDate: result.createdAt?.toISOString() || new Date().toISOString()
+    const rows = await db
+      .select({
+        id: prospects.id,
+        name: prospects.name,
+        status: prospects.status,
+        notes: prospects.notes,
+        geometryJson: sql<string>`ST_AsGeoJSON(${prospects.geometry})`,
+        submarketId: prospects.submarketId,
+        lastContactDate: prospects.lastContactDate,
+        followUpTimeframe: prospects.followUpTimeframe,
+        contactName: prospects.contactName,
+        contactEmail: prospects.contactEmail,
+        contactPhone: prospects.contactPhone,
+        contactCompany: prospects.contactCompany,
+        size: prospects.size,
+        acres: prospects.acres,
+        createdAt: prospects.createdAt,
+      })
+      .from(prospects)
+      .where(eq(prospects.userId, userId));
+    return rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      status: r.status as any,
+      notes: r.notes || "",
+      geometry: JSON.parse(r.geometryJson as any),
+      submarketId: r.submarketId || undefined,
+      lastContactDate: r.lastContactDate || undefined,
+      followUpTimeframe: r.followUpTimeframe as any || undefined,
+      contactName: r.contactName || undefined,
+      contactEmail: r.contactEmail || undefined,
+      contactPhone: r.contactPhone || undefined,
+      contactCompany: r.contactCompany || undefined,
+      size: r.size || undefined,
+      acres: r.acres || undefined,
+      createdDate: r.createdAt?.toISOString() || new Date().toISOString()
     }));
   }
 
@@ -633,8 +703,8 @@ export class DatabaseStorage implements IStorage {
       name: insertProspect.name,
       status: insertProspect.status,
       notes: insertProspect.notes,
-      // Wrap GeoJSON with PostGIS constructor to satisfy geometry column
-      geometry: sql`ST_GeomFromGeoJSON(${JSON.stringify(insertProspect.geometry)})` as any,
+      // Wrap GeoJSON with PostGIS constructor and set SRID=4326
+      geometry: sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(insertProspect.geometry)}), 4326)` as any,
       ...(insertProspect.submarketId && { submarketId: insertProspect.submarketId }),
       ...(insertProspect.lastContactDate && { lastContactDate: insertProspect.lastContactDate }),
       ...(insertProspect.followUpTimeframe && { followUpTimeframe: insertProspect.followUpTimeframe }),
@@ -644,7 +714,23 @@ export class DatabaseStorage implements IStorage {
       ...(insertProspect.contactCompany && { contactCompany: insertProspect.contactCompany }),
       ...(insertProspect.size && { size: insertProspect.size }),
       ...(insertProspect.acres && { acres: insertProspect.acres })
-    }).returning();
+    }).returning({
+      id: prospects.id,
+      name: prospects.name,
+      status: prospects.status,
+      notes: prospects.notes,
+      geometryJson: sql<string>`ST_AsGeoJSON(${prospects.geometry})`,
+      submarketId: prospects.submarketId,
+      lastContactDate: prospects.lastContactDate,
+      followUpTimeframe: prospects.followUpTimeframe,
+      contactName: prospects.contactName,
+      contactEmail: prospects.contactEmail,
+      contactPhone: prospects.contactPhone,
+      contactCompany: prospects.contactCompany,
+      size: prospects.size,
+      acres: prospects.acres,
+      createdAt: prospects.createdAt,
+    });
     
     // Award XP for prospecting
     await this.addSkillActivity({
@@ -661,7 +747,7 @@ export class DatabaseStorage implements IStorage {
       name: result.name,
       status: result.status as any,
       notes: result.notes || "",
-      geometry: result.geometry as any,
+      geometry: JSON.parse(result.geometryJson as any),
       submarketId: result.submarketId || undefined,
       lastContactDate: result.lastContactDate || undefined,
       followUpTimeframe: result.followUpTimeframe as any || undefined,
@@ -681,8 +767,8 @@ export class DatabaseStorage implements IStorage {
         ...(updates.name && { name: updates.name }),
         ...(updates.status && { status: updates.status }),
         ...(updates.notes !== undefined && { notes: updates.notes }),
-        // Convert incoming GeoJSON to PostGIS geometry
-        ...(updates.geometry && { geometry: sql`ST_GeomFromGeoJSON(${JSON.stringify(updates.geometry)})` as any }),
+        // Convert incoming GeoJSON to PostGIS geometry and set SRID=4326
+        ...(updates.geometry && { geometry: sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(updates.geometry)}), 4326)` as any }),
         ...(updates.submarketId !== undefined && { submarketId: updates.submarketId }),
         ...(updates.lastContactDate !== undefined && { lastContactDate: updates.lastContactDate }),
         ...(updates.followUpTimeframe !== undefined && { followUpTimeframe: updates.followUpTimeframe }),
@@ -695,7 +781,23 @@ export class DatabaseStorage implements IStorage {
         updatedAt: new Date()
       })
       .where(and(eq(prospects.id, id), eq(prospects.userId, userId)))
-      .returning();
+      .returning({
+        id: prospects.id,
+        name: prospects.name,
+        status: prospects.status,
+        notes: prospects.notes,
+        geometryJson: sql<string>`ST_AsGeoJSON(${prospects.geometry})`,
+        submarketId: prospects.submarketId,
+        lastContactDate: prospects.lastContactDate,
+        followUpTimeframe: prospects.followUpTimeframe,
+        contactName: prospects.contactName,
+        contactEmail: prospects.contactEmail,
+        contactPhone: prospects.contactPhone,
+        contactCompany: prospects.contactCompany,
+        size: prospects.size,
+        acres: prospects.acres,
+        createdAt: prospects.createdAt,
+      });
     
     if (!result) return undefined;
     return {
@@ -703,7 +805,7 @@ export class DatabaseStorage implements IStorage {
       name: result.name,
       status: result.status as any,
       notes: result.notes || "",
-      geometry: result.geometry as any,
+      geometry: JSON.parse(result.geometryJson as any),
       submarketId: result.submarketId || undefined,
       lastContactDate: result.lastContactDate || undefined,
       followUpTimeframe: result.followUpTimeframe as any || undefined,

@@ -12,6 +12,7 @@ import {
   pgEnum,
   unique,
   primaryKey,
+  customType,
 } from "drizzle-orm/pg-core";
 
 // Prospect status enum
@@ -275,13 +276,19 @@ export const contactInteractions = pgTable(
 );
 
 // Prospects table with user association
+// Define PostGIS geometry column type for Drizzle
+export const pgGeometry = customType<{ data: unknown; driverData: unknown }>({
+  dataType() { return 'geometry'; },
+});
+
 export const prospects = pgTable("prospects", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
   name: varchar("name").notNull(),
   status: varchar("status").notNull(), // prospect, contacted, listing, client, no_go
   notes: varchar("notes").default(""),
-  geometry: jsonb("geometry").notNull(), // GeoJSON geometry
+  // PostGIS geometry column (SRID enforced via DB constraint/migration)
+  geometry: pgGeometry("geometry").notNull(),
   submarketId: varchar("submarket_id"),
   lastContactDate: varchar("last_contact_date"),
   followUpTimeframe: varchar("follow_up_timeframe"), // 1_month, 3_month, 6_month, 1_year
