@@ -25,6 +25,8 @@ const Onboarding = lazy(() => import("./pages/onboarding"));
 const WorkspacesIndex = lazy(() => import("./pages/workspaces"));
 const Workspace = lazy(() => import("./pages/workspace"));
 const AuthCallback = lazy(() => import("./pages/AuthCallback"));
+const Terms = lazy(() => import("./pages/terms"));
+const Privacy = lazy(() => import("./pages/privacy"));
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
@@ -75,6 +77,18 @@ function Router() {
       <Route path="/" component={() => (
         <Suspense fallback={<Spinner />}> 
           <Landing />
+        </Suspense>
+      )} />
+
+      <Route path="/terms" component={() => (
+        <Suspense fallback={<Spinner />}> 
+          <Terms />
+        </Suspense>
+      )} />
+
+      <Route path="/privacy" component={() => (
+        <Suspense fallback={<Spinner />}> 
+          <Privacy />
         </Suspense>
       )} />
       

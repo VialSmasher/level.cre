@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Badge } from "@/components/ui/badge";
 import { Edit, Plus, Trash2, Banknote, Building2 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { MarketComp, InsertMarketComp, Submarket, MarketCompDealType, MarketCompAssetType } from "@level-cre/shared/schema";
@@ -254,11 +255,18 @@ export default function MarketCompsPage() {
           </div>
 
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="flex items-center gap-2" onClick={() => { resetForm(); setIsDialogOpen(true); }}>
-                <Plus className="h-4 w-4" /> Add Comp
-              </Button>
-            </DialogTrigger>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DialogTrigger asChild>
+                  <Button size="icon" aria-label="Create Market Comp" onClick={() => { resetForm(); setIsDialogOpen(true); }}>
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </DialogTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Create Market Comp</p>
+              </TooltipContent>
+            </Tooltip>
             <DialogContent className="max-w-[420px]">
               <DialogHeader>
                 <DialogTitle>{editingComp ? 'Edit Comp' : 'Add Market Comp'}</DialogTitle>

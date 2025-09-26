@@ -2,7 +2,7 @@ import { MapPin, BarChart3, Users } from 'lucide-react'
 
 export default function FeatureCards() {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-6 max-w-5xl mx-auto">
       <div 
         className="group relative bg-white/80 backdrop-blur-md rounded-2xl p-6 shadow-lg hover:shadow-xl transition-all duration-300 border border-white/20 hover:bg-white/90 hover:-translate-y-1"
         tabIndex={0}
@@ -53,4 +53,3 @@ export default function FeatureCards() {
     </div>
   )
 }
-

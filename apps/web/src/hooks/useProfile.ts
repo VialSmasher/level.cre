@@ -16,6 +16,8 @@ export function useProfile() {
     onSuccess: () => {
       // Invalidate profile query to refetch data
       queryClient.invalidateQueries({ queryKey: ['/api/profile'] })
+      // Also refresh submarkets anywhere they are used
+      queryClient.invalidateQueries({ queryKey: ['/api/submarkets'] })
       // Broadcast submarket change event for real-time updates
       window.dispatchEvent(new CustomEvent('submarketChange'))
     },

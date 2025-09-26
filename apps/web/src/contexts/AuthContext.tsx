@@ -96,11 +96,71 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     const tStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    // Check if demo mode was requested (allow in production per user request)
-    const demoModeRequested = localStorage.getItem('demo-mode') === 'true'
+
+    const envDemoModeEnabled = (
+      import.meta.env.VITE_DEMO_MODE === '1' ||
+      import.meta.env.VITE_DEMO_MODE === 'true'
+    )
+
+    if (envDemoModeEnabled) {
+      try { localStorage.setItem('demo-mode', 'true') } catch {}
+    }
+
+    let demoModeRequested = envDemoModeEnabled
+    if (!demoModeRequested) {
+      try {
+        demoModeRequested = localStorage.getItem('demo-mode') === 'true'
+      } catch {
+        demoModeRequested = false
+      }
+    }
+
     setIsDemoMode(demoModeRequested)
     
     if (demoModeRequested) {
+      const applyDemoSession = (data?: any) => {
+        const prevUserId = user?.id
+        const nowIso = new Date().toISOString()
+        const firstName = data?.firstName || 'Demo'
+        const lastName = data?.lastName || 'User'
+        const email = data?.email || 'demo@example.com'
+        const avatarUrl = data?.profileImageUrl || null
+        const demoUser = {
+          id: data?.id || 'demo-user',
+          email,
+          app_metadata: { provider: 'demo' },
+          aud: 'authenticated',
+          role: 'authenticated',
+          user_metadata: {
+            full_name: `${firstName} ${lastName}`.trim(),
+            avatar_url: avatarUrl,
+          },
+          identities: [],
+          created_at: nowIso,
+          last_sign_in_at: nowIso,
+        } as unknown as User
+        const nowSeconds = Math.floor(Date.now() / 1000)
+        const expiresIn = 60 * 60 * 24
+        const demoSession = {
+          access_token: 'demo-access-token',
+          token_type: 'bearer',
+          refresh_token: 'demo-refresh-token',
+          provider_token: null,
+          provider_refresh_token: null,
+          expires_in: expiresIn,
+          expires_at: nowSeconds + expiresIn,
+          user: demoUser,
+        } as Session
+        setUser(demoUser)
+        setSession(demoSession)
+        setNeedsOnboarding(false) // Demo users don't need onboarding
+        setLoading(false)
+
+        if (prevUserId !== demoUser.id) {
+          resetClientState()
+        }
+      }
+
       // Load demo user immediately from demo endpoint
       apiRequest('GET', '/api/auth/demo/user')
         .then(async res => {
@@ -109,35 +169,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
         })
         .then(data => {
           console.log('Demo mode user data:', data);
-          if (data.id === 'demo-user') {
-            const prevUserId = user?.id
-            const demoUser = {
-              id: data.id,
-              email: data.email,
-              user_metadata: {
-                full_name: `${data.firstName} ${data.lastName}`,
-                avatar_url: data.profileImageUrl
-              },
-              app_metadata: {},
-              aud: 'authenticated',
-              created_at: new Date().toISOString()
-            } as unknown as User
-            setUser(demoUser)
-            setNeedsOnboarding(false) // Demo users don't need onboarding
-            setLoading(false)
-            
-            // Reset client state if switching to demo user
-            if (prevUserId !== demoUser.id) {
-              resetClientState()
-            }
+          if (data?.id === 'demo-user') {
+            applyDemoSession(data)
           } else {
             console.warn('Demo mode: unexpected user data', data);
-            setLoading(false);
+            applyDemoSession(undefined)
           }
         })
         .catch((err) => {
           console.error('Demo mode fetch error:', err);
-          setLoading(false)
+          applyDemoSession(undefined)
         })
       return
     }

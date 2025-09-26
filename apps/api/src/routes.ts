@@ -1392,7 +1392,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getUserId(req);
       if (isDemo(req)) {
         const list = await demo.getSubmarkets(userId);
-        return res.json(list);
+        // Deduplicate by name (case-insensitive) and prefer active entries.
+        const seen = new Set<string>();
+        const unique: any[] = [];
+        for (const s of (list || [])) {
+          const name = (s?.name || '').trim();
+          if (!name) continue;
+          const key = name.toLowerCase();
+          const isActive = (s?.isActive !== false);
+          if (seen.has(key)) continue;
+          if (!isActive) continue;
+          seen.add(key);
+          unique.push({ id: s.id, name: s.name, color: s.color, isActive: !!s.isActive });
+        }
+        return res.json(unique);
       }
       const submarkets = await storage.getAllSubmarkets(userId);
       res.json(submarkets);

@@ -836,12 +836,22 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllSubmarkets(userId: string): Promise<Submarket[]> {
-    const results = await db.select().from(submarkets).where(eq(submarkets.userId, userId));
-    return results.map(result => ({
-      id: result.id,
-      name: result.name,
-      color: result.color || undefined,
-      isActive: result.isActive === 'true'
+    // Return unique submarkets for the user (by name, case-insensitive),
+    // preferring active and most recently updated rows.
+    // Use DISTINCT ON to collapse duplicates by lower(name).
+    const rows: any = await db.execute(sql`
+      SELECT DISTINCT ON (LOWER(name)) id, name, color, is_active, updated_at, created_at
+      FROM submarkets
+      WHERE user_id = ${userId} AND (is_active = 'true' OR is_active IS NULL)
+      ORDER BY LOWER(name), is_active DESC, updated_at DESC, created_at DESC
+    `);
+
+    const list: any[] = (rows?.rows ?? rows) as any[];
+    return (list || []).map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      color: r.color || undefined,
+      isActive: String(r.is_active ?? r.isActive ?? 'true') === 'true'
     }));
   }
 

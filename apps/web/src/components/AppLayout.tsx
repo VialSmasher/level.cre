@@ -75,8 +75,8 @@ export function AppLayout({ children }: AppLayoutProps) {
           <div className="flex justify-between items-center h-16">
             {/* Logo/Brand */}
             <div className="flex items-center">
-              <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                CRE Prospect Mapper
+              <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-gray-100">
+                level CRE
               </h1>
             </div>
 

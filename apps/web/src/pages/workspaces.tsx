@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
-import { MoreHorizontal, Trash2, Pencil, Share2 } from 'lucide-react';
+import { MoreHorizontal, Trash2, Pencil, Share2, Plus } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -146,7 +147,16 @@ export default function WorkspacesIndex() {
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Workspaces</h1>
-        <Button onClick={() => setOpen(true)}>Create Workspace</Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="icon" onClick={() => setOpen(true)} aria-label="Create Workspace">
+              <Plus className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Create Workspace</p>
+          </TooltipContent>
+        </Tooltip>
       </div>
       {isLoading ? (
         <div>Loading...</div>
