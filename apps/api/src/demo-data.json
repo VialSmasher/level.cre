@@ -2039,6 +2039,43 @@
           ]
         },
         "createdDate": "2025-09-23T18:21:33.528Z"
+      },
+      {
+        "id": "1e01c718-c624-45a9-bd09-255567d05f00",
+        "name": "New polygon",
+        "status": "prospect",
+        "notes": "",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -114.00226099853515,
+                53.57036833429465
+              ],
+              [
+                -113.92467005615234,
+                53.52998139974426
+              ],
+              [
+                -113.93153651123046,
+                53.60542065667506
+              ],
+              [
+                -114.00363428955077,
+                53.567513958664
+              ],
+              [
+                -114.00226099853515,
+                53.57036833429465
+              ]
+            ]
+          ]
+        },
+        "acres": "4930.301552787042",
+        "createdDate": "2025-09-26T16:50:31.566Z",
+        "size": "10,000 - 25,000 SF",
+        "followUpTimeframe": "3_month"
       }
     ],
     "demo-user-2": [
@@ -4105,6 +4142,17 @@
         "lng": "",
         "submarket": null,
         "createdAt": "2025-09-23T18:21:10.807Z",
+        "archivedAt": null
+      },
+      {
+        "id": "d63c864f-fc0c-49d7-ac56-929e5ea10bdb",
+        "userId": "demo-user",
+        "title": "teswt",
+        "address": "teswt",
+        "lat": "",
+        "lng": "",
+        "submarket": null,
+        "createdAt": "2025-09-26T16:47:39.400Z",
         "archivedAt": null
       }
     ],

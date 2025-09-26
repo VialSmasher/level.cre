@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
-import { Archive, MoreHorizontal, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Trash2, Pencil, Share2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -98,7 +98,7 @@ export default function WorkspacesIndex() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const { data: listings = [], isLoading } = useQuery<ListingRow[]>({ queryKey: ['/api/listings'] });
-  const { data: shared = [] } = useQuery<ListingRow[]>({ queryKey: ['/api/listings', 'shared'], queryFn: async () => {
+  const { data: shared = [], isLoading: isLoadingShared } = useQuery<ListingRow[]>({ queryKey: ['/api/listings', 'shared'], queryFn: async () => {
     const res = await apiRequest('GET', '/api/listings?scope=shared');
     const ct = res.headers.get('content-type') || '';
     if (!ct.includes('application/json')) return [] as any;
@@ -151,7 +151,8 @@ export default function WorkspacesIndex() {
       {isLoading ? (
         <div>Loading...</div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {listings.length === 0 && (
             <Card className="col-span-full">
               <CardHeader>
@@ -203,20 +204,19 @@ export default function WorkspacesIndex() {
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            setLocation(`/app/workspaces/${l.id}`);
+                            toast({ title: 'Rename', description: 'Coming soon.' });
                           }}
                         >
-                          Open
+                          <Pencil className="mr-2 h-4 w-4" /> Rename
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            archiveMutation.mutate(l.id);
+                            toast({ title: 'Share', description: 'Coming soon.' });
                           }}
-                          disabled={archiveMutation.isPending}
                         >
-                          <Archive className="h-4 w-4" /> Archive
+                          <Share2 className="mr-2 h-4 w-4" /> Share
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           className="text-red-600 focus:text-red-700"
@@ -229,7 +229,7 @@ export default function WorkspacesIndex() {
                           }}
                           disabled={deleteMutation.isPending}
                         >
-                          <Trash2 className="h-4 w-4" /> Delete
+                          <Trash2 className="mr-2 h-4 w-4" /> Delete
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -243,47 +243,94 @@ export default function WorkspacesIndex() {
               </CardContent>
             </Card>
           ))}
+          </div>
 
-          {shared.length > 0 && (
-            <Card className="col-span-full mt-2">
-              <CardHeader className="pb-2">
-                <CardTitle>Shared With Me</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {shared.map((l) => (
-                    <Card
-                      key={l.id}
-                      className="group relative cursor-pointer transition-shadow hover:shadow-md hover:border-blue-300"
-                      onClick={() => {
-                        try {
-                          localStorage.setItem('lastWorkspaceId', l.id);
-                          localStorage.setItem('lastWorkspacesLocation', `/app/workspaces/${l.id}`);
-                          localStorage.setItem('lastListingsLocation', `/app/listings/${l.id}`);
-                        } catch {}
-                        setLocation(`/app/workspaces/${l.id}`);
-                      }}
-                    >
-                      <CardHeader className="pb-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <CardTitle className="text-lg leading-tight truncate">
-                            {l.title || l.address}
-                          </CardTitle>
-                          <span className="text-xs text-muted-foreground whitespace-nowrap">
-                            {new Date(l.createdAt || Date.now()).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="text-sm text-muted-foreground">Prospects: {l.prospectCount ?? 0}</div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+        {/* Shared Section */}
+        <div className="mt-8">
+          <h2 className="text-xl font-semibold mb-4">Shared</h2>
+          {isLoadingShared ? (
+            <div>Loading...</div>
+          ) : shared.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No shared workspaces yet.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {shared.map((l) => (
+                <Card
+                  key={l.id}
+                  className="group relative cursor-pointer transition-shadow hover:shadow-md hover:border-blue-300"
+                  onClick={() => {
+                    try {
+                      localStorage.setItem('lastWorkspaceId', l.id);
+                      localStorage.setItem('lastWorkspacesLocation', `/app/workspaces/${l.id}`);
+                      localStorage.setItem('lastListingsLocation', `/app/listings/${l.id}`);
+                    } catch {}
+                    setLocation(`/app/workspaces/${l.id}`);
+                  }}
+                >
+                  <CardHeader className="pb-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <CardTitle className="text-lg leading-tight truncate">
+                        {l.title || l.address}
+                      </CardTitle>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                          {new Date(l.createdAt || Date.now()).toLocaleDateString()}
+                        </span>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                              aria-label="Workspace actions"
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                toast({ title: 'Rename', description: 'Coming soon.' });
+                              }}
+                            >
+                              <Pencil className="mr-2 h-4 w-4" /> Rename
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                toast({ title: 'Share', description: 'Coming soon.' });
+                              }}
+                            >
+                              <Share2 className="mr-2 h-4 w-4" /> Share
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-red-600 focus:text-red-700"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                toast({ title: 'Delete', description: 'Coming soon.' });
+                              }}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" /> Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-sm text-muted-foreground">Prospects: {l.prospectCount ?? 0}</div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
           )}
         </div>
+        </>
       )}
 
       <CreateWorkspaceModal open={open} onOpenChange={setOpen} />

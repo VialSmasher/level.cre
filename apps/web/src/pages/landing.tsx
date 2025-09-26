@@ -6,7 +6,7 @@ import { Loader2, Sparkles, ArrowRight, CheckCircle } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
 // Lazy-load the feature cards so the login route stays fast
-const FeatureCards = lazy(() => import('@/components/FeatureCards'))
+const FeatureCards = lazy(() => import('../components/FeatureCards'))
 
 export default function Landing() {
   const { user, loading, signInWithGoogle } = useAuth()
@@ -25,8 +25,8 @@ export default function Landing() {
   const prefetchApp = () => {
     if (hasPrefetched.current) return
     hasPrefetched.current = true
-    import('@/pages/home')
-    import('@/components/AppLayout')
+    import('./home')
+    import('../components/AppLayout')
   }
 
   useEffect(() => {
