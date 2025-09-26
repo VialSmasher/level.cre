@@ -1,0 +1,1 @@
+function u(e){return(e||"").trim().replace(/\s+/g," ").toLowerCase()}function i(e){const t=new Set,n=[];if(!Array.isArray(e))return n;for(const a of e){const r=(a||"").trim();if(!r)continue;const o=u(r);t.has(o)||(t.add(o),n.push(r))}return n}export{i as u};

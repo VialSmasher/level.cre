@@ -13,7 +13,7 @@
     "dev:web": "npm --workspace @apps/web run dev",
     "dev:api": "npm --workspace @apps/api run dev",
     "build": "npm-run-all build:web build:api",
-    "vercel-build": "npm run build:web && rm -rf public && mkdir -p public && cp -R apps/web/dist/* public/",
+    "vercel-build": "npm run build:web && rm -rf public && mkdir -p public && cp -a apps/web/dist/. public/",
     "build:web": "npm --workspace @apps/web run build",
     "build:api": "npm --workspace @apps/api run build",
     "start": "npm --workspace @apps/api run start",
