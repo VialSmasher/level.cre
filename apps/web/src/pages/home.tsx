@@ -43,7 +43,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { queryClient, apiRequest } from '@/lib/queryClient';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
-import { STATUS_META, type ProspectStatusType } from '@level-cre/shared/schema';
+import { STATUS_META } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
 
 // Import all necessary types and data

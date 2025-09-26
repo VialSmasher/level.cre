@@ -85,7 +85,15 @@ if (process.env.NODE_ENV === 'development') {
   });
 }
 
-app.use(cookieParser(process.env.JWT_SECRET));
+// Ensure a secret for signed cookies; fallback in dev to avoid crashes
+{
+  const isDev = (process.env.NODE_ENV === 'development' || app.get('env') === 'development');
+  const secret = process.env.JWT_SECRET || (isDev ? 'dev_change_me' : undefined);
+  if (!secret) {
+    console.warn('JWT_SECRET is not set. Signed cookies may not work correctly.');
+  }
+  app.use(cookieParser(secret || 'dev_change_me'));
+}
 app.use(devUser());
 
 app.use((req, res, next) => {

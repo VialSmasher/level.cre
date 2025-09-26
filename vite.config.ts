@@ -14,6 +14,11 @@ const __dirname = path.dirname(__filename);
 export default defineConfig({
   // Load env vars from the repo root (so .env at project root is used)
   envDir: path.resolve(__dirname),
+  // Ensure Vite always uses the app-level PostCSS (Tailwind) config
+  css: {
+    postcss: path.resolve(__dirname, 'apps', 'web', 'postcss.config.cjs'),
+    devSourcemap: true,
+  },
   esbuild: {
     // Keep transforms light and modern for CI speed
     target: 'es2022',
@@ -39,6 +44,8 @@ export default defineConfig({
       "@level-cre/shared": path.resolve(__dirname, "packages", "shared", "src"),
       "@assets": path.resolve(__dirname, "attached_assets"),
     },
+    // Ensure a single React instance across the app and packages
+    dedupe: ['react', 'react-dom'],
   },
   root: path.resolve(__dirname, "apps", "web"),
   build: {
@@ -87,6 +94,13 @@ export default defineConfig({
     },
     fs: {
       strict: true,
+      // Allow serving/reading files from monorepo roots (packages, apps) so
+      // Tailwind's JIT content scanning and Vite dependency graph work properly.
+      allow: [
+        path.resolve(__dirname),
+        path.resolve(__dirname, 'apps'),
+        path.resolve(__dirname, 'packages'),
+      ],
       deny: ["**/.*"],
     },
   },

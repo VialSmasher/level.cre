@@ -2,7 +2,12 @@ import type { Config } from "tailwindcss";
 
 export default {
   darkMode: ["class"],
-  content: ["./apps/web/index.html", "./apps/web/src/**/*.{js,jsx,ts,tsx}"],
+  // Scan templates and source within the new apps/web workspace
+  content: [
+    "./apps/web/index.html",
+    "./apps/web/src/**/*.{html,js,jsx,ts,tsx,md,mdx}",
+    "./packages/shared/src/**/*.{html,js,jsx,ts,tsx,md,mdx}",
+  ],
   theme: {
     extend: {
       borderRadius: {
@@ -52,7 +57,7 @@ export default {
           "5": "var(--chart-5)",
         },
         sidebar: {
-          DEFAULT: "var(--sidebar-background)",
+          DEFAULT: "var(--sidebar)",
           foreground: "var(--sidebar-foreground)",
           primary: "var(--sidebar-primary)",
           "primary-foreground": "var(--sidebar-primary-foreground)",

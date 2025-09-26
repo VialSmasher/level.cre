@@ -1,6 +1,7 @@
 // import React from "react"; (remove if not needed)
 import { Switch, Route } from "wouter";
 import { lazy, Suspense } from "react";
+import { Spinner } from "@/components/ui/spinner";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -66,10 +67,11 @@ function Router() {
   }
 
   return (
+    <Suspense fallback={<Spinner />}>
     <Switch>
       {/* Public routes */}
       <Route path="/" component={() => (
-        <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+        <Suspense fallback={<Spinner />}> 
           <Landing />
         </Suspense>
       )} />
@@ -77,7 +79,7 @@ function Router() {
       {/* Onboarding route - only for authenticated users */}
       <Route path="/onboarding">
         <ProtectedRoute>
-          <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+          <Suspense fallback={<Spinner />}> 
             <Onboarding />
           </Suspense>
         </ProtectedRoute>
@@ -85,7 +87,7 @@ function Router() {
       
       {/* OAuth callback (PKCE) */}
       <Route path="/auth/callback" component={() => (
-        <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+        <Suspense fallback={<Spinner />}> 
           <AuthCallback />
         </Suspense>
       )} />
@@ -95,7 +97,7 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+              <Suspense fallback={<Spinner />}> 
                 <Home />
               </Suspense>
             </AppLayout>
@@ -107,7 +109,7 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+              <Suspense fallback={<Spinner />}> 
                 <Knowledge />
               </Suspense>
             </AppLayout>
@@ -119,7 +121,7 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+              <Suspense fallback={<Spinner />}> 
                 <FollowUp />
               </Suspense>
             </AppLayout>
@@ -131,7 +133,7 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+              <Suspense fallback={<Spinner />}> 
                 <Stats />
               </Suspense>
             </AppLayout>
@@ -143,7 +145,7 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+              <Suspense fallback={<Spinner />}> 
                 <Requirements />
               </Suspense>
             </AppLayout>
@@ -155,7 +157,7 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+              <Suspense fallback={<Spinner />}> 
                 <WorkspacesIndex />
               </Suspense>
             </AppLayout>
@@ -167,7 +169,7 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+              <Suspense fallback={<Spinner />}> 
                 <Workspace />
               </Suspense>
             </AppLayout>
@@ -192,7 +194,7 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+              <Suspense fallback={<Spinner />}> 
                 <MarketComps />
               </Suspense>
             </AppLayout>
@@ -204,7 +206,7 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+              <Suspense fallback={<Spinner />}> 
                 <MapToolsTestPage />
               </Suspense>
             </AppLayout>
@@ -216,7 +218,7 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+              <Suspense fallback={<Spinner />}> 
                 <Profile />
               </Suspense>
             </AppLayout>
@@ -247,11 +249,12 @@ function Router() {
       }} />}
       
       <Route component={() => (
-        <Suspense fallback={<div className="max-w-5xl mx-auto h-40" />}> 
+        <Suspense fallback={<Spinner />}> 
           <NotFound />
         </Suspense>
       )} />
     </Switch>
+    </Suspense>
   )
 }
 
