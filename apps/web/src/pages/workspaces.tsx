@@ -95,6 +95,10 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
           const k = nsKey(user?.id, 'listings');
           const existing = readJSON<any[]>(k, []);
           writeJSON(k, [...existing, listing]);
+          // Also persist a shared device-wide copy for demo
+          const kShared = nsKey(null, 'listings'); // -> 'listings::guest'
+          const sharedExisting = readJSON<any[]>(kShared, []);
+          writeJSON(kShared, [...sharedExisting, listing]);
         } catch {}
       }
       try {
@@ -163,16 +167,34 @@ export default function WorkspacesIndex() {
   useEffect(() => {
     if (!isDemoMode) return;
     try {
-      const k = nsKey(user?.id, 'listings');
-      const existing = readJSON<any[]>(k, []);
-      if (existing.length > 0) {
-        queryClient.setQueryData<any[]>(['/api/listings'], existing);
+      const kUser = nsKey(user?.id, 'listings');
+      const kShared = nsKey(null, 'listings'); // device-wide demo list
+      const userListings = readJSON<any[]>(kUser, []);
+      const sharedListings = readJSON<any[]>(kShared, []);
+      const mergedMap: Record<string, any> = {};
+      [...sharedListings, ...userListings].forEach(l => { if (l && l.id) mergedMap[l.id] = l; });
+      const merged = Object.values(mergedMap);
+      if (merged.length > 0) {
+        queryClient.setQueryData<any[]>(['/api/listings'], merged as any[]);
       }
     } catch {}
   }, [isDemoMode, user?.id, queryClient]);
 
   const archiveMutation = useMutation({
     mutationFn: async (id: string) => {
+      if (isDemoMode) {
+        const when = new Date().toISOString();
+        // Update caches
+        queryClient.setQueryData<any[]>(['/api/listings'], (prev) => Array.isArray(prev) ? prev.map(l => l.id === id ? { ...l, archivedAt: when } : l) : prev);
+        queryClient.setQueryData<any>(['/api/listings', id], (prev) => prev ? { ...prev, archivedAt: when } : prev);
+        // Persist user + shared
+        const kUser = nsKey(user?.id, 'listings');
+        const kShared = nsKey(null, 'listings');
+        const upd = (arr: any[]) => arr.map(l => l.id === id ? { ...l, archivedAt: when } : l);
+        try { writeJSON(kUser, upd(readJSON<any[]>(kUser, []))); } catch {}
+        try { writeJSON(kShared, upd(readJSON<any[]>(kShared, []))); } catch {}
+        return { ok: true };
+      }
       await apiRequest('POST', `/api/listings/${id}/archive`, {});
       return { ok: true };
     },
@@ -187,6 +209,22 @@ export default function WorkspacesIndex() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
+      if (isDemoMode) {
+        // Update caches
+        queryClient.setQueryData<any[]>(['/api/listings'], (prev) => Array.isArray(prev) ? prev.filter(l => l.id !== id) : prev);
+        queryClient.removeQueries({ queryKey: ['/api/listings', id], exact: true });
+        queryClient.removeQueries({ queryKey: ['/api/listings', id, 'prospects'], exact: true });
+        // Persist user + shared
+        const kUser = nsKey(user?.id, 'listings');
+        const kShared = nsKey(null, 'listings');
+        const filt = (arr: any[]) => arr.filter(l => l.id !== id);
+        try { writeJSON(kUser, filt(readJSON<any[]>(kUser, []))); } catch {}
+        try { writeJSON(kShared, filt(readJSON<any[]>(kShared, []))); } catch {}
+        // Remove workspace membership mapping
+        try { localStorage.removeItem(nsKey(user?.id, `workspace:${id}:prospectIds`)); } catch {}
+        try { localStorage.removeItem(nsKey(null, `workspace:${id}:prospectIds`)); } catch {}
+        return { ok: true };
+      }
       await apiRequest('DELETE', `/api/listings/${id}`);
       return { ok: true };
     },

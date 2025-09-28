@@ -3,7 +3,6 @@ import { useLocation, useRoute } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { GoogleMap, Marker, Polygon, DrawingManager, useJsApiLoader } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 // Drawer controls not used in workspace; edit panel opens directly
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
@@ -16,7 +15,7 @@ import { apiRequest } from '@/lib/queryClient';
 import type { Prospect } from '@level-cre/shared/schema';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
-import { Save, X, Edit3, Trash2, ArrowLeft, Share2 } from 'lucide-react';
+import { Save, X, Edit3, Trash2, Share2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 // Using Google DrawingManager (not Terra) to match main map behavior
 import { ShareWorkspaceDialog } from '@/components/ShareWorkspaceDialog';
@@ -201,14 +200,24 @@ export default function Workspace() {
 
   // Demo helpers: persist workspace membership (listing -> prospect ids)
   const getWorkspaceProspectIds = (wid: string): string[] => {
-    try { return readJSON<string[]>(nsKey(user?.id, `workspace:${wid}:prospectIds`), []); } catch { return []; }
+    try {
+      // Merge shared + user-scoped sets for device-wide demo consistency
+      const shared = readJSON<string[]>(nsKey(null, `workspace:${wid}:prospectIds`), []);
+      const userScoped = readJSON<string[]>(nsKey(user?.id, `workspace:${wid}:prospectIds`), []);
+      return Array.from(new Set([...(shared || []), ...(userScoped || [])]));
+    } catch { return []; }
   };
   const setWorkspaceProspectIds = (wid: string, ids: string[]) => {
     try { writeJSON(nsKey(user?.id, `workspace:${wid}:prospectIds`), Array.from(new Set(ids))); } catch {}
+    try { writeJSON(nsKey(null, `workspace:${wid}:prospectIds`), Array.from(new Set(ids))); } catch {}
   };
   const addProspectToWorkspace = (wid: string, pid: string) => {
     const ids = getWorkspaceProspectIds(wid);
     if (!ids.includes(pid)) setWorkspaceProspectIds(wid, [...ids, pid]);
+  };
+  const removeProspectFromWorkspace = (wid: string, pid: string) => {
+    const ids = getWorkspaceProspectIds(wid);
+    setWorkspaceProspectIds(wid, ids.filter(x => x !== pid));
   };
   
   // Pan to search selection and highlight
@@ -372,8 +381,7 @@ export default function Workspace() {
         const all = (queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || []) as Prospect[];
         persistProspectsGlobal(all);
         // Update workspace membership
-        const ids = getWorkspaceProspectIds(listingId || '');
-        setWorkspaceProspectIds(listingId || '', ids.filter(x => x !== id));
+        if (listingId) removeProspectFromWorkspace(listingId, id);
         setSelectedProspect(null); setIsEditPanelOpen(false);
         toast({ title: 'Prospect Deleted (demo)' });
       } else {
@@ -509,37 +517,21 @@ export default function Workspace() {
         )}
         {isLoaded && apiKey && (
           <div style={{ position: 'absolute', inset: 0 }}>
-            {/* Overlay: back button and workspace name (top-right) */}
+            {/* Floating Share button (top-right) */}
             <div
-              className="absolute top-4 z-[1000] pointer-events-auto flex items-center gap-2"
+              className="absolute top-4 z-[1000] pointer-events-auto"
               style={{ right: isEditPanelOpen ? 352 : 16 }}
             >
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="secondary"
-                    size="icon"
-                    className="h-8 w-8 shadow"
-                  onClick={() => setLocation('/app/workspaces')}
-                    aria-label="Exit workspace"
-                    title="Exit workspace"
-                  >
-                    <ArrowLeft className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Exit workspace</p>
-                </TooltipContent>
-              </Tooltip>
-              <Badge variant="secondary" className="shadow">{listing?.title || listing?.address}</Badge>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="secondary" size="sm" className="h-8 shadow" onClick={() => setShareOpen(true)}>
-                    <Share2 className="h-4 w-4 mr-1"/> Share
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent><p>Share workspace</p></TooltipContent>
-              </Tooltip>
+              <Button
+                size="sm"
+                onClick={() => setShareOpen(true)}
+                className="h-9 px-3 rounded-xl bg-neutral-900/90 text-white border border-neutral-800 shadow-lg hover:bg-neutral-800/90 focus:ring-2 focus:ring-white/20"
+                aria-label="Share workspace"
+                title="Share workspace"
+              >
+                <Share2 className="h-4 w-4 mr-1.5" />
+                Share
+              </Button>
             </div>
             <GoogleMap
               onLoad={onMapLoad}

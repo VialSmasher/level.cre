@@ -21,11 +21,13 @@ import {
   Layers,
   Fingerprint,
   Menu,
-  X
+  X,
+  ChartSpline
 } from 'lucide-react'
 import { Table } from 'lucide-react'
-import { Link, useLocation } from 'wouter'
+import { Link, useLocation, useRoute } from 'wouter'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 
 interface AppLayoutProps {
@@ -36,6 +38,10 @@ export function AppLayout({ children }: AppLayoutProps) {
   const { user, signOut } = useAuth()
   const [location] = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [isWorkspaceDetail, params] = useRoute('/app/workspaces/:id')
+  const workspaceId = (params as any)?.id as string | undefined
+  type Listing = { id: string; title?: string; address?: string }
+  const { data: listing } = useQuery<Listing>({ queryKey: ['/api/listings', workspaceId], enabled: !!workspaceId })
   // Decide where the Workspace nav goes: last place visited in the Workspaces section
   const workspacesHref = (() => {
     try {
@@ -73,11 +79,29 @@ export function AppLayout({ children }: AppLayoutProps) {
       <nav className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            {/* Logo/Brand */}
-            <div className="flex items-center">
-              <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-gray-100">
-                level CRE
-              </h1>
+            {/* Logo + optional Breadcrumbs */}
+            <div className="flex items-center min-w-0 gap-4">
+              <Link
+                href="/app"
+                className="text-2xl font-black tracking-tight text-slate-900 dark:text-gray-100"
+                aria-label="Go to dashboard"
+              >
+                <span className="inline-flex items-center gap-1">
+                  level CRE
+                  <ChartSpline size={20} className="-mt-px" />
+                </span>
+              </Link>
+              {isWorkspaceDetail && (
+                <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 truncate">
+                  <Link href="/app/workspaces" className="hover:underline text-gray-800 dark:text-gray-100">
+                    Workspaces
+                  </Link>
+                  <span className="text-gray-400">/</span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100 truncate max-w-[320px]" title={listing?.title || listing?.address || ''}>
+                    {listing?.title || listing?.address || 'Workspace'}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Navigation Links */}

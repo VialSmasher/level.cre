@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '@/contexts/AuthContext'
 import { useLocation } from 'wouter'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { Loader2, ArrowRight, CheckCircle } from 'lucide-react'
+import { Loader2, ArrowRight, CheckCircle, ChartSpline } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
 // Lazy-load the feature cards so the login route stays fast
@@ -83,7 +83,12 @@ export default function Landing() {
           {/* Left column: Branding + Login */}
           <div className="flex flex-col gap-6 lg:pt-6">
             {/* Text logo */}
-            <div className="text-3xl md:text-4xl font-black tracking-tight text-slate-900">level CRE</div>
+            <div className="text-3xl md:text-4xl font-black tracking-tight text-slate-900">
+              <span className="inline-flex items-center gap-1">
+                level CRE
+                <ChartSpline className="-mt-px" size={22} />
+              </span>
+            </div>
 
             {/* Headline + Subheadline */}
             <div className="space-y-3">
