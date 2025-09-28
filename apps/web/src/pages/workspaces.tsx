@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
+import { useAuth } from '@/contexts/AuthContext';
+import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 import { MoreHorizontal, Trash2, Pencil, Share2, Plus } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -36,11 +38,36 @@ type ListingRow = {
 function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
+  const { user, isDemoMode } = useAuth();
+  const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
+
+  const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+    ? crypto.randomUUID()
+    : `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const payload = { title: title.trim() };
+      const trimmed = title.trim();
+      if (isDemoMode) {
+        const listing = {
+          id: genId(),
+          userId: user?.id || 'demo-user',
+          title: trimmed,
+          address: null,
+          lat: null,
+          lng: null,
+          submarket: null,
+          dealType: null,
+          size: null,
+          price: null,
+          createdAt: new Date().toISOString(),
+          archivedAt: null,
+          prospectCount: 0,
+        } as any;
+        return listing;
+      }
+      const payload = { title: trimmed };
       const res = await apiRequest('POST', '/api/listings', payload);
       const ct = res.headers.get('content-type') || '';
       if (!ct.includes('application/json')) {
@@ -53,7 +80,23 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
     onSuccess: (listing: any) => {
       onOpenChange(false);
       setTitle('');
-      toast({ title: 'Workspace created', description: 'Opening workspace...' });
+      toast({ title: isDemoMode ? 'Workspace created (demo)' : 'Workspace created', description: 'Opening workspace...' });
+
+      // In demo mode, cache + persist locally so the UI lists and opens it
+      if (isDemoMode) {
+        try {
+          // Update list cache
+          queryClient.setQueryData<any[]>(['/api/listings'], (prev) => Array.isArray(prev) ? [...prev, listing] : [listing]);
+          // Seed detail + empty prospects for this listing
+          queryClient.setQueryData<any>(['/api/listings', listing.id], listing);
+          queryClient.setQueryData<any[]>(['/api/listings', listing.id, 'prospects'], (prev) => Array.isArray(prev) ? prev : []);
+
+          // Persist to localStorage under user scope
+          const k = nsKey(user?.id, 'listings');
+          const existing = readJSON<any[]>(k, []);
+          writeJSON(k, [...existing, listing]);
+        } catch {}
+      }
       try {
         localStorage.setItem('lastWorkspaceId', listing.id);
         localStorage.setItem('lastWorkspacesLocation', `/app/workspaces/${listing.id}`);
@@ -97,6 +140,7 @@ export default function WorkspacesIndex() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user, isDemoMode } = useAuth();
   const [open, setOpen] = useState(false);
   const { data: listings = [], isLoading } = useQuery<ListingRow[]>({ queryKey: ['/api/listings'] });
   const { data: shared = [], isLoading: isLoadingShared } = useQuery<ListingRow[]>({ queryKey: ['/api/listings', 'shared'], queryFn: async () => {
@@ -114,6 +158,18 @@ export default function WorkspacesIndex() {
       localStorage.setItem('lastListingsLocation', '/app/listings'); 
     } catch {}
   }, []);
+
+  // Demo mode: seed listings list from localStorage if present
+  useEffect(() => {
+    if (!isDemoMode) return;
+    try {
+      const k = nsKey(user?.id, 'listings');
+      const existing = readJSON<any[]>(k, []);
+      if (existing.length > 0) {
+        queryClient.setQueryData<any[]>(['/api/listings'], existing);
+      }
+    } catch {}
+  }, [isDemoMode, user?.id, queryClient]);
 
   const archiveMutation = useMutation({
     mutationFn: async (id: string) => {

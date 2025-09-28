@@ -123,7 +123,7 @@ const calculatePolygonAcres = (geometry: any): number | null => {
 
 export default function HomePage() {
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
   const { profile } = useProfile();
   
   // Memoize currentUser to prevent infinite loops
@@ -218,8 +218,19 @@ export default function HomePage() {
   
   // Sync React Query data with local state
   useEffect(() => {
-    setProspects(prospectsData);
-  }, [prospectsData]);
+    if (isDemoMode) {
+      const stored = readJSON<MapData | null>(nsKey(currentUser?.id, 'mapData'), null);
+      const localProspects = stored?.prospects || [];
+      const byId: Record<string, Prospect> = {};
+      for (const p of prospectsData) byId[p.id] = p;
+      for (const lp of localProspects) {
+        if (!byId[lp.id]) byId[lp.id] = lp;
+      }
+      setProspects(Object.values(byId));
+    } else {
+      setProspects(prospectsData);
+    }
+  }, [prospectsData, isDemoMode, currentUser?.id]);
   
   
   // Load touches from localStorage (keeping this for now)
@@ -490,20 +501,42 @@ export default function HomePage() {
             submarketId: drawingForProspect.submarketId
           };
 
-          const response = await apiRequest('POST', '/api/prospects', newProspectData);
-          const savedProspect = await response.json();
-          setProspects(prev => [...prev, savedProspect]);
-          setSelectedProspect(savedProspect);
+          if (isDemoMode) {
+            const localProspect = buildLocalProspect({
+              name: newProspectData.name,
+              status: newProspectData.status,
+              notes: newProspectData.notes,
+              geometry: newProspectData.geometry,
+              acres: newProspectData.acres,
+              submarketId: newProspectData.submarketId,
+            } as any);
+            const next = [...prospects, localProspect];
+            persistProspects(next);
+            setSelectedProspect(localProspect);
+          } else {
+            const response = await apiRequest('POST', '/api/prospects', newProspectData);
+            const savedProspect = await response.json();
+            setProspects(prev => [...prev, savedProspect]);
+            setSelectedProspect(savedProspect);
+          }
         } else {
           // Update existing prospect
-          const response = await apiRequest('PATCH', `/api/prospects/${drawingForProspect.id}`, updateData);
-          const savedProspect = await response.json();
-          setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
-          setSelectedProspect(savedProspect);
+          if (isDemoMode) {
+            const updated = prospects.map(p => p.id === drawingForProspect.id ? { ...p, ...updateData } as Prospect : p);
+            persistProspects(updated);
+            const sel = updated.find(p => p.id === drawingForProspect.id) || null;
+            setSelectedProspect(sel);
+          } else {
+            const response = await apiRequest('PATCH', `/api/prospects/${drawingForProspect.id}`, updateData);
+            const savedProspect = await response.json();
+            setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
+            setSelectedProspect(savedProspect);
+          }
         }
-
-        // Invalidate React Query cache
-        queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
+        // Invalidate React Query cache only if we saved via network
+        if (!isDemoMode) {
+          queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
+        }
         
         toast({
           title: "Polygon Added",
@@ -522,19 +555,33 @@ export default function HomePage() {
           geometry,
           acres: acres ? acres.toString() : undefined
         };
-
-        const response = await apiRequest('POST', '/api/prospects', newProspectData);
-        const savedProspect = await response.json();
-        setProspects(prev => [...prev, savedProspect]);
-        setSelectedProspect(savedProspect);
-        setIsEditPanelOpen(true);
-        
-        queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
-        
-        toast({
-          title: "Prospect Saved",
-          description: `New ${e.type} prospect saved to your profile`,
-        });
+        if (isDemoMode) {
+          const localProspect = buildLocalProspect({
+            name: newProspectData.name,
+            status: newProspectData.status,
+            notes: newProspectData.notes,
+            geometry: newProspectData.geometry,
+            acres: newProspectData.acres,
+          } as any);
+          const next = [...prospects, localProspect];
+          persistProspects(next);
+          setSelectedProspect(localProspect);
+          setIsEditPanelOpen(true);
+          toast({ title: 'Prospect Saved', description: `New ${e.type} added locally (demo).` });
+        } else {
+          const response = await apiRequest('POST', '/api/prospects', newProspectData);
+          const savedProspect = await response.json();
+          setProspects(prev => [...prev, savedProspect]);
+          setSelectedProspect(savedProspect);
+          setIsEditPanelOpen(true);
+          
+          queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
+          
+          toast({
+            title: "Prospect Saved",
+            description: `New ${e.type} prospect saved to your profile`,
+          });
+        }
       }
     } catch (error) {
       console.error('Error saving prospect:', error);
@@ -549,7 +596,7 @@ export default function HomePage() {
     if (drawingManagerRef.current) {
       drawingManagerRef.current.setDrawingMode(null);
     }
-  }, [drawingForProspect, toast]);
+  }, [drawingForProspect, toast, isDemoMode, prospects]);
 
   // CSV import handler - save all imported prospects to database
   const handleProspectsImport = useCallback(async (newProspects: Prospect[]) => {
@@ -671,6 +718,39 @@ export default function HomePage() {
     });
   }, []);
 
+  // Demo helpers: id generation, building & persisting local prospects
+  const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+    ? crypto.randomUUID()
+    : `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const buildLocalProspect = (
+    data: Partial<Prospect> & Pick<Prospect, 'name' | 'status' | 'notes' | 'geometry'>
+  ): Prospect => ({
+    id: genId(),
+    createdDate: new Date().toISOString(),
+    submarketId: data.submarketId,
+    lastContactDate: data.lastContactDate,
+    followUpTimeframe: data.followUpTimeframe,
+    contactName: data.contactName,
+    contactEmail: data.contactEmail,
+    contactPhone: data.contactPhone,
+    contactCompany: data.contactCompany,
+    size: data.size,
+    acres: data.acres,
+    businessName: (data as any).businessName,
+    websiteUrl: (data as any).websiteUrl,
+    name: data.name,
+    status: data.status,
+    notes: data.notes,
+    geometry: data.geometry,
+  });
+
+  const persistProspects = (next: Prospect[]) => {
+    setProspects(next);
+    const dataToSave: MapData = { prospects: next, submarkets: [], touches };
+    writeJSON(nsKey(currentUser?.id, 'mapData'), dataToSave);
+  };
+
   // Submarket inference helper
   const inferSubmarketFromPoint = useCallback((point: { lat: number; lng: number }): string => {
     // For now, return empty string since we don't have submarket polygon logic
@@ -678,7 +758,7 @@ export default function HomePage() {
     return '';
   }, []);
 
-  // Handle "Save as Prospect" from search pin - save immediately to database
+  // Handle "Save as Prospect" from search pin - save immediately (demo local or API)
   const handleSaveSearchPin = useCallback(async () => {
     if (!searchPin) return;
     
@@ -700,30 +780,49 @@ export default function HomePage() {
       };
 
       console.log('Saving search pin as prospect:', newProspectData);
-      
-      // Save directly to database
-      const response = await apiRequest('POST', '/api/prospects', newProspectData);
-      const savedProspect = await response.json();
-      
-      // Add to prospects list
-      setProspects(prev => [...prev, savedProspect]);
-      setSelectedProspect(savedProspect);
-      setIsEditPanelOpen(true);
-      
-      // Invalidate query cache to refresh
-      queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
-      
-      // Clear the search pin
-      setSearchPin(null);
-      
-      // Show success message
-      toast({
-        title: "Prospect saved successfully",
-        description: `"${savedProspect.name}" has been added to your map.`
-      });
-      
-      console.log('Search pin saved as prospect:', savedProspect);
-      
+
+      if (isDemoMode) {
+        const localProspect = buildLocalProspect({
+          name: newProspectData.name,
+          status: newProspectData.status,
+          notes: newProspectData.notes,
+          geometry: newProspectData.geometry,
+          submarketId: newProspectData.submarketId,
+          businessName: newProspectData.businessName,
+          contactCompany: newProspectData.contactCompany,
+          websiteUrl: newProspectData.websiteUrl,
+        } as any);
+        const next = [...prospects, localProspect];
+        persistProspects(next);
+        setSelectedProspect(localProspect);
+        setIsEditPanelOpen(true);
+        setSearchPin(null);
+        toast({ title: 'Prospect saved (demo)', description: `"${localProspect.name}" added locally.` });
+      } else {
+        // Save directly to database
+        const response = await apiRequest('POST', '/api/prospects', newProspectData);
+        const savedProspect = await response.json();
+        
+        // Add to prospects list
+        setProspects(prev => [...prev, savedProspect]);
+        setSelectedProspect(savedProspect);
+        setIsEditPanelOpen(true);
+        
+        // Invalidate query cache to refresh
+        queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
+        
+        // Clear the search pin
+        setSearchPin(null);
+        
+        // Show success message
+        toast({
+          title: "Prospect saved successfully",
+          description: `"${savedProspect.name}" has been added to your map.`
+        });
+        
+        console.log('Search pin saved as prospect:', savedProspect);
+      }
+
     } catch (error) {
       console.error('Error saving search pin as prospect:', error);
       toast({
@@ -732,7 +831,7 @@ export default function HomePage() {
         variant: "destructive"
       });
     }
-  }, [searchPin, inferSubmarketFromPoint, toast, queryClient]);
+  }, [searchPin, inferSubmarketFromPoint, toast, queryClient, isDemoMode, prospects]);
 
   // Handle drawing polygon for point prospects
   const handleDrawPolygon = useCallback(() => {

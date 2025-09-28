@@ -23,6 +23,7 @@ import { ShareWorkspaceDialog } from '@/components/ShareWorkspaceDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { STATUS_META, type ProspectStatusType } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
+import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 
 type Listing = {
   id: string;
@@ -42,7 +43,7 @@ export default function Workspace() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, isDemoMode } = useAuth();
 
   const { data: listing } = useQuery<Listing>({ queryKey: ['/api/listings', listingId], enabled: !!listingId });
   const { data: linkedProspects = [], refetch: refetchLinked } = useQuery<Prospect[]>({ queryKey: ['/api/listings', listingId, 'prospects'], enabled: !!listingId });
@@ -52,8 +53,8 @@ export default function Workspace() {
   const isOwner = !!(listing && user && listing.userId === user.id);
   const myRole = isOwner ? 'owner' : (members.find((m) => m.userId === user?.id)?.role || null);
   const can = {
-    view: isOwner || !!myRole,
-    edit: isOwner || myRole === 'editor',
+    view: (isDemoMode && !!listingId) || isOwner || !!myRole,
+    edit: (isDemoMode && !!listingId) || isOwner || myRole === 'editor',
     share: isOwner,
   };
   const [shareOpen, setShareOpen] = useState(false);
@@ -70,17 +71,43 @@ export default function Workspace() {
     }
   }, [listingId]);
 
+  // Demo: seed listing detail from localStorage if cache empty
+  useEffect(() => {
+    if (!isDemoMode || !listingId) return;
+    try {
+      const cache = queryClient.getQueryData<Listing>(['/api/listings', listingId]);
+      if (!cache) {
+        const all = readJSON<any[]>(nsKey(user?.id, 'listings'), []);
+        const found = all.find((l) => l.id === listingId);
+        if (found) {
+          queryClient.setQueryData(['/api/listings', listingId], found);
+        }
+      }
+    } catch {}
+  }, [isDemoMode, listingId, user?.id, queryClient]);
+
   useEffect(() => {
     // fetch linked prospects (use apiRequest for consistent auth/demo headers)
-    if (listingId) {
-      apiRequest('GET', `/api/listings/${listingId}/prospects`)
-        .then(r => r.json())
-        .then(() => {
-          queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
-        })
-        .catch(() => {});
+    if (!listingId) return;
+    if (isDemoMode) {
+      try {
+        const ids = getWorkspaceProspectIds(listingId);
+        const global = readJSON<any>(nsKey(user?.id, 'mapData'), null);
+        const all: Prospect[] = global?.prospects || [];
+        const linked = ids.map((id) => all.find((p: Prospect) => p.id === id)).filter(Boolean) as Prospect[];
+        if (linked.length > 0) {
+          queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], linked);
+        }
+      } catch {}
+      return;
     }
-  }, [listingId]);
+    apiRequest('GET', `/api/listings/${listingId}/prospects`)
+      .then(r => r.json())
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
+      })
+      .catch(() => {});
+  }, [listingId, isDemoMode, user?.id]);
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
@@ -133,6 +160,56 @@ export default function Workspace() {
   const [editingProspectId, setEditingProspectId] = useState<string | null>(null);
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
   const [originalPolygonCoordinates, setOriginalPolygonCoordinates] = useState<[number, number][] | null>(null);
+
+  // Demo helpers: id generation, building & persisting local prospects (shared conventions with main map)
+  const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+    ? crypto.randomUUID()
+    : `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const buildLocalProspect = (
+    data: Pick<Prospect, 'name' | 'status' | 'notes' | 'geometry'> & Partial<Prospect>
+  ): Prospect => ({
+    id: genId(),
+    createdDate: new Date().toISOString(),
+    // carry-through optional fields when present
+    submarketId: data.submarketId,
+    lastContactDate: data.lastContactDate,
+    followUpTimeframe: data.followUpTimeframe,
+    contactName: data.contactName,
+    contactEmail: data.contactEmail,
+    contactPhone: data.contactPhone,
+    contactCompany: data.contactCompany,
+    size: data.size,
+    acres: data.acres,
+    businessName: (data as any).businessName,
+    websiteUrl: (data as any).websiteUrl,
+    // required
+    name: data.name,
+    status: data.status,
+    notes: data.notes,
+    geometry: data.geometry,
+  });
+
+  const persistProspectsGlobal = (next: Prospect[]) => {
+    try {
+      const saved = readJSON<any>(nsKey(user?.id, 'mapData'), null);
+      const touches = saved?.touches || [];
+      const submarkets = saved?.submarkets || [];
+      writeJSON(nsKey(user?.id, 'mapData'), { prospects: next, submarkets, touches });
+    } catch {}
+  };
+
+  // Demo helpers: persist workspace membership (listing -> prospect ids)
+  const getWorkspaceProspectIds = (wid: string): string[] => {
+    try { return readJSON<string[]>(nsKey(user?.id, `workspace:${wid}:prospectIds`), []); } catch { return []; }
+  };
+  const setWorkspaceProspectIds = (wid: string, ids: string[]) => {
+    try { writeJSON(nsKey(user?.id, `workspace:${wid}:prospectIds`), Array.from(new Set(ids))); } catch {}
+  };
+  const addProspectToWorkspace = (wid: string, pid: string) => {
+    const ids = getWorkspaceProspectIds(wid);
+    if (!ids.includes(pid)) setWorkspaceProspectIds(wid, [...ids, pid]);
+  };
   
   // Pan to search selection and highlight
   useEffect(() => {
@@ -217,6 +294,21 @@ export default function Workspace() {
     pendingPatchRef.current = {};
     if (!patch || Object.keys(patch).length === 0) return;
     try {
+      if (isDemoMode) {
+        // Update caches locally
+        queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) =>
+          Array.isArray(prev) ? prev.map((p) => (p.id === id ? { ...p, ...patch } as Prospect : p)) : prev
+        );
+        queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) =>
+          Array.isArray(prev) ? prev.map((p) => (p.id === id ? { ...p, ...patch } as Prospect : p)) : prev
+        );
+        const nextSel = selectedProspect && selectedProspect.id === id ? ({ ...selectedProspect, ...patch } as Prospect) : selectedProspect;
+        setSelectedProspect(nextSel || null);
+        // Persist globals
+        const all = (queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || []) as Prospect[];
+        persistProspectsGlobal(all);
+        return;
+      }
       const res = await apiRequest('PATCH', `/api/prospects/${id}`, patch);
       const saved = await res.json();
       setSelectedProspect((prev) => (prev && prev.id === saved.id ? saved : prev));
@@ -228,7 +320,7 @@ export default function Workspace() {
         Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev
       );
     } catch {}
-  }, [queryClient, listingId, selectedProspect, can.edit]);
+  }, [queryClient, listingId, selectedProspect, can.edit, isDemoMode]);
 
   const queueUpdate = useCallback((field: keyof Prospect, value: any, opts?: { flush?: boolean }) => {
     if (!can.edit) return;
@@ -271,13 +363,28 @@ export default function Workspace() {
     if (!can.edit) return;
     if (!selectedProspect) return;
     try {
-      await apiRequest('DELETE', `/api/prospects/${selectedProspect.id}`);
-      setSelectedProspect(null); setIsEditPanelOpen(false);
-      queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
-      toast({ title: 'Prospect Deleted' });
+      if (isDemoMode) {
+        // Remove from caches
+        const id = selectedProspect.id;
+        queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? prev.filter(p => p.id !== id) : prev);
+        queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? prev.filter(p => p.id !== id) : prev);
+        // Persist globals
+        const all = (queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || []) as Prospect[];
+        persistProspectsGlobal(all);
+        // Update workspace membership
+        const ids = getWorkspaceProspectIds(listingId || '');
+        setWorkspaceProspectIds(listingId || '', ids.filter(x => x !== id));
+        setSelectedProspect(null); setIsEditPanelOpen(false);
+        toast({ title: 'Prospect Deleted (demo)' });
+      } else {
+        await apiRequest('DELETE', `/api/prospects/${selectedProspect.id}`);
+        setSelectedProspect(null); setIsEditPanelOpen(false);
+        queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
+        queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
+        toast({ title: 'Prospect Deleted' });
+      }
     } catch {}
-  }, [selectedProspect, listingId, can.edit]);
+  }, [selectedProspect, listingId, can.edit, isDemoMode]);
 
   const enablePolygonEditing = useCallback((prospectId: string) => {
     if (!can.edit) return;
@@ -295,7 +402,23 @@ export default function Workspace() {
           if (coords.length > 0) coords.push(coords[0]);
           const newGeom = { type: 'Polygon' as const, coordinates: [coords] };
           const acres = calculatePolygonAcres(newGeom);
-          try { const r = await apiRequest('PATCH', `/api/prospects/${prospectId}`, { geometry: newGeom, acres: acres ? acres.toString() : undefined }); const saved = await r.json(); setSelectedProspect(prev => prev && prev.id === saved.id ? saved : prev); queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev); queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev); } catch {}
+          try {
+            if (isDemoMode) {
+              // Local update in demo mode
+              const patch: Partial<Prospect> = { geometry: newGeom, acres: acres ? acres.toString() : undefined };
+              queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === prospectId ? { ...p, ...patch } as Prospect : p)) : prev);
+              queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === prospectId ? { ...p, ...patch } as Prospect : p)) : prev);
+              const all = (queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || []) as Prospect[];
+              persistProspectsGlobal(all);
+              setSelectedProspect(prev => (prev && prev.id === prospectId) ? ({ ...prev, ...patch } as Prospect) : prev);
+            } else {
+              const r = await apiRequest('PATCH', `/api/prospects/${prospectId}`, { geometry: newGeom, acres: acres ? acres.toString() : undefined });
+              const saved = await r.json();
+              setSelectedProspect(prev => prev && prev.id === saved.id ? saved : prev);
+              queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev);
+              queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev);
+            }
+          } catch {}
         }, 500); };
         path.addListener('set_at', scheduleSave); path.addListener('insert_at', scheduleSave); path.addListener('remove_at', scheduleSave);
       }
@@ -321,30 +444,48 @@ export default function Workspace() {
       const payload = {
         name: searchPin.address,
         geometry: { type: 'Point' as const, coordinates: [searchPin.lng, searchPin.lat] as [number, number] },
-        status: 'prospect',
+        status: 'prospect' as ProspectStatusType,
         notes: '',
-        // Persist business metadata similar to main /app map
         businessName: searchPin.businessName || undefined,
         websiteUrl: searchPin.websiteUrl || undefined,
-        // Map business name to Contact tab's company field
         contactCompany: searchPin.businessName || undefined,
       };
+
+      if (isDemoMode) {
+        // Demo-mode: create locally and return
+        const p = buildLocalProspect(payload as any);
+        return p;
+      }
+
+      // Real API flow
       const res = await apiRequest('POST', '/api/prospects', payload);
       const p = await res.json();
       await apiRequest('POST', `/api/listings/${listingId}/prospects`, { prospectId: p.id });
       return p;
     },
-    onSuccess: (p: any) => {
-      // Optimistically add to cache to show immediately
+    onSuccess: (p: Prospect) => {
+      // Keep caches in sync for both listing and global prospects
       queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) =>
         Array.isArray(prev) ? [...prev, p] : [p]
       );
-      queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
-      refetchLinked();
+      queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) =>
+        Array.isArray(prev) ? [...prev, p] : [p]
+      );
+      if (!isDemoMode) {
+        queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
+      } else {
+        // Persist globally for demo mode so main map sees it too
+        const all = queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || [];
+        persistProspectsGlobal(all);
+        if (listingId) addProspectToWorkspace(listingId, p.id);
+      }
+      if (!isDemoMode) {
+        refetchLinked();
+      }
       setSearchPin(null);
       setSelectedProspect(p);
       setIsEditPanelOpen(true);
-      toast({ title: 'Prospect added', description: `${p.name} linked to workspace` });
+      toast({ title: isDemoMode ? 'Prospect added (demo)' : 'Prospect added', description: `${p.name} linked to workspace` });
     }
   });
 
@@ -463,6 +604,25 @@ export default function Workspace() {
                   try { (e as any).overlay?.setMap(null); } catch {}
 
                   if (!geometry) return;
+                  if (isDemoMode) {
+                    const saved = buildLocalProspect({ name: 'New Prospect', status: 'prospect' as ProspectStatusType, notes: '', geometry });
+                    // Update caches for both listing and global
+                    queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
+                    queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
+                    // Persist globally so the main map sees it in demo mode
+                    const all = queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || [];
+                    persistProspectsGlobal(all);
+                    if (listingId) addProspectToWorkspace(listingId, saved.id);
+                    toast({ title: 'Prospect created (demo)', description: 'Linked to workspace locally' });
+                    // reset to select
+                    drawingManagerRef.current?.setDrawingMode(null);
+                    setDrawMode('select');
+                    map?.setOptions({ draggable: true, disableDoubleClickZoom: false });
+                    // Open the edit panel for the new prospect
+                    setSelectedProspect(saved);
+                    setIsEditPanelOpen(true);
+                    return;
+                  }
                   const res = await apiRequest('POST', '/api/prospects', { name: 'New Prospect', status: 'prospect', notes: '', geometry });
                   const saved = await res.json();
                   await apiRequest('POST', `/api/listings/${listingId}/prospects`, { prospectId: saved.id });
