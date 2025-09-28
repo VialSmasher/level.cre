@@ -9,9 +9,11 @@ interface SearchBarProps {
   onSearch: (location: { lat: number; lng: number; address: string; businessName?: string | null; websiteUrl?: string | null }) => void;
   bounds?: google.maps.LatLngBoundsLiteral | null;
   defaultCenter?: { lat: number; lng: number };
+  // When this value changes, the input clears (used after adding a prospect)
+  clearSignal?: number;
 }
 
-export function SearchBar({ onSearch, bounds, defaultCenter = { lat: 53.5461, lng: -113.4938 } }: SearchBarProps) {
+export function SearchBar({ onSearch, bounds, defaultCenter = { lat: 53.5461, lng: -113.4938 }, clearSignal }: SearchBarProps) {
   const [strictBounds, setStrictBounds] = useState(false);
   const [activeIndex, setActiveIndex] = useState<number>(-1);
 
@@ -56,6 +58,15 @@ export function SearchBar({ onSearch, bounds, defaultCenter = { lat: 53.5461, ln
   useEffect(() => {
     setActiveIndex(-1);
   }, [status, data.length]);
+
+  // Clear input when parent signals (e.g., after saving a prospect)
+  useEffect(() => {
+    if (typeof clearSignal === 'number') {
+      setValue('', false);
+      clearSuggestions();
+      setActiveIndex(-1);
+    }
+  }, [clearSignal, setValue, clearSuggestions]);
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     setValue(e.target.value);

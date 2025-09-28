@@ -6,6 +6,7 @@ interface MapControlsProps {
   onSearch: (location: { lat: number; lng: number; address: string; businessName?: string | null; websiteUrl?: string | null }) => void;
   bounds?: google.maps.LatLngBoundsLiteral | null;
   defaultCenter?: { lat: number; lng: number };
+  clearSearchSignal?: number;
   onPolygon?: () => void;
   onPin?: () => void;
   onPan?: () => void;
@@ -23,6 +24,7 @@ export function MapControls({
   onSearch,
   bounds,
   defaultCenter,
+  clearSearchSignal,
   onPolygon,
   onPin,
   onPan,
@@ -36,7 +38,7 @@ export function MapControls({
 }: MapControlsProps) {
   return (
     <div className={`absolute top-4 left-4 z-50 flex flex-col gap-3 ${className}`}>
-      <SearchBar onSearch={onSearch} bounds={bounds ?? null} defaultCenter={defaultCenter} />
+      <SearchBar onSearch={onSearch} bounds={bounds ?? null} defaultCenter={defaultCenter} clearSignal={clearSearchSignal} />
       <MapTools
         onPolygon={onPolygon}
         onPin={onPin}

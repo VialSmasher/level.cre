@@ -119,6 +119,11 @@ export default function Workspace() {
   const [drawMode, setDrawMode] = useState<DrawMode>('select');
   const drawingManagerRef = useRef<google.maps.drawing.DrawingManager | null>(null);
 
+  // Track when user is drawing a polygon to attach to an existing prospect (like /app)
+  const [drawingForProspect, setDrawingForProspect] = useState<Prospect | null>(null);
+  const drawingForProspectRef = useRef<Prospect | null>(null);
+  useEffect(() => { drawingForProspectRef.current = drawingForProspect; }, [drawingForProspect]);
+
   const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton
   const subjectPosition = useMemo(() => {
     if (!listing) return null;
@@ -152,6 +157,8 @@ export default function Workspace() {
   }, [map, isLoaded, subjectPosition]);
 
   const [searchPin, setSearchPin] = useState<{ lat: number; lng: number; address: string; businessName?: string | null; websiteUrl?: string | null } | null>(null);
+  // Signal to clear the SearchBar input when a prospect is added
+  const [clearSearchSignal, setClearSearchSignal] = useState(0);
   const [mapType, setMapType] = useState<'roadmap' | 'hybrid'>('roadmap');
   const [bounds, setBounds] = useState<google.maps.LatLngBoundsLiteral | null>(null);
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
@@ -491,6 +498,8 @@ export default function Workspace() {
         refetchLinked();
       }
       setSearchPin(null);
+      // Clear the search input text
+      setClearSearchSignal((s) => s + 1);
       setSelectedProspect(p);
       setIsEditPanelOpen(true);
       toast({ title: isDemoMode ? 'Prospect added (demo)' : 'Prospect added', description: `${p.name} linked to workspace` });
@@ -596,8 +605,43 @@ export default function Workspace() {
                   try { (e as any).overlay?.setMap(null); } catch {}
 
                   if (!geometry) return;
+
+                  // Calculate acres for polygon/rectangle cases (to match /app)
+                  const acres = geometry?.type === 'Polygon' ? calculatePolygonAcres(geometry) : null;
+
+                  // If user was drawing an area for an existing prospect, update that one instead of creating new
+                  const target = drawingForProspectRef.current;
+                  if (target && geometry.type === 'Polygon') {
+                    try {
+                      if (isDemoMode) {
+                        const patch: Partial<Prospect> = { geometry, acres: acres ? acres.toString() : undefined };
+                        // Update caches
+                        queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === target.id ? { ...p, ...patch } as Prospect : p)) : prev);
+                        queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === target.id ? { ...p, ...patch } as Prospect : p)) : prev);
+                        const all = (queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || []) as Prospect[];
+                        persistProspectsGlobal(all);
+                        setSelectedProspect((prev) => (prev && prev.id === target.id) ? ({ ...prev, ...patch } as Prospect) : prev);
+                      } else {
+                        const r = await apiRequest('PATCH', `/api/prospects/${target.id}`, { geometry, acres: acres ? acres.toString() : undefined });
+                        const saved = await r.json();
+                        setSelectedProspect((prev) => (prev && prev.id === saved.id ? saved : prev));
+                        queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev);
+                        queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev);
+                      }
+                      toast({ title: 'Area saved', description: acres ? `${acres.toFixed(2)} acres` : 'Polygon saved' });
+                    } finally {
+                      setDrawingForProspect(null);
+                      drawingManagerRef.current?.setDrawingMode(null);
+                      setDrawMode('select');
+                      map?.setOptions({ draggable: true, disableDoubleClickZoom: false });
+                    }
+                    return;
+                  }
+
+                  // Otherwise, create a brand-new prospect and link it
+                  const typeLabel = (type || 'prospect');
                   if (isDemoMode) {
-                    const saved = buildLocalProspect({ name: 'New Prospect', status: 'prospect' as ProspectStatusType, notes: '', geometry });
+                    const saved = buildLocalProspect({ name: `New ${typeLabel}`, status: 'prospect' as ProspectStatusType, notes: '', geometry, acres: acres ? acres.toString() : undefined } as any);
                     // Update caches for both listing and global
                     queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
                     queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
@@ -615,7 +659,7 @@ export default function Workspace() {
                     setIsEditPanelOpen(true);
                     return;
                   }
-                  const res = await apiRequest('POST', '/api/prospects', { name: 'New Prospect', status: 'prospect', notes: '', geometry });
+                  const res = await apiRequest('POST', '/api/prospects', { name: `New ${typeLabel}`, status: 'prospect', notes: '', geometry, acres: acres ? acres.toString() : undefined });
                   const saved = await res.json();
                   await apiRequest('POST', `/api/listings/${listingId}/prospects`, { prospectId: saved.id });
                   queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
@@ -709,6 +753,7 @@ export default function Workspace() {
               onSearch={(loc) => setSearchPin(loc)}
               bounds={bounds}
               defaultCenter={DEFAULT_CENTER}
+              clearSearchSignal={clearSearchSignal}
               onPolygon={() => { try { drawingManagerRef.current?.setDrawingMode(window.google.maps.drawing.OverlayType.POLYGON); setDrawMode('polygon'); map?.setOptions({ draggable: false, disableDoubleClickZoom: true }); } catch {} }}
               onRectangle={() => { try { drawingManagerRef.current?.setDrawingMode(window.google.maps.drawing.OverlayType.RECTANGLE); setDrawMode('rectangle'); map?.setOptions({ draggable: false, disableDoubleClickZoom: true }); } catch {} }}
               onPin={() => { try { drawingManagerRef.current?.setDrawingMode(window.google.maps.drawing.OverlayType.MARKER); setDrawMode('point'); map?.setOptions({ draggable: false, disableDoubleClickZoom: true }); } catch {} }}
@@ -934,20 +979,29 @@ export default function Workspace() {
                   </Tooltip>
                 )
               ) : (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button 
-                      onClick={() => { drawingManagerRef.current?.setDrawingMode(window.google.maps.drawing.OverlayType.POLYGON); }} 
-                      variant="outline" 
-                      className="h-8 w-8 p-0"
-                      disabled={!can.edit}
-                      aria-label="Draw area"
-                    >
-                      <Edit3 className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Draw area</TooltipContent>
-                </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        onClick={() => {
+                          if (!can.edit || !selectedProspect) return;
+                          // Mark this prospect as the target for the next drawn polygon
+                          setDrawingForProspect(selectedProspect);
+                          try {
+                            drawingManagerRef.current?.setDrawingMode(window.google.maps.drawing.OverlayType.POLYGON);
+                            setDrawMode('polygon');
+                            map?.setOptions({ draggable: false, disableDoubleClickZoom: true });
+                          } catch {}
+                        }}
+                        variant="outline"
+                        className="h-8 w-8 p-0"
+                        disabled={!can.edit}
+                        aria-label="Draw area"
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Draw area</TooltipContent>
+                  </Tooltip>
               )}
               <Button onClick={deleteSelectedProspect} variant="destructive" className="h-8 px-3 text-xs" disabled={!can.edit}><Trash2 className="h-3.5 w-3.5" /></Button>
             </div>

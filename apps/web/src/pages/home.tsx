@@ -191,6 +191,8 @@ export default function HomePage() {
   
   // Search pin state
   const [searchPin, setSearchPin] = useState<{ id: 'temp-search', lat: number, lng: number, address: string, businessName?: string | null, websiteUrl?: string | null } | null>(null);
+  // Signal to clear the SearchBar input when a prospect is added
+  const [clearSearchSignal, setClearSearchSignal] = useState(0);
   
   // Drawing state
   const drawingManagerRef = useRef<google.maps.drawing.DrawingManager | null>(null);
@@ -258,12 +260,28 @@ export default function HomePage() {
     writeJSON(nsKey(currentUser?.id, 'mapData'), data);
   }, [prospects, touches, currentUser?.id]);
 
-  // Save data whenever prospects or touches change (but not on initial load)
+  // Debounced persistence to localStorage to avoid blocking on every keystroke
+  const persistTimerRef = useRef<number | null>(null);
   useEffect(() => {
-    if (currentUser && prospects.length > 0) {
-      const data: MapData = { prospects, submarkets: [], touches };
-      writeJSON(nsKey(currentUser.id, 'mapData'), data);
+    if (!currentUser) return;
+    if (persistTimerRef.current) {
+      window.clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
     }
+    persistTimerRef.current = window.setTimeout(() => {
+      // Preserve prior behavior of not persisting an empty set on first load
+      if (prospects.length > 0) {
+        const data: MapData = { prospects, submarkets: [], touches };
+        writeJSON(nsKey(currentUser.id, 'mapData'), data);
+      }
+      persistTimerRef.current = null;
+    }, 700);
+    return () => {
+      if (persistTimerRef.current) {
+        window.clearTimeout(persistTimerRef.current);
+        persistTimerRef.current = null;
+      }
+    };
   }, [prospects, touches, currentUser?.id]);
 
   // Save UI state to user-scoped localStorage
@@ -797,6 +815,8 @@ export default function HomePage() {
         setSelectedProspect(localProspect);
         setIsEditPanelOpen(true);
         setSearchPin(null);
+        // Also clear the search input field
+        setClearSearchSignal((s) => s + 1);
         toast({ title: 'Prospect saved (demo)', description: `"${localProspect.name}" added locally.` });
       } else {
         // Save directly to database
@@ -811,8 +831,9 @@ export default function HomePage() {
         // Invalidate query cache to refresh
         queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
         
-        // Clear the search pin
+        // Clear the search pin and input
         setSearchPin(null);
+        setClearSearchSignal((s) => s + 1);
         
         // Show success message
         toast({
@@ -1064,7 +1085,6 @@ export default function HomePage() {
 
     const updatedProspect = { ...selectedProspect, [field]: value } as Prospect;
     setSelectedProspect(updatedProspect);
-    setProspects(prev => prev.map(p => p.id === id ? { ...p, [field]: value } as Prospect : p));
 
     homePendingPatchRef.current = { ...homePendingPatchRef.current, [field]: value };
     if (homeSaveTimerRef.current) window.clearTimeout(homeSaveTimerRef.current);
@@ -1076,9 +1096,26 @@ export default function HomePage() {
     if (!selectedProspect) return;
     
     try {
+      // Cancel any pending auto-save for this prospect to avoid race conditions
+      if (homeSaveTimerRef.current) {
+        window.clearTimeout(homeSaveTimerRef.current);
+        homeSaveTimerRef.current = null;
+        homePendingPatchRef.current = {};
+      }
+
+      if (isDemoMode) {
+        // Local delete in demo mode (no network)
+        const next = prospects.filter(p => p.id !== selectedProspect.id);
+        persistProspects(next);
+        setSelectedProspect(null);
+        setIsEditPanelOpen(false);
+        toast({ title: 'Prospect Deleted (demo)', description: 'Removed from local data' });
+        return;
+      }
+
       // Delete from database
       await apiRequest('DELETE', `/api/prospects/${selectedProspect.id}`);
-  setProspects(prev => prev.filter(p => p.id !== selectedProspect.id));
+      setProspects(prev => prev.filter(p => p.id !== selectedProspect.id));
       setSelectedProspect(null);
       setIsEditPanelOpen(false);
       
@@ -1097,7 +1134,7 @@ export default function HomePage() {
         variant: "destructive"
       });
     }
-  }, [selectedProspect, toast]);
+  }, [selectedProspect, isDemoMode, prospects, toast]);
 
   // API key change handler (no-op; use .env key)
   const handleApiKeyChange = useCallback((_newApiKey: string) => {
@@ -1358,6 +1395,7 @@ export default function HomePage() {
         }}
         bounds={bounds}
         defaultCenter={DEFAULT_CENTER}
+        clearSearchSignal={clearSearchSignal}
         onPolygon={() => {
           if (selectedProspect) {
             setDrawingForProspect(selectedProspect);
