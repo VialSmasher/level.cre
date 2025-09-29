@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 // Drawer controls not used in workspace; edit panel opens directly
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -23,6 +24,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import { STATUS_META, type ProspectStatusType } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 type Listing = {
   id: string;
@@ -166,6 +177,7 @@ export default function Workspace() {
   const [editingProspectId, setEditingProspectId] = useState<string | null>(null);
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
   const [originalPolygonCoordinates, setOriginalPolygonCoordinates] = useState<[number, number][] | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   // Demo helpers: id generation, building & persisting local prospects (shared conventions with main map)
   const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
@@ -338,6 +350,19 @@ export default function Workspace() {
     } catch {}
   }, [queryClient, listingId, selectedProspect, can.edit, isDemoMode]);
 
+  // Close Edit Panel on Escape key (flush queued edits before closing)
+  useEffect(() => {
+    if (!isEditPanelOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        void flushQueuedSave();
+        setIsEditPanelOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isEditPanelOpen, flushQueuedSave]);
+
   const queueUpdate = useCallback((field: keyof Prospect, value: any, opts?: { flush?: boolean }) => {
     if (!can.edit) return;
     if (!selectedProspect) return;
@@ -400,6 +425,32 @@ export default function Workspace() {
       }
     } catch {}
   }, [selectedProspect, listingId, can.edit, isDemoMode]);
+
+  // Keyboard shortcut: Ctrl+Delete (Windows) or Cmd+Delete (Mac)
+  useEffect(() => {
+    if (!isEditPanelOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      // Avoid triggering while typing in inputs/textareas/contenteditable
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        (target && (target as HTMLElement).isContentEditable) ||
+        target?.closest('input, textarea, [contenteditable="true"]')
+      ) {
+        return;
+      }
+      const isMac = typeof navigator !== 'undefined' && (navigator.platform || '').toUpperCase().includes('MAC');
+      const key = (e.key || '').toLowerCase();
+      if ((key === 'delete') && ((isMac && e.metaKey) || (!isMac && e.ctrlKey))) {
+        e.preventDefault();
+        setDeleteDialogOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isEditPanelOpen]);
 
   const enablePolygonEditing = useCallback((prospectId: string) => {
     if (!can.edit) return;
@@ -937,7 +988,7 @@ export default function Workspace() {
                   </div>
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Phone</Label>
-                    <Input value={selectedProspect.contactPhone || ''} onChange={(e) => updateSelectedProspect('contactPhone', e.target.value || undefined)} placeholder="(000) 000-0000" className="h-8 text-sm" />
+                    <PhoneInput value={selectedProspect.contactPhone || ''} onChange={(e) => updateSelectedProspect('contactPhone', e.target.value || undefined)} placeholder="(000) 000-0000" className="h-8 text-sm" />
                   </div>
                 </div>
               </TabsContent>
@@ -1003,12 +1054,32 @@ export default function Workspace() {
                     <TooltipContent>Draw area</TooltipContent>
                   </Tooltip>
               )}
-              <Button onClick={deleteSelectedProspect} variant="destructive" className="h-8 px-3 text-xs" disabled={!can.edit}><Trash2 className="h-3.5 w-3.5" /></Button>
+              <Button onClick={() => setDeleteDialogOpen(true)} variant="destructive" className="h-8 px-3 text-xs ml-auto" disabled={!can.edit} aria-label="Delete prospect"><Trash2 className="h-3.5 w-3.5" /></Button>
             </div>
           </div>
         </div>
       )}
       <ShareWorkspaceDialog listingId={listingId} open={shareOpen} onOpenChange={setShareOpen} canManage={can.share} />
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Prospect</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this prospect? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteDialogOpen(false)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => { setDeleteDialogOpen(false); void deleteSelectedProspect(); }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

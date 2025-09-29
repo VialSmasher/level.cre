@@ -12,7 +12,7 @@ import {
   type Listing, type InsertListing,
   type InsertListingProspect,
   prospects, requirements, submarkets, touches, users, profiles, contactInteractions, brokerSkills, skillActivities, marketComps,
-  listings, listingProspects
+  listings, listingProspects, listingMembers
 } from "@level-cre/shared/schema";
 import { db } from "./db";
 import { eq, and, desc, gte, ne, sql, between } from "drizzle-orm";
@@ -762,24 +762,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateProspect(id: string, userId: string, updates: Partial<Prospect>): Promise<Prospect | undefined> {
-    const [result] = await db.update(prospects)
-      .set({
-        ...(updates.name && { name: updates.name }),
-        ...(updates.status && { status: updates.status }),
-        ...(updates.notes !== undefined && { notes: updates.notes }),
-        // Convert incoming GeoJSON to PostGIS geometry, cast param to text, and set SRID=4326
-        ...(updates.geometry && { geometry: sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(updates.geometry)}::text), 4326)` as any }),
-        ...(updates.submarketId !== undefined && { submarketId: updates.submarketId }),
-        ...(updates.lastContactDate !== undefined && { lastContactDate: updates.lastContactDate }),
-        ...(updates.followUpTimeframe !== undefined && { followUpTimeframe: updates.followUpTimeframe }),
-        ...(updates.contactName !== undefined && { contactName: updates.contactName }),
-        ...(updates.contactEmail !== undefined && { contactEmail: updates.contactEmail }),
-        ...(updates.contactPhone !== undefined && { contactPhone: updates.contactPhone }),
-        ...(updates.contactCompany !== undefined && { contactCompany: updates.contactCompany }),
-        ...(updates.size !== undefined && { size: updates.size }),
-        ...(updates.acres !== undefined && { acres: updates.acres }),
-        updatedAt: new Date()
-      })
+    // Common SET payload for both owner and shared edits
+    const setPayload: any = {
+      ...(updates.name && { name: updates.name }),
+      ...(updates.status && { status: updates.status }),
+      ...(updates.notes !== undefined && { notes: updates.notes }),
+      ...(updates.geometry && { geometry: sql`ST_SetSRID(ST_GeomFromGeoJSON(${JSON.stringify(updates.geometry)}::text), 4326)` as any }),
+      ...(updates.submarketId !== undefined && { submarketId: updates.submarketId }),
+      ...(updates.lastContactDate !== undefined && { lastContactDate: updates.lastContactDate }),
+      ...(updates.followUpTimeframe !== undefined && { followUpTimeframe: updates.followUpTimeframe }),
+      ...(updates.contactName !== undefined && { contactName: updates.contactName }),
+      ...(updates.contactEmail !== undefined && { contactEmail: updates.contactEmail }),
+      ...(updates.contactPhone !== undefined && { contactPhone: updates.contactPhone }),
+      ...(updates.contactCompany !== undefined && { contactCompany: updates.contactCompany }),
+      ...(updates.size !== undefined && { size: updates.size }),
+      ...(updates.acres !== undefined && { acres: updates.acres }),
+      updatedAt: new Date()
+    };
+
+    // 1) Try as owner
+    let rows = await db.update(prospects)
+      .set(setPayload)
       .where(and(eq(prospects.id, id), eq(prospects.userId, userId)))
       .returning({
         id: prospects.id,
@@ -798,8 +801,57 @@ export class DatabaseStorage implements IStorage {
         acres: prospects.acres,
         createdAt: prospects.createdAt,
       });
-    
-    if (!result) return undefined;
+
+    let result = rows?.[0];
+
+    // 2) If not owner, allow edit if user is owner/editor of any linked workspace
+    if (!result) {
+      // Check membership via listing links
+      const links = await db
+        .select({
+          listingId: listingProspects.listingId,
+          listingOwnerId: listings.userId,
+          memberRole: listingMembers.role,
+        })
+        .from(listingProspects)
+        .innerJoin(listings, eq(listingProspects.listingId, listings.id))
+        .leftJoin(
+          listingMembers,
+          and(eq(listingMembers.listingId, listingProspects.listingId), eq(listingMembers.userId, userId))
+        )
+        .where(eq(listingProspects.prospectId, id));
+
+      const canEdit = (links || []).some(l => l.listingOwnerId === userId || l.memberRole === 'editor');
+
+      if (!canEdit) {
+        return undefined;
+      }
+
+      // Perform unrestricted-by-owner update when user has workspace edit rights
+      rows = await db.update(prospects)
+        .set(setPayload)
+        .where(eq(prospects.id, id))
+        .returning({
+          id: prospects.id,
+          name: prospects.name,
+          status: prospects.status,
+          notes: prospects.notes,
+          geometryJson: sql<string>`ST_AsGeoJSON(${prospects.geometry})`,
+          submarketId: prospects.submarketId,
+          lastContactDate: prospects.lastContactDate,
+          followUpTimeframe: prospects.followUpTimeframe,
+          contactName: prospects.contactName,
+          contactEmail: prospects.contactEmail,
+          contactPhone: prospects.contactPhone,
+          contactCompany: prospects.contactCompany,
+          size: prospects.size,
+          acres: prospects.acres,
+          createdAt: prospects.createdAt,
+        });
+      result = rows?.[0];
+      if (!result) return undefined;
+    }
+
     return {
       id: result.id,
       name: result.name,

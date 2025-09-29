@@ -14,6 +14,7 @@ import {
 import { TerraDrawGoogleMapsAdapter } from 'terra-draw-google-maps-adapter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -188,6 +189,18 @@ export default function HomePage() {
   const [originalPolygonCoordinates, setOriginalPolygonCoordinates] = useState<[number, number][] | null>(null);
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
   const [showImportDialog, setShowImportDialog] = useState(false);
+
+  // Close Edit Panel on Escape key
+  useEffect(() => {
+    if (!isEditPanelOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsEditPanelOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isEditPanelOpen]);
   
   // Search pin state
   const [searchPin, setSearchPin] = useState<{ id: 'temp-search', lat: number, lng: number, address: string, businessName?: string | null, websiteUrl?: string | null } | null>(null);
@@ -1739,11 +1752,10 @@ export default function HomePage() {
                   </div>
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Phone</Label>
-                    <Input
-                      type="tel"
+                    <PhoneInput
                       value={selectedProspect.contactPhone || ''}
                       onChange={(e) => updateSelectedProspect('contactPhone', e.target.value)}
-                      placeholder="Phone"
+                      placeholder="(000) 000-0000"
                       className="h-8 text-sm"
                     />
                   </div>
@@ -1829,7 +1841,7 @@ export default function HomePage() {
               <Button 
                 onClick={deleteSelectedProspect}
                 variant="destructive"
-                className="h-8 px-3 text-xs"
+                className="h-8 px-3 text-xs ml-auto"
                 title="Delete Prospect"
               >
                 <Trash2 className="h-3.5 w-3.5" />

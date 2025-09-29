@@ -59,12 +59,58 @@ export async function addProspect(userId: string, prospect: any): Promise<any> {
 
 export async function updateProspect(userId: string, id: string, updates: any): Promise<any | null> {
   await ensureLoaded();
-  const list = cache!.prospects[userId] || [];
-  const idx = list.findIndex((p) => p.id === id);
-  if (idx === -1) return null;
-  const updated = { ...list[idx], ...updates };
-  list[idx] = updated;
-  cache!.prospects[userId] = list;
+  // 1) Try to update if prospect owned by caller
+  {
+    const list = cache!.prospects[userId] || [];
+    const idx = list.findIndex((p) => p.id === id);
+    if (idx !== -1) {
+      const updated = { ...list[idx], ...updates };
+      list[idx] = updated;
+      cache!.prospects[userId] = list;
+      await save();
+      return updated;
+    }
+  }
+
+  // 2) Find the actual owner of this prospect
+  let ownerId: string | null = null;
+  let ownerIdx = -1;
+  for (const uid of Object.keys(cache!.prospects || {})) {
+    const list = cache!.prospects[uid] || [];
+    const idx = list.findIndex((p) => p.id === id);
+    if (idx !== -1) {
+      ownerId = uid;
+      ownerIdx = idx;
+      break;
+    }
+  }
+  if (!ownerId || ownerIdx === -1) return null;
+
+  // 3) Determine if caller has edit rights via any linked workspace (listing)
+  // Scan all listingLinks (across all users in demo store) for this prospect
+  const byUser = cache!.listingLinks || {};
+  const linkedListingIds = new Set<string>();
+  for (const uid of Object.keys(byUser)) {
+    for (const link of byUser[uid] || []) {
+      if (link.prospectId === id) linkedListingIds.add(link.listingId);
+    }
+  }
+  let canEdit = false;
+  for (const listingId of Array.from(linkedListingIds)) {
+    // Owner of listing can edit
+    const owner = await getListingOwner(listingId);
+    if (owner?.userId === userId) { canEdit = true; break; }
+    // Editors can edit
+    const role = await getListingMemberRole(listingId, userId);
+    if (role === 'editor') { canEdit = true; break; }
+  }
+  if (!canEdit) return null;
+
+  // 4) Apply update to the owner's prospect record
+  const ownerList = cache!.prospects[ownerId] || [];
+  const updated = { ...ownerList[ownerIdx], ...updates };
+  ownerList[ownerIdx] = updated;
+  cache!.prospects[ownerId] = ownerList;
   await save();
   return updated;
 }
