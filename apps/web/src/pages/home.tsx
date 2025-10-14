@@ -190,17 +190,7 @@ export default function HomePage() {
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
   const [showImportDialog, setShowImportDialog] = useState(false);
 
-  // Close Edit Panel on Escape key
-  useEffect(() => {
-    if (!isEditPanelOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        closeEditPanel();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isEditPanelOpen, closeEditPanel]);
+  // Note: Escape key close handler moved below to avoid TDZ on closeEditPanel
   
   // Search pin state
   const [searchPin, setSearchPin] = useState<{ id: 'temp-search', lat: number, lng: number, address: string, businessName?: string | null, websiteUrl?: string | null } | null>(null);
@@ -1171,6 +1161,18 @@ export default function HomePage() {
     try { setTerraModeSafe('select'); } catch {}
     try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false } as google.maps.MapOptions); } catch {}
   }, [flushHomeQueuedSave, setTerraModeSafe, map]);
+
+  // Close Edit Panel on Escape key
+  useEffect(() => {
+    if (!isEditPanelOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closeEditPanel();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isEditPanelOpen, closeEditPanel]);
 
   if (!isLoaded) {
     return (
