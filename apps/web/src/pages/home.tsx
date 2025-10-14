@@ -195,12 +195,12 @@ export default function HomePage() {
     if (!isEditPanelOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setIsEditPanelOpen(false);
+        closeEditPanel();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isEditPanelOpen]);
+  }, [isEditPanelOpen, closeEditPanel]);
   
   // Search pin state
   const [searchPin, setSearchPin] = useState<{ id: 'temp-search', lat: number, lng: number, address: string, businessName?: string | null, websiteUrl?: string | null } | null>(null);
@@ -1154,6 +1154,24 @@ export default function HomePage() {
     // Intentionally no-op: key is sourced from VITE_GOOGLE_MAPS_API_KEY only.
   }, []);
 
+  // Close the edit panel, flush pending changes, and reset drawing state
+  const closeEditPanel = useCallback(() => {
+    // Flush any pending debounced save
+    if (homeSaveTimerRef.current) {
+      window.clearTimeout(homeSaveTimerRef.current);
+      homeSaveTimerRef.current = null;
+      void flushHomeQueuedSave();
+    }
+    // Reset UI + selection
+    setIsEditPanelOpen(false);
+    setSelectedProspect(null);
+    setDrawingForProspect(null);
+    // Reset drawing tools
+    try { drawingManagerRef.current?.setDrawingMode(null); } catch {}
+    try { setTerraModeSafe('select'); } catch {}
+    try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false } as google.maps.MapOptions); } catch {}
+  }, [flushHomeQueuedSave, setTerraModeSafe, map]);
+
   if (!isLoaded) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -1536,7 +1554,7 @@ export default function HomePage() {
                   <Button 
                     variant="ghost" 
                     size="sm"
-                    onClick={() => setIsEditPanelOpen(false)}
+                    onClick={closeEditPanel}
                     className="text-gray-400 hover:text-gray-600 h-6 w-6 p-0"
                     aria-label="Save and close"
                   >
@@ -1770,7 +1788,7 @@ export default function HomePage() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    onClick={() => setIsEditPanelOpen(false)}
+                    onClick={closeEditPanel}
                     variant="outline"
                     className="h-8 w-8 p-0 text-xs"
                     aria-label="Save and close"

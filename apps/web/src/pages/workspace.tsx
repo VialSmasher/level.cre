@@ -350,18 +350,35 @@ export default function Workspace() {
     } catch {}
   }, [queryClient, listingId, selectedProspect, can.edit, isDemoMode]);
 
-  // Close Edit Panel on Escape key (flush queued edits before closing)
+  // Close the edit panel, flush pending changes, and reset selection/draw state
+  const closeEditPanel = useCallback(() => {
+    // Flush any pending debounced save
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      void flushQueuedSave();
+    }
+    // Close panel and clear selection
+    setIsEditPanelOpen(false);
+    setSelectedProspect(null);
+    setDrawingForProspect(null);
+    // Reset drawing mode and map interactions
+    try { drawingManagerRef.current?.setDrawingMode(null); } catch {}
+    try { setDrawMode('select'); } catch {}
+    try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false }); } catch {}
+  }, [flushQueuedSave, map]);
+
+  // Close Edit Panel on Escape key (flush + reset draw state)
   useEffect(() => {
     if (!isEditPanelOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        void flushQueuedSave();
-        setIsEditPanelOpen(false);
+        closeEditPanel();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isEditPanelOpen, flushQueuedSave]);
+  }, [isEditPanelOpen, closeEditPanel]);
 
   const queueUpdate = useCallback((field: keyof Prospect, value: any, opts?: { flush?: boolean }) => {
     if (!can.edit) return;
@@ -860,7 +877,7 @@ export default function Workspace() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => { void flushQueuedSave(); setIsEditPanelOpen(false); }}
+                    onClick={closeEditPanel}
                     className="text-gray-400 hover:text-gray-600 h-6 w-6 p-0"
                     aria-label="Save and close"
                   >
@@ -997,7 +1014,7 @@ export default function Workspace() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    onClick={() => { void flushQueuedSave(); setIsEditPanelOpen(false); }}
+                    onClick={closeEditPanel}
                     variant="outline"
                     className="h-8 w-8 p-0 text-xs"
                     aria-label="Save and close"

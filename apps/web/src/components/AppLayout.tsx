@@ -94,9 +94,8 @@ export function AppLayout({ children }: AppLayoutProps) {
               {isWorkspaceDetail && (
                 <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 truncate">
                   <Link href="/app/workspaces" className="hover:underline text-gray-800 dark:text-gray-100">
-                    WS
+                    WS:
                   </Link>
-                  <span className="text-gray-400">/</span>
                   <span className="font-medium text-gray-900 dark:text-gray-100 truncate max-w-[320px]" title={listing?.title || listing?.address || ''}>
                     {listing?.title || listing?.address || 'Workspace'}
                   </span>
