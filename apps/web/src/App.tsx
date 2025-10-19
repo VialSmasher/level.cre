@@ -21,6 +21,7 @@ const MapToolsTestPage = lazy(() => import("./pages/map-tools-test"));
 const Profile = lazy(() => import("./pages/profile"));
 const NotFound = lazy(() => import("./pages/not-found"));
 const Landing = lazy(() => import("./pages/landing"));
+const Debug = lazy(() => import("./pages/debug"));
 const Onboarding = lazy(() => import("./pages/onboarding"));
 const WorkspacesIndex = lazy(() => import("./pages/workspaces"));
 const Workspace = lazy(() => import("./pages/workspace"));
@@ -74,6 +75,11 @@ function Router() {
     <Suspense fallback={<Spinner />}>
     <Switch>
       {/* Public routes */}
+      <Route path="/debug" component={() => (
+        <Suspense fallback={<Spinner />}> 
+          <Debug />
+        </Suspense>
+      )} />
       <Route path="/" component={() => (
         <Suspense fallback={<Spinner />}> 
           <Landing />

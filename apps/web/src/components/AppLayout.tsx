@@ -499,6 +499,16 @@ export function AppLayout({ children }: AppLayoutProps) {
       <main className="flex-1 min-h-0 flex flex-col">
         {children}
       </main>
+      {/* Build badge (non-invasive) */}
+      {(() => {
+        const sha = (import.meta as any)?.env?.VITE_COMMIT_SHA as string | undefined;
+        if (!sha) return null;
+        return (
+          <div className="fixed bottom-1 right-2 text-[10px] text-gray-500 bg-white/70 dark:bg-gray-800/70 px-2 py-0.5 rounded select-none opacity-80" style={{ pointerEvents: 'none' }}>
+            build: {String(sha).slice(0, 7)}
+          </div>
+        );
+      })()}
     </div>
   )
 }

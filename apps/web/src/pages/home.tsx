@@ -1603,12 +1603,18 @@ export default function HomePage() {
                 {/* Address */}
                 <div>
                   <Label className="text-xs font-medium text-gray-700">Address</Label>
-                  <Input
-                    value={selectedProspect.name}
-                    onChange={(e) => updateSelectedProspect('name', e.target.value)}
-                    placeholder="Property address"
-                    className="h-8 text-sm"
-                  />
+                  {(() => {
+                    const n = selectedProspect?.name || '';
+                    const display = /^New\s+(polygon|rectangle|point|marker)/i.test(n) ? '' : n;
+                    return (
+                      <Input
+                        value={display}
+                        onChange={(e) => updateSelectedProspect('name', e.target.value)}
+                        placeholder="Property address"
+                        className="h-8 text-sm"
+                      />
+                    );
+                  })()}
                 </div>
 
                 {/* Business Information Row */}
