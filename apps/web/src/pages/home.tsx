@@ -591,10 +591,18 @@ export default function HomePage() {
           setIsEditPanelOpen(true);
           toast({ title: 'Prospect Saved', description: `New ${e.type} added locally (demo).` });
         } else {
-          const response = await apiRequest('POST', '/api/prospects', newProspectData);
+          // Server requires non-empty name; send a placeholder then clear locally for smooth editing
+          const payload = {
+            name: `New ${e.type}`,
+            status: 'prospect' as ProspectStatusType,
+            notes: '',
+            geometry,
+            acres: acres ? acres.toString() : undefined
+          };
+          const response = await apiRequest('POST', '/api/prospects', payload);
           const savedProspect = await response.json();
           setProspects(prev => [...prev, savedProspect]);
-          setSelectedProspect(savedProspect);
+          setSelectedProspect({ ...savedProspect, name: '' });
           setIsEditPanelOpen(true);
           
           queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
@@ -1066,6 +1074,16 @@ export default function HomePage() {
     homePendingPatchRef.current = {};
     if (!patch || Object.keys(patch).length === 0) return;
     try {
+      // In demo mode, persist locally without hitting the API
+      if (isDemoMode) {
+        setProspects(prev => {
+          const next = prev.map(p => (p.id === id ? ({ ...p, ...patch } as Prospect) : p));
+          persistProspects(next);
+          return next;
+        });
+        setSelectedProspect(prev => (prev && prev.id === id ? ({ ...prev, ...patch } as Prospect) : prev));
+        return;
+      }
       const response = await apiRequest('PATCH', `/api/prospects/${id}`, patch);
       const savedProspect = await response.json();
       setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
@@ -1075,7 +1093,7 @@ export default function HomePage() {
     } catch (error) {
       console.error('Error updating prospect:', error);
     }
-  }, [selectedProspect, queryClient]);
+  }, [selectedProspect, queryClient, isDemoMode]);
 
   const updateSelectedProspect = useCallback((field: keyof Prospect, value: any) => {
     if (!selectedProspect) return;
@@ -1087,9 +1105,12 @@ export default function HomePage() {
     }
     homeLastEditedIdRef.current = id;
 
+    // Optimistic UI update for selected prospect and list
     const updatedProspect = { ...selectedProspect, [field]: value } as Prospect;
     setSelectedProspect(updatedProspect);
+    setProspects(prev => prev.map(p => (p.id === id ? ({ ...p, [field]: value } as Prospect) : p)));
 
+    // Queue patch with debounce
     homePendingPatchRef.current = { ...homePendingPatchRef.current, [field]: value };
     if (homeSaveTimerRef.current) window.clearTimeout(homeSaveTimerRef.current);
     homeSaveTimerRef.current = window.setTimeout(() => { homeSaveTimerRef.current = null; void flushHomeQueuedSave(); }, 450);

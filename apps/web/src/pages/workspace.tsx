@@ -709,7 +709,8 @@ export default function Workspace() {
                   // Otherwise, create a brand-new prospect and link it
                   const typeLabel = (type || 'prospect');
                   if (isDemoMode) {
-                    const saved = buildLocalProspect({ name: `New ${typeLabel}`, status: 'prospect' as ProspectStatusType, notes: '', geometry, acres: acres ? acres.toString() : undefined } as any);
+                    // Start with empty name so the Address field placeholder shows and editing is smooth
+                    const saved = buildLocalProspect({ name: '', status: 'prospect' as ProspectStatusType, notes: '', geometry, acres: acres ? acres.toString() : undefined } as any);
                     // Update caches for both listing and global
                     queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
                     queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
@@ -727,6 +728,7 @@ export default function Workspace() {
                     setIsEditPanelOpen(true);
                     return;
                   }
+                  // Use a non-empty default for server validation; user can edit in the panel
                   const res = await apiRequest('POST', '/api/prospects', { name: `New ${typeLabel}`, status: 'prospect', notes: '', geometry, acres: acres ? acres.toString() : undefined });
                   const saved = await res.json();
                   await apiRequest('POST', `/api/listings/${listingId}/prospects`, { prospectId: saved.id });
