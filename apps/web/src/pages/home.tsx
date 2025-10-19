@@ -569,14 +569,15 @@ export default function HomePage() {
         setIsEditPanelOpen(true);
       } else {
         // Create new prospect (original behavior)
-        const newProspectData = {
-          name: `New ${e.type}`,
-          status: 'prospect' as ProspectStatusType,
-          notes: '',
-          geometry,
-          acres: acres ? acres.toString() : undefined
-        };
         if (isDemoMode) {
+          const newProspectData = {
+            // Leave name empty in demo so the Address field placeholder shows and editing is smooth
+            name: '',
+            status: 'prospect' as ProspectStatusType,
+            notes: '',
+            geometry,
+            acres: acres ? acres.toString() : undefined
+          };
           const localProspect = buildLocalProspect({
             name: newProspectData.name,
             status: newProspectData.status,
