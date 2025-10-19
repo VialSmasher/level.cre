@@ -178,6 +178,11 @@ export default function Workspace() {
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
   const [originalPolygonCoordinates, setOriginalPolygonCoordinates] = useState<[number, number][] | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  // Local draft state for Notes to keep typing smooth while debounced saves run
+  const [notesDraft, setNotesDraft] = useState<string>("");
+  useEffect(() => {
+    setNotesDraft(selectedProspect?.notes || "");
+  }, [selectedProspect?.id, isEditPanelOpen]);
 
   // Demo helpers: id generation, building & persisting local prospects (shared conventions with main map)
   const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
@@ -997,7 +1002,16 @@ export default function Workspace() {
                 </div>
                 <div>
                   <Label className="text-xs font-medium text-gray-700">Notes</Label>
-                  <Textarea value={selectedProspect.notes} onChange={(e) => updateSelectedProspect('notes', e.target.value)} rows={3} className="resize-none text-sm" />
+                  <Textarea
+                    value={notesDraft}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setNotesDraft(v);
+                      updateSelectedProspect('notes', v);
+                    }}
+                    rows={3}
+                    className="resize-none text-sm"
+                  />
                 </div>
               </TabsContent>
               <TabsContent value="contact" className="space-y-4">

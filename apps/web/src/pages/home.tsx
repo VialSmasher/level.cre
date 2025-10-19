@@ -189,6 +189,11 @@ export default function HomePage() {
   const [originalPolygonCoordinates, setOriginalPolygonCoordinates] = useState<[number, number][] | null>(null);
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
   const [showImportDialog, setShowImportDialog] = useState(false);
+  // Local draft for Notes to keep typing responsive while debounced saves run
+  const [notesDraft, setNotesDraft] = useState<string>("");
+  useEffect(() => {
+    setNotesDraft(selectedProspect?.notes || "");
+  }, [selectedProspect?.id, isEditPanelOpen]);
 
   // Note: Escape key close handler moved below to avoid TDZ on closeEditPanel
   
@@ -1754,8 +1759,12 @@ export default function HomePage() {
                 <div>
                   <Label className="text-xs font-medium text-gray-700">Notes</Label>
                   <Textarea
-                    value={selectedProspect.notes}
-                    onChange={(e) => updateSelectedProspect('notes', e.target.value)}
+                    value={notesDraft}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setNotesDraft(v);
+                      updateSelectedProspect('notes', v);
+                    }}
                     placeholder="Add notes..."
                     rows={3}
                     className="resize-none text-sm"
