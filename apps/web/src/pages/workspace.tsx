@@ -356,7 +356,11 @@ export default function Workspace() {
   }, [queryClient, listingId, selectedProspect, can.edit, isDemoMode]);
 
   // Close the edit panel, flush pending changes, and reset selection/draw state
-  const closeEditPanel = useCallback(() => {
+  const closeEditPanel = useCallback(async () => {
+    // If polygon editing is active, persist geometry before closing
+    if (editingProspectId) {
+      try { await savePolygonChanges(); } catch {}
+    }
     // Flush any pending debounced save
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current);
@@ -371,19 +375,21 @@ export default function Workspace() {
     try { drawingManagerRef.current?.setDrawingMode(null); } catch {}
     try { setDrawMode('select'); } catch {}
     try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false }); } catch {}
-  }, [flushQueuedSave, map]);
+  }, [editingProspectId, savePolygonChanges, flushQueuedSave, map]);
 
-  // Close Edit Panel on Escape key (flush + reset draw state)
+  // Close Edit Panel on Escape key (flush + reset draw state). Works while editing.
   useEffect(() => {
-    if (!isEditPanelOpen) return;
+    if (!isEditPanelOpen && !editingProspectId) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        closeEditPanel();
+        e.preventDefault();
+        e.stopPropagation();
+        void closeEditPanel();
       }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isEditPanelOpen, closeEditPanel]);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [isEditPanelOpen, editingProspectId, closeEditPanel]);
 
   const queueUpdate = useCallback((field: keyof Prospect, value: any, opts?: { flush?: boolean }) => {
     if (!can.edit) return;
@@ -477,7 +483,7 @@ export default function Workspace() {
   const enablePolygonEditing = useCallback((prospectId: string) => {
     if (!can.edit) return;
     const prospect = linkedProspects.find(p => p.id === prospectId);
-    if (!prospect || prospect.geometry.type !== 'Polygon') return;
+    if (!prospect || (prospect.geometry.type !== 'Polygon' && prospect.geometry.type !== 'Rectangle')) return;
     const original = (prospect.geometry.coordinates[0] as [number, number][]);
     setOriginalPolygonCoordinates(original); setEditingProspectId(prospectId);
     setTimeout(() => {
@@ -799,7 +805,7 @@ export default function Workspace() {
                     }}
                   />
                 );
-              } else if (p.geometry.type === 'Polygon') {
+              } else if (p.geometry.type === 'Polygon' || p.geometry.type === 'Rectangle') {
                 const coords = p.geometry.coordinates as [number, number][][] | [number, number][];
                 const ring = Array.isArray(coords[0]) && Array.isArray((coords as any)[0][0])
                   ? (coords as [number, number][][])[0]
@@ -881,10 +887,10 @@ export default function Workspace() {
               <h2 className="text-sm font-semibold text-gray-800">Edit Prospect</h2>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
+                  <Button 
+                    variant="ghost" 
                     size="sm"
-                    onClick={closeEditPanel}
+                    onClick={() => void closeEditPanel()}
                     className="text-gray-400 hover:text-gray-600 h-6 w-6 p-0"
                     aria-label="Save and close"
                   >
@@ -1041,7 +1047,7 @@ export default function Workspace() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    onClick={closeEditPanel}
+                    onClick={() => void closeEditPanel()}
                     variant="outline"
                     className="h-8 w-8 p-0 text-xs"
                     aria-label="Save and close"
@@ -1051,52 +1057,52 @@ export default function Workspace() {
                 </TooltipTrigger>
                 <TooltipContent>Save and close</TooltipContent>
               </Tooltip>
-              {selectedProspect.geometry.type === 'Polygon' ? (
-                editingProspectId === selectedProspect.id ? (
-                  <div className="flex gap-2 flex-1">
-                    <Button onClick={savePolygonChanges} className="bg-green-600 hover:bg-green-700 flex-1 h-8 text-xs" disabled={!can.edit}><Save className="h-3.5 w-3.5 mr-1" />Save Changes</Button>
-                    <Button onClick={discardPolygonChanges} variant="outline" className="flex-1 h-8 text-xs hover:bg-red-50 hover:text-red-600 hover:border-red-200" disabled={!can.edit}><X className="h-3.5 w-3.5 mr-1" />Discard</Button>
-                  </div>
-                ) : (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button 
-                        onClick={() => enablePolygonEditing(selectedProspect.id)} 
-                        variant="outline" 
-                        className="h-8 w-8 p-0"
-                        disabled={!can.edit}
-                        aria-label="Edit shape"
-                      >
-                        <Edit3 className="h-3.5 w-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Edit shape</TooltipContent>
-                  </Tooltip>
-                )
+              {selectedProspect.geometry.type === 'Polygon' || selectedProspect.geometry.type === 'Rectangle' ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      onClick={() => {
+                        if (!can.edit) return;
+                        if (editingProspectId === selectedProspect.id) {
+                          void savePolygonChanges();
+                        } else {
+                          enablePolygonEditing(selectedProspect.id);
+                        }
+                      }} 
+                      variant="outline" 
+                      className="h-8 w-8 p-0"
+                      disabled={!can.edit}
+                      aria-label={editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}
+                    >
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}</TooltipContent>
+                </Tooltip>
               ) : (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        onClick={() => {
-                          if (!can.edit || !selectedProspect) return;
-                          // Mark this prospect as the target for the next drawn polygon
-                          setDrawingForProspect(selectedProspect);
-                          try {
-                            drawingManagerRef.current?.setDrawingMode(window.google.maps.drawing.OverlayType.POLYGON);
-                            setDrawMode('polygon');
-                            map?.setOptions({ draggable: false, disableDoubleClickZoom: true });
-                          } catch {}
-                        }}
-                        variant="outline"
-                        className="h-8 w-8 p-0"
-                        disabled={!can.edit}
-                        aria-label="Draw area"
-                      >
-                        <Edit3 className="h-3.5 w-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Draw area</TooltipContent>
-                  </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={() => {
+                        if (!can.edit || !selectedProspect) return;
+                        // Mark this prospect as the target for the next drawn polygon
+                        setDrawingForProspect(selectedProspect);
+                        try {
+                          drawingManagerRef.current?.setDrawingMode(window.google.maps.drawing.OverlayType.POLYGON);
+                          setDrawMode('polygon');
+                          map?.setOptions({ draggable: false, disableDoubleClickZoom: true });
+                        } catch {}
+                      }}
+                      variant="outline"
+                      className="h-8 w-8 p-0"
+                      disabled={!can.edit}
+                      aria-label="Draw area"
+                    >
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Draw area</TooltipContent>
+                </Tooltip>
               )}
               <Button onClick={() => setDeleteDialogOpen(true)} variant="destructive" className="h-8 px-3 text-xs ml-auto" disabled={!can.edit} aria-label="Delete prospect"><Trash2 className="h-3.5 w-3.5" /></Button>
             </div>

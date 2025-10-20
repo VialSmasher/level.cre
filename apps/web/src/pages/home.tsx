@@ -922,7 +922,7 @@ export default function HomePage() {
   const enablePolygonEditing = useCallback((prospectId: string) => {
     // Find the prospect to get original coordinates
     const prospect = prospects.find(p => p.id === prospectId);
-    if (!prospect || prospect.geometry.type !== 'Polygon') {
+    if (!prospect || (prospect.geometry.type !== 'Polygon' && prospect.geometry.type !== 'Rectangle')) {
       return;
     }
     
@@ -1172,8 +1172,14 @@ export default function HomePage() {
   }, []);
 
   // Close the edit panel, flush pending changes, and reset drawing state
-  const closeEditPanel = useCallback(() => {
-    // Flush any pending debounced save
+  const closeEditPanel = useCallback(async () => {
+    // If polygon editing is active, persist geometry before closing
+    if (editingProspectId) {
+      try {
+        await savePolygonChanges();
+      } catch {}
+    }
+    // Flush any pending debounced metadata save
     if (homeSaveTimerRef.current) {
       window.clearTimeout(homeSaveTimerRef.current);
       homeSaveTimerRef.current = null;
@@ -1187,19 +1193,22 @@ export default function HomePage() {
     try { drawingManagerRef.current?.setDrawingMode(null); } catch {}
     try { setTerraModeSafe('select'); } catch {}
     try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false } as google.maps.MapOptions); } catch {}
-  }, [flushHomeQueuedSave, setTerraModeSafe, map]);
+  }, [editingProspectId, savePolygonChanges, flushHomeQueuedSave, setTerraModeSafe, map]);
 
-  // Close Edit Panel on Escape key
+  // Save + close on Escape, even while editing polygon
   useEffect(() => {
-    if (!isEditPanelOpen) return;
+    if (!isEditPanelOpen && !editingProspectId) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        closeEditPanel();
+        // Act like a save button then close the panel
+        e.preventDefault();
+        e.stopPropagation();
+        void closeEditPanel();
       }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isEditPanelOpen, closeEditPanel]);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [isEditPanelOpen, editingProspectId, closeEditPanel]);
 
   if (!isLoaded) {
     return (
@@ -1362,7 +1371,7 @@ export default function HomePage() {
                   }}
                 />
               );
-            } else if (prospect.geometry.type === 'Polygon') {
+            } else if (prospect.geometry.type === 'Polygon' || prospect.geometry.type === 'Rectangle') {
               // Handle polygon coordinates
               const coords = prospect.geometry.coordinates as [number, number][][] | [number, number][];
               let coordinates: [number, number][];
@@ -1583,7 +1592,7 @@ export default function HomePage() {
                   <Button 
                     variant="ghost" 
                     size="sm"
-                    onClick={closeEditPanel}
+                    onClick={() => void closeEditPanel()}
                     className="text-gray-400 hover:text-gray-600 h-6 w-6 p-0"
                     aria-label="Save and close"
                   >
@@ -1827,7 +1836,7 @@ export default function HomePage() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    onClick={closeEditPanel}
+                    onClick={() => void closeEditPanel()}
                     variant="outline"
                     className="h-8 w-8 p-0 text-xs"
                     aria-label="Save and close"
@@ -1838,46 +1847,28 @@ export default function HomePage() {
                 </TooltipTrigger>
                 <TooltipContent>Save and close</TooltipContent>
               </Tooltip>
-              
-              {selectedProspect.geometry.type === 'Polygon' ? (
-                editingProspectId === selectedProspect.id ? (
-                  // Show Save/Discard buttons when editing
-                  <div className="flex gap-2 flex-1">
-                    <Button 
-                      onClick={savePolygonChanges}
-                      className="bg-green-600 hover:bg-green-700 flex-1 h-8 text-xs"
-                      title="Save Changes"
-                    >
-                      <Save className="h-3.5 w-3.5 mr-1" />
-                      Save Changes
-                    </Button>
-                    <Button 
-                      onClick={discardPolygonChanges}
+
+              {selectedProspect.geometry.type === 'Polygon' || selectedProspect.geometry.type === 'Rectangle' ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={() => {
+                        if (editingProspectId === selectedProspect.id) {
+                          void savePolygonChanges();
+                        } else {
+                          enablePolygonEditing(selectedProspect.id);
+                        }
+                      }}
                       variant="outline"
-                      className="flex-1 h-8 text-xs hover:bg-red-50 hover:text-red-600 hover:border-red-200"
-                      title="Discard Changes"
+                      className="h-8 w-8 p-0"
+                      aria-label={editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}
+                      title={editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}
                     >
-                      <X className="h-3.5 w-3.5 mr-1" />
-                      Discard
+                      <Edit3 className="h-3.5 w-3.5" />
                     </Button>
-                  </div>
-                ) : (
-                  // Show Edit button when not editing (icon-only)
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button 
-                        onClick={() => enablePolygonEditing(selectedProspect.id)}
-                        variant="outline"
-                        className="h-8 w-8 p-0"
-                        aria-label="Edit shape"
-                        title="Edit shape"
-                      >
-                        <Edit3 className="h-3.5 w-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Edit shape</TooltipContent>
-                  </Tooltip>
-                )
+                  </TooltipTrigger>
+                  <TooltipContent>{editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}</TooltipContent>
+                </Tooltip>
               ) : (
                 <Tooltip>
                   <TooltipTrigger asChild>
