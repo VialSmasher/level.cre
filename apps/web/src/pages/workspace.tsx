@@ -346,6 +346,16 @@ export default function Workspace() {
     } catch {}
   }, [queryClient, listingId, selectedProspect, can.edit, isDemoMode]);
 
+  // Ensure this is defined before any hooks or callbacks reference it
+  const savePolygonChanges = useCallback(() => {
+    setEditingProspectId(null);
+    const polygon = selectedProspect ? polygonRefs.current.get(selectedProspect.id) : null;
+    if (polygon) {
+      polygon.setEditable(false);
+      polygon.setDraggable(false);
+    }
+  }, [selectedProspect]);
+
   // Close the edit panel, flush pending changes, and reset selection/draw state
   const closeEditPanel = useCallback(async () => {
     // If polygon editing is active, persist geometry before closing
@@ -510,9 +520,7 @@ export default function Workspace() {
     }, 100);
   }, [linkedProspects, listingId, can.edit]);
 
-  const savePolygonChanges = useCallback(() => {
-    setEditingProspectId(null); const polygon = selectedProspect ? polygonRefs.current.get(selectedProspect.id) : null; if (polygon) { polygon.setEditable(false); polygon.setDraggable(false); }
-  }, [selectedProspect]);
+  
 
   const discardPolygonChanges = useCallback(() => {
     if (!editingProspectId || !originalPolygonCoordinates) return;
