@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Modal, ModalContent, ModalHeader, ModalTitle, ModalTrigger } from '@/components/primitives/Modal';
 import { DeveloperSettings } from '@/components/DeveloperSettings';
 import { CSVUploader } from '@/components/CSVUploaderNew';
 import { SearchComponent } from '@/components/SearchComponent';

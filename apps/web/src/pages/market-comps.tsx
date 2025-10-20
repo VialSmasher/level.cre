@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle, ModalTrigger } from "@/components/primitives/Modal";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Badge } from "@/components/ui/badge";
@@ -254,24 +254,24 @@ export default function MarketCompsPage() {
             <p className="text-gray-600 dark:text-gray-300 mt-2">Track comparable leases and sales to build market knowledge</p>
           </div>
 
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <Modal open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <DialogTrigger asChild>
+                <ModalTrigger asChild>
                   <Button size="icon" aria-label="Create Market Comp" onClick={() => { resetForm(); setIsDialogOpen(true); }}>
                     <Plus className="h-4 w-4" />
                   </Button>
-                </DialogTrigger>
+                </ModalTrigger>
               </TooltipTrigger>
               <TooltipContent>
                 <p>Create Market Comp</p>
               </TooltipContent>
             </Tooltip>
-            <DialogContent className="max-w-[420px]">
-              <DialogHeader>
-                <DialogTitle>{editingComp ? 'Edit Comp' : 'Add Market Comp'}</DialogTitle>
-                <DialogDescription className="text-xs">Quickly log a lease or sale comp</DialogDescription>
-              </DialogHeader>
+            <ModalContent className="max-w-[420px]">
+              <ModalHeader>
+                <ModalTitle>{editingComp ? 'Edit Comp' : 'Add Market Comp'}</ModalTitle>
+                <ModalDescription className="text-xs">Quickly log a lease or sale comp</ModalDescription>
+              </ModalHeader>
 
               <form onSubmit={submit} className="space-y-3">
                 {/* Deal type segmented */}
@@ -422,8 +422,8 @@ export default function MarketCompsPage() {
                   <Button type="button" className="h-9 text-sm" variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
                 </div>
               </form>
-            </DialogContent>
-          </Dialog>
+            </ModalContent>
+          </Modal>
         </div>
 
         {/* Filters */}

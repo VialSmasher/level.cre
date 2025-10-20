@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { Upload, FileText, X, AlertCircle, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Modal, ModalContent, ModalHeader, ModalTitle, ModalTrigger } from '@/components/primitives/Modal';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -280,21 +280,21 @@ export function CSVUploader({ onProspectsImport }: CSVUploaderProps) {
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
+    <Modal open={isOpen} onOpenChange={setIsOpen}>
+      <ModalTrigger asChild>
         <div className="flex items-center w-full p-0 h-auto">
           <Upload className="mr-2 h-4 w-4" />
           Import CSV
         </div>
-      </DialogTrigger>
+      </ModalTrigger>
       
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+      <ModalContent className="sm:max-w-lg">
+        <ModalHeader>
+          <ModalTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
             {showMapping ? 'Map CSV Columns' : 'Import Prospects from CSV'}
-          </DialogTitle>
-        </DialogHeader>
+          </ModalTitle>
+        </ModalHeader>
         
         {!showMapping ? (
           <div className="space-y-4">
@@ -493,7 +493,7 @@ export function CSVUploader({ onProspectsImport }: CSVUploaderProps) {
             </div>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </ModalContent>
+    </Modal>
   );
 }

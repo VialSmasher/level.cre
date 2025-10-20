@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle, ModalTrigger } from "@/components/primitives/Modal";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -293,21 +293,21 @@ export default function RequirementsPage() {
             </p>
           </div>
           
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
+          <Modal open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <ModalTrigger asChild>
               <Button onClick={resetForm} size="icon" aria-label="Add Requirement" title="Add Requirement">
                 <Plus className="h-4 w-4" />
               </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>
+            </ModalTrigger>
+            <ModalContent className="max-w-md">
+              <ModalHeader>
+                <ModalTitle>
                   {editingRequirement ? "Edit Requirement" : "Add New Requirement"}
-                </DialogTitle>
-                <DialogDescription>
+                </ModalTitle>
+                <ModalDescription>
                   Quick entry form for market requirements
-                </DialogDescription>
-              </DialogHeader>
+                </ModalDescription>
+              </ModalHeader>
               
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
@@ -440,8 +440,8 @@ export default function RequirementsPage() {
                   </Button>
                 </div>
               </form>
-            </DialogContent>
-          </Dialog>
+            </ModalContent>
+          </Modal>
         </div>
 
         {/* Filters */}

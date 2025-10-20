@@ -3,7 +3,7 @@ import { useLocation } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/primitives/Modal';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
@@ -118,11 +118,11 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
   const canSubmit = !!title.trim();
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Create Workspace</DialogTitle>
-        </DialogHeader>
+    <Modal open={open} onOpenChange={onOpenChange}>
+      <ModalContent className="max-w-lg">
+        <ModalHeader>
+          <ModalTitle>Create Workspace</ModalTitle>
+        </ModalHeader>
         <div className="space-y-4">
           <div>
             <Label>Workspace Name</Label>
@@ -135,8 +135,8 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
             </Button>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </ModalContent>
+    </Modal>
   );
 }
 

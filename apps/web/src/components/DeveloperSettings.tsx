@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Modal, ModalContent, ModalHeader, ModalTitle, ModalTrigger } from '@/components/primitives/Modal';
 import { apiRequest } from '@/lib/queryClient';
 import { Label } from '@/components/ui/label';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -25,10 +25,10 @@ export function DeveloperSettings({ onApiKeyChange }: DeveloperSettingsProps) {
 
   return (
     <TooltipProvider>
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <Modal open={isOpen} onOpenChange={setIsOpen}>
         <Tooltip>
           <TooltipTrigger asChild>
-            <DialogTrigger asChild>
+            <ModalTrigger asChild>
               <Button
                 variant="outline"
                 size="sm"
@@ -36,20 +36,20 @@ export function DeveloperSettings({ onApiKeyChange }: DeveloperSettingsProps) {
               >
                 <Settings className="h-4 w-4" />
               </Button>
-            </DialogTrigger>
+            </ModalTrigger>
           </TooltipTrigger>
           <TooltipContent>
             <p>Developer Settings</p>
           </TooltipContent>
         </Tooltip>
         
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+        <ModalContent className="sm:max-w-md">
+          <ModalHeader>
+            <ModalTitle className="flex items-center gap-2">
               <Settings className="h-5 w-5" />
               Developer Settings
-            </DialogTitle>
-          </DialogHeader>
+            </ModalTitle>
+          </ModalHeader>
           
           <div className="space-y-4">
             <div className="pt-3">
@@ -64,8 +64,8 @@ export function DeveloperSettings({ onApiKeyChange }: DeveloperSettingsProps) {
               </p>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </ModalContent>
+      </Modal>
     </TooltipProvider>
   );
 }

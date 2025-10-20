@@ -1,7 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-// Replaced Radix Dialog with a lightweight inline modal to avoid
-// circular-import issues in some bundles.
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -10,6 +8,7 @@ import { apiRequest } from '@/lib/queryClient';
 import { Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { Modal, ModalContent, ModalHeader, ModalTitle, ModalFooter, ModalClose } from '@/components/primitives/Modal';
 
 type Member = { userId: string; email?: string | null; role: 'owner'|'editor'|'viewer' };
 
@@ -76,16 +75,13 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
     onSettled: () => { qc.invalidateQueries({ queryKey: ['/api/listings', listingId, 'members'] }); }
   });
 
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/70" onClick={() => onOpenChange(false)} />
-      <div className="relative z-10 w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg">
-        <div className="flex flex-col space-y-1.5 text-center sm:text-left">
-          <h2 className="text-lg font-semibold leading-none tracking-tight">Share Workspace</h2>
-        </div>
-        <div className="space-y-4 mt-4">
+    <Modal open={open} onOpenChange={onOpenChange}>
+      <ModalContent>
+        <ModalHeader>
+          <ModalTitle>Share Workspace</ModalTitle>
+        </ModalHeader>
+        <div className="space-y-4">
           {isDemoMode && (
             <div className="text-sm p-2 rounded border bg-amber-50 text-amber-900 border-amber-200">
               Demo mode: sharing is local-only and does not carry over to Google sign-in. Invites are disabled.
@@ -153,16 +149,17 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
             </div>
           </div>
         </div>
-        <button
-          type="button"
-          className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-          onClick={() => onOpenChange(false)}
-          aria-label="Close"
-        >
-          <span aria-hidden className="inline-block h-4 w-4">✕</span>
-        </button>
-      </div>
-    </div>
+        <ModalClose asChild>
+          <button
+            type="button"
+            className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+            aria-label="Close"
+          >
+            <span aria-hidden className="inline-block h-4 w-4">✕</span>
+          </button>
+        </ModalClose>
+      </ModalContent>
+    </Modal>
   );
 }
 

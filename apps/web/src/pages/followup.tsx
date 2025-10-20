@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/primitives/Modal';
 import { Calendar, MapPin, Phone, Mail, Building2, Clock, Filter, Plus, MessageSquare, X, PhoneCall, Zap, CheckCircle, Undo2 } from 'lucide-react';
 import { Prospect, ProspectStatusType, FollowUpTimeframeType, Submarket, ContactInteractionType, ContactInteractionRow } from '@level-cre/shared/schema';
 import { apiRequest } from '@/lib/queryClient';
@@ -67,15 +67,15 @@ function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; on
   };
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+    <Modal open onOpenChange={onClose}>
+      <ModalContent className="max-w-lg">
+        <ModalHeader>
+          <ModalTitle className="flex items-center gap-2">
             <MessageSquare className="h-5 w-5" />
             Log Contact Interaction
-          </DialogTitle>
+          </ModalTitle>
           <p className="text-sm text-gray-600">{prospect.name}</p>
-        </DialogHeader>
+        </ModalHeader>
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -145,8 +145,8 @@ function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; on
             </Button>
           </div>
         </form>
-      </DialogContent>
-    </Dialog>
+      </ModalContent>
+    </Modal>
   );
 }
 
