@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
+import { prospectLabel } from '@/lib/copy';
 import { useAuth } from '@/contexts/AuthContext';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 import { MoreHorizontal, Trash2, Pencil, Share2, Plus } from 'lucide-react';
@@ -342,7 +343,7 @@ export default function WorkspacesIndex() {
               </CardHeader>
               <CardContent>
                 <div className="text-sm text-muted-foreground">
-                  <span className="font-medium text-foreground">Prospects:</span> {l.prospectCount}
+                  <span className="font-medium text-foreground">{prospectLabel(l.prospectCount)}:</span> {l.prospectCount ?? 0}
                 </div>
               </CardContent>
             </Card>
@@ -427,7 +428,7 @@ export default function WorkspacesIndex() {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-sm text-muted-foreground">Prospects: {l.prospectCount ?? 0}</div>
+                    <div className="text-sm text-muted-foreground">{prospectLabel(l.prospectCount)}: {l.prospectCount ?? 0}</div>
                   </CardContent>
                 </Card>
               ))}

@@ -445,12 +445,23 @@ export default function Workspace() {
         // Update workspace membership
         if (listingId) removeProspectFromWorkspace(listingId, id);
         setSelectedProspect(null); setIsEditPanelOpen(false);
+        // Decrement cached count in listings grid
+        queryClient.setQueryData<any[] | undefined>(['/api/listings'], (prev) => {
+          if (!Array.isArray(prev)) return prev;
+          return prev.map((l: any) => (l?.id === listingId) ? { ...l, prospectCount: Math.max(0, (l?.prospectCount ?? 0) - 1) } : l);
+        });
         toast({ title: 'Prospect Deleted (demo)' });
       } else {
         await apiRequest('DELETE', `/api/prospects/${selectedProspect.id}`);
         setSelectedProspect(null); setIsEditPanelOpen(false);
         queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
         queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
+        // Decrement cached count for listings and mark stale
+        queryClient.setQueryData<any[] | undefined>(['/api/listings'], (prev) => {
+          if (!Array.isArray(prev)) return prev;
+          return prev.map((l: any) => (l?.id === listingId) ? { ...l, prospectCount: Math.max(0, (l?.prospectCount ?? 0) - 1) } : l);
+        });
+        queryClient.invalidateQueries({ queryKey: ['/api/listings'] });
         toast({ title: 'Prospect Deleted' });
       }
     } catch {}
@@ -565,13 +576,25 @@ export default function Workspace() {
       queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) =>
         Array.isArray(prev) ? [...prev, p] : [p]
       );
+      // Bump cached count in the Workspaces list immediately
+      queryClient.setQueryData<any[] | undefined>(['/api/listings'], (prev) => {
+        if (!Array.isArray(prev)) return prev;
+        return prev.map((l: any) => (l?.id === listingId) ? { ...l, prospectCount: Math.max(0, (l?.prospectCount ?? 0) + 1) } : l);
+      });
       if (!isDemoMode) {
         queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
+        // Mark the listings collection stale so it refetches when viewed next
+        queryClient.invalidateQueries({ queryKey: ['/api/listings'] });
       } else {
         // Persist globally for demo mode so main map sees it too
         const all = queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || [];
         persistProspectsGlobal(all);
         if (listingId) addProspectToWorkspace(listingId, p.id);
+        // Keep demo listing counts consistent
+        queryClient.setQueryData<any[] | undefined>(['/api/listings'], (prev) => {
+          if (!Array.isArray(prev)) return prev;
+          return prev.map((l: any) => (l?.id === listingId) ? { ...l, prospectCount: Math.max(0, (l?.prospectCount ?? 0) + 1) } : l);
+        });
       }
       if (!isDemoMode) {
         refetchLinked();
@@ -729,6 +752,11 @@ export default function Workspace() {
                     const all = queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || [];
                     persistProspectsGlobal(all);
                     if (listingId) addProspectToWorkspace(listingId, saved.id);
+                    // Bump cached count for demo listings grid
+                    queryClient.setQueryData<any[] | undefined>(['/api/listings'], (prev) => {
+                      if (!Array.isArray(prev)) return prev;
+                      return prev.map((l: any) => (l?.id === listingId) ? { ...l, prospectCount: Math.max(0, (l?.prospectCount ?? 0) + 1) } : l);
+                    });
                     toast({ title: 'Prospect created (demo)', description: 'Linked to workspace locally' });
                     // reset to select
                     drawingManagerRef.current?.setDrawingMode(null);
@@ -744,6 +772,12 @@ export default function Workspace() {
                   const saved = await res.json();
                   await apiRequest('POST', `/api/listings/${listingId}/prospects`, { prospectId: saved.id });
                   queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
+                  // Bump cached count for the listings grid and mark it stale
+                  queryClient.setQueryData<any[] | undefined>(['/api/listings'], (prev) => {
+                    if (!Array.isArray(prev)) return prev;
+                    return prev.map((l: any) => (l?.id === listingId) ? { ...l, prospectCount: Math.max(0, (l?.prospectCount ?? 0) + 1) } : l);
+                  });
+                  queryClient.invalidateQueries({ queryKey: ['/api/listings'], refetchType: 'inactive' });
                   queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'], refetchType: 'active' });
                   refetchLinked();
                   toast({ title: 'Prospect created', description: 'Linked to workspace' });
