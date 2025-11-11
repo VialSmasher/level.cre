@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { MapControls } from '@/features/map/MapControls';
 import { apiRequest } from '@/lib/queryClient';
-import type { Prospect } from '@level-cre/shared/schema';
+import type { Prospect, FollowUpTimeframeType } from '@level-cre/shared/schema';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { Save, X, Edit3, Trash2, Share2 } from 'lucide-react';
@@ -116,6 +116,27 @@ export default function Workspace() {
     googleMapsApiKey: (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '') as string,
     libraries,
   });
+
+  // Follow-up due date helpers
+  const timeframeToMonths: Record<FollowUpTimeframeType, number> = {
+    '1_month': 1,
+    '3_month': 3,
+    '6_month': 6,
+    '1_year': 12,
+  };
+  const addMonthsSafe = (d: Date, months: number) => {
+    const date = new Date(d);
+    const day = date.getDate();
+    date.setMonth(date.getMonth() + months);
+    if (date.getDate() < day) date.setDate(0);
+    return date;
+  };
+  const computeFollowUpDue = (anchorIso?: string, timeframe?: FollowUpTimeframeType) => {
+    if (!timeframe) return undefined;
+    const months = timeframeToMonths[timeframe] ?? 3;
+    const anchor = anchorIso ? new Date(anchorIso) : new Date();
+    return addMonthsSafe(anchor, months).toISOString();
+  };
 
   // DrawingManager state
   type DrawMode = 'select' | 'point' | 'polygon' | 'rectangle';
@@ -1001,7 +1022,13 @@ export default function Workspace() {
                   </div>
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Follow Up</Label>
-                    <Select value={(selectedProspect as any).followUpTimeframe || 'none'} onValueChange={(v) => updateSelectedProspect('followUpTimeframe' as any, v === 'none' ? undefined : v)}>
+                    <Select value={(selectedProspect as any).followUpTimeframe || 'none'} onValueChange={(v) => {
+                      const tf = (v === 'none' ? undefined : (v as FollowUpTimeframeType));
+                      updateSelectedProspect('followUpTimeframe' as any, tf);
+                      const anchor = selectedProspect.lastContactDate || (selectedProspect as any).createdDate;
+                      const due = tf ? computeFollowUpDue(anchor, tf) : undefined;
+                      updateSelectedProspect('followUpDueDate', due);
+                    }}>
                       <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="None" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">None</SelectItem>

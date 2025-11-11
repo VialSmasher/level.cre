@@ -27,6 +27,36 @@ const STATUS_COLORS: Record<ProspectStatusType, string> = {
   no_go: '#EF4444'
 };
 
+// Helpers to compute due dates when missing or for client-side fallback
+const timeframeToMonths: Record<FollowUpTimeframeType, number> = {
+  '1_month': 1,
+  '3_month': 3,
+  '6_month': 6,
+  '1_year': 12,
+};
+
+function addMonthsSafe(d: Date, months: number) {
+  const date = new Date(d);
+  const day = date.getDate();
+  date.setMonth(date.getMonth() + months);
+  if (date.getDate() < day) date.setDate(0);
+  return date;
+}
+
+function computeFollowUpDue(anchorIso?: string, timeframe?: FollowUpTimeframeType) {
+  if (!timeframe) return undefined;
+  const months = timeframeToMonths[timeframe] ?? 3;
+  const anchor = anchorIso ? new Date(anchorIso) : new Date();
+  return addMonthsSafe(anchor, months).toISOString();
+}
+
+// Simple date helper used for due-soon windows and snoozing
+function addDays(d: Date, days: number) {
+  const nd = new Date(d);
+  nd.setDate(nd.getDate() + days);
+  return nd;
+}
+
 // Contact Interaction Modal Component
 function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
   const [interactionType, setInteractionType] = useState<string>('call');
@@ -34,6 +64,13 @@ function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; on
   const [notes, setNotes] = useState<string>('');
   const [nextFollowUp, setNextFollowUp] = useState<string>('');
   const queryClient = useQueryClient();
+
+  const toIsoAtNoonUtc = (dateStr: string) => {
+    // dateStr is expected as 'YYYY-MM-DD' from <input type="date" />
+    if (!dateStr) return undefined;
+    const iso = new Date(`${dateStr}T12:00:00Z`).toISOString();
+    return iso;
+  };
 
   const addInteractionMutation = useMutation({
     mutationFn: async (interaction: any) => {
@@ -47,7 +84,17 @@ function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; on
       });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      try {
+        if (nextFollowUp) {
+          const iso = toIsoAtNoonUtc(nextFollowUp);
+          if (iso) {
+            await apiRequest('PATCH', `/api/prospects/${prospect.id}`, {
+              followUpDueDate: iso,
+            });
+          }
+        }
+      } catch {}
       queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
       queryClient.invalidateQueries({ queryKey: ['/api/interactions'] });
       queryClient.invalidateQueries({ queryKey: ['/api/skills'] });
@@ -153,6 +200,8 @@ function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; on
 // Quick Engagement Component
 function QuickEngagement({ prospect, allInteractions }: { prospect: Prospect; allInteractions: ContactInteractionRow[] }) {
   const [engagingType, setEngagingType] = useState<string | null>(null);
+  const [showNextFollow, setShowNextFollow] = useState<boolean>(false);
+  const [nextFollowUpDate, setNextFollowUpDate] = useState<string>(''); // YYYY-MM-DD
   const queryClient = useQueryClient();
 
   // Calculate interaction counts by type
@@ -168,16 +217,26 @@ function QuickEngagement({ prospect, allInteractions }: { prospect: Prospect; al
         date: new Date().toISOString(),
         type,
         outcome: 'contacted',
-        notes: `Quick ${type} engagement`
+        notes: `Quick ${type} engagement`,
+        nextFollowUp: nextFollowUpDate || undefined,
       });
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      try {
+        if (nextFollowUpDate) {
+          // Normalize to noon UTC to avoid TZ off-by-one
+          const iso = new Date(`${nextFollowUpDate}T12:00:00Z`).toISOString();
+          await apiRequest('PATCH', `/api/prospects/${prospect.id}`, { followUpDueDate: iso });
+        }
+      } catch {}
       queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
       queryClient.invalidateQueries({ queryKey: ['/api/interactions'] });
       queryClient.invalidateQueries({ queryKey: ['/api/skills'] });
       queryClient.invalidateQueries({ queryKey: ['/api/skill-activities'] });
       setEngagingType(null);
+      setShowNextFollow(false);
+      setNextFollowUpDate('');
     }
   });
 
@@ -213,6 +272,39 @@ function QuickEngagement({ prospect, allInteractions }: { prospect: Prospect; al
 
   return (
     <div className="flex items-center gap-1">
+      {/* Toggle next follow-up date input */}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={(e) => { e.stopPropagation(); setShowNextFollow((s) => !s); }}
+        className="flex items-center gap-1 transition-all px-2 hover:bg-amber-50 hover:border-amber-300"
+        title="Set next follow-up date"
+      >
+        <Clock className="h-3 w-3" />
+      </Button>
+
+      {showNextFollow && (
+        <div className="flex items-center gap-1">
+          <Input
+            type="date"
+            value={nextFollowUpDate}
+            onChange={(e) => { e.stopPropagation(); setNextFollowUpDate(e.target.value); }}
+            className="h-7 text-xs"
+          />
+          {nextFollowUpDate && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={(e) => { e.stopPropagation(); setNextFollowUpDate(''); }}
+              className="px-2"
+              title="Clear date"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Phone Button with Call Count */}
       <Button
         size="sm"
@@ -278,13 +370,57 @@ function QuickEngagement({ prospect, allInteractions }: { prospect: Prospect; al
   );
 }
 
+function SnoozeButtons({ prospect }: { prospect: Prospect }) {
+  const queryClient = useQueryClient();
+  const snoozeMutation = useMutation({
+    mutationFn: async (days: number) => {
+      const d = addDays(new Date(), days);
+      // Normalize to noon UTC
+      const iso = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 12, 0, 0)).toISOString();
+      const res = await apiRequest('PATCH', `/api/prospects/${prospect.id}`, { followUpDueDate: iso });
+      return res.json?.() ?? null;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
+    }
+  });
+
+  const btn = (label: string, days: number) => (
+    <Button
+      key={label}
+      size="sm"
+      variant="outline"
+      className="px-2 text-[11px]"
+      disabled={snoozeMutation.isPending}
+      onClick={(e) => { e.stopPropagation(); snoozeMutation.mutate(days); }}
+      title={`Snooze ${label}`}
+    >
+      {label}
+    </Button>
+  );
+
+  return (
+    <div className="flex items-center gap-1">
+      <span className="text-[10px] text-gray-500">Snooze:</span>
+      {btn('1d', 1)}
+      {btn('3d', 3)}
+      {btn('1w', 7)}
+    </div>
+  );
+}
+
 export default function FollowUpPage() {
   const [selectedSubmarket, setSelectedSubmarket] = useState<string>('all');
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [showEngagementFilter, setShowEngagementFilter] = useState<string>('all'); // 'all', 'no_engagement', 'has_engagement'
+  const [filterMode, setFilterMode] = useState<'client' | 'server'>('client'); // toggle between client vs server due filtering
+  const [includeDueSoon, setIncludeDueSoon] = useState<boolean>(true);
+  const [dueSoonDays, setDueSoonDays] = useState<number>(7);
   
+  const effectiveMode = includeDueSoon ? 'client' : filterMode;
+  const apiKey = effectiveMode === 'server' ? '/api/prospects?dueOnly=1' : '/api/prospects';
   const { data: prospects = [], isLoading } = useQuery<Prospect[]>({
-    queryKey: ['/api/prospects'],
+    queryKey: [apiKey],
   });
 
   const { data: submarkets = [] } = useQuery<Submarket[]>({
@@ -296,10 +432,42 @@ export default function FollowUpPage() {
     queryKey: ['/api/interactions'],
   });
 
-  // Filter prospects that have follow-up timeframes OR show those with no engagement
-  const baseProspects = showEngagementFilter === 'no_engagement' 
-    ? prospects // Show all prospects when filtering by engagement
-    : prospects.filter((prospect: Prospect) => prospect.followUpTimeframe);
+  // Compute due date (prefer stored followUpDueDate; fall back to timeframe-based)
+  const now = new Date();
+  const getDueDate = (p: Prospect) => {
+    const stored = p.followUpDueDate as string | undefined;
+    if (stored) {
+      const d = new Date(stored);
+      if (!isNaN(d.getTime())) return d;
+    }
+    if (p.followUpTimeframe) {
+      const anchor = p.lastContactDate || p.createdDate;
+      const iso = computeFollowUpDue(anchor, p.followUpTimeframe);
+      if (iso) {
+        const d = new Date(iso);
+        if (!isNaN(d.getTime())) return d;
+      }
+    }
+    return null;
+  };
+
+  const getDueStatus = (p: Prospect): 'overdue' | 'today' | 'soon' | 'future' | null => {
+    const due = getDueDate(p);
+    if (!due) return null;
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const end = new Date(); end.setHours(23, 59, 59, 999);
+    if (due.getTime() < start.getTime()) return 'overdue';
+    if (due.getTime() <= end.getTime()) return 'today';
+    const soonCutoff = addDays(end, dueSoonDays).getTime();
+    if (due.getTime() <= soonCutoff) return 'soon';
+    return 'future';
+  };
+
+  // Base list: due today/overdue, plus optional due-soon
+  const baseProspects = prospects.filter((p) => {
+    const status = getDueStatus(p);
+    return status === 'overdue' || status === 'today' || (includeDueSoon && status === 'soon');
+  });
 
   // Apply engagement filter
   const engagementFilteredProspects = baseProspects.filter((prospect: Prospect) => {
@@ -321,10 +489,12 @@ export default function FollowUpPage() {
     return prospect.submarketId === selectedSubmarket;
   });
 
-  // Sort by follow-up timeframe (shortest first)
+  // Sort by due date (soonest first)
   const sortedProspects = [...filteredProspects].sort((a, b) => {
-    const timeframeOrder: Record<FollowUpTimeframeType, number> = { '1_month': 1, '3_month': 2, '6_month': 3, '1_year': 4 };
-    return timeframeOrder[a.followUpTimeframe!] - timeframeOrder[b.followUpTimeframe!];
+    const ad = getDueDate(a)?.getTime() ?? Number.POSITIVE_INFINITY;
+    const bd = getDueDate(b)?.getTime() ?? Number.POSITIVE_INFINITY;
+    if (ad !== bd) return ad - bd;
+    return a.name.localeCompare(b.name);
   });
 
   if (isLoading) {
@@ -355,6 +525,19 @@ export default function FollowUpPage() {
             </p>
           </div>
           <div className="flex items-center gap-4">
+            {/* Filter Mode (Client vs Server) */}
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-gray-500" />
+              <Select value={filterMode} onValueChange={(v) => setFilterMode(v as 'client' | 'server')}>
+                <SelectTrigger className="h-8 w-[170px]">
+                  <SelectValue placeholder="Filter mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="client">Client filter</SelectItem>
+                  <SelectItem value="server">Server filter</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             {/* Engagement Filter */}
             <div className="flex items-center gap-2">
               <MessageSquare className="h-4 w-4 text-gray-500" />
@@ -368,6 +551,31 @@ export default function FollowUpPage() {
                   <SelectItem value="has_engagement">Has Engagement</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            {/* Due Soon Controls */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">Due soon</span>
+              <Select value={includeDueSoon ? 'on' : 'off'} onValueChange={(v) => setIncludeDueSoon(v === 'on')}>
+                <SelectTrigger className="h-8 w-[100px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="on">On</SelectItem>
+                  <SelectItem value="off">Off</SelectItem>
+                </SelectContent>
+              </Select>
+              {includeDueSoon && (
+                <Select value={String(dueSoonDays)} onValueChange={(v) => setDueSoonDays(Number(v))}>
+                  <SelectTrigger className="h-8 w-[110px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="3">3 days</SelectItem>
+                    <SelectItem value="7">7 days</SelectItem>
+                    <SelectItem value="14">14 days</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             
             {/* Submarket Filter */}
@@ -452,18 +660,35 @@ export default function FollowUpPage() {
                             {prospect.status.replace('_', ' ')}
                           </span>
                         </div>
-                        <Badge 
-                          variant="outline" 
-                          className="bg-blue-50 text-blue-700 border-blue-200"
-                        >
-                          <Clock className="h-3 w-3 mr-1" />
-                          {FOLLOW_UP_LABELS[prospect.followUpTimeframe!]}
-                        </Badge>
+                        {(() => {
+                          const status = getDueStatus(prospect);
+                          const classes = status === 'overdue'
+                            ? 'bg-red-50 text-red-700 border-red-200'
+                            : (status === 'today' || status === 'soon')
+                              ? 'bg-amber-50 text-amber-700 border-amber-200'
+                              : 'bg-green-50 text-green-700 border-green-200';
+                          const label = prospect.followUpTimeframe
+                            ? FOLLOW_UP_LABELS[prospect.followUpTimeframe]
+                            : status === 'overdue'
+                              ? 'Overdue'
+                              : status === 'today'
+                                ? 'Due Today'
+                                : status === 'soon'
+                                  ? 'Due Soon'
+                                  : 'Upcoming';
+                          return (
+                            <Badge variant="outline" className={classes}>
+                              <Clock className="h-3 w-3 mr-1" />
+                              {label}
+                            </Badge>
+                          );
+                        })()}
                       </div>
                       
-                      {/* Quick Engagement Actions */}
-                      <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                      {/* Quick Engagement & Snooze */}
+                      <div className="flex flex-col items-end gap-1" onClick={(e) => e.stopPropagation()}>
                         <QuickEngagement prospect={prospect} allInteractions={allInteractions} />
+                        <SnoozeButtons prospect={prospect} />
                       </div>
                     </div>
                 </CardHeader>
@@ -531,6 +756,10 @@ export default function FollowUpPage() {
                     {/* Created Date */}
                     <div className="text-xs text-gray-500 border-t pt-2">
                       Added: {new Date(prospect.createdDate).toLocaleDateString()}
+                      {(() => {
+                        const d = getDueDate(prospect);
+                        return d ? ` · Due: ${d.toLocaleDateString()}` : '';
+                      })()}
                     </div>
                   </div>
                 </CardContent>

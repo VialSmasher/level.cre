@@ -328,7 +328,8 @@
         "businessName": "Tim Hortons",
         "websiteUrl": "http://locations.timhortons.ca/en/ab/edmonton/10365-111-st",
         "createdDate": "2025-09-21T20:03:49.041Z",
-        "followUpTimeframe": "1_month"
+        "followUpTimeframe": "1_month",
+        "followUpDueDate": "2025-11-14T12:00:00.000Z"
       },
       {
         "id": "2553e7bb-769e-497b-b1e3-b181a2272830",
@@ -3959,6 +3960,30 @@
         "nextFollowUp": null,
         "listingId": null,
         "createdAt": "2025-09-30T19:05:40.063Z"
+      },
+      {
+        "id": "0bda81dc-9729-4ab6-9c04-44f1a3a20a96",
+        "userId": "demo-user",
+        "prospectId": "c22d9e8d-3ee9-4d60-b3b2-7df2c6963bc6",
+        "date": "2025-11-11T18:12:59.826Z",
+        "type": "call",
+        "outcome": "contacted",
+        "notes": "",
+        "nextFollowUp": "2025-11-11",
+        "listingId": null,
+        "createdAt": "2025-11-11T18:12:59.937Z"
+      },
+      {
+        "id": "9d96b6b5-74bd-42bf-9943-8126fdc601c3",
+        "userId": "demo-user",
+        "prospectId": "3f87e6e3-24cb-40c2-9bbe-616dbf062be4",
+        "date": "2025-11-11T20:12:07.502Z",
+        "type": "email",
+        "outcome": "contacted",
+        "notes": "Quick email engagement",
+        "nextFollowUp": null,
+        "listingId": null,
+        "createdAt": "2025-11-11T20:12:07.731Z"
       }
     ],
     "3e1df863-0f8d-483d-86d4-15de9fc137fc": [

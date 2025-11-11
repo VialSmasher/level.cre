@@ -67,6 +67,27 @@ const FOLLOW_UP_LABELS: Record<FollowUpTimeframeType, string> = {
   '1_year': '1 Year'
 };
 
+// Follow-up due date helpers
+const timeframeToMonths: Record<FollowUpTimeframeType, number> = {
+  '1_month': 1,
+  '3_month': 3,
+  '6_month': 6,
+  '1_year': 12,
+};
+const addMonthsSafe = (d: Date, months: number) => {
+  const date = new Date(d);
+  const day = date.getDate();
+  date.setMonth(date.getMonth() + months);
+  if (date.getDate() < day) date.setDate(0);
+  return date;
+};
+const computeFollowUpDue = (anchorIso?: string, timeframe?: FollowUpTimeframeType) => {
+  if (!timeframe) return undefined;
+  const months = timeframeToMonths[timeframe] ?? 3;
+  const anchor = anchorIso ? new Date(anchorIso) : new Date();
+  return addMonthsSafe(anchor, months).toISOString();
+};
+
 interface MapData {
   prospects: Prospect[];
   submarkets: Submarket[];
@@ -766,6 +787,7 @@ export default function HomePage() {
     submarketId: data.submarketId,
     lastContactDate: data.lastContactDate,
     followUpTimeframe: data.followUpTimeframe,
+    followUpDueDate: data.followUpDueDate || (data.followUpTimeframe ? computeFollowUpDue(new Date().toISOString(), data.followUpTimeframe) : undefined),
     contactName: data.contactName,
     contactEmail: data.contactEmail,
     contactPhone: data.contactPhone,
@@ -1684,9 +1706,13 @@ export default function HomePage() {
                     <Label className="text-xs font-medium text-gray-700">Follow Up</Label>
                     <Select
                       value={selectedProspect.followUpTimeframe || "none"}
-                      onValueChange={(value: FollowUpTimeframeType | "none") => 
-                        updateSelectedProspect('followUpTimeframe', value === "none" ? undefined : value)
-                      }
+                      onValueChange={(value: FollowUpTimeframeType | "none") => {
+                        const tf = value === 'none' ? undefined : value;
+                        updateSelectedProspect('followUpTimeframe', tf);
+                        const anchor = selectedProspect.lastContactDate || selectedProspect.createdDate;
+                        const due = tf ? computeFollowUpDue(anchor, tf as FollowUpTimeframeType) : undefined;
+                        updateSelectedProspect('followUpDueDate', due);
+                      }}
                     >
                       <SelectTrigger className="h-8 text-sm">
                         <SelectValue placeholder="None" />

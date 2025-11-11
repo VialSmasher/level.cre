@@ -69,6 +69,9 @@ export const ProspectSchema = z.object({
   submarketId: z.string().optional(),
   lastContactDate: z.string().optional(),
   followUpTimeframe: FollowUpTimeframe.optional(),
+  // Calculated follow-up due date (ISO string). May be derived server-side
+  // from created/last contact + followUpTimeframe, or explicitly set.
+  followUpDueDate: z.string().optional(),
   // Contact information
   contactName: z.string().optional(),
   contactEmail: z.string().optional(),
@@ -292,6 +295,8 @@ export const prospects = pgTable("prospects", {
   submarketId: varchar("submarket_id"),
   lastContactDate: varchar("last_contact_date"),
   followUpTimeframe: varchar("follow_up_timeframe"), // 1_month, 3_month, 6_month, 1_year
+  // Calculated due date for next follow-up
+  followUpDueDate: timestamp("follow_up_due_date"),
   contactName: varchar("contact_name"),
   contactEmail: varchar("contact_email"),
   contactPhone: varchar("contact_phone"),
