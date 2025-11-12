@@ -1,0 +1,12 @@
+{
+  "createdAt": "2025-11-11T00:00:00Z",
+  "routes": { "brokerStats": null, "leaderboard": null },
+  "apis": { "statsHeader": null },
+  "db": { "events": null, "assets": null },
+  "eventTypes90d": [],
+  "indexes": { "events_user_type_created_at": null, "events_user_asset": null },
+  "samples": { "assetsTracked": 0, "followupsLogged": 0, "lastActivityISO": null },
+  "tz": null,
+  "weekStartISO": null,
+  "note": "Baseline from Phase 0 diagnostic. Values set to null/0 where environment-dependent."
+}

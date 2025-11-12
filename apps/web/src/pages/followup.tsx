@@ -414,11 +414,11 @@ export default function FollowUpPage() {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [showEngagementFilter, setShowEngagementFilter] = useState<string>('all'); // 'all', 'no_engagement', 'has_engagement'
   const [filterMode, setFilterMode] = useState<'client' | 'server'>('client'); // toggle between client vs server due filtering
-  const [includeDueSoon, setIncludeDueSoon] = useState<boolean>(true);
+  const [dueFilter, setDueFilter] = useState<'due_soon' | 'due_only' | 'all'>('due_soon');
   const [dueSoonDays, setDueSoonDays] = useState<number>(7);
   
-  const effectiveMode = includeDueSoon ? 'client' : filterMode;
-  const apiKey = effectiveMode === 'server' ? '/api/prospects?dueOnly=1' : '/api/prospects';
+  const useServerDueOnly = dueFilter === 'due_only' && filterMode === 'server';
+  const apiKey = useServerDueOnly ? '/api/prospects?dueOnly=1' : '/api/prospects';
   const { data: prospects = [], isLoading } = useQuery<Prospect[]>({
     queryKey: [apiKey],
   });
@@ -426,6 +426,19 @@ export default function FollowUpPage() {
   const { data: submarkets = [] } = useQuery<Submarket[]>({
     queryKey: ['/api/submarkets'],
   });
+
+  const normalizeSubmarketValue = (value: string | null | undefined) =>
+    (value ?? '').toString().trim().toLowerCase();
+
+  const resolveSubmarketName = (value: string | null | undefined) => {
+    if (!value) return null;
+    const normalizedValue = normalizeSubmarketValue(value);
+    if (!normalizedValue || normalizedValue === 'none') return null;
+    const byId = submarkets.find((s) => String(s.id) === String(value));
+    if (byId) return byId.name;
+    const byName = submarkets.find((s) => normalizeSubmarketValue(s.name) === normalizedValue);
+    return byName?.name ?? value;
+  };
 
   // Get interaction counts for all prospects
   const { data: allInteractions = [] } = useQuery<ContactInteractionRow[]>({
@@ -463,10 +476,14 @@ export default function FollowUpPage() {
     return 'future';
   };
 
-  // Base list: due today/overdue, plus optional due-soon
+  // Base list respecting selected due filter
   const baseProspects = prospects.filter((p) => {
+    if (dueFilter === 'all') return true;
     const status = getDueStatus(p);
-    return status === 'overdue' || status === 'today' || (includeDueSoon && status === 'soon');
+    if (!status) return false;
+    if (dueFilter === 'due_only') return status === 'overdue' || status === 'today';
+    // dueFilter === 'due_soon'
+    return status === 'overdue' || status === 'today' || status === 'soon';
   });
 
   // Apply engagement filter
@@ -485,9 +502,25 @@ export default function FollowUpPage() {
   // Apply submarket filter
   const filteredProspects = engagementFilteredProspects.filter((prospect: Prospect) => {
     if (selectedSubmarket === 'all') return true;
-    if (selectedSubmarket === 'none') return !prospect.submarketId;
-    return prospect.submarketId === selectedSubmarket;
+    const prospectSubmarketId = prospect.submarketId ? String(prospect.submarketId) : null;
+    if (selectedSubmarket === 'none') return prospectSubmarketId === null;
+    if (!prospectSubmarketId) return false;
+
+    const normalizedProspect = normalizeSubmarketValue(prospectSubmarketId);
+    const normalizedSelectedId = normalizeSubmarketValue(selectedSubmarket);
+    const resolvedSelectedName = resolveSubmarketName(selectedSubmarket);
+    const normalizedSelectedName = resolvedSelectedName ? normalizeSubmarketValue(resolvedSelectedName) : null;
+
+    if (normalizedProspect === normalizedSelectedId) return true;
+    if (normalizedSelectedName && normalizedProspect === normalizedSelectedName) return true;
+    return false;
   });
+
+  const selectedSubmarketLabel = (() => {
+    if (selectedSubmarket === 'all') return null;
+    if (selectedSubmarket === 'none') return 'no submarket';
+    return resolveSubmarketName(selectedSubmarket) ?? selectedSubmarket;
+  })();
 
   // Sort by due date (soonest first)
   const sortedProspects = [...filteredProspects].sort((a, b) => {
@@ -517,9 +550,9 @@ export default function FollowUpPage() {
               {showEngagementFilter === 'no_engagement' && ' with no engagement'}
               {showEngagementFilter === 'has_engagement' && ' with logged activity'}
               {showEngagementFilter === 'all' && ' scheduled for follow-up'}
-              {selectedSubmarket !== 'all' && (
+              {selectedSubmarketLabel && (
                 <span className="ml-2">
-                  in {selectedSubmarket === 'none' ? 'no submarket' : submarkets.find(s => s.id === selectedSubmarket)?.name || selectedSubmarket}
+                  in {selectedSubmarketLabel}
                 </span>
               )}
             </p>
@@ -552,19 +585,20 @@ export default function FollowUpPage() {
                 </SelectContent>
               </Select>
             </div>
-            {/* Due Soon Controls */}
+            {/* Due Filter Controls */}
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600">Due soon</span>
-              <Select value={includeDueSoon ? 'on' : 'off'} onValueChange={(v) => setIncludeDueSoon(v === 'on')}>
-                <SelectTrigger className="h-8 w-[100px]">
+              <span className="text-sm text-gray-600">Show</span>
+              <Select value={dueFilter} onValueChange={(v) => setDueFilter(v as 'due_soon' | 'due_only' | 'all')}>
+                <SelectTrigger className="h-8 w-[160px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="on">On</SelectItem>
-                  <SelectItem value="off">Off</SelectItem>
+                  <SelectItem value="due_soon">Due &amp; upcoming</SelectItem>
+                  <SelectItem value="due_only">Due today / overdue</SelectItem>
+                  <SelectItem value="all">All prospects</SelectItem>
                 </SelectContent>
               </Select>
-              {includeDueSoon && (
+              {dueFilter === 'due_soon' && (
                 <Select value={String(dueSoonDays)} onValueChange={(v) => setDueSoonDays(Number(v))}>
                   <SelectTrigger className="h-8 w-[110px]">
                     <SelectValue />
@@ -589,7 +623,7 @@ export default function FollowUpPage() {
                   <SelectItem value="all">All Submarkets</SelectItem>
                   <SelectItem value="none">No Submarket</SelectItem>
                   {submarkets.map((submarket) => (
-                    <SelectItem key={submarket.id} value={submarket.id}>
+                    <SelectItem key={submarket.id} value={String(submarket.id)}>
                       <div className="flex items-center gap-2">
                         {submarket.color && (
                           <div 
@@ -696,12 +730,16 @@ export default function FollowUpPage() {
                 <CardContent className="pt-0">
                   <div className="space-y-3">
                     {/* Submarket */}
-                    {prospect.submarketId && (
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <MapPin className="h-4 w-4" />
-                        <span className="capitalize">{prospect.submarketId}</span>
-                      </div>
-                    )}
+                    {(() => {
+                      const name = resolveSubmarketName(prospect.submarketId);
+                      if (!name) return null;
+                      return (
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <MapPin className="h-4 w-4" />
+                          <span className="capitalize">{name}</span>
+                        </div>
+                      );
+                    })()}
 
                     {/* Contact Information */}
                     {(prospect.contactName || prospect.contactEmail || prospect.contactPhone || prospect.contactCompany) && (

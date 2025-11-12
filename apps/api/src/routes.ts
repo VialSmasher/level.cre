@@ -16,6 +16,8 @@ import { createClient } from '@supabase/supabase-js';
 import { pool, db } from './db';
 import { listings, listingMembers, users, profiles, listingProspects } from '@level-cre/shared/schema';
 import { and, eq, sql } from 'drizzle-orm';
+import fs from 'fs';
+import path from 'path';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Supabase client for server-side OAuth
@@ -245,6 +247,240 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) {
       console.error('Demo reset error:', e);
       res.status(500).json({ ok: false, message: e.message || 'Failed to reset demo data' });
+    }
+  });
+
+  // Read-only diagnostics: /api/diag/summary
+  app.get('/api/diag/summary', async (req, res) => {
+    try {
+      const flag = String(process.env.NEXT_PUBLIC_ADMIN_DIAG_ENABLED || '').toLowerCase();
+      const diagEnabled = ['1','true','yes','on'].includes(flag);
+      if (!diagEnabled) {
+        return res.status(404).json({ message: 'Not found' });
+      }
+
+      // Helper: safe filesystem route detection (scan web router file)
+      const routesState = (() => {
+        try {
+          const repoRoot = path.resolve(process.cwd(), '..', '..');
+          const appRouterPath = path.join(repoRoot, 'apps', 'web', 'src', 'App.tsx');
+          const src = fs.readFileSync(appRouterPath, 'utf8');
+          return {
+            brokerStats: src.includes('/broker-stats') || src.includes('broker-stats'),
+            leaderboard: src.includes('/leaderboard') || src.includes('leaderboard'),
+          };
+        } catch {
+          return { brokerStats: null as any, leaderboard: null as any };
+        }
+      })();
+
+      // Helper: does a table exist?
+      const tableExists = async (name: string): Promise<boolean> => {
+        try {
+          const { rows } = await pool.query(`SELECT to_regclass('public.' || $1) AS oid`, [name]);
+          const oid = rows?.[0]?.oid;
+          return Boolean(oid);
+        } catch {
+          return false;
+        }
+      };
+
+      // Helper: does an index exist exactly by name?
+      const indexExists = async (name: string): Promise<boolean> => {
+        try {
+          const { rows } = await pool.query(
+            `SELECT EXISTS (
+               SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = $1
+             ) AS present`,
+            [name]
+          );
+          return Boolean(rows?.[0]?.present);
+        } catch {
+          return false;
+        }
+      };
+
+      // API existence (by source scan of API routes)
+      const apisState = (() => {
+        try {
+          const apiRoutesPath = path.join(path.resolve(process.cwd(), '..', '..'), 'apps', 'api', 'src', 'routes.ts');
+          const src = fs.readFileSync(apiRoutesPath, 'utf8');
+          return {
+            statsHeader: src.includes("/api/stats/header"),
+          };
+        } catch {
+          return { statsHeader: null as any };
+        }
+      })();
+
+      // DB table checks
+      const hasEvents = await tableExists('events');
+      const hasAssets = await tableExists('assets');
+
+      // Index checks (only meaningful if events exists)
+      const eventsIdxTypeCreatedAt = hasEvents
+        ? await indexExists('events_user_type_created_at')
+        : false;
+      const eventsIdxUserAsset = hasEvents
+        ? await indexExists('events_user_asset')
+        : false;
+
+      // Event types in last 90 days (safe fallback to empty)
+      let eventTypes90d: Array<{ type: string; count: number }> = [];
+      if (hasEvents) {
+        try {
+          const { rows } = await pool.query(
+            `SELECT type, COUNT(*)::int AS count
+             FROM events
+             WHERE created_at >= NOW() - INTERVAL '90 days'
+             GROUP BY type
+             ORDER BY count DESC`
+          );
+          eventTypes90d = rows || [];
+        } catch {
+          eventTypes90d = [];
+        }
+      } else {
+        // Try a best-effort fallback to contact_interactions if present
+        const hasInteractions = await tableExists('contact_interactions');
+        if (hasInteractions) {
+          try {
+            const { rows } = await pool.query(
+              `SELECT type, COUNT(*)::int AS count
+               FROM contact_interactions
+               WHERE created_at >= NOW() - INTERVAL '90 days'
+               GROUP BY type
+               ORDER BY count DESC`
+            );
+            eventTypes90d = rows || [];
+          } catch {
+            eventTypes90d = [];
+          }
+        }
+      }
+
+      // Sample aggregations for current user (best-effort, read-only)
+      const userId = getUserId(req);
+      let assetsTracked: number | null = null;
+      let followupsLogged: number | null = null;
+      let lastActivityISO: string | null = null;
+
+      if (hasEvents) {
+        try {
+          const assetRes = await pool.query(
+            `SELECT COUNT(DISTINCT asset_id)::int AS c FROM events WHERE user_id = $1`,
+            [userId]
+          );
+          assetsTracked = assetRes?.rows?.[0]?.c ?? 0;
+        } catch {}
+        try {
+          const fuRes = await pool.query(
+            `SELECT COUNT(*)::int AS c
+             FROM events
+             WHERE user_id = $1 AND type = ANY($2)`,
+            [userId, ['call','email','meeting','followup_logged']]
+          );
+          followupsLogged = fuRes?.rows?.[0]?.c ?? 0;
+        } catch {}
+        try {
+          const lastRes = await pool.query(
+            `SELECT MAX(created_at) AS last FROM events WHERE user_id = $1`,
+            [userId]
+          );
+          const last = lastRes?.rows?.[0]?.last as Date | null;
+          lastActivityISO = last ? new Date(last).toISOString() : null;
+        } catch {}
+      } else {
+        // Fallbacks for current schema
+        try {
+          const hasProspects = await tableExists('prospects');
+          if (hasProspects) {
+            const r = await pool.query(
+              `SELECT COUNT(*)::int AS c FROM prospects WHERE user_id = $1`,
+              [userId]
+            );
+            assetsTracked = r?.rows?.[0]?.c ?? 0;
+          }
+        } catch {}
+        try {
+          const hasInteractions = await tableExists('contact_interactions');
+          if (hasInteractions) {
+            const r = await pool.query(
+              `SELECT COUNT(*)::int AS c
+               FROM contact_interactions
+               WHERE user_id = $1 AND type = ANY($2)`,
+              [userId, ['call','email','meeting','followup_logged']]
+            );
+            followupsLogged = r?.rows?.[0]?.c ?? 0;
+            const lastR = await pool.query(
+              `SELECT MAX(created_at) AS last FROM contact_interactions WHERE user_id = $1`,
+              [userId]
+            );
+            const last = lastR?.rows?.[0]?.last as Date | null;
+            lastActivityISO = last ? new Date(last).toISOString() : null;
+          }
+        } catch {}
+        if (followupsLogged == null) {
+          try {
+            const hasTouches = await tableExists('touches');
+            if (hasTouches) {
+              const r = await pool.query(
+                `SELECT COUNT(*)::int AS c
+                 FROM touches
+                 WHERE user_id = $1 AND kind = ANY($2)`,
+                [userId, ['call','email','meeting','followup_logged']]
+              );
+              followupsLogged = r?.rows?.[0]?.c ?? 0;
+              const lastR = await pool.query(
+                `SELECT MAX(created_at) AS last FROM touches WHERE user_id = $1`,
+                [userId]
+              );
+              const last = lastR?.rows?.[0]?.last as Date | null;
+              lastActivityISO = last ? new Date(last).toISOString() : null;
+            }
+          } catch {}
+        }
+      }
+
+      // Timezone and current week start (Monday 00:00 local)
+      const tz = (() => {
+        try {
+          return (Intl.DateTimeFormat().resolvedOptions().timeZone) || null;
+        } catch { return null; }
+      })();
+      const weekStartISO = (() => {
+        try {
+          const now = new Date();
+          const day = now.getDay(); // 0=Sun,1=Mon,...
+          const diffToMonday = (day === 0 ? -6 : 1 - day);
+          const monday = new Date(now);
+          monday.setDate(now.getDate() + diffToMonday);
+          monday.setHours(0,0,0,0);
+          return monday.toISOString();
+        } catch { return null; }
+      })();
+
+      const payload = {
+        routes: routesState,
+        apis: apisState,
+        db: { events: hasEvents, assets: hasAssets },
+        eventTypes90d,
+        indexes: {
+          events_user_type_created_at: eventsIdxTypeCreatedAt,
+          events_user_asset: eventsIdxUserAsset,
+        },
+        samples: {
+          assetsTracked: assetsTracked ?? 0,
+          followupsLogged: followupsLogged ?? 0,
+          lastActivityISO: lastActivityISO,
+        },
+        tz,
+        weekStartISO,
+      };
+      return res.json(payload);
+    } catch (e: any) {
+      const message = e?.message || 'diagnostic failed';
+      return res.status(500).json({ message });
     }
   });
   // User endpoint - returns demo user for unauthenticated requests, real user for authenticated requests
@@ -1560,6 +1796,136 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Broker Skills Routes
+  app.get('/api/stats/header', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const qUser = ((req.query.userId as string) || 'me').toLowerCase();
+      if (qUser !== 'me' && qUser !== userId) {
+        // Only self queries supported; deny others
+        return res.status(403).json({ message: 'Forbidden' });
+      }
+
+      // Helper: does a table exist?
+      const tableExists = async (name: string): Promise<boolean> => {
+        try {
+          const { rows } = await pool.query(`SELECT to_regclass('public.' || $1) AS oid`, [name]);
+          const oid = rows?.[0]?.oid;
+          return Boolean(oid);
+        } catch {
+          return false;
+        }
+      };
+
+      // Compute level and streak from existing skills source
+      const levelFromXp = (xp: number) => Math.min(99, Math.floor(Math.sqrt(xp / 100)));
+      let totalLevel = 0;
+      let streakDays = 0;
+      let demoProspects: any[] = [];
+      let demoInteractions: any[] = [];
+
+      if (isDemo(req)) {
+        const [prospects, interactions, requirements, comps] = await Promise.all([
+          demo.getProspects(userId),
+          demo.getInteractions(userId),
+          demo.getRequirements(userId),
+          demo.getMarketComps(userId),
+        ]);
+        demoProspects = prospects || [];
+        demoInteractions = interactions || [];
+        const prospectingXp = (prospects?.length || 0) * 25;
+        const followUpXp = (interactions || []).reduce((sum: number, i: any) => {
+          if (i.type === 'call') return sum + 15;
+          if (i.type === 'email') return sum + 10;
+          if (i.type === 'meeting') return sum + 25;
+          return sum + 10; // note/other
+        }, 0);
+        const marketKnowledgeXp = ((requirements?.length || 0) + (comps?.length || 0)) * 20;
+        const daysSet = new Set((interactions || []).map((i: any) => new Date(i.date || i.createdAt).toDateString()));
+        streakDays = daysSet.size > 0 ? Math.min(daysSet.size, 99) : 0;
+        const consistencyXp = streakDays * 100;
+        totalLevel =
+          levelFromXp(prospectingXp) +
+          levelFromXp(followUpXp) +
+          levelFromXp(consistencyXp) +
+          levelFromXp(marketKnowledgeXp);
+      } else {
+        try {
+          const skills = await storage.getBrokerSkills(userId);
+          const p = skills?.prospecting || 0;
+          const f = skills?.followUp || 0;
+          const c = skills?.consistency || 0;
+          const m = skills?.marketKnowledge || 0;
+          streakDays = skills?.streakDays || 0;
+          totalLevel = levelFromXp(p) + levelFromXp(f) + levelFromXp(c) + levelFromXp(m);
+        } catch {
+          totalLevel = 0;
+          streakDays = 0;
+        }
+      }
+
+      // Aggregations: prefer events; fallback to current tables
+      let assetsTracked = 0;
+      let followupsLogged = 0;
+
+      if (isDemo(req)) {
+        assetsTracked = demoProspects.length;
+        followupsLogged = demoInteractions.filter((i: any) =>
+          ['call', 'email', 'meeting', 'followup_logged'].includes(i.type)
+        ).length;
+      } else {
+        const hasEvents = await tableExists('events');
+        if (hasEvents) {
+          try {
+            const assetRes = await pool.query(
+              `SELECT COUNT(DISTINCT asset_id)::int AS c FROM events WHERE user_id = $1`,
+              [userId]
+            );
+            assetsTracked = assetRes?.rows?.[0]?.c ?? 0;
+          } catch {}
+          try {
+            const fuRes = await pool.query(
+              `SELECT COUNT(*)::int AS c FROM events WHERE user_id = $1 AND type = ANY($2)`,
+              [userId, ['call','email','meeting','followup_logged']]
+            );
+            followupsLogged = fuRes?.rows?.[0]?.c ?? 0;
+          } catch {}
+        }
+
+        if (!hasEvents) {
+          // Fallbacks
+          try {
+            if (await tableExists('prospects')) {
+              const r = await pool.query(
+                `SELECT COUNT(*)::int AS c FROM prospects WHERE user_id = $1`,
+                [userId]
+              );
+              assetsTracked = r?.rows?.[0]?.c ?? assetsTracked;
+            }
+          } catch {}
+          try {
+            if (await tableExists('contact_interactions')) {
+              const r = await pool.query(
+                `SELECT COUNT(*)::int AS c FROM contact_interactions WHERE user_id = $1 AND type = ANY($2)`,
+                [userId, ['call','email','meeting','followup_logged']]
+              );
+              followupsLogged = r?.rows?.[0]?.c ?? followupsLogged;
+            } else if (await tableExists('touches')) {
+              const r = await pool.query(
+                `SELECT COUNT(*)::int AS c FROM touches WHERE user_id = $1 AND kind = ANY($2)`,
+                [userId, ['call','email','meeting','followup_logged']]
+              );
+              followupsLogged = r?.rows?.[0]?.c ?? followupsLogged;
+            }
+          } catch {}
+        }
+      }
+
+      return res.json({ totalLevel, assetsTracked, followupsLogged, streakDays });
+    } catch (error) {
+      console.error('Error fetching stats header:', error);
+      res.status(500).json({ message: 'Failed to fetch header stats' });
+    }
+  });
   app.get('/api/skills', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);

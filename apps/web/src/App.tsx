@@ -28,6 +28,9 @@ const Workspace = lazy(() => import("./pages/workspace"));
 const AuthCallback = lazy(() => import("./pages/AuthCallback"));
 const Terms = lazy(() => import("./pages/terms"));
 const Privacy = lazy(() => import("./pages/privacy"));
+const AdminDiag = lazy(() => import("./pages/admin-diag"));
+const BrokerStats = lazy(() => import("./pages/broker-stats"));
+const Leaderboard = lazy(() => import("./pages/leaderboard"));
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
@@ -75,6 +78,14 @@ function Router() {
     <Suspense fallback={<Spinner />}>
     <Switch>
       {/* Public routes */}
+      {(String(import.meta.env.NEXT_PUBLIC_ADMIN_DIAG_ENABLED ?? '').toLowerCase() === 'true' ||
+        String(import.meta.env.NEXT_PUBLIC_ADMIN_DIAG_ENABLED ?? '').toLowerCase() === '1') && (
+        <Route path="/admin/diag" component={() => (
+          <Suspense fallback={<Spinner />}> 
+            <AdminDiag />
+          </Suspense>
+        )} />
+      )}
       <Route path="/debug" component={() => (
         <Suspense fallback={<Spinner />}> 
           <Debug />
@@ -115,6 +126,36 @@ function Router() {
       )} />
       
       {/* Protected app routes - flat structure */}
+      <Route path="/broker-stats">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <Suspense fallback={<Spinner />}>
+                <BrokerStats />
+              </Suspense>
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
+
+      {/* Back-compat: redirect old stats path */}
+      <Route path="/app/stats" component={() => { 
+        const [, setLocation] = useLocation(); 
+        setLocation('/broker-stats'); 
+        return null; 
+      }} />
+
+      <Route path="/leaderboard">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <Suspense fallback={<Spinner />}>
+                <Leaderboard />
+              </Suspense>
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
       <Route path="/app">
         <ProtectedRoute>
           <OnboardingCheck>

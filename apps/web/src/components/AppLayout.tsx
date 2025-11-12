@@ -11,8 +11,7 @@ import {
   User, 
   Settings, 
   LogOut, 
-  ChevronDown, 
-  Trophy,
+  ChevronDown,
   Map,
   Briefcase,
   Brain,
@@ -184,19 +183,19 @@ export function AppLayout({ children }: AppLayoutProps) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Link 
-                    href="/app/stats" 
+                    href="/broker-stats" 
                     className={`p-3 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                      isActive('/app/stats') 
+                      isActive('/broker-stats') 
                         ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30 opacity-100' 
                         : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 opacity-70 hover:opacity-100'
                     }`}
-                    aria-label="Stats"
+                    aria-label="Broker Stats"
                   >
                     <BarChart3 size={22} />
                   </Link>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Stats</p>
+                  <p>Broker Stats</p>
                 </TooltipContent>
               </Tooltip>
 
@@ -410,21 +409,21 @@ export function AppLayout({ children }: AppLayoutProps) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Link 
-                    href="/app/stats" 
+                    href="/broker-stats" 
                     className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/stats') 
+                      isActive('/broker-stats') 
                         ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
                         : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
                     }`}
                     onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Stats"
+                    aria-label="Broker Stats"
                   >
                     <BarChart3 size={20} />
-                    <span className="font-medium">Stats</span>
+                    <span className="font-medium">Broker Stats</span>
                   </Link>
                 </TooltipTrigger>
                 <TooltipContent side="right">
-                  <p>Stats</p>
+                  <p>Broker Stats</p>
                 </TooltipContent>
               </Tooltip>
 

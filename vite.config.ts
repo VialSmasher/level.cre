@@ -14,6 +14,8 @@ const __dirname = path.dirname(__filename);
 export default defineConfig({
   // Load env vars from the repo root (so .env at project root is used)
   envDir: path.resolve(__dirname),
+  // Expose both Vite and Next-style public env vars to the client
+  envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
   // Let Vite auto-discover the nearest PostCSS config (apps/web/postcss.config.cjs)
   // to avoid any subtle context issues with content scanning in Tailwind.
   css: {

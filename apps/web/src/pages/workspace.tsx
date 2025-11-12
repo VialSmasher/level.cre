@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { MapControls } from '@/features/map/MapControls';
 import { apiRequest } from '@/lib/queryClient';
 import type { Prospect, FollowUpTimeframeType } from '@level-cre/shared/schema';
@@ -186,16 +187,23 @@ export default function Workspace() {
   const [mapType, setMapType] = useState<'roadmap' | 'hybrid'>('roadmap');
   const [bounds, setBounds] = useState<google.maps.LatLngBoundsLiteral | null>(null);
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
+  const [prospectDraft, setProspectDraft] = useState<Prospect | null>(null);
+  const prospectDraftRef = useRef<Prospect | null>(null);
   const [isEditPanelOpen, setIsEditPanelOpen] = useState(false);
   const [editingProspectId, setEditingProspectId] = useState<string | null>(null);
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
   const [originalPolygonCoordinates, setOriginalPolygonCoordinates] = useState<[number, number][] | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  // Local draft state for Notes to keep typing smooth while debounced saves run
-  const [notesDraft, setNotesDraft] = useState<string>("");
   useEffect(() => {
-    setNotesDraft(selectedProspect?.notes || "");
-  }, [selectedProspect?.id, isEditPanelOpen]);
+    if (isEditPanelOpen && selectedProspect) {
+      setProspectDraft(selectedProspect);
+    } else {
+      setProspectDraft(null);
+    }
+  }, [isEditPanelOpen, selectedProspect]);
+  useEffect(() => {
+    prospectDraftRef.current = prospectDraft;
+  }, [prospectDraft]);
 
   // Demo helpers: id generation, building & persisting local prospects (shared conventions with main map)
   const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
@@ -328,13 +336,13 @@ export default function Workspace() {
   };
 
   // Debounced, optimistic field updates to avoid flicker while typing
-  const saveTimerRef = useRef<number | null>(null);
   const pendingPatchRef = useRef<Partial<Prospect>>({});
   const lastEditedIdRef = useRef<string | null>(null);
 
   const flushQueuedSave = useCallback(async () => {
     if (!can.edit) return;
-    const id = lastEditedIdRef.current || selectedProspect?.id || null;
+    const currentDraft = prospectDraftRef.current;
+    const id = lastEditedIdRef.current || currentDraft?.id || null;
     if (!id) return;
     const patch = pendingPatchRef.current;
     pendingPatchRef.current = {};
@@ -348,8 +356,8 @@ export default function Workspace() {
         queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) =>
           Array.isArray(prev) ? prev.map((p) => (p.id === id ? { ...p, ...patch } as Prospect : p)) : prev
         );
-        const nextSel = selectedProspect && selectedProspect.id === id ? ({ ...selectedProspect, ...patch } as Prospect) : selectedProspect;
-        setSelectedProspect(nextSel || null);
+        setSelectedProspect((prev) => (prev && prev.id === id ? ({ ...prev, ...patch } as Prospect) : prev));
+        setProspectDraft((prev) => (prev && prev.id === id ? ({ ...prev, ...patch } as Prospect) : prev));
         // Persist globals
         const all = (queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || []) as Prospect[];
         persistProspectsGlobal(all);
@@ -358,6 +366,7 @@ export default function Workspace() {
       const res = await apiRequest('PATCH', `/api/prospects/${id}`, patch);
       const saved = await res.json();
       setSelectedProspect((prev) => (prev && prev.id === saved.id ? saved : prev));
+      setProspectDraft((prev) => (prev && prev.id === saved.id ? saved : prev));
       // Keep caches in sync without forcing re-fetches
       queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) =>
         Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev
@@ -366,7 +375,16 @@ export default function Workspace() {
         Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev
       );
     } catch {}
-  }, [queryClient, listingId, selectedProspect, can.edit, isDemoMode]);
+  }, [can.edit, isDemoMode, listingId, queryClient]);
+
+  const { debounced: scheduleAutoSave, flush: flushAutoSave, cancel: cancelAutoSave } =
+    useDebouncedCallback(() => { void flushQueuedSave(); }, 500);
+
+  useEffect(() => {
+    cancelAutoSave();
+    pendingPatchRef.current = {};
+    lastEditedIdRef.current = selectedProspect?.id ?? null;
+  }, [selectedProspect?.id, cancelAutoSave]);
 
   // Ensure this is defined before any hooks or callbacks reference it
   const savePolygonChanges = useCallback(() => {
@@ -385,20 +403,21 @@ export default function Workspace() {
       try { await savePolygonChanges(); } catch {}
     }
     // Flush any pending debounced save
-    if (saveTimerRef.current) {
-      window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-      void flushQueuedSave();
-    }
+    cancelAutoSave();
+    flushAutoSave();
     // Close panel and clear selection
     setIsEditPanelOpen(false);
     setSelectedProspect(null);
+    setProspectDraft(null);
+    prospectDraftRef.current = null;
+    pendingPatchRef.current = {};
+    lastEditedIdRef.current = null;
     setDrawingForProspect(null);
     // Reset drawing mode and map interactions
     try { drawingManagerRef.current?.setDrawingMode(null); } catch {}
     try { setDrawMode('select'); } catch {}
     try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false }); } catch {}
-  }, [editingProspectId, savePolygonChanges, flushQueuedSave, map]);
+  }, [editingProspectId, savePolygonChanges, flushAutoSave, cancelAutoSave, map]);
 
   // Close Edit Panel on Escape key (flush + reset draw state). Works while editing.
   useEffect(() => {
@@ -416,36 +435,30 @@ export default function Workspace() {
 
   const queueUpdate = useCallback((field: keyof Prospect, value: any, opts?: { flush?: boolean }) => {
     if (!can.edit) return;
-    if (!selectedProspect) return;
-    const id = selectedProspect.id;
-    // Reset timer if switching prospects while typing
-    if (lastEditedIdRef.current && lastEditedIdRef.current !== id && saveTimerRef.current) {
-      window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-      pendingPatchRef.current = {};
-    }
-    lastEditedIdRef.current = id;
-
-    // Optimistic UI
-    const updated = { ...selectedProspect, [field]: value } as Prospect;
-    setSelectedProspect(updated);
-    queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) =>
-      Array.isArray(prev) ? prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)) : prev
-    );
-    queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) =>
-      Array.isArray(prev) ? prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)) : prev
-    );
-
-    // Queue patch with debounce
-    pendingPatchRef.current = { ...pendingPatchRef.current, [field]: value };
+    let didUpdate = false;
+    setProspectDraft((prev) => {
+      if (!prev) return prev;
+      const id = prev.id;
+      if (!id) return prev;
+      const currentValue = (prev as any)[field];
+      if (currentValue === value) return prev;
+      if (lastEditedIdRef.current && lastEditedIdRef.current !== id) {
+        cancelAutoSave();
+        pendingPatchRef.current = {};
+      }
+      lastEditedIdRef.current = id;
+      pendingPatchRef.current = { ...pendingPatchRef.current, [field]: value };
+      didUpdate = true;
+      return { ...prev, [field]: value } as Prospect;
+    });
+    if (!didUpdate) return;
     if (opts?.flush) {
-      if (saveTimerRef.current) { window.clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
-      void flushQueuedSave();
+      cancelAutoSave();
+      flushAutoSave();
     } else {
-      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = window.setTimeout(() => { saveTimerRef.current = null; void flushQueuedSave(); }, 450);
+      scheduleAutoSave();
     }
-  }, [listingId, queryClient, flushQueuedSave, selectedProspect, can.edit]);
+  }, [can.edit, cancelAutoSave, flushAutoSave, scheduleAutoSave]);
 
   const updateSelectedProspect = useCallback((field: keyof Prospect, value: any) => {
     queueUpdate(field, value);
@@ -465,7 +478,13 @@ export default function Workspace() {
         persistProspectsGlobal(all);
         // Update workspace membership
         if (listingId) removeProspectFromWorkspace(listingId, id);
-        setSelectedProspect(null); setIsEditPanelOpen(false);
+        setSelectedProspect(null);
+        setIsEditPanelOpen(false);
+        setProspectDraft(null);
+        prospectDraftRef.current = null;
+        cancelAutoSave();
+        pendingPatchRef.current = {};
+        lastEditedIdRef.current = null;
         // Decrement cached count in listings grid
         queryClient.setQueryData<any[] | undefined>(['/api/listings'], (prev) => {
           if (!Array.isArray(prev)) return prev;
@@ -474,7 +493,13 @@ export default function Workspace() {
         toast({ title: 'Prospect Deleted (demo)' });
       } else {
         await apiRequest('DELETE', `/api/prospects/${selectedProspect.id}`);
-        setSelectedProspect(null); setIsEditPanelOpen(false);
+        setSelectedProspect(null);
+        setIsEditPanelOpen(false);
+        setProspectDraft(null);
+        prospectDraftRef.current = null;
+        cancelAutoSave();
+        pendingPatchRef.current = {};
+        lastEditedIdRef.current = null;
         queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
         queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
         // Decrement cached count for listings and mark stale
@@ -486,7 +511,7 @@ export default function Workspace() {
         toast({ title: 'Prospect Deleted' });
       }
     } catch {}
-  }, [selectedProspect, listingId, can.edit, isDemoMode]);
+  }, [selectedProspect, listingId, can.edit, isDemoMode, cancelAutoSave]);
 
   // Keyboard shortcut: Ctrl+Delete (Windows) or Cmd+Delete (Mac)
   useEffect(() => {
@@ -935,7 +960,7 @@ export default function Workspace() {
       </div>
 
       {/* Removed legacy Drawer UI */}
-      {isEditPanelOpen && selectedProspect && (
+      {isEditPanelOpen && selectedProspect && prospectDraft && (
         <div className="absolute top-0 right-0 w-80 max-h-[90vh] flex flex-col bg-white shadow-xl border-l border-gray-200 z-50 overflow-y-auto" style={{ pointerEvents: 'auto' }}>
           <div className="sticky top-0 z-10 bg-white border-b px-4 pt-3 pb-2">
             <div className="flex items-center justify-between">
@@ -967,7 +992,7 @@ export default function Workspace() {
                 <div>
                   <Label className="text-xs font-medium text-gray-700">Address</Label>
                   {(() => {
-                    const n = selectedProspect?.name || '';
+                    const n = prospectDraft?.name || '';
                     const display = /^New\s+(polygon|rectangle|point|marker)/i.test(n) ? '' : n;
                     return (
                       <Input
@@ -980,12 +1005,12 @@ export default function Workspace() {
                   })()}
                 </div>
                 {/* Business information (shown when available) */}
-                {(selectedProspect.businessName || selectedProspect.websiteUrl) && (
+                {(prospectDraft.businessName || prospectDraft.websiteUrl) && (
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <Label className="text-xs font-medium text-gray-700">Business Name</Label>
                       <Input
-                        value={selectedProspect.businessName || ''}
+                        value={prospectDraft.businessName || ''}
                         onChange={(e) => updateSelectedProspect('businessName', e.target.value || undefined)}
                         placeholder="Business name"
                         className="h-8 text-sm"
@@ -995,7 +1020,7 @@ export default function Workspace() {
                       <Label className="text-xs font-medium text-gray-700">Website</Label>
                       <Input
                         type="url"
-                        value={selectedProspect.websiteUrl || ''}
+                        value={prospectDraft.websiteUrl || ''}
                         onChange={(e) => updateSelectedProspect('websiteUrl', e.target.value || undefined)}
                         placeholder="Website URL"
                         className="h-8 text-sm"
@@ -1006,7 +1031,7 @@ export default function Workspace() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Status</Label>
-                    <Select value={selectedProspect.status} onValueChange={(v) => updateSelectedProspect('status', v)}>
+                    <Select value={prospectDraft.status} onValueChange={(v) => updateSelectedProspect('status', v)}>
                       <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {Object.entries(STATUS_META).map(([k, meta]) => (
@@ -1022,10 +1047,10 @@ export default function Workspace() {
                   </div>
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Follow Up</Label>
-                    <Select value={(selectedProspect as any).followUpTimeframe || 'none'} onValueChange={(v) => {
+                    <Select value={(prospectDraft as any).followUpTimeframe || 'none'} onValueChange={(v) => {
                       const tf = (v === 'none' ? undefined : (v as FollowUpTimeframeType));
                       updateSelectedProspect('followUpTimeframe' as any, tf);
-                      const anchor = selectedProspect.lastContactDate || (selectedProspect as any).createdDate;
+                      const anchor = prospectDraft.lastContactDate || (prospectDraft as any).createdDate;
                       const due = tf ? computeFollowUpDue(anchor, tf) : undefined;
                       updateSelectedProspect('followUpDueDate', due);
                     }}>
@@ -1040,7 +1065,7 @@ export default function Workspace() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Size</Label>
-                    <Select value={selectedProspect.size || ''} onValueChange={(v) => updateSelectedProspect('size', v === 'none' ? '' : v)}>
+                    <Select value={prospectDraft.size || ''} onValueChange={(v) => updateSelectedProspect('size', v === 'none' ? '' : v)}>
                       <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select size" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">None</SelectItem>
@@ -1050,7 +1075,7 @@ export default function Workspace() {
                   </div>
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Acres</Label>
-                    <Input value={selectedProspect.acres || ''} placeholder="Auto-calculated" className="h-8 text-sm bg-gray-50" disabled />
+                    <Input value={prospectDraft.acres || ''} placeholder="Auto-calculated" className="h-8 text-sm bg-gray-50" disabled />
                   </div>
                 </div>
                 <div>
@@ -1058,7 +1083,7 @@ export default function Workspace() {
                   {submarketOptions.length === 0 ? (
                     <Select disabled><SelectTrigger className="h-8 text-sm"><SelectValue placeholder="No submarkets" /></SelectTrigger></Select>
                   ) : (
-                    <Select value={(selectedProspect as any).submarketId || ''} onValueChange={(v) => updateSelectedProspect('submarketId' as any, v === 'none' ? undefined : v)}>
+                    <Select value={(prospectDraft as any).submarketId || ''} onValueChange={(v) => updateSelectedProspect('submarketId' as any, v === 'none' ? undefined : v)}>
                       <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select submarket" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">None</SelectItem>
@@ -1070,12 +1095,8 @@ export default function Workspace() {
                 <div>
                   <Label className="text-xs font-medium text-gray-700">Notes</Label>
                   <Textarea
-                    value={notesDraft}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setNotesDraft(v);
-                      updateSelectedProspect('notes', v);
-                    }}
+                    value={prospectDraft.notes || ''}
+                    onChange={(e) => updateSelectedProspect('notes', e.target.value)}
                     rows={3}
                     className="resize-none text-sm"
                   />
@@ -1085,21 +1106,21 @@ export default function Workspace() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Contact Name</Label>
-                    <Input value={selectedProspect.contactName || ''} onChange={(e) => updateSelectedProspect('contactName', e.target.value || undefined)} placeholder="Contact name" className="h-8 text-sm" />
+                    <Input value={prospectDraft.contactName || ''} onChange={(e) => updateSelectedProspect('contactName', e.target.value || undefined)} placeholder="Contact name" className="h-8 text-sm" />
                   </div>
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Company</Label>
-                    <Input value={selectedProspect.contactCompany || ''} onChange={(e) => updateSelectedProspect('contactCompany', e.target.value || undefined)} placeholder="Company" className="h-8 text-sm" />
+                    <Input value={prospectDraft.contactCompany || ''} onChange={(e) => updateSelectedProspect('contactCompany', e.target.value || undefined)} placeholder="Company" className="h-8 text-sm" />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Email</Label>
-                    <Input type="email" value={selectedProspect.contactEmail || ''} onChange={(e) => updateSelectedProspect('contactEmail', e.target.value || undefined)} placeholder="name@company.com" className="h-8 text-sm" />
+                    <Input type="email" value={prospectDraft.contactEmail || ''} onChange={(e) => updateSelectedProspect('contactEmail', e.target.value || undefined)} placeholder="name@company.com" className="h-8 text-sm" />
                   </div>
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Phone</Label>
-                    <PhoneInput value={selectedProspect.contactPhone || ''} onChange={(e) => updateSelectedProspect('contactPhone', e.target.value || undefined)} placeholder="(000) 000-0000" className="h-8 text-sm" />
+                    <PhoneInput value={prospectDraft.contactPhone || ''} onChange={(e) => updateSelectedProspect('contactPhone', e.target.value || undefined)} placeholder="(000) 000-0000" className="h-8 text-sm" />
                   </div>
                 </div>
               </TabsContent>
