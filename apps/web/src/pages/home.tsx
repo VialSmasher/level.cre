@@ -22,6 +22,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Download, MapIcon, Satellite, ChevronLeft, ChevronRight, X, Save, Trash2, Filter, User, LogOut, Settings, Edit3 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MapControls } from '@/features/map/MapControls';
+import { MapContextMenu } from '@/features/map/MapContextMenu';
 
 // Standardized size options for consistent use across Prospects and Requirements
 const STANDARD_SIZE_OPTIONS = [
@@ -36,6 +37,7 @@ import { SearchComponent } from '@/components/SearchComponent';
 import { CSVUploader } from '@/components/CSVUploader';
 import { DeveloperSettings } from '@/components/DeveloperSettings';
 import { useToast } from '@/hooks/use-toast';
+import { useGeocode } from '@/hooks/useGeocode';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
@@ -57,6 +59,13 @@ import type {
 } from '@level-cre/shared/schema';
 
 const libraries: any = ['drawing', 'geometry', 'places'];
+
+type ContextMenuState = {
+  lat: number;
+  lng: number;
+  viewportX: number;
+  viewportY: number;
+};
 
 // Colors and labels now come from shared STATUS_META
 
@@ -147,9 +156,11 @@ export default function HomePage() {
   const { toast } = useToast();
   const { user, isDemoMode } = useAuth();
   const { profile } = useProfile();
+  const geocode = useGeocode();
   
   // Memoize currentUser to prevent infinite loops
   const currentUser = useMemo(() => user, [user]);
+  const canCreateProspects = !!currentUser || isDemoMode;
   
   // Use normalized, de-duplicated submarkets for consistent options
   const submarketOptions = uniqueSubmarketNames(profile?.submarkets || []);
@@ -158,6 +169,9 @@ export default function HomePage() {
   const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton
   const DEFAULT_ZOOM = 11;
   const [map, setMap] = useState<google.maps.Map | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const [mapType, setMapType] = useState<'roadmap' | 'hybrid'>(() => {
     const primary = readJSON<any>(nsKey(currentUser?.id, 'mapType'), null);
     if (primary === 'roadmap' || primary === 'hybrid') return primary;
@@ -188,6 +202,10 @@ export default function HomePage() {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [submarkets, setSubmarkets] = useState<Submarket[]>([]);
   const [touches, setTouches] = useState<Touch[]>([]);
+  const touchesRef = useRef<Touch[]>([]);
+  useEffect(() => {
+    touchesRef.current = touches;
+  }, [touches]);
   
   // Filter state
   const [statusFilters, setStatusFilters] = useState<Set<ProspectStatusType>>(
@@ -358,6 +376,48 @@ export default function HomePage() {
       setZoom(DEFAULT_ZOOM);
     }
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!map) return;
+    const listener = map.addListener('rightclick', (event: google.maps.MapMouseEvent) => {
+      if (!mapContainerRef.current || !event.latLng) return;
+      event.domEvent?.preventDefault?.();
+      event.domEvent?.stopPropagation?.();
+      const lat = event.latLng.lat();
+      const lng = event.latLng.lng();
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      const pixel = event.pixel;
+      const rect = mapContainerRef.current.getBoundingClientRect();
+      const viewportX = rect.left + (pixel?.x ?? 0);
+      const viewportY = rect.top + (pixel?.y ?? 0);
+      setContextMenu({ lat, lng, viewportX, viewportY });
+    });
+    return () => {
+      listener.remove();
+    };
+  }, [map]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handlePointer = () => closeContextMenu();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeContextMenu();
+      }
+    };
+    const timer = window.setTimeout(() => {
+      window.addEventListener('mousedown', handlePointer);
+      window.addEventListener('contextmenu', handlePointer);
+      window.addEventListener('keydown', handleKey, true);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('mousedown', handlePointer);
+      window.removeEventListener('contextmenu', handlePointer);
+      window.removeEventListener('keydown', handleKey, true);
+    };
+  }, [contextMenu, closeContextMenu]);
 
   // Filter prospects based on status and submarket
   const filteredProspects = prospects.filter(prospect => {
@@ -774,6 +834,64 @@ export default function HomePage() {
     });
   }, []);
 
+  const formatCoordinates = useCallback((lat: number, lng: number) => `${lat.toFixed(6)}, ${lng.toFixed(6)}`, []);
+
+  const handleCopyCoordinates = useCallback(async (lat: number, lng: number) => {
+    const text = formatCoordinates(lat, lng);
+    let copied = false;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      }
+    } catch {}
+    if (!copied && typeof document !== 'undefined') {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', 'true');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        copied = true;
+      } catch {}
+    }
+    toast({
+      title: copied ? 'Coordinates copied' : 'Copy failed',
+      description: text,
+      variant: copied ? undefined : 'destructive',
+    });
+  }, [formatCoordinates, toast]);
+
+  const handleOpenInMaps = useCallback((lat: number, lng: number) => {
+    const url = `https://www.google.com/maps?q=${lat},${lng}`;
+    let opened = false;
+    try {
+      const win = window.open(url, '_blank', 'noopener,noreferrer');
+      if (win) {
+        opened = true;
+        win.opener = null;
+      }
+    } catch {}
+    if (!opened && typeof document !== 'undefined') {
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.target = '_blank';
+      anchor.rel = 'noopener noreferrer';
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      opened = true;
+    }
+    if (!opened) {
+      window.location.href = url;
+    }
+  }, []);
+
   // Demo helpers: id generation, building & persisting local prospects
   const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
     ? crypto.randomUUID()
@@ -892,6 +1010,73 @@ export default function HomePage() {
       });
     }
   }, [searchPin, inferSubmarketFromPoint, toast, queryClient, isDemoMode, prospects]);
+
+  const createProspectFromContext = useMutation<Prospect, Error, { lat: number; lng: number; address?: string }>({
+    mutationFn: async ({ lat, lng, address }) => {
+      const cleanedAddress = address?.replace(/, Canada$/, '').trim();
+      const fallbackName = cleanedAddress && cleanedAddress.length > 0
+        ? cleanedAddress
+        : `Dropped pin (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+      const payload = {
+        name: fallbackName,
+        geometry: {
+          type: 'Point' as const,
+          coordinates: [lng, lat] as [number, number],
+        },
+        status: 'prospect' as ProspectStatusType,
+        notes: '',
+        submarketId: inferSubmarketFromPoint({ lat, lng }) || '',
+      };
+
+      if (isDemoMode) {
+        return buildLocalProspect(payload as any);
+      }
+
+      const response = await apiRequest('POST', '/api/prospects', payload);
+      return await response.json();
+    },
+    onSuccess: (created) => {
+      setProspects((prev) => {
+        const next = [...prev, created];
+        if (isDemoMode) {
+          const dataToSave: MapData = { prospects: next, submarkets: [], touches: touchesRef.current };
+          writeJSON(nsKey(currentUser?.id, 'mapData'), dataToSave);
+        }
+        return next;
+      });
+      if (!isDemoMode) {
+        queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
+      }
+      setSelectedProspect(created);
+      setIsEditPanelOpen(true);
+      closeContextMenu();
+      const label = created.name?.trim() || 'Prospect';
+      toast({
+        title: isDemoMode ? 'Prospect added (demo)' : 'Prospect added',
+        description: `${label} saved to your map`,
+      });
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : 'Failed to create prospect';
+      toast({
+        title: 'Could not add prospect',
+        description: message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const handleCreateProspectAt = useCallback(async (lat: number, lng: number) => {
+    if (!canCreateProspects || createProspectFromContext.isPending) return;
+    let address: string | undefined;
+    try {
+      const result = await geocode.reverse(lat, lng);
+      if (result.address) {
+        address = result.address;
+      }
+    } catch {}
+    createProspectFromContext.mutate({ lat, lng, address });
+  }, [canCreateProspects, createProspectFromContext, geocode]);
 
   // Handle drawing polygon for point prospects
   const handleDrawPolygon = useCallback(() => {
@@ -1246,7 +1431,7 @@ export default function HomePage() {
   return (
     <div style={{ position: 'relative', height: 'calc(100vh - 4rem)', width: '100%', overflow: 'hidden' }}>
       {/* Map Canvas */}
-      <div style={{ position: 'absolute', inset: 0 }}>
+      <div style={{ position: 'absolute', inset: 0 }} ref={mapContainerRef}>
         <GoogleMap
           mapContainerStyle={{ width: '100%', height: '100%' }}
           center={center}
@@ -1471,6 +1656,16 @@ export default function HomePage() {
             </>
           )}
         </GoogleMap>
+        {contextMenu && (
+          <MapContextMenu
+            anchor={{ x: contextMenu.viewportX, y: contextMenu.viewportY }}
+            latLng={{ lat: contextMenu.lat, lng: contextMenu.lng }}
+            onCopy={() => handleCopyCoordinates(contextMenu.lat, contextMenu.lng)}
+            onCreateProspect={() => handleCreateProspectAt(contextMenu.lat, contextMenu.lng)}
+            onClose={closeContextMenu}
+            canCreate={canCreateProspects && !createProspectFromContext.isPending}
+          />
+        )}
       </div>
 
       {/* Map Controls - Top Left (authoritative) */}

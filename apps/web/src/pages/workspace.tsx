@@ -14,7 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { MapControls } from '@/features/map/MapControls';
 import { apiRequest } from '@/lib/queryClient';
-import type { Prospect, FollowUpTimeframeType } from '@level-cre/shared/schema';
+import type { Prospect, FollowUpTimeframeType, ProspectGeometryType } from '@level-cre/shared/schema';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { Save, X, Edit3, Trash2, Share2 } from 'lucide-react';
@@ -25,6 +25,8 @@ import { ShareWorkspaceDialog } from '@/components/ShareWorkspaceDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { STATUS_META, type ProspectStatusType } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
+import { MapContextMenu } from '@/features/map/MapContextMenu';
+import { useGeocode } from '@/hooks/useGeocode';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 // Note: Avoid importing AlertDialog to prevent a circular-import bundle bug
 
@@ -40,6 +42,26 @@ type Listing = {
 
 const libraries: any = ['drawing', 'geometry', 'places'];
 
+type CreateProspectVariables = {
+  payload: {
+    name: string;
+    geometry: ProspectGeometryType;
+    status?: ProspectStatusType;
+    notes?: string;
+    businessName?: string;
+    websiteUrl?: string;
+    contactCompany?: string;
+  };
+  source?: 'search' | 'context-menu';
+};
+
+type ContextMenuState = {
+  lat: number;
+  lng: number;
+  viewportX: number;
+  viewportY: number;
+};
+
 export default function Workspace() {
   const [, params] = useRoute('/app/workspaces/:id');
   const listingId = params?.id as string;
@@ -52,6 +74,7 @@ export default function Workspace() {
   const { data: linkedProspects = [], refetch: refetchLinked } = useQuery<Prospect[]>({ queryKey: ['/api/listings', listingId, 'prospects'], enabled: !!listingId });
   const { data: allProspects = [] } = useQuery<Prospect[]>({ queryKey: ['/api/prospects'] });
   const { data: members = [] } = useQuery<{ userId: string; role: 'owner'|'editor'|'viewer'; email?: string|null }[]>({ queryKey: ['/api/listings', listingId, 'members'], enabled: !!listingId });
+  const geocode = useGeocode();
 
   const isOwner = !!(listing && user && listing.userId === user.id);
   const myRole = isOwner ? 'owner' : (members.find((m) => m.userId === user?.id)?.role || null);
@@ -162,6 +185,9 @@ export default function Workspace() {
     return { lat, lng };
   }, [listing]);
 
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const onMapLoad = useCallback((m: google.maps.Map) => {
     // Keep a reference to the map instance; initial center/zoom are set via defaultCenter/defaultZoom
@@ -180,6 +206,48 @@ export default function Workspace() {
       window.google?.maps?.event?.trigger(map, 'resize');
     } catch {}
   }, [map, isLoaded, subjectPosition]);
+
+  useEffect(() => {
+    if (!map) return;
+    const listener = map.addListener('rightclick', (event: google.maps.MapMouseEvent) => {
+      if (!mapContainerRef.current || !event.latLng) return;
+      event.domEvent?.preventDefault?.();
+      event.domEvent?.stopPropagation?.();
+      const lat = event.latLng.lat();
+      const lng = event.latLng.lng();
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      const pixel = event.pixel;
+      const rect = mapContainerRef.current.getBoundingClientRect();
+      const viewportX = rect.left + (pixel?.x ?? 0);
+      const viewportY = rect.top + (pixel?.y ?? 0);
+      setContextMenu({ lat, lng, viewportX, viewportY });
+    });
+    return () => {
+      listener.remove();
+    };
+  }, [map]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handlePointer = () => closeContextMenu();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeContextMenu();
+      }
+    };
+    const timer = window.setTimeout(() => {
+      window.addEventListener('mousedown', handlePointer);
+      window.addEventListener('contextmenu', handlePointer);
+      window.addEventListener('keydown', handleKey, true);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('mousedown', handlePointer);
+      window.removeEventListener('contextmenu', handlePointer);
+      window.removeEventListener('keydown', handleKey, true);
+    };
+  }, [contextMenu, closeContextMenu]);
 
   const [searchPin, setSearchPin] = useState<{ lat: number; lng: number; address: string; businessName?: string | null; websiteUrl?: string | null } | null>(null);
   // Signal to clear the SearchBar input when a prospect is added
@@ -589,70 +657,153 @@ export default function Workspace() {
 
   // Linking existing prospects via drawer removed
 
-  const createAndLink = useMutation({
-    mutationFn: async () => {
-      if (!searchPin) throw new Error('No selection');
-      const payload = {
-        name: searchPin.address,
-        geometry: { type: 'Point' as const, coordinates: [searchPin.lng, searchPin.lat] as [number, number] },
-        status: 'prospect' as ProspectStatusType,
-        notes: '',
-        businessName: searchPin.businessName || undefined,
-        websiteUrl: searchPin.websiteUrl || undefined,
-        contactCompany: searchPin.businessName || undefined,
+  const createProspectMutation = useMutation<Prospect, Error, CreateProspectVariables>({
+    mutationFn: async ({ payload }) => {
+      const normalized = {
+        ...payload,
+        status: (payload.status ?? 'prospect') as ProspectStatusType,
+        notes: payload.notes ?? '',
       };
 
       if (isDemoMode) {
-        // Demo-mode: create locally and return
-        const p = buildLocalProspect(payload as any);
-        return p;
+        return buildLocalProspect(normalized as any);
       }
 
-      // Real API flow
-      const res = await apiRequest('POST', '/api/prospects', payload);
-      const p = await res.json();
-      await apiRequest('POST', `/api/listings/${listingId}/prospects`, { prospectId: p.id });
-      return p;
+      const res = await apiRequest('POST', '/api/prospects', normalized);
+      const created = await res.json();
+      if (listingId) {
+        await apiRequest('POST', `/api/listings/${listingId}/prospects`, { prospectId: created.id });
+      }
+      return created;
     },
-    onSuccess: (p: Prospect) => {
-      // Keep caches in sync for both listing and global prospects
+    onSuccess: (p, variables) => {
       queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) =>
         Array.isArray(prev) ? [...prev, p] : [p]
       );
       queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) =>
         Array.isArray(prev) ? [...prev, p] : [p]
       );
-      // Bump cached count in the Workspaces list immediately
       queryClient.setQueryData<any[] | undefined>(['/api/listings'], (prev) => {
         if (!Array.isArray(prev)) return prev;
         return prev.map((l: any) => (l?.id === listingId) ? { ...l, prospectCount: Math.max(0, (l?.prospectCount ?? 0) + 1) } : l);
       });
+
       if (!isDemoMode) {
         queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'] });
-        // Mark the listings collection stale so it refetches when viewed next
         queryClient.invalidateQueries({ queryKey: ['/api/listings'] });
+        refetchLinked();
       } else {
-        // Persist globally for demo mode so main map sees it too
         const all = queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || [];
         persistProspectsGlobal(all);
         if (listingId) addProspectToWorkspace(listingId, p.id);
-        // Keep demo listing counts consistent
-        queryClient.setQueryData<any[] | undefined>(['/api/listings'], (prev) => {
-          if (!Array.isArray(prev)) return prev;
-          return prev.map((l: any) => (l?.id === listingId) ? { ...l, prospectCount: Math.max(0, (l?.prospectCount ?? 0) + 1) } : l);
-        });
       }
-      if (!isDemoMode) {
-        refetchLinked();
+
+      if (variables?.source === 'search') {
+        setSearchPin(null);
+        setClearSearchSignal((s) => s + 1);
+      } else if (variables?.source === 'context-menu') {
+        closeContextMenu();
       }
-      setSearchPin(null);
-      // Clear the search input text
-      setClearSearchSignal((s) => s + 1);
+
       setSelectedProspect(p);
       setIsEditPanelOpen(true);
-      toast({ title: isDemoMode ? 'Prospect added (demo)' : 'Prospect added', description: `${p.name} linked to workspace` });
-    }
+      const label = (p.name || '').trim() || 'Prospect';
+      toast({
+        title: isDemoMode ? 'Prospect added (demo)' : 'Prospect added',
+        description: `${label} linked to workspace`,
+      });
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : 'Failed to create prospect';
+      toast({
+        title: 'Could not add prospect',
+        description: message,
+        variant: 'destructive',
+      });
+    },
   });
+
+  const formatCoordinates = useCallback((lat: number, lng: number) => `${lat.toFixed(6)}, ${lng.toFixed(6)}`, []);
+
+  const handleCopyCoordinates = useCallback(async (lat: number, lng: number) => {
+    const text = formatCoordinates(lat, lng);
+    let copied = false;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      }
+    } catch {}
+
+    if (!copied && typeof document !== 'undefined') {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', 'true');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        copied = true;
+      } catch {}
+    }
+
+    if (copied) {
+      toast({ title: 'Coordinates copied', description: text });
+    } else {
+      toast({ title: 'Copy failed', description: 'Unable to copy coordinates', variant: 'destructive' });
+    }
+  }, [formatCoordinates, toast]);
+
+  const handleOpenInMaps = useCallback((lat: number, lng: number) => {
+    const url = `https://www.google.com/maps?q=${lat},${lng}`;
+    let opened = false;
+    try {
+      const win = window.open(url, '_blank', 'noopener,noreferrer');
+      if (win) {
+        opened = true;
+        win.opener = null;
+      }
+    } catch {}
+    if (!opened && typeof document !== 'undefined') {
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.target = '_blank';
+      anchor.rel = 'noopener noreferrer';
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      opened = true;
+    }
+    if (!opened) {
+      window.location.href = url;
+    }
+  }, []);
+
+  const handleCreateProspectAt = useCallback(async (lat: number, lng: number) => {
+    if (!can.edit || createProspectMutation.isPending) return;
+    let resolvedAddress = '';
+    try {
+      const result = await geocode.reverse(lat, lng);
+      if (result.address) {
+        resolvedAddress = result.address.trim();
+      }
+    } catch {}
+
+    const displayName = resolvedAddress.length > 0 ? resolvedAddress : `New prospect ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    createProspectMutation.mutate({
+      source: 'context-menu',
+      payload: {
+        name: displayName,
+        geometry: { type: 'Point', coordinates: [lng, lat] as [number, number] },
+        status: 'prospect',
+        notes: '',
+      },
+    });
+  }, [can.edit, createProspectMutation, geocode]);
 
   // Activity logging UI removed in workspace
 
@@ -661,7 +812,7 @@ export default function Workspace() {
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       {/* Map container fills remaining height without causing page scroll */}
-      <div className="relative flex-1 min-h-0 w-full overflow-hidden">
+      <div className="relative flex-1 min-h-0 w-full overflow-hidden" ref={mapContainerRef}>
         {!apiKey && (
           <div className="absolute inset-0 flex items-center justify-center text-gray-500">
             Missing VITE_GOOGLE_MAPS_API_KEY
@@ -937,11 +1088,42 @@ export default function Workspace() {
               <div style={{ position: 'absolute', top: 76, left: 16, zIndex: 50 }}>
                 <div className="bg-white p-2 rounded shadow border">
                   <div className="text-sm mb-2">{searchPin.address}</div>
-                  <Button size="sm" onClick={() => createAndLink.mutate()} disabled={createAndLink.isPending || !can.edit}>{createAndLink.isPending ? 'Adding...' : 'Add as Prospect'}</Button>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      if (!searchPin || !can.edit) return;
+                      const name = (searchPin.businessName?.trim() || searchPin.address || 'New Prospect').trim() || 'New Prospect';
+                      createProspectMutation.mutate({
+                        source: 'search',
+                        payload: {
+                          name,
+                          geometry: { type: 'Point', coordinates: [searchPin.lng, searchPin.lat] as [number, number] },
+                          status: 'prospect',
+                          notes: '',
+                          businessName: searchPin.businessName || undefined,
+                          websiteUrl: searchPin.websiteUrl || undefined,
+                          contactCompany: searchPin.businessName || undefined,
+                        },
+                      });
+                    }}
+                    disabled={createProspectMutation.isPending || !can.edit}
+                  >
+                    {createProspectMutation.isPending ? 'Adding...' : 'Add as Prospect'}
+                  </Button>
                 </div>
               </div>
             )}
             </GoogleMap>
+            {contextMenu && (
+              <MapContextMenu
+                anchor={{ x: contextMenu.viewportX, y: contextMenu.viewportY }}
+                latLng={{ lat: contextMenu.lat, lng: contextMenu.lng }}
+                onCopy={() => handleCopyCoordinates(contextMenu.lat, contextMenu.lng)}
+                onCreateProspect={() => handleCreateProspectAt(contextMenu.lat, contextMenu.lng)}
+                onClose={closeContextMenu}
+                canCreate={can.edit && !createProspectMutation.isPending}
+              />
+            )}
           </div>
         )}
       </div>

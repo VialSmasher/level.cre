@@ -16,11 +16,14 @@ export function SearchComponent({ prospects, map, onProspectSelect, onLocationFo
   const handleProspectSearch = (query: string) => {
     if (!query.trim()) return;
     
-    // Search existing prospects
-    const prospect = prospects.find(p => 
-      p.name.toLowerCase().includes(query.toLowerCase()) ||
-      p.notes.toLowerCase().includes(query.toLowerCase())
-    );
+    const normalizedQuery = query.toLowerCase();
+    // Search existing prospects by name, address, or notes
+    const prospect = prospects.find((p) => {
+      const name = (p.name ?? '').toLowerCase();
+      const address = (((p as any).address ?? '') as string).toLowerCase();
+      const notes = (p.notes ?? '').toLowerCase();
+      return name.includes(normalizedQuery) || address.includes(normalizedQuery) || notes.includes(normalizedQuery);
+    });
     
     if (prospect && map) {
       let coords: { lat: number; lng: number };
