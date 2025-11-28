@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useRoute } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { GoogleMap, Marker, Polygon, DrawingManager, useJsApiLoader } from '@react-google-maps/api';
+import { GoogleMap, Polygon, DrawingManager, useJsApiLoader } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
 // Drawer controls not used in workspace; edit panel opens directly
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { MapControls } from '@/features/map/MapControls';
+import { createCustomAssetMarker } from '@/features/map/createCustomAssetMarker';
 import { apiRequest } from '@/lib/queryClient';
 import type { Prospect, FollowUpTimeframeType, ProspectGeometryType } from '@level-cre/shared/schema';
 import { useProfile } from '@/hooks/useProfile';
@@ -193,6 +194,9 @@ export default function Workspace() {
     // Keep a reference to the map instance; initial center/zoom are set via defaultCenter/defaultZoom
     setMap(m);
   }, []);
+  const customAssetMarkersRef = useRef<google.maps.Marker[]>([]);
+  const subjectMarkerRef = useRef<google.maps.Marker | null>(null);
+  const searchMarkerRef = useRef<google.maps.Marker | null>(null);
 
   // Ensure tiles render by forcing a recenter once loaded
   useEffect(() => {
@@ -351,6 +355,140 @@ export default function Workspace() {
   const filteredLinkedProspects = useMemo(() => {
     return linkedProspects.filter((p) => statusFilters.has(p.status as StatusKey));
   }, [linkedProspects, statusFilters]);
+
+  useEffect(() => {
+    if (!map) return;
+
+    customAssetMarkersRef.current.forEach((marker) => marker.setMap(null));
+    customAssetMarkersRef.current = [];
+
+    const nextMarkers: google.maps.Marker[] = [];
+
+    filteredLinkedProspects.forEach((p) => {
+      if (p.geometry.type !== 'Point') return;
+      const [lng, lat] = p.geometry.coordinates as [number, number];
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      try {
+        const circlePath = window.google?.maps?.SymbolPath?.CIRCLE ?? google.maps.SymbolPath.CIRCLE;
+        const color = STATUS_META[p.status as ProspectStatusType]?.color || '#3B82F6';
+        const marker = createCustomAssetMarker(map, {
+          lat,
+          lng,
+          title: p.name || 'Custom Asset',
+          markerOptions: {
+            icon: {
+              path: circlePath,
+              fillColor: color,
+              fillOpacity: 1,
+              strokeWeight: 2,
+              strokeColor: '#ffffff',
+              scale: 8,
+            } as google.maps.Symbol,
+          },
+        });
+        nextMarkers.push(marker);
+      } catch (err) {
+        console.error('Failed to create custom asset marker', err);
+      }
+    });
+
+    customAssetMarkersRef.current = nextMarkers;
+
+    return () => {
+      nextMarkers.forEach((marker) => marker.setMap(null));
+      if (customAssetMarkersRef.current === nextMarkers) {
+        customAssetMarkersRef.current = [];
+      }
+    };
+  }, [map, filteredLinkedProspects]);
+
+  useEffect(() => {
+    if (!map) {
+      if (subjectMarkerRef.current) {
+        subjectMarkerRef.current.setMap(null);
+        subjectMarkerRef.current = null;
+      }
+      return;
+    }
+
+    subjectMarkerRef.current?.setMap(null);
+    subjectMarkerRef.current = null;
+
+    if (!subjectPosition) return;
+
+    let nextMarker: google.maps.Marker | null = null;
+    try {
+      const circlePath = window.google?.maps?.SymbolPath?.CIRCLE ?? google.maps.SymbolPath.CIRCLE;
+      const subjectIcon = {
+        path: circlePath,
+        fillColor: '#ef4444',
+        fillOpacity: 1,
+        strokeWeight: 2,
+        strokeColor: '#ffffff',
+        scale: 10,
+      } as google.maps.Symbol;
+      nextMarker = createCustomAssetMarker(map, {
+        lat: subjectPosition.lat,
+        lng: subjectPosition.lng,
+        title: listing?.title || 'Subject Property',
+        markerOptions: { icon: subjectIcon },
+      });
+      subjectMarkerRef.current = nextMarker;
+    } catch (err) {
+      console.error('Failed to create subject marker', err);
+    }
+
+    return () => {
+      nextMarker?.setMap(null);
+      if (subjectMarkerRef.current === nextMarker) {
+        subjectMarkerRef.current = null;
+      }
+    };
+  }, [map, subjectPosition, listing?.title]);
+
+  useEffect(() => {
+    if (!map) {
+      if (searchMarkerRef.current) {
+        searchMarkerRef.current.setMap(null);
+        searchMarkerRef.current = null;
+      }
+      return;
+    }
+
+    searchMarkerRef.current?.setMap(null);
+    searchMarkerRef.current = null;
+
+    if (!searchPin) return;
+
+    let nextMarker: google.maps.Marker | null = null;
+    try {
+      const circlePath = window.google?.maps?.SymbolPath?.CIRCLE ?? google.maps.SymbolPath.CIRCLE;
+      const searchIcon = {
+        path: circlePath,
+        fillColor: '#7C3AED',
+        fillOpacity: 1,
+        strokeWeight: 2,
+        strokeColor: '#ffffff',
+        scale: 8,
+      } as google.maps.Symbol;
+      nextMarker = createCustomAssetMarker(map, {
+        lat: searchPin.lat,
+        lng: searchPin.lng,
+        title: searchPin.address || 'Search Pin',
+        markerOptions: { icon: searchIcon },
+      });
+      searchMarkerRef.current = nextMarker;
+    } catch (err) {
+      console.error('Failed to create search marker', err);
+    }
+
+    return () => {
+      nextMarker?.setMap(null);
+      if (searchMarkerRef.current === nextMarker) {
+        searchMarkerRef.current = null;
+      }
+    };
+  }, [map, searchPin]);
 
   // Persist status filters per workspace id
   useEffect(() => {
@@ -997,67 +1135,31 @@ export default function Workspace() {
                 rectangleOptions: { fillColor: '#059669', fillOpacity: 0.15, strokeColor: '#059669', strokeWeight: 2 },
               }}
             />
-            {/* Subject pin */}
-            {subjectPosition && (
-              <Marker position={subjectPosition} icon={{ path: window.google?.maps?.SymbolPath?.CIRCLE, fillColor: '#ef4444', fillOpacity: 1, strokeWeight: 2, strokeColor: '#ffffff', scale: 10 }} />
-            )}
-            {/* Search selection pin */}
-            {searchPin && (
-              <Marker
-                position={{ lat: searchPin.lat, lng: searchPin.lng }}
-                icon={{
-                  path: window.google?.maps?.SymbolPath?.CIRCLE,
-                  fillColor: '#7C3AED',
-                  fillOpacity: 1,
-                  strokeWeight: 2,
-                  strokeColor: '#ffffff',
-                  scale: 8,
-                }}
-                title={searchPin.address}
-              />
-            )}
             {/* Linked prospects (filtered by status) */}
             {filteredLinkedProspects.map((p) => {
-              const color = STATUS_META[p.status as ProspectStatusType]?.color || '#3B82F6';
-              if (p.geometry.type === 'Point') {
-                const [lng, lat] = p.geometry.coordinates as [number, number];
-                return (
-                  <Marker
-                    key={p.id}
-                    position={{ lat, lng }}
-                    onClick={() => { setSelectedProspect(p); setIsEditPanelOpen(true); }}
-                    icon={{
-                      path: window.google?.maps?.SymbolPath?.CIRCLE,
-                      fillColor: color,
-                      fillOpacity: 1,
-                      strokeWeight: 2,
-                      strokeColor: '#ffffff',
-                      scale: 8,
-                    }}
-                  />
-                );
-              } else if (p.geometry.type === 'Polygon' || p.geometry.type === 'Rectangle') {
-                const coords = p.geometry.coordinates as [number, number][][] | [number, number][];
-                const ring = Array.isArray(coords[0]) && Array.isArray((coords as any)[0][0])
-                  ? (coords as [number, number][][])[0]
-                  : (coords as [number, number][]);
-                return (
-                  <Polygon
-                    key={p.id}
-                    paths={ring.map(([lng, lat]) => ({ lat, lng }))}
-                    onClick={() => { setSelectedProspect(p); setIsEditPanelOpen(true); }}
-                    onLoad={(poly) => { polygonRefs.current.set(p.id, poly); }}
-                    options={{
-                      fillColor: color,
-                      fillOpacity: 0.15,
-                      strokeColor: color,
-                      strokeOpacity: 0.8,
-                      strokeWeight: 2,
-                    }}
-                  />
-                );
+              if (p.geometry.type !== 'Polygon' && p.geometry.type !== 'Rectangle') {
+                return null;
               }
-              return null;
+              const color = STATUS_META[p.status as ProspectStatusType]?.color || '#3B82F6';
+              const coords = p.geometry.coordinates as [number, number][][] | [number, number][];
+              const ring = Array.isArray(coords[0]) && Array.isArray((coords as any)[0][0])
+                ? (coords as [number, number][][])[0]
+                : (coords as [number, number][]);
+              return (
+                <Polygon
+                  key={p.id}
+                  paths={ring.map(([lng, lat]) => ({ lat, lng }))}
+                  onClick={() => { setSelectedProspect(p); setIsEditPanelOpen(true); }}
+                  onLoad={(poly) => { polygonRefs.current.set(p.id, poly); }}
+                  options={{
+                    fillColor: color,
+                    fillOpacity: 0.15,
+                    strokeColor: color,
+                    strokeOpacity: 0.8,
+                    strokeWeight: 2,
+                  }}
+                />
+              );
             })}
 
             {/* Tools + search overlay */}
