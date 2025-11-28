@@ -658,6 +658,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllProspects(userId: string): Promise<Prospect[]> {
+    // [INTENTIONAL ARCHITECTURE]
+    // We deliberately fetch ALL assets (personal + workspace) for the Global Map.
+    // This creates a 'Unified Intelligence Layer' allowing users to see collaborative
+    // inputs from their team alongside their personal data.
+    // DO NOT filter by 'workspace_id is null' here.
     const rows = await db
       .select({
         id: prospects.id,

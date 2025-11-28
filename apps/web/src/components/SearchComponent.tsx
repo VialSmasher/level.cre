@@ -1,5 +1,6 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import type { Prospect } from '@level-cre/shared/schema';
+import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 
 interface SearchComponentProps {
   prospects: Prospect[];
@@ -8,12 +9,15 @@ interface SearchComponentProps {
   onLocationFound?: (location: { lat: number; lng: number; address: string; businessName?: string | null; websiteUrl?: string | null }) => void;
 }
 
+const SEARCH_DEBOUNCE_MS = 400;
+
 export function SearchComponent({ prospects, map, onProspectSelect, onLocationFound }: SearchComponentProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
+  const [searchValue, setSearchValue] = useState('');
 
   // Handle prospect search from input change
-  const handleProspectSearch = (query: string) => {
+  const handleProspectSearch = useCallback((query: string) => {
     if (!query.trim()) return;
     
     const normalizedQuery = query.toLowerCase();
@@ -39,7 +43,18 @@ export function SearchComponent({ prospects, map, onProspectSelect, onLocationFo
       map.setZoom(15);
       onProspectSelect(prospect);
     }
-  };
+  }, [prospects, map, onProspectSelect]);
+
+  const { debounced: scheduleProspectSearch, cancel: cancelProspectSearch } =
+    useDebouncedCallback((query: string) => {
+      handleProspectSearch(query);
+    }, SEARCH_DEBOUNCE_MS);
+
+  useEffect(() => {
+    return () => {
+      cancelProspectSearch();
+    };
+  }, [cancelProspectSearch]);
 
   // Initialize Google Places Autocomplete
   useEffect(() => {
@@ -58,6 +73,7 @@ export function SearchComponent({ prospects, map, onProspectSelect, onLocationFo
         autocomplete.addListener('place_changed', () => {
           const place = autocomplete.getPlace();
           console.log('Place selected:', place);
+          const rawInput = inputRef.current?.value || '';
           
           if (place?.geometry?.location) {
             const lat = place.geometry.location.lat();
@@ -68,6 +84,7 @@ export function SearchComponent({ prospects, map, onProspectSelect, onLocationFo
             // Clean up address - remove "Canada"
             let cleanAddress = place.formatted_address || '';
             cleanAddress = cleanAddress.replace(/, Canada$/, '');
+            setSearchValue(cleanAddress || rawInput);
             
             // Center and zoom the map
             map.setCenter({ lat, lng });
@@ -86,6 +103,7 @@ export function SearchComponent({ prospects, map, onProspectSelect, onLocationFo
             // Fallback: Use geocoder if autocomplete missing geometry
             console.log('Place missing geometry, using geocoder fallback');
             handleGeocodeSearch(place.name);
+            setSearchValue(place.name);
           }
         });
 
@@ -139,16 +157,18 @@ export function SearchComponent({ prospects, map, onProspectSelect, onLocationFo
       <input
         ref={inputRef}
         type="text"
+        value={searchValue}
         onChange={(e) => {
           const value = e.target.value;
-          // Search existing prospects while typing
-          handleProspectSearch(value);
+          setSearchValue(value);
+          scheduleProspectSearch(value);
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
-            const value = (e.target as HTMLInputElement).value;
-            if (value.trim()) {
+            const value = (e.target as HTMLInputElement).value.trim();
+            if (value) {
               console.log('Manual search for:', value);
+              cancelProspectSearch();
               // Use geocoder for manual searches
               handleGeocodeSearch(value);
             }

@@ -1,5 +1,5 @@
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { PlusCircle, Copy, ExternalLink } from 'lucide-react';
 
 type MapContextMenuProps = {
   anchor: { x: number; y: number };
@@ -20,72 +20,87 @@ export function MapContextMenu({
   onClose,
   canCreate = true,
 }: MapContextMenuProps) {
+  const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
   if (typeof document === 'undefined') return null;
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
-  const width = 256;
-  const headerHeight = 48;
-  const buttonHeight = 40;
-  const buttonCount = 3; // Copy, Open, Create (Create may be disabled but still rendered)
-  const height = headerHeight + buttonCount * buttonHeight;
+  const width = 240;
+  const rowHeight = 42;
+  const dividerHeight = 2; // approx margin w/ divider
+  const buttonCount = 3;
+  const height = rowHeight * buttonCount + dividerHeight;
   const left = Math.min(anchor.x, viewportWidth - width - 8);
   const top = Math.min(anchor.y, viewportHeight - height - 8);
   const coordsLabel = `${latLng.lat.toFixed(6)}, ${latLng.lng.toFixed(6)}`;
-  const itemBase = 'w-full px-3 py-2 text-left text-sm focus:outline-none transition-colors';
+
+  const handleCopyClick = async () => {
+    try {
+      await Promise.resolve(onCopy());
+      setCopied(true);
+      if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   const menu = (
     <div
       role="menu"
       aria-label="Map actions"
-      className="fixed z-[2000] rounded-lg border border-gray-200 bg-white shadow-[0_4px_12px_rgba(0,0,0,0.15)] focus:outline-none overflow-hidden"
+      className="fixed bg-white min-w-[200px] shadow-xl rounded-md py-1 z-50 focus:outline-none"
       style={{ top, left, width }}
       onMouseDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
     >
       <button
         type="button"
-        className="w-full px-3 py-2 text-left text-sm font-medium text-gray-800 border-b border-gray-100 hover:bg-gray-50 focus:bg-gray-50 focus:outline-none flex items-center justify-between"
-        onClick={async () => {
-          try {
-            await onCopy();
-          } finally {
-            onClose();
-          }
-        }}
+        className={`flex w-full items-center justify-center px-4 py-1.5 text-sm font-medium tracking-wide hover:bg-gray-100 cursor-pointer transition-colors ${copied ? 'text-green-600' : 'text-gray-800'}`}
+        onClick={handleCopyClick}
         title="Copy coordinates"
         aria-label={`Copy ${coordsLabel}`}
       >
-        <span className="font-mono tracking-tight">{coordsLabel}</span>
-        <Copy className="h-4 w-4 text-gray-500" aria-hidden />
+        <span className="font-mono text-center">{coordsLabel}</span>
       </button>
       <a
-        href={`https://www.google.com/maps?q=${latLng.lat},${latLng.lng}`}
+        href={`https://maps.google.com/search/?api=1&query=${latLng.lat},${latLng.lng}`}
         target="_blank"
         rel="noopener noreferrer"
-        className={`${itemBase} text-gray-700 hover:bg-gray-100 focus:bg-gray-100 flex items-center justify-between`}
-        onClick={() => {
+        className="block px-4 py-1.5 hover:bg-gray-100 cursor-pointer text-gray-700 text-sm"
+        aria-label="Open in Google Maps"
+        title="Open in Google Maps"
+        onClick={(e) => {
+          e.stopPropagation();
           try { onOpenMaps?.(); } catch {}
-          // Delay closing slightly so the browser can complete the default navigation.
           requestAnimationFrame(() => onClose());
         }}
       >
-        <span>Open in Google Maps</span>
-        <ExternalLink className="h-4 w-4 text-gray-500" aria-hidden />
+        Open in Google Maps
       </a>
+      <div className="h-px bg-gray-200 my-0.5" />
       <button
         type="button"
-        className={`${itemBase} ${canCreate ? 'text-blue-600 hover:bg-blue-50 focus:bg-blue-50' : 'text-gray-300 cursor-not-allowed'}`}
+        className={`w-full text-left px-4 py-1.5 text-sm ${canCreate ? 'text-gray-700 hover:bg-gray-100 cursor-pointer' : 'text-gray-400 cursor-not-allowed'}`}
         onClick={() => {
           if (!canCreate) return;
           onCreateProspect();
           onClose();
         }}
         disabled={!canCreate}
-        aria-label="Create prospect here"
-        title="Create prospect here"
+        aria-label="Add new asset here"
+        title="Add new asset here"
       >
-        <PlusCircle className="h-4 w-4 mx-auto" />
-        <span className="sr-only">Create prospect here</span>
+        Add new asset here
       </button>
     </div>
   );

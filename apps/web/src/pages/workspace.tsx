@@ -42,6 +42,12 @@ type Listing = {
 };
 
 const libraries: any = ['drawing', 'geometry', 'places'];
+const FIELD_BUFFER_DELAY = 600;
+const AUTO_NAME_REGEX = /^New\s+(polygon|rectangle|point|marker)/i;
+const getDisplayAddressValue = (name?: string | null) => {
+  if (!name) return '';
+  return AUTO_NAME_REGEX.test(name) ? '' : name;
+};
 
 type CreateProspectVariables = {
   payload: {
@@ -261,6 +267,12 @@ export default function Workspace() {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [prospectDraft, setProspectDraft] = useState<Prospect | null>(null);
   const prospectDraftRef = useRef<Prospect | null>(null);
+  const [localAddress, setLocalAddress] = useState('');
+  const [localNotes, setLocalNotes] = useState('');
+  const [localContactName, setLocalContactName] = useState('');
+  const [localContactCompany, setLocalContactCompany] = useState('');
+  const [localContactEmail, setLocalContactEmail] = useState('');
+  const [localContactPhone, setLocalContactPhone] = useState('');
   const [isEditPanelOpen, setIsEditPanelOpen] = useState(false);
   const [editingProspectId, setEditingProspectId] = useState<string | null>(null);
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
@@ -669,6 +681,164 @@ export default function Workspace() {
   const updateSelectedProspect = useCallback((field: keyof Prospect, value: any) => {
     queueUpdate(field, value);
   }, [queueUpdate]);
+
+  const { debounced: scheduleAddressSync, cancel: cancelAddressSync } = useDebouncedCallback(
+    (payload: { id: string; value: string }) => {
+      if (!payload?.id) return;
+      if (prospectDraftRef.current?.id !== payload.id) return;
+      queueUpdate('name', payload.value);
+    },
+    FIELD_BUFFER_DELAY
+  );
+
+  const { debounced: scheduleNotesSync, cancel: cancelNotesSync } = useDebouncedCallback(
+    (payload: { id: string; value: string }) => {
+      if (!payload?.id) return;
+      if (prospectDraftRef.current?.id !== payload.id) return;
+      queueUpdate('notes', payload.value);
+    },
+    FIELD_BUFFER_DELAY
+  );
+
+  const { debounced: scheduleContactNameSync, cancel: cancelContactNameSync } = useDebouncedCallback(
+    (payload: { id: string; value: string }) => {
+      if (!payload?.id) return;
+      if (prospectDraftRef.current?.id !== payload.id) return;
+      queueUpdate('contactName', payload.value || undefined);
+    },
+    FIELD_BUFFER_DELAY
+  );
+
+  const { debounced: scheduleContactCompanySync, cancel: cancelContactCompanySync } = useDebouncedCallback(
+    (payload: { id: string; value: string }) => {
+      if (!payload?.id) return;
+      if (prospectDraftRef.current?.id !== payload.id) return;
+      queueUpdate('contactCompany', payload.value || undefined);
+    },
+    FIELD_BUFFER_DELAY
+  );
+
+  const { debounced: scheduleContactEmailSync, cancel: cancelContactEmailSync } = useDebouncedCallback(
+    (payload: { id: string; value: string }) => {
+      if (!payload?.id) return;
+      if (prospectDraftRef.current?.id !== payload.id) return;
+      queueUpdate('contactEmail', payload.value || undefined);
+    },
+    FIELD_BUFFER_DELAY
+  );
+
+  const { debounced: scheduleContactPhoneSync, cancel: cancelContactPhoneSync } = useDebouncedCallback(
+    (payload: { id: string; value: string }) => {
+      if (!payload?.id) return;
+      if (prospectDraftRef.current?.id !== payload.id) return;
+      queueUpdate('contactPhone', payload.value || undefined);
+    },
+    FIELD_BUFFER_DELAY
+  );
+
+  useEffect(() => {
+    cancelAddressSync();
+    cancelNotesSync();
+    cancelContactNameSync();
+    cancelContactCompanySync();
+    cancelContactEmailSync();
+    cancelContactPhoneSync();
+    if (!prospectDraft) {
+      setLocalAddress('');
+      setLocalNotes('');
+      setLocalContactName('');
+      setLocalContactCompany('');
+      setLocalContactEmail('');
+      setLocalContactPhone('');
+      return;
+    }
+    setLocalAddress(getDisplayAddressValue(prospectDraft.name));
+    setLocalNotes(prospectDraft.notes || '');
+    setLocalContactName(prospectDraft.contactName || '');
+    setLocalContactCompany(prospectDraft.contactCompany || '');
+    setLocalContactEmail(prospectDraft.contactEmail || '');
+    setLocalContactPhone(prospectDraft.contactPhone || '');
+  }, [
+    prospectDraft,
+    cancelAddressSync,
+    cancelNotesSync,
+    cancelContactNameSync,
+    cancelContactCompanySync,
+    cancelContactEmailSync,
+    cancelContactPhoneSync,
+  ]);
+
+  const handleAddressChange = useCallback((next: string) => {
+    setLocalAddress(next);
+    if (!prospectDraft?.id) return;
+    scheduleAddressSync({ id: prospectDraft.id, value: next });
+  }, [prospectDraft?.id, scheduleAddressSync]);
+
+  const handleAddressBlur = useCallback(() => {
+    if (!prospectDraftRef.current?.id) return;
+    cancelAddressSync();
+    queueUpdate('name', localAddress);
+  }, [cancelAddressSync, queueUpdate, localAddress]);
+
+  const handleNotesChange = useCallback((next: string) => {
+    setLocalNotes(next);
+    if (!prospectDraft?.id) return;
+    scheduleNotesSync({ id: prospectDraft.id, value: next });
+  }, [prospectDraft?.id, scheduleNotesSync]);
+
+  const handleNotesBlur = useCallback(() => {
+    if (!prospectDraftRef.current?.id) return;
+    cancelNotesSync();
+    queueUpdate('notes', localNotes);
+  }, [cancelNotesSync, queueUpdate, localNotes]);
+
+  const handleContactNameChange = useCallback((next: string) => {
+    setLocalContactName(next);
+    if (!prospectDraft?.id) return;
+    scheduleContactNameSync({ id: prospectDraft.id, value: next });
+  }, [prospectDraft?.id, scheduleContactNameSync]);
+
+  const handleContactNameBlur = useCallback(() => {
+    if (!prospectDraftRef.current?.id) return;
+    cancelContactNameSync();
+    queueUpdate('contactName', localContactName || undefined);
+  }, [cancelContactNameSync, queueUpdate, localContactName]);
+
+  const handleContactCompanyChange = useCallback((next: string) => {
+    setLocalContactCompany(next);
+    if (!prospectDraft?.id) return;
+    scheduleContactCompanySync({ id: prospectDraft.id, value: next });
+  }, [prospectDraft?.id, scheduleContactCompanySync]);
+
+  const handleContactCompanyBlur = useCallback(() => {
+    if (!prospectDraftRef.current?.id) return;
+    cancelContactCompanySync();
+    queueUpdate('contactCompany', localContactCompany || undefined);
+  }, [cancelContactCompanySync, queueUpdate, localContactCompany]);
+
+  const handleContactEmailChange = useCallback((next: string) => {
+    setLocalContactEmail(next);
+    if (!prospectDraft?.id) return;
+    scheduleContactEmailSync({ id: prospectDraft.id, value: next });
+  }, [prospectDraft?.id, scheduleContactEmailSync]);
+
+  const handleContactEmailBlur = useCallback(() => {
+    if (!prospectDraftRef.current?.id) return;
+    cancelContactEmailSync();
+    queueUpdate('contactEmail', localContactEmail || undefined);
+  }, [cancelContactEmailSync, queueUpdate, localContactEmail]);
+
+  const handleContactPhoneChange = useCallback((next: string) => {
+    setLocalContactPhone(next);
+    if (!prospectDraft?.id) return;
+    scheduleContactPhoneSync({ id: prospectDraft.id, value: next });
+  }, [prospectDraft?.id, scheduleContactPhoneSync]);
+
+  const handleContactPhoneBlur = useCallback(() => {
+    if (!prospectDraftRef.current?.id) return;
+    cancelContactPhoneSync();
+    queueUpdate('contactPhone', localContactPhone || undefined);
+  }, [cancelContactPhoneSync, queueUpdate, localContactPhone]);
 
   const deleteSelectedProspect = useCallback(async () => {
     if (!can.edit) return;
@@ -1275,18 +1445,13 @@ export default function Workspace() {
               <TabsContent value="property" className="space-y-4">
                 <div>
                   <Label className="text-xs font-medium text-gray-700">Address</Label>
-                  {(() => {
-                    const n = prospectDraft?.name || '';
-                    const display = /^New\s+(polygon|rectangle|point|marker)/i.test(n) ? '' : n;
-                    return (
-                      <Input
-                        value={display}
-                        onChange={(e) => updateSelectedProspect('name', e.target.value)}
-                        placeholder="Property address"
-                        className="h-8 text-sm"
-                      />
-                    );
-                  })()}
+                  <Input
+                    value={localAddress}
+                    onChange={(e) => handleAddressChange(e.target.value)}
+                    onBlur={handleAddressBlur}
+                    placeholder="Property address"
+                    className="h-8 text-sm"
+                  />
                 </div>
                 {/* Business information (shown when available) */}
                 {(prospectDraft.businessName || prospectDraft.websiteUrl) && (
@@ -1379,8 +1544,9 @@ export default function Workspace() {
                 <div>
                   <Label className="text-xs font-medium text-gray-700">Notes</Label>
                   <Textarea
-                    value={prospectDraft.notes || ''}
-                    onChange={(e) => updateSelectedProspect('notes', e.target.value)}
+                    value={localNotes}
+                    onChange={(e) => handleNotesChange(e.target.value)}
+                    onBlur={handleNotesBlur}
                     rows={3}
                     className="resize-none text-sm"
                   />
@@ -1390,21 +1556,46 @@ export default function Workspace() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Contact Name</Label>
-                    <Input value={prospectDraft.contactName || ''} onChange={(e) => updateSelectedProspect('contactName', e.target.value || undefined)} placeholder="Contact name" className="h-8 text-sm" />
+                    <Input
+                      value={localContactName}
+                      onChange={(e) => handleContactNameChange(e.target.value)}
+                      onBlur={handleContactNameBlur}
+                      placeholder="Contact name"
+                      className="h-8 text-sm"
+                    />
                   </div>
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Company</Label>
-                    <Input value={prospectDraft.contactCompany || ''} onChange={(e) => updateSelectedProspect('contactCompany', e.target.value || undefined)} placeholder="Company" className="h-8 text-sm" />
+                    <Input
+                      value={localContactCompany}
+                      onChange={(e) => handleContactCompanyChange(e.target.value)}
+                      onBlur={handleContactCompanyBlur}
+                      placeholder="Company"
+                      className="h-8 text-sm"
+                    />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Email</Label>
-                    <Input type="email" value={prospectDraft.contactEmail || ''} onChange={(e) => updateSelectedProspect('contactEmail', e.target.value || undefined)} placeholder="name@company.com" className="h-8 text-sm" />
+                    <Input
+                      type="email"
+                      value={localContactEmail}
+                      onChange={(e) => handleContactEmailChange(e.target.value)}
+                      onBlur={handleContactEmailBlur}
+                      placeholder="name@company.com"
+                      className="h-8 text-sm"
+                    />
                   </div>
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Phone</Label>
-                    <PhoneInput value={prospectDraft.contactPhone || ''} onChange={(e) => updateSelectedProspect('contactPhone', e.target.value || undefined)} placeholder="(000) 000-0000" className="h-8 text-sm" />
+                    <PhoneInput
+                      value={localContactPhone}
+                      onChange={(e) => handleContactPhoneChange(e.target.value)}
+                      onBlur={handleContactPhoneBlur}
+                      placeholder="(000) 000-0000"
+                      className="h-8 text-sm"
+                    />
                   </div>
                 </div>
               </TabsContent>
