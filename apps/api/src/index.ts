@@ -1,6 +1,3 @@
-// DEBUG: Temporary log to verify env var loading in Railway. Remove after debugging.
-console.log(`DEBUG ECHO_TEST: ${process.env.ECHO_TEST}`);
-console.log('DEBUG SUPABASE_JWT_SECRET:', process.env.SUPABASE_JWT_SECRET ? `${process.env.SUPABASE_JWT_SECRET.slice(0, 4)}...(${process.env.SUPABASE_JWT_SECRET.length} chars)` : 'undefined');
 import express, { type Request, Response, NextFunction } from "express";
 import path from 'path';
 import fs from 'fs';
@@ -88,9 +85,9 @@ if (process.env.NODE_ENV === 'development') {
 // Ensure a secret for signed cookies; fallback in dev to avoid crashes
 {
   const isDev = (process.env.NODE_ENV === 'development' || app.get('env') === 'development');
-  const secret = process.env.JWT_SECRET || (isDev ? 'dev_change_me' : undefined);
+  const secret = process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET || (isDev ? 'dev_change_me' : undefined);
   if (!secret) {
-    console.warn('JWT_SECRET is not set. Signed cookies may not work correctly.');
+    console.warn('JWT_SECRET (or SUPABASE_JWT_SECRET) is not set. Signed cookies may not work correctly.');
   }
   app.use(cookieParser(secret || 'dev_change_me'));
 }
