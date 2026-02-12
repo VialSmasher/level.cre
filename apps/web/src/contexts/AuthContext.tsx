@@ -265,6 +265,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
       throw new Error('Google OAuth disabled')
     }
     try {
+      const providerStatusRes = await fetch(apiUrl('/api/auth/google/status'), {
+        method: 'GET',
+        credentials: 'include',
+      })
+      if (!providerStatusRes.ok) {
+        let message = 'Google sign-in is temporarily unavailable. Please use Demo Mode and try again later.'
+        try {
+          const body = await providerStatusRes.json()
+          if (body?.message) message = body.message
+        } catch {}
+        throw new Error(message)
+      }
+
       // Clear demo mode when starting Google flow
       localStorage.removeItem('demo-mode')
       if (!supabase) throw new Error('Auth is not configured')

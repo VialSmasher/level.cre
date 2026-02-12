@@ -29,6 +29,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
   const supabaseAdmin = (supabaseUrl && supabaseServiceKey) ? createClient(supabaseUrl, supabaseServiceKey) : null;
 
+  async function checkGoogleOAuthProvider(): Promise<{ ok: true } | { ok: false; message: string }> {
+    if (!supabaseUrl || !supabaseKey) {
+      return { ok: false, message: 'Google sign-in is not configured for this environment.' };
+    }
+
+    try {
+      const authorizeUrl = new URL('/auth/v1/authorize', supabaseUrl);
+      authorizeUrl.searchParams.set('provider', 'google');
+      authorizeUrl.searchParams.set('redirect_to', 'https://example.com/auth/callback');
+      authorizeUrl.searchParams.set('apikey', supabaseKey);
+
+      const response = await fetch(authorizeUrl.toString(), {
+        method: 'GET',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (response.status >= 500) {
+        return { ok: false, message: 'Google sign-in is temporarily unavailable. Please try again in a few minutes.' };
+      }
+
+      if (response.status >= 400) {
+        return { ok: false, message: 'Google sign-in is currently unavailable. Please use Demo Mode and try again later.' };
+      }
+
+      return { ok: true };
+    } catch (error: any) {
+      console.error('Google OAuth provider check failed:', error?.message || error);
+      return { ok: false, message: 'Google sign-in provider is unreachable right now. Please use Demo Mode and try again later.' };
+    }
+  }
+
   // Helpers: membership + role checks
   async function getListingRole(userId: string, listingId: string): Promise<'owner' | 'editor' | 'viewer' | null> {
     try {
@@ -137,6 +169,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   if (GOOGLE_ENABLED) {
+    app.get('/api/auth/google/status', async (_req, res) => {
+      const status = await checkGoogleOAuthProvider();
+      if (!status.ok) return res.status(503).json(status);
+      return res.json(status);
+    });
+
     // Simple redirect to Google OAuth - let Supabase handle everything
     app.get('/api/auth/google', async (req, res) => {
       if (!supabase) {
