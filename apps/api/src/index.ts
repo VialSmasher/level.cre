@@ -155,6 +155,7 @@ app.get('/api/ping', (req, res) => {
   // In the monorepo, the API runs independently.
   // Bind on 0.0.0.0 and prefer PORT from env (Railway/Heroku style).
   const port = Number(process.env.PORT) || 3000;
+  console.log(`[startup] DATABASE_URL ${process.env.DATABASE_URL ? 'present' : 'missing'}`);
   server.listen(port, '0.0.0.0', () => {
     const formattedTime = new Date().toLocaleTimeString("en-US", {
       hour: "numeric",
