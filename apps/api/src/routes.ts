@@ -1980,15 +1980,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return followUpCountActions.has(type);
         }).length;
       } else {
-        const hasEvents = await tableExists('events');
-        if (hasEvents) {
-          try {
-            const assetRes = await pool.query(
-              `SELECT COUNT(DISTINCT asset_id)::int AS c FROM events WHERE user_id = $1`,
+        // Assets Tracked must be all-time count of prospects (not week-filtered).
+        try {
+          if (await tableExists('prospects')) {
+            const r = await pool.query(
+              `SELECT COUNT(*)::int AS c FROM prospects WHERE user_id = $1`,
               [userId]
             );
-            assetsTracked = assetRes?.rows?.[0]?.c ?? 0;
-          } catch {}
+            assetsTracked = r?.rows?.[0]?.c ?? 0;
+          }
+        } catch {}
+
+        const hasEvents = await tableExists('events');
+        if (hasEvents) {
           // events table is retained for diagnostics/legacy support; follow-ups counter now comes
           // from weekly skill activities to match the Broker Stats performance ring.
         }
@@ -2017,15 +2021,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         if (!followupsCountedFromActivities) {
           // Fallbacks
-          try {
-            if (await tableExists('prospects')) {
-              const r = await pool.query(
-                `SELECT COUNT(*)::int AS c FROM prospects WHERE user_id = $1`,
-                [userId]
-              );
-              assetsTracked = r?.rows?.[0]?.c ?? assetsTracked;
-            }
-          } catch {}
           try {
             if (await tableExists('contact_interactions')) {
               const r = await pool.query(

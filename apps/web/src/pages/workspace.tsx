@@ -1335,6 +1335,29 @@ export default function Workspace() {
             {/* Tools + search overlay */}
             <MapControls
               onSearch={(loc) => setSearchPin(loc)}
+              prospects={filteredLinkedProspects}
+              onProspectClick={(prospect) => {
+                let target: { lat: number; lng: number } | null = null;
+                if (prospect.geometry.type === 'Point') {
+                  const [lng, lat] = prospect.geometry.coordinates as [number, number];
+                  target = { lat, lng };
+                } else if (prospect.geometry.type === 'Polygon' || prospect.geometry.type === 'Rectangle') {
+                  const coords = prospect.geometry.coordinates as [number, number][][] | [number, number][];
+                  const ring = Array.isArray(coords[0]) && Array.isArray((coords as any)[0][0])
+                    ? (coords as [number, number][][])[0]
+                    : (coords as [number, number][]);
+                  if (ring.length > 0) {
+                    const [lng, lat] = ring[0];
+                    target = { lat, lng };
+                  }
+                }
+                if (target && map) {
+                  map.panTo(target);
+                  map.setZoom(Math.max(map.getZoom() || 15, 15));
+                }
+                setSelectedProspect(prospect);
+                setIsEditPanelOpen(true);
+              }}
               bounds={bounds}
               defaultCenter={DEFAULT_CENTER}
               clearSearchSignal={clearSearchSignal}

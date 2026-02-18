@@ -19,7 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Download, MapIcon, MapPin, Satellite, ChevronLeft, ChevronRight, X, Save, Trash2, Filter, User, LogOut, Settings, Edit3, Phone, Mail, Handshake, Volume2, VolumeX } from 'lucide-react';
+import { Download, MapIcon, MapPin, Satellite, ChevronLeft, ChevronRight, X, Trash2, Filter, User, LogOut, Settings, Edit3, Phone, Mail, Handshake } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MapControls } from '@/features/map/MapControls';
 import { MapContextMenu } from '@/features/map/MapContextMenu';
@@ -310,6 +310,8 @@ export default function HomePage() {
   const [savePulse, setSavePulse] = useState(false);
   const [quickLogPendingType, setQuickLogPendingType] = useState<'call' | 'email' | 'meeting' | null>(null);
   const [isXpSoundEnabled, setIsXpSoundEnabled] = useState<boolean>(() => {
+    const settings = readJSON<any>(nsKey(currentUser?.id, 'userSettings'), null);
+    if (settings && typeof settings.soundEffects === 'boolean') return settings.soundEffects;
     const saved = readJSON<boolean | null>(nsKey(currentUser?.id, 'gamificationSoundEnabled'), null);
     if (typeof saved === 'boolean') return saved;
     const guest = readJSON<boolean | null>('gamificationSoundEnabled::guest', null);
@@ -336,8 +338,24 @@ export default function HomePage() {
   });
 
   useEffect(() => {
-    writeJSON(nsKey(currentUser?.id, 'gamificationSoundEnabled'), isXpSoundEnabled);
+    const settings = readJSON<any>(nsKey(currentUser?.id, 'userSettings'), null) || {};
+    writeJSON(nsKey(currentUser?.id, 'userSettings'), {
+      ...settings,
+      soundEffects: isXpSoundEnabled,
+    });
   }, [isXpSoundEnabled, currentUser?.id]);
+
+  useEffect(() => {
+    const syncSoundSetting = () => {
+      const settings = readJSON<any>(nsKey(currentUser?.id, 'userSettings'), null);
+      if (settings && typeof settings.soundEffects === 'boolean') {
+        setIsXpSoundEnabled(settings.soundEffects);
+      }
+    };
+    syncSoundSetting();
+    window.addEventListener('storage', syncSoundSetting);
+    return () => window.removeEventListener('storage', syncSoundSetting);
+  }, [currentUser?.id]);
 
   const playXpSound = useCallback(() => {
     if (!isXpSoundEnabled) return;
@@ -1727,8 +1745,8 @@ export default function HomePage() {
     if (homeSaveTimerRef.current) {
       window.clearTimeout(homeSaveTimerRef.current);
       homeSaveTimerRef.current = null;
-      void flushHomeQueuedSave();
     }
+    await flushHomeQueuedSave();
     // Reset UI + selection
     if (editingProspectId) {
       clearPolygonPathListeners(editingProspectId);
@@ -2006,6 +2024,28 @@ export default function HomePage() {
       {/* Map Controls - Top Left (authoritative) */}
       <MapControls
         onSearch={handleMapSearch}
+        prospects={prospects}
+        onProspectClick={(prospect) => {
+          let target: { lat: number; lng: number } | null = null;
+          if (prospect.geometry.type === 'Point') {
+            const [lng, lat] = prospect.geometry.coordinates as [number, number];
+            target = { lat, lng };
+          } else if (prospect.geometry.type === 'Polygon' || prospect.geometry.type === 'Rectangle') {
+            const coords = prospect.geometry.coordinates as [number, number][][] | [number, number][];
+            const ring = Array.isArray(coords[0]) && Array.isArray((coords as any)[0][0])
+              ? (coords as [number, number][][])[0]
+              : (coords as [number, number][]);
+            if (ring.length > 0) {
+              const [lng, lat] = ring[0];
+              target = { lat, lng };
+            }
+          }
+          if (target && map) {
+            map.panTo(target);
+            map.setZoom(Math.max(map.getZoom() || 15, 15));
+          }
+          handleProspectClick(prospect);
+        }}
         bounds={bounds}
         defaultCenter={DEFAULT_CENTER}
         clearSearchSignal={clearSearchSignal}
@@ -2373,21 +2413,7 @@ export default function HomePage() {
 
           {/* Footer - Sticky */}
           <div className="sticky bottom-0 z-10 bg-white border-t px-4 py-3 relative">
-            <div className="flex gap-2 items-center">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() => void closeEditPanel()}
-                    variant="outline"
-                    className={`h-8 w-8 p-0 text-xs transition ${savePulse ? 'animate-pulse ring-2 ring-emerald-200' : ''}`}
-                    aria-label="Save and close"
-                    title="Save and close"
-                  >
-                    <Save className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Save and close</TooltipContent>
-              </Tooltip>
+            <div className="relative flex items-center justify-center">
               {xpToast && (
                 <GamificationToast
                   key={xpToast.id}
@@ -2397,21 +2423,7 @@ export default function HomePage() {
                 />
               )}
 
-              <div className="flex items-center gap-1 ml-1">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      onClick={() => setIsXpSoundEnabled((prev) => !prev)}
-                      variant="outline"
-                      className="h-8 w-8 p-0"
-                      aria-label={isXpSoundEnabled ? 'Disable XP sound' : 'Enable XP sound'}
-                      title={isXpSoundEnabled ? 'Disable XP sound' : 'Enable XP sound'}
-                    >
-                      {isXpSoundEnabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{isXpSoundEnabled ? 'XP sound on' : 'XP sound off'}</TooltipContent>
-                </Tooltip>
+              <div className={`flex items-center gap-1 ${savePulse ? 'animate-pulse' : ''}`}>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -2457,50 +2469,49 @@ export default function HomePage() {
                   </TooltipTrigger>
                   <TooltipContent>Quick meeting follow-up</TooltipContent>
                 </Tooltip>
+                {selectedProspect.geometry.type === 'Polygon' || selectedProspect.geometry.type === 'Rectangle' ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        onClick={() => {
+                          if (editingProspectId === selectedProspect.id) {
+                            void savePolygonChanges();
+                          } else {
+                            enablePolygonEditing(selectedProspect.id);
+                          }
+                        }}
+                        variant="outline"
+                        className="h-8 w-8 p-0"
+                        aria-label={editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}
+                        title={editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        onClick={() => handleDrawPolygon()}
+                        variant="outline"
+                        className="h-8 w-8 p-0"
+                        aria-label="Draw area"
+                        title="Draw area"
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Draw area</TooltipContent>
+                  </Tooltip>
+                )}
               </div>
-
-              {selectedProspect.geometry.type === 'Polygon' || selectedProspect.geometry.type === 'Rectangle' ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      onClick={() => {
-                        if (editingProspectId === selectedProspect.id) {
-                          void savePolygonChanges();
-                        } else {
-                          enablePolygonEditing(selectedProspect.id);
-                        }
-                      }}
-                      variant="outline"
-                      className="h-8 w-8 p-0"
-                      aria-label={editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}
-                      title={editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}
-                    >
-                      <Edit3 className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}</TooltipContent>
-                </Tooltip>
-              ) : (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button 
-                      onClick={() => handleDrawPolygon()}
-                      variant="outline"
-                      className="h-8 w-8 p-0"
-                      aria-label="Draw area"
-                      title="Draw area"
-                    >
-                      <Edit3 className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Draw area</TooltipContent>
-                </Tooltip>
-              )}
               
               <Button 
                 onClick={deleteSelectedProspect}
                 variant="destructive"
-                className="h-8 px-3 text-xs ml-auto"
+                className="absolute right-0 h-8 px-3 text-xs"
                 title="Delete Prospect"
               >
                 <Trash2 className="h-3.5 w-3.5" />

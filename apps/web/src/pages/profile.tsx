@@ -36,6 +36,7 @@ export default function ProfilePage() {
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
   const [autoSave, setAutoSave] = useState(true);
+  const [soundEffects, setSoundEffects] = useState(true);
   
   // Submarket Management State
   const [newSubmarket, setNewSubmarket] = useState("");
@@ -53,6 +54,12 @@ export default function ProfilePage() {
       setEmailNotifications(savedSettings.emailNotifications ?? true);
       setDarkMode(savedSettings.darkMode ?? false);
       setAutoSave(savedSettings.autoSave ?? true);
+      setSoundEffects(savedSettings.soundEffects ?? true);
+    } else {
+      const legacySound = readJSON<boolean | null>(nsKey(user?.id, 'gamificationSoundEnabled'), null);
+      if (typeof legacySound === 'boolean') {
+        setSoundEffects(legacySound);
+      }
     }
   }, [user?.id]);
 
@@ -61,6 +68,7 @@ export default function ProfilePage() {
       emailNotifications,
       darkMode,
       autoSave,
+      soundEffects,
     };
     writeJSON(nsKey(user?.id, 'userSettings'), settings);
   };
@@ -304,6 +312,14 @@ export default function ProfilePage() {
                       id="email-notifications"
                       checked={emailNotifications}
                       onCheckedChange={setEmailNotifications}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="sound-effects">Sound Effects</Label>
+                    <Switch
+                      id="sound-effects"
+                      checked={soundEffects}
+                      onCheckedChange={setSoundEffects}
                     />
                   </div>
                 </div>

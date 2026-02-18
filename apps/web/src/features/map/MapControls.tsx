@@ -1,9 +1,12 @@
 import { SearchBar } from './SearchBar';
 import { MapTools } from './MapTools';
+import type { Prospect } from '@level-cre/shared/schema';
 
 interface MapControlsProps {
   className?: string;
   onSearch: (location: { lat: number; lng: number; address: string; businessName?: string | null; websiteUrl?: string | null }) => void;
+  prospects?: Prospect[];
+  onProspectClick?: (prospect: Prospect) => void;
   bounds?: google.maps.LatLngBoundsLiteral | null;
   defaultCenter?: { lat: number; lng: number };
   clearSearchSignal?: number;
@@ -22,6 +25,8 @@ interface MapControlsProps {
 export function MapControls({
   className = '',
   onSearch,
+  prospects = [],
+  onProspectClick,
   bounds,
   defaultCenter,
   clearSearchSignal,
@@ -38,7 +43,14 @@ export function MapControls({
 }: MapControlsProps) {
   return (
     <div className={`absolute top-4 left-4 z-50 flex flex-col gap-3 ${className}`}>
-      <SearchBar onSearch={onSearch} bounds={bounds ?? null} defaultCenter={defaultCenter} clearSignal={clearSearchSignal} />
+      <SearchBar
+        onSearch={onSearch}
+        prospects={prospects}
+        onProspectClick={onProspectClick}
+        bounds={bounds ?? null}
+        defaultCenter={defaultCenter}
+        clearSignal={clearSearchSignal}
+      />
       <MapTools
         onPolygon={onPolygon}
         onPin={onPin}
