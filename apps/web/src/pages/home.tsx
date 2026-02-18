@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { GoogleMap, useJsApiLoader, DrawingManager, Marker, Polygon, InfoWindow } from '@react-google-maps/api';
 import {
   TerraDraw,
@@ -19,7 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Download, MapIcon, Satellite, ChevronLeft, ChevronRight, X, Save, Trash2, Filter, User, LogOut, Settings, Edit3 } from 'lucide-react';
+import { Download, MapIcon, MapPin, Satellite, ChevronLeft, ChevronRight, X, Save, Trash2, Filter, User, LogOut, Settings, Edit3, Phone, Mail, Handshake, Volume2, VolumeX } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MapControls } from '@/features/map/MapControls';
 import { MapContextMenu } from '@/features/map/MapContextMenu';
@@ -36,12 +36,14 @@ const STANDARD_SIZE_OPTIONS = [
 import { SearchComponent } from '@/components/SearchComponent';
 import { CSVUploader } from '@/components/CSVUploader';
 import { DeveloperSettings } from '@/components/DeveloperSettings';
+import { GamificationToast } from '@/components/GamificationToast';
 import { useToast } from '@/hooks/use-toast';
 import { useGeocode } from '@/hooks/useGeocode';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
+import { quickLogSpecFor, type QuickLogType } from '@/lib/gamificationUi';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { queryClient, apiRequest } from '@/lib/queryClient';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -59,6 +61,19 @@ import type {
 } from '@level-cre/shared/schema';
 
 const libraries: any = ['drawing', 'geometry', 'places'];
+const MAP_CONTAINER_STYLE = { width: '100%', height: '100%' } as const;
+const MAP_OPTIONS: google.maps.MapOptions = {
+  disableDefaultUI: true,
+  zoomControl: true,
+  mapTypeControl: false,
+  scaleControl: true,
+  streetViewControl: false,
+  rotateControl: false,
+  fullscreenControl: true,
+  gestureHandling: 'greedy',
+};
+const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton
+const DEFAULT_ZOOM = 11;
 
 type ContextMenuState = {
   lat: number;
@@ -96,12 +111,76 @@ const computeFollowUpDue = (anchorIso?: string, timeframe?: FollowUpTimeframeTyp
   const anchor = anchorIso ? new Date(anchorIso) : new Date();
   return addMonthsSafe(anchor, months).toISOString();
 };
+const addDaysIsoFromNow = (days: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString();
+};
 
 interface MapData {
   prospects: Prospect[];
   submarkets: Submarket[];
   touches: Touch[];
 }
+
+type RenderableProspectEntry =
+  | { id: string; prospect: Prospect; color: string; kind: 'point'; position: { lat: number; lng: number } }
+  | { id: string; prospect: Prospect; color: string; kind: 'polygon'; paths: Array<{ lat: number; lng: number }> };
+
+const MapOverlayLayer = memo(function MapOverlayLayer({
+  renderableProspects,
+  terraMode,
+  editingProspectId,
+  onProspectClick,
+  polygonRefs,
+  getPointMarkerIcon,
+}: {
+  renderableProspects: RenderableProspectEntry[];
+  terraMode: string;
+  editingProspectId: string | null;
+  onProspectClick: (prospect: Prospect) => void;
+  polygonRefs: { current: Map<string, google.maps.Polygon> };
+  getPointMarkerIcon: (color: string) => google.maps.Symbol;
+}) {
+  return (
+    <>
+      {renderableProspects.map((entry) => {
+        if (entry.kind === 'point') {
+          return (
+            <Marker
+              key={entry.id}
+              position={entry.position}
+              onClick={() => onProspectClick(entry.prospect)}
+              clickable={terraMode === 'select'}
+              icon={getPointMarkerIcon(entry.color)}
+            />
+          );
+        }
+        return (
+          <Polygon
+            key={entry.id}
+            paths={entry.paths}
+            onClick={() => onProspectClick(entry.prospect)}
+            onLoad={(polygon) => {
+              polygonRefs.current.set(entry.id, polygon);
+            }}
+            options={{
+              fillColor: entry.color,
+              fillOpacity: editingProspectId === entry.id ? 0.25 : 0.15,
+              strokeColor: entry.color,
+              strokeWeight: editingProspectId === entry.id ? 3 : 2,
+              strokeOpacity: 0.8,
+              clickable: true,
+              editable: editingProspectId === entry.id,
+              draggable: editingProspectId === entry.id,
+              zIndex: editingProspectId === entry.id ? 2 : 1,
+            }}
+          />
+        );
+      })}
+    </>
+  );
+});
 
 // Function to calculate polygon area in square feet and convert to acres
 const calculatePolygonAcres = (geometry: any): number | null => {
@@ -166,8 +245,6 @@ export default function HomePage() {
   const submarketOptions = uniqueSubmarketNames(profile?.submarkets || []);
   
   // Map state
-  const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton
-  const DEFAULT_ZOOM = 11;
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -227,7 +304,17 @@ export default function HomePage() {
   const [editingProspectId, setEditingProspectId] = useState<string | null>(null);
   const [originalPolygonCoordinates, setOriginalPolygonCoordinates] = useState<[number, number][] | null>(null);
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
+  const polygonPathListenersRef = useRef<Map<string, google.maps.MapsEventListener[]>>(new Map());
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [xpToast, setXpToast] = useState<{ id: number; xp: number; label?: string } | null>(null);
+  const [savePulse, setSavePulse] = useState(false);
+  const [quickLogPendingType, setQuickLogPendingType] = useState<'call' | 'email' | 'meeting' | null>(null);
+  const [isXpSoundEnabled, setIsXpSoundEnabled] = useState<boolean>(() => {
+    const saved = readJSON<boolean | null>(nsKey(currentUser?.id, 'gamificationSoundEnabled'), null);
+    if (typeof saved === 'boolean') return saved;
+    const guest = readJSON<boolean | null>('gamificationSoundEnabled::guest', null);
+    return typeof guest === 'boolean' ? guest : true;
+  });
   // Note: Escape key close handler moved below to avoid TDZ on closeEditPanel
   
   // Search pin state
@@ -247,6 +334,58 @@ export default function HomePage() {
     googleMapsApiKey: (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '') as string,
     libraries,
   });
+
+  useEffect(() => {
+    writeJSON(nsKey(currentUser?.id, 'gamificationSoundEnabled'), isXpSoundEnabled);
+  }, [isXpSoundEnabled, currentUser?.id]);
+
+  const playXpSound = useCallback(() => {
+    if (!isXpSoundEnabled) return;
+    try {
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.03, ctx.currentTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.14);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.14);
+    } catch {}
+  }, [isXpSoundEnabled]);
+
+  const bumpLocalSkillXp = useCallback((delta: number, skillKey: 'followUp' | 'prospecting' = 'followUp') => {
+    if (!delta || Number.isNaN(delta)) return;
+    queryClient.setQueryData<any>(['/api/skills'], (prev) => {
+      if (!prev || typeof prev !== 'object') return prev;
+      return {
+        ...prev,
+        [skillKey]: Math.max(0, Number(prev[skillKey] || 0) + delta),
+      };
+    });
+  }, []);
+
+  const triggerXpFeedback = useCallback((xp: number, label?: string) => {
+    if (!xp || xp <= 0) return;
+    setXpToast({ id: Date.now(), xp, label });
+    setSavePulse(true);
+    window.setTimeout(() => setSavePulse(false), 450);
+    playXpSound();
+  }, [playXpSound]);
+
+  const parseProspectPatchResponse = useCallback((payload: any): { prospect: Prospect; newXpGained: number } => {
+    const gained = Number(payload?.newXpGained || 0);
+    const { newXpGained: _ignored, ...prospectRaw } = payload || {};
+    return {
+      prospect: prospectRaw as Prospect,
+      newXpGained: Number.isFinite(gained) ? gained : 0,
+    };
+  }, []);
 
   // Avoid resetting local state on user change; we invalidate queries instead (see listener below)
 
@@ -450,11 +589,30 @@ export default function HomePage() {
         };
       }
       return null;
-    }).filter(Boolean) as Array<
-      | { id: string; prospect: Prospect; color: string; kind: 'point'; position: { lat: number; lng: number } }
-      | { id: string; prospect: Prospect; color: string; kind: 'polygon'; paths: Array<{ lat: number; lng: number }> }
-    >;
+    }).filter(Boolean) as RenderableProspectEntry[];
   }, [filteredProspects]);
+
+  const getPointMarkerIcon = useCallback((color: string): google.maps.Symbol => ({
+    path: window.google?.maps?.SymbolPath?.CIRCLE,
+    fillColor: color,
+    fillOpacity: 1,
+    strokeWeight: 2,
+    strokeColor: '#ffffff',
+    scale: 8,
+  }), []);
+
+  const clearPolygonPathListeners = useCallback((prospectId?: string) => {
+    if (prospectId) {
+      const listeners = polygonPathListenersRef.current.get(prospectId) || [];
+      listeners.forEach((listener) => google.maps.event.removeListener(listener));
+      polygonPathListenersRef.current.delete(prospectId);
+      return;
+    }
+    polygonPathListenersRef.current.forEach((listeners) => {
+      listeners.forEach((listener) => google.maps.event.removeListener(listener));
+    });
+    polygonPathListenersRef.current.clear();
+  }, []);
 
   const upsertProspectInCache = useCallback((nextProspect: Prospect) => {
     queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => {
@@ -528,10 +686,15 @@ export default function HomePage() {
               geometry: newGeom,
               acres: acres ? acres.toString() : undefined,
             });
-            const saved = await response.json();
+            const payload = await response.json();
+            const { prospect: saved, newXpGained } = parseProspectPatchResponse(payload);
             setProspects(prev => prev.map(p => p.id === saved.id ? saved : p));
             if (selectedProspect && selectedProspect.id === saved.id) {
               setSelectedProspect(saved);
+            }
+            if (newXpGained > 0) {
+              bumpLocalSkillXp(newXpGained, 'followUp');
+              triggerXpFeedback(newXpGained);
             }
             toast({ title: 'Area saved', description: acres ? `${acres.toFixed(2)} acres` : 'Polygon saved' });
           } catch (err) {
@@ -682,10 +845,15 @@ export default function HomePage() {
             setSelectedProspect(sel);
           } else {
             const response = await apiRequest('PATCH', `/api/prospects/${drawingForProspect.id}`, updateData);
-            const savedProspect = await response.json();
+            const payload = await response.json();
+            const { prospect: savedProspect, newXpGained } = parseProspectPatchResponse(payload);
             setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
             setSelectedProspect(savedProspect);
             upsertProspectInCache(savedProspect);
+            if (newXpGained > 0) {
+              bumpLocalSkillXp(newXpGained, 'followUp');
+              triggerXpFeedback(newXpGained);
+            }
           }
         }
         
@@ -940,6 +1108,33 @@ export default function HomePage() {
     }
   }, []);
 
+  const getProspectLatLng = useCallback((prospect?: Prospect | null): { lat: number; lng: number } | null => {
+    if (!prospect?.geometry) return null;
+    const geometry: any = prospect.geometry;
+    if (geometry.type === 'Point' && Array.isArray(geometry.coordinates)) {
+      const [lng, lat] = geometry.coordinates as [number, number];
+      if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+      return null;
+    }
+    if (geometry.type === 'Polygon' && Array.isArray(geometry.coordinates)) {
+      const ring: [number, number][] = Array.isArray(geometry.coordinates[0]?.[0])
+        ? (geometry.coordinates[0] as [number, number][])
+        : (geometry.coordinates as [number, number][]);
+      if (!Array.isArray(ring) || ring.length === 0) return null;
+      const usable = ring.length > 1 ? ring.slice(0, -1) : ring;
+      const valid = usable.filter(([lng, lat]) => Number.isFinite(lat) && Number.isFinite(lng));
+      if (!valid.length) return null;
+      const acc = valid.reduce((sum, [lng, lat]) => ({ lat: sum.lat + lat, lng: sum.lng + lng }), { lat: 0, lng: 0 });
+      return { lat: acc.lat / valid.length, lng: acc.lng / valid.length };
+    }
+    return null;
+  }, []);
+
+  const selectedProspectLatLng = useMemo(
+    () => getProspectLatLng(selectedProspect),
+    [getProspectLatLng, selectedProspect]
+  );
+
   // Demo helpers: id generation, building & persisting local prospects
   const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
     ? crypto.randomUUID()
@@ -1184,10 +1379,15 @@ export default function HomePage() {
       return;
     }
     
+    if (editingProspectId && editingProspectId !== prospectId) {
+      clearPolygonPathListeners(editingProspectId);
+    }
+
     // Store original coordinates for potential discard
     const originalCoords = prospect.geometry.coordinates[0] as [number, number][];
     setOriginalPolygonCoordinates(originalCoords);
     setEditingProspectId(prospectId);
+    clearPolygonPathListeners(prospectId);
     
     // Enable polygon editing with debounced auto-save on vertex edits
     setTimeout(() => {
@@ -1214,7 +1414,8 @@ export default function HomePage() {
                 geometry: newGeom,
                 acres: acres ? acres.toString() : undefined
               });
-              const saved = await response.json();
+              const payload = await response.json();
+              const { prospect: saved } = parseProspectPatchResponse(payload);
               setProspects(prev => prev.map(p => p.id === saved.id ? saved : p));
               if (selectedProspect && selectedProspect.id === saved.id) {
                 setSelectedProspect(saved);
@@ -1226,12 +1427,15 @@ export default function HomePage() {
         };
 
         // Attach listeners
-        path.addListener('set_at', scheduleSave);
-        path.addListener('insert_at', scheduleSave);
-        path.addListener('remove_at', scheduleSave);
+        const listeners = [
+          path.addListener('set_at', scheduleSave),
+          path.addListener('insert_at', scheduleSave),
+          path.addListener('remove_at', scheduleSave),
+        ];
+        polygonPathListenersRef.current.set(prospectId, listeners);
       }
     }, 100);
-  }, [prospects]);
+  }, [prospects, clearPolygonPathListeners, editingProspectId]);
 
   // Save current polygon changes
   const savePolygonChanges = useCallback(async () => {
@@ -1266,7 +1470,8 @@ export default function HomePage() {
         geometry: updatedGeometry,
         acres: acres ? acres.toString() : undefined
       });
-      const savedProspect = await response.json();
+      const payload = await response.json();
+      const { prospect: savedProspect } = parseProspectPatchResponse(payload);
       
       // Update local state
       setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
@@ -1278,6 +1483,7 @@ export default function HomePage() {
       // Exit edit mode
       polygon.setEditable(false);
       polygon.setDraggable(false);
+      clearPolygonPathListeners(editingProspectId);
       setEditingProspectId(null);
       setOriginalPolygonCoordinates(null);
       
@@ -1295,7 +1501,7 @@ export default function HomePage() {
         duration: 4000,
       });
     }
-  }, [editingProspectId, selectedProspect, toast]);
+  }, [editingProspectId, selectedProspect, toast, clearPolygonPathListeners]);
 
   // Discard polygon changes and revert to original
   const discardPolygonChanges = useCallback(() => {
@@ -1316,6 +1522,7 @@ export default function HomePage() {
       polygon.setDraggable(false);
     }
     
+    clearPolygonPathListeners(editingProspectId);
     setEditingProspectId(null);
     setOriginalPolygonCoordinates(null);
     
@@ -1323,7 +1530,7 @@ export default function HomePage() {
       title: "Changes Discarded",
       description: "Polygon reverted to original shape",
     });
-  }, [editingProspectId, originalPolygonCoordinates, toast]);
+  }, [editingProspectId, originalPolygonCoordinates, toast, clearPolygonPathListeners]);
 
   // Update prospect handler - debounced + optimistic to reduce flicker while typing
   const homeSaveTimerRef = useRef<number | null>(null);
@@ -1354,10 +1561,19 @@ export default function HomePage() {
         return;
       }
       const response = await apiRequest('PATCH', `/api/prospects/${id}`, patch);
-      const savedProspect = await response.json();
-      setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
+      const payload = await response.json();
+      const { prospect: savedProspect, newXpGained } = parseProspectPatchResponse(payload);
+      const patchKeys = Object.keys(patch) as (keyof Prospect)[];
+      const hasMapVisualChanges = patchKeys.some((key) => mapVisualFieldsRef.current.has(key));
+      if (hasMapVisualChanges) {
+        setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
+      }
       setSelectedProspect(prev => (prev && prev.id === savedProspect.id ? savedProspect : prev));
       upsertProspectInCache(savedProspect);
+      if (newXpGained > 0) {
+        bumpLocalSkillXp(newXpGained, 'followUp');
+        triggerXpFeedback(newXpGained);
+      }
     } catch (error) {
       console.error('Error updating prospect:', error);
     }
@@ -1374,7 +1590,7 @@ export default function HomePage() {
     homeLastEditedIdRef.current = id;
     homePendingPatchRef.current = { ...homePendingPatchRef.current, [field]: value };
     if (homeSaveTimerRef.current) window.clearTimeout(homeSaveTimerRef.current);
-    homeSaveTimerRef.current = window.setTimeout(() => { homeSaveTimerRef.current = null; void flushHomeQueuedSave(); }, 450);
+    homeSaveTimerRef.current = window.setTimeout(() => { homeSaveTimerRef.current = null; void flushHomeQueuedSave(); }, 500);
   }, [selectedProspect, flushHomeQueuedSave]);
 
   const updateSelectedProspect = useCallback((field: keyof Prospect, value: any) => {
@@ -1393,6 +1609,62 @@ export default function HomePage() {
     // Queue patch with debounce
     queueSelectedProspectPatch(field, value);
   }, [selectedProspect, queueSelectedProspectPatch]);
+
+  const runQuickLog = useCallback(async (type: QuickLogType) => {
+    if (!selectedProspect || quickLogPendingType) return;
+
+    const spec = quickLogSpecFor(type);
+    const baseNote = spec.note;
+    const mergedNote = selectedProspect.notes?.trim()
+      ? `${selectedProspect.notes.trim()}\n${baseNote}`
+      : baseNote;
+    const due = addDaysIsoFromNow(spec.followUpDays);
+    const expectedXp = spec.xp;
+    const optimistic = { ...selectedProspect, notes: mergedNote, followUpDueDate: due, lastContactDate: new Date().toISOString() } as Prospect;
+
+    setQuickLogPendingType(type);
+
+    if (homeSaveTimerRef.current) {
+      window.clearTimeout(homeSaveTimerRef.current);
+      homeSaveTimerRef.current = null;
+      homePendingPatchRef.current = {};
+    }
+
+    setSelectedProspect(optimistic);
+    bumpLocalSkillXp(expectedXp, 'followUp');
+    triggerXpFeedback(expectedXp, spec.toastLabel);
+
+    try {
+      const response = await apiRequest('PATCH', `/api/prospects/${selectedProspect.id}`, {
+        notes: mergedNote,
+        followUpDueDate: due,
+        lastContactDate: new Date().toISOString(),
+      });
+      const payload = await response.json();
+      const { prospect: saved, newXpGained } = parseProspectPatchResponse(payload);
+      setProspects(prev => prev.map(p => p.id === saved.id ? saved : p));
+      setSelectedProspect(saved);
+      upsertProspectInCache(saved);
+
+      const delta = newXpGained - expectedXp;
+      if (delta !== 0) {
+        bumpLocalSkillXp(delta, 'followUp');
+      }
+      if (newXpGained > 0 && newXpGained !== expectedXp) {
+        triggerXpFeedback(newXpGained, spec.toastLabel);
+      }
+    } catch (error) {
+      setSelectedProspect(selectedProspect);
+      bumpLocalSkillXp(-expectedXp, 'followUp');
+      toast({
+        title: 'Quick log failed',
+        description: 'Could not save follow-up action.',
+        variant: 'destructive',
+      });
+    } finally {
+      setQuickLogPendingType(null);
+    }
+  }, [selectedProspect, quickLogPendingType, bumpLocalSkillXp, triggerXpFeedback, parseProspectPatchResponse, upsertProspectInCache, toast]);
 
   // Delete prospect handler - remove from database
   const deleteSelectedProspect = useCallback(async () => {
@@ -1458,6 +1730,9 @@ export default function HomePage() {
       void flushHomeQueuedSave();
     }
     // Reset UI + selection
+    if (editingProspectId) {
+      clearPolygonPathListeners(editingProspectId);
+    }
     setIsEditPanelOpen(false);
     setSelectedProspect(null);
     setDrawingForProspect(null);
@@ -1465,7 +1740,13 @@ export default function HomePage() {
     try { drawingManagerRef.current?.setDrawingMode(null); } catch {}
     try { setTerraModeSafe('select'); } catch {}
     try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false } as google.maps.MapOptions); } catch {}
-  }, [editingProspectId, savePolygonChanges, flushHomeQueuedSave, setTerraModeSafe, map]);
+  }, [editingProspectId, savePolygonChanges, flushHomeQueuedSave, setTerraModeSafe, map, clearPolygonPathListeners]);
+
+  useEffect(() => {
+    return () => {
+      clearPolygonPathListeners();
+    };
+  }, [clearPolygonPathListeners]);
 
   // Save + close on Escape, even while editing polygon
   useEffect(() => {
@@ -1481,6 +1762,55 @@ export default function HomePage() {
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [isEditPanelOpen, editingProspectId, closeEditPanel]);
+
+  const handleMapSearch = useCallback((location: { lat: number; lng: number; address: string; businessName?: string | null; websiteUrl?: string | null }) => {
+    handleLocationFound(location);
+    if (map) {
+      map.panTo({ lat: location.lat, lng: location.lng });
+      map.setZoom(15);
+    }
+    setCenter({ lat: location.lat, lng: location.lng });
+    setZoom(15);
+  }, [handleLocationFound, map]);
+
+  const handleMapPolygonTool = useCallback(() => {
+    if (selectedProspect) {
+      setDrawingForProspect(selectedProspect);
+      toast({ title: 'Draw Mode', description: `Draw an area for ${selectedProspect.name}.` });
+    }
+    if (drawingManagerRef.current) {
+      drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.POLYGON);
+    }
+  }, [selectedProspect, toast]);
+
+  const handleMapPinTool = useCallback(() => {
+    if (drawingManagerRef.current) {
+      drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.MARKER);
+    }
+  }, []);
+
+  const handleMapPanTool = useCallback(() => {
+    if (drawingManagerRef.current) {
+      drawingManagerRef.current.setDrawingMode(null);
+    }
+    toast({ title: 'Pan Tool', description: 'Pan/hand tool selected. You can now move the map.' });
+  }, [toast]);
+
+  const handleMapResetViewport = useCallback(() => {
+    if (map) {
+      map.panTo(DEFAULT_CENTER);
+      map.setZoom(DEFAULT_ZOOM);
+    }
+    setCenter(DEFAULT_CENTER);
+    setZoom(DEFAULT_ZOOM);
+    writeJSON(nsKey(currentUser?.id, 'mapViewport'), { ...DEFAULT_CENTER, zoom: DEFAULT_ZOOM });
+  }, [map, currentUser?.id, DEFAULT_CENTER, DEFAULT_ZOOM]);
+
+  const handleMapRectangleTool = useCallback(() => {
+    if (drawingManagerRef.current) {
+      drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.RECTANGLE);
+    }
+  }, []);
 
   if (!isLoaded) {
     return (
@@ -1498,22 +1828,13 @@ export default function HomePage() {
       {/* Map Canvas */}
       <div style={{ position: 'absolute', inset: 0 }} ref={mapContainerRef}>
         <GoogleMap
-          mapContainerStyle={{ width: '100%', height: '100%' }}
+          mapContainerStyle={MAP_CONTAINER_STYLE}
           center={center}
           zoom={zoom}
           onLoad={onMapLoad}
           onUnmount={onMapUnmount}
           mapTypeId={mapType}
-          options={{
-            disableDefaultUI: true,
-            zoomControl: true,
-            mapTypeControl: false,
-            scaleControl: true,
-            streetViewControl: false,
-            rotateControl: false,
-            fullscreenControl: true,
-            gestureHandling: 'greedy'
-          }}
+          options={MAP_OPTIONS}
           onIdle={() => {
             if (!map) return;
             const c = map.getCenter();
@@ -1622,47 +1943,14 @@ export default function HomePage() {
           )}
 
           {/* Render Prospects */}
-          {renderableProspects.map((entry) => {
-            if (entry.kind === 'point') {
-              return (
-                <Marker
-                  key={entry.id}
-                  position={entry.position}
-                  onClick={() => handleProspectClick(entry.prospect)}
-                  clickable={terraMode === 'select'}
-                  icon={{
-                    path: window.google?.maps?.SymbolPath?.CIRCLE,
-                    fillColor: entry.color,
-                    fillOpacity: 1,
-                    strokeWeight: 2,
-                    strokeColor: '#ffffff',
-                    scale: 8,
-                  }}
-                />
-              );
-            }
-            return (
-              <Polygon
-                key={entry.id}
-                paths={entry.paths}
-                onClick={() => handleProspectClick(entry.prospect)}
-                onLoad={(polygon) => {
-                  polygonRefs.current.set(entry.id, polygon);
-                }}
-                options={{
-                  fillColor: entry.color,
-                  fillOpacity: editingProspectId === entry.id ? 0.25 : 0.15,
-                  strokeColor: entry.color,
-                  strokeWeight: editingProspectId === entry.id ? 3 : 2,
-                  strokeOpacity: 0.8,
-                  clickable: true,
-                  editable: editingProspectId === entry.id,
-                  draggable: editingProspectId === entry.id,
-                  zIndex: editingProspectId === entry.id ? 2 : 1,
-                }}
-              />
-            );
-          })}
+          <MapOverlayLayer
+            renderableProspects={renderableProspects}
+            terraMode={terraMode}
+            editingProspectId={editingProspectId}
+            onProspectClick={handleProspectClick}
+            polygonRefs={polygonRefs}
+            getPointMarkerIcon={getPointMarkerIcon}
+          />
 
           {/* Search Pin */}
           {searchPin && (
@@ -1717,54 +2005,17 @@ export default function HomePage() {
 
       {/* Map Controls - Top Left (authoritative) */}
       <MapControls
-        onSearch={(location) => {
-          handleLocationFound(location);
-          if (map) {
-            map.panTo({ lat: location.lat, lng: location.lng });
-            map.setZoom(15);
-          }
-          setCenter({ lat: location.lat, lng: location.lng });
-          setZoom(15);
-        }}
+        onSearch={handleMapSearch}
         bounds={bounds}
         defaultCenter={DEFAULT_CENTER}
         clearSearchSignal={clearSearchSignal}
-        onPolygon={() => {
-          if (selectedProspect) {
-            setDrawingForProspect(selectedProspect);
-            toast({ title: 'Draw Mode', description: `Draw an area for ${selectedProspect.name}.` });
-          }
-          if (drawingManagerRef.current) {
-            drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.POLYGON);
-          }
-        }}
-        onPin={() => {
-          if (drawingManagerRef.current) {
-            drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.MARKER);
-          }
-        }}
-        onPan={() => {
-          if (drawingManagerRef.current) {
-            drawingManagerRef.current.setDrawingMode(null);
-          }
-          toast({ title: 'Pan Tool', description: 'Pan/hand tool selected. You can now move the map.' });
-        }}
+        onPolygon={handleMapPolygonTool}
+        onPin={handleMapPinTool}
+        onPan={handleMapPanTool}
         mapType={mapType}
         onMapTypeChange={setMapType}
-        onMyLocation={() => {
-          if (map) {
-            map.panTo(DEFAULT_CENTER);
-            map.setZoom(DEFAULT_ZOOM);
-          }
-          setCenter(DEFAULT_CENTER);
-          setZoom(DEFAULT_ZOOM);
-          writeJSON(nsKey(currentUser?.id, 'mapViewport'), { ...DEFAULT_CENTER, zoom: DEFAULT_ZOOM });
-        }}
-        onRectangle={() => {
-          if (drawingManagerRef.current) {
-            drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.RECTANGLE);
-          }
-        }}
+        onMyLocation={handleMapResetViewport}
+        onRectangle={handleMapRectangleTool}
         onSelect={() => setTerraModeSafe('select')}
         activeTerraMode={terraMode as any}
       />
@@ -1878,6 +2129,18 @@ export default function HomePage() {
               </TabsList>
               
               <TabsContent value="property" className="space-y-4">
+                {/* Business Name */}
+                <div>
+                  <Label className="text-xs font-medium text-gray-700">Business Name</Label>
+                  <Input
+                    key={`businessName-${selectedProspect.id}`}
+                    defaultValue={selectedProspect.businessName || ''}
+                    onChange={(e) => queueSelectedProspectPatch('businessName', e.target.value || undefined)}
+                    placeholder="Business name"
+                    className="h-8 text-sm"
+                  />
+                </div>
+
                 {/* Address */}
                 <div>
                   <Label className="text-xs font-medium text-gray-700">Address</Label>
@@ -1885,43 +2148,37 @@ export default function HomePage() {
                     const n = selectedProspect?.name || '';
                     const display = /^New\s+(polygon|rectangle|point|marker)/i.test(n) ? '' : n;
                     return (
-                      <Input
-                        key={`name-${selectedProspect.id}`}
-                        defaultValue={display}
-                        onChange={(e) => queueSelectedProspectPatch('name', e.target.value)}
-                        placeholder="Property address"
-                        className="h-8 text-sm"
-                      />
+                      <div className="flex items-center gap-2">
+                        <Input
+                          key={`name-${selectedProspect.id}`}
+                          defaultValue={display}
+                          onChange={(e) => queueSelectedProspectPatch('name', e.target.value)}
+                          placeholder="Property address"
+                          className="h-8 text-sm"
+                        />
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-8 w-8 p-0 shrink-0"
+                              aria-label="Open coordinates in Google Maps"
+                              title="Open in Google Maps"
+                              disabled={!selectedProspectLatLng}
+                              onClick={() => {
+                                if (!selectedProspectLatLng) return;
+                                handleOpenInMaps(selectedProspectLatLng.lat, selectedProspectLatLng.lng);
+                              }}
+                            >
+                              <MapPin className="h-3.5 w-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Open point in Google Maps</TooltipContent>
+                        </Tooltip>
+                      </div>
                     );
                   })()}
                 </div>
-
-                {/* Business Information Row */}
-                {(selectedProspect.businessName || selectedProspect.websiteUrl) && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-xs font-medium text-gray-700">Business Name</Label>
-                      <Input
-                        key={`businessName-${selectedProspect.id}`}
-                        defaultValue={selectedProspect.businessName || ''}
-                        onChange={(e) => queueSelectedProspectPatch('businessName', e.target.value || undefined)}
-                        placeholder="Business name"
-                        className="h-8 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs font-medium text-gray-700">Website</Label>
-                      <Input
-                        type="url"
-                        key={`websiteUrl-${selectedProspect.id}`}
-                        defaultValue={selectedProspect.websiteUrl || ''}
-                        onChange={(e) => queueSelectedProspectPatch('websiteUrl', e.target.value || undefined)}
-                        placeholder="Website URL"
-                        className="h-8 text-sm"
-                      />
-                    </div>
-                  </div>
-                )}
 
                 {/* Status & Follow Up Row */}
                 <div className="grid grid-cols-2 gap-3">
@@ -2050,6 +2307,18 @@ export default function HomePage() {
               </TabsContent>
 
               <TabsContent value="contact" className="space-y-4">
+                <div>
+                  <Label className="text-xs font-medium text-gray-700">Website</Label>
+                  <Input
+                    type="url"
+                    key={`websiteUrl-${selectedProspect.id}`}
+                    defaultValue={selectedProspect.websiteUrl || ''}
+                    onChange={(e) => queueSelectedProspectPatch('websiteUrl', e.target.value || undefined)}
+                    placeholder="Website URL"
+                    className="h-8 text-sm"
+                  />
+                </div>
+
                 {/* Contact Name & Company Row */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -2103,14 +2372,14 @@ export default function HomePage() {
           </div>
 
           {/* Footer - Sticky */}
-          <div className="sticky bottom-0 z-10 bg-white border-t px-4 py-3">
-            <div className="flex gap-2">
+          <div className="sticky bottom-0 z-10 bg-white border-t px-4 py-3 relative">
+            <div className="flex gap-2 items-center">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     onClick={() => void closeEditPanel()}
                     variant="outline"
-                    className="h-8 w-8 p-0 text-xs"
+                    className={`h-8 w-8 p-0 text-xs transition ${savePulse ? 'animate-pulse ring-2 ring-emerald-200' : ''}`}
                     aria-label="Save and close"
                     title="Save and close"
                   >
@@ -2119,6 +2388,76 @@ export default function HomePage() {
                 </TooltipTrigger>
                 <TooltipContent>Save and close</TooltipContent>
               </Tooltip>
+              {xpToast && (
+                <GamificationToast
+                  key={xpToast.id}
+                  xp={xpToast.xp}
+                  label={xpToast.label}
+                  onDone={() => setXpToast(null)}
+                />
+              )}
+
+              <div className="flex items-center gap-1 ml-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={() => setIsXpSoundEnabled((prev) => !prev)}
+                      variant="outline"
+                      className="h-8 w-8 p-0"
+                      aria-label={isXpSoundEnabled ? 'Disable XP sound' : 'Enable XP sound'}
+                      title={isXpSoundEnabled ? 'Disable XP sound' : 'Enable XP sound'}
+                    >
+                      {isXpSoundEnabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{isXpSoundEnabled ? 'XP sound on' : 'XP sound off'}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={() => void runQuickLog('call')}
+                      variant="outline"
+                      className="h-8 w-8 p-0"
+                      aria-label="Quick log call"
+                      title="Quick log call"
+                      disabled={quickLogPendingType !== null}
+                    >
+                      <Phone className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Quick call + 30d follow-up</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={() => void runQuickLog('email')}
+                      variant="outline"
+                      className="h-8 w-8 p-0"
+                      aria-label="Quick log email"
+                      title="Quick log email"
+                      disabled={quickLogPendingType !== null}
+                    >
+                      <Mail className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Quick email follow-up</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      onClick={() => void runQuickLog('meeting')}
+                      variant="outline"
+                      className="h-8 w-8 p-0"
+                      aria-label="Quick log meeting"
+                      title="Quick log meeting"
+                      disabled={quickLogPendingType !== null}
+                    >
+                      <Handshake className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Quick meeting follow-up</TooltipContent>
+                </Tooltip>
+              </div>
 
               {selectedProspect.geometry.type === 'Polygon' || selectedProspect.geometry.type === 'Rectangle' ? (
                 <Tooltip>
@@ -2167,6 +2506,16 @@ export default function HomePage() {
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>
+            {selectedProspectLatLng && (
+              <button
+                type="button"
+                className="mt-2 block w-full text-[10px] text-gray-400 hover:text-gray-600 text-center"
+                onClick={() => void handleCopyCoordinates(selectedProspectLatLng.lat, selectedProspectLatLng.lng)}
+                title="Click to copy coordinates"
+              >
+                {formatCoordinates(selectedProspectLatLng.lat, selectedProspectLatLng.lng)}
+              </button>
+            )}
           </div>
         </div>
       )}

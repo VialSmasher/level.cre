@@ -18,6 +18,7 @@ import { listings, listingMembers, users, profiles, listingProspects } from '@le
 import { and, eq, sql } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
+import { XP_VALUES, actionForInteractionType, xpForInteractionType } from './lib/gamification';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Supabase client for server-side OAuth
@@ -1575,6 +1576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         submarketId: z.string().optional(),
         lastContactDate: z.string().optional(),
         followUpTimeframe: FollowUpTimeframe.optional(),
+        followUpDueDate: z.string().optional(),
         // Contact and business info
         contactName: z.string().optional(),
         contactEmail: z.string().optional(),
@@ -1627,16 +1629,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!isDemo(req)) {
         await ensureUser(userId, email);
       }
-      if (isDemo(req)) {
-        const updated = await demo.updateProspect(userId, req.params.id, req.body);
-        if (!updated) return res.status(404).json({ message: 'Prospect not found' });
-        return res.json(updated);
+      const ProspectPatchSchema = z.object({
+        name: z.string().min(1).optional(),
+        status: ProspectStatus.optional(),
+        notes: z.string().optional(),
+        geometry: ProspectGeometry.optional(),
+        submarketId: z.string().optional(),
+        lastContactDate: z.string().optional(),
+        followUpTimeframe: FollowUpTimeframe.optional(),
+        followUpDueDate: z.string().optional(),
+        contactName: z.string().optional(),
+        contactEmail: z.string().optional(),
+        contactPhone: z.string().optional(),
+        contactCompany: z.string().optional(),
+        size: z.string().optional(),
+        acres: z.string().optional(),
+        businessName: z.string().optional(),
+        websiteUrl: z.string().optional(),
+      }).strict();
+
+      const parseResult = ProspectPatchSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ message: 'Invalid prospect patch data', error: parseResult.error.errors });
       }
-      const prospect = await storage.updateProspect(req.params.id, userId, req.body);
-      if (!prospect) {
+
+      if (isDemo(req)) {
+        const updated = await demo.updateProspect(userId, req.params.id, parseResult.data);
+        if (!updated) return res.status(404).json({ message: 'Prospect not found' });
+        return res.json({ ...updated, newXpGained: 0 });
+      }
+      const result = await storage.updateProspect(req.params.id, userId, parseResult.data);
+      if (!result) {
         return res.status(404).json({ message: "Prospect not found" });
       }
-      res.json(prospect);
+      res.json({ ...result.prospect, newXpGained: result.newXpGained });
     } catch (e) {
       const err: any = e;
       console.error('Error updating prospect:', {
@@ -1879,17 +1905,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ]);
         demoProspects = prospects || [];
         demoInteractions = interactions || [];
-        const prospectingXp = (prospects?.length || 0) * 25;
+        const prospectingXp = (prospects?.length || 0) * XP_VALUES.PROSPECTING;
         const followUpXp = (interactions || []).reduce((sum: number, i: any) => {
-          if (i.type === 'call') return sum + 15;
-          if (i.type === 'email') return sum + 10;
-          if (i.type === 'meeting') return sum + 25;
-          return sum + 10; // note/other
+          if (i.type === 'call' || i.type === 'email' || i.type === 'meeting') {
+            return sum + xpForInteractionType(i.type);
+          }
+          return sum + XP_VALUES.FOLLOW_UP_BASE; // note/other
         }, 0);
-        const marketKnowledgeXp = ((requirements?.length || 0) + (comps?.length || 0)) * 20;
+        const marketKnowledgeXp = ((requirements?.length || 0) + (comps?.length || 0)) * XP_VALUES.REQUIREMENT;
         const daysSet = new Set((interactions || []).map((i: any) => new Date(i.date || i.createdAt).toDateString()));
         streakDays = daysSet.size > 0 ? Math.min(daysSet.size, 99) : 0;
-        const consistencyXp = streakDays * 100;
+        const consistencyXp = streakDays * XP_VALUES.CONSISTENCY;
         totalLevel =
           levelFromXp(prospectingXp) +
           levelFromXp(followUpXp) +
@@ -1985,23 +2011,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           demo.getMarketComps(userId),
         ]);
 
-        const prospectingXp = (prospects?.length || 0) * 25; // Add prospect
+        const prospectingXp = (prospects?.length || 0) * XP_VALUES.PROSPECTING; // Add prospect
 
         const followUpXp = (interactions || []).reduce((sum: number, i: any) => {
-          if (i.type === 'call') return sum + 15;
-          if (i.type === 'email') return sum + 10;
-          if (i.type === 'meeting') return sum + 25;
-          return sum + 10; // note/other
+          if (i.type === 'call' || i.type === 'email' || i.type === 'meeting') {
+            return sum + xpForInteractionType(i.type);
+          }
+          return sum + XP_VALUES.FOLLOW_UP_BASE; // note/other
         }, 0);
 
-        const marketKnowledgeXp = ((requirements?.length || 0) + (comps?.length || 0)) * 20;
+        const marketKnowledgeXp = ((requirements?.length || 0) + (comps?.length || 0)) * XP_VALUES.REQUIREMENT;
 
-        // Consistency: 100 XP per distinct active day
+        // Consistency XP per distinct active day
         const daysSet = new Set(
           (interactions || []).map((i: any) => new Date(i.date || i.createdAt).toDateString())
         );
         const streakDays = daysSet.size > 0 ? Math.min(daysSet.size, 99) : 0;
-        const consistencyXp = streakDays * 100;
+        const consistencyXp = streakDays * XP_VALUES.CONSISTENCY;
         const lastActivity = (interactions || []).length > 0
           ? new Date((interactions || [])[(interactions || []).length - 1].date || Date.now()).toISOString()
           : new Date().toISOString();
@@ -2064,8 +2090,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ]);
 
         const interactionActivities = (interactions || []).map((i: any) => {
-          const action = i.type === 'call' ? 'phone_call' : i.type === 'email' ? 'email_sent' : i.type === 'meeting' ? 'meeting_held' : 'note_added';
-          const xp = i.type === 'call' ? 15 : i.type === 'email' ? 10 : i.type === 'meeting' ? 25 : 10;
+          const interactionType = (i.type === 'call' || i.type === 'email' || i.type === 'meeting') ? i.type : 'note';
+          const action = (interactionType === 'note') ? 'note_added' : actionForInteractionType(interactionType);
+          const xp = xpForInteractionType(interactionType);
           return {
             id: i.id,
             userId,
@@ -2083,7 +2110,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userId,
           skillType: 'prospecting',
           action: 'add_prospect',
-          xpGained: 25,
+          xpGained: XP_VALUES.PROSPECTING,
           timestamp: new Date(p.createdAt || p.createdDate || Date.now()),
           relatedId: p.id,
           multiplier: 1,
@@ -2094,7 +2121,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userId,
           skillType: 'marketKnowledge',
           action: 'add_requirement',
-          xpGained: 20,
+          xpGained: XP_VALUES.REQUIREMENT,
           timestamp: new Date(r.createdAt || Date.now()),
           relatedId: r.id,
           multiplier: 1,
@@ -2105,7 +2132,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userId,
           skillType: 'marketKnowledge',
           action: 'add_market_comp',
-          xpGained: 20,
+          xpGained: XP_VALUES.MARKET_COMP,
           timestamp: new Date(c.createdAt || Date.now()),
           relatedId: c.id,
           multiplier: 1,
@@ -2215,20 +2242,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             demo.getRequirements(user),
             demo.getMarketComps(user),
           ]);
-          const prospectingXp = (prospects?.length || 0) * 25;
+          const prospectingXp = (prospects?.length || 0) * XP_VALUES.PROSPECTING;
           const followUpXp = (interactions || []).reduce((sum: number, i: any) => {
-            if (i.type === 'call') return sum + 15;
-            if (i.type === 'email') return sum + 10;
-            if (i.type === 'meeting') return sum + 25;
-            return sum + 10; // note/other
+            if (i.type === 'call' || i.type === 'email' || i.type === 'meeting') {
+              return sum + xpForInteractionType(i.type);
+            }
+            return sum + XP_VALUES.FOLLOW_UP_BASE; // note/other
           }, 0);
-          const marketKnowledgeXp = ((requirements?.length || 0) + (comps?.length || 0)) * 20;
-          // Consistency: 100 XP per distinct active day
+          const marketKnowledgeXp = ((requirements?.length || 0) + (comps?.length || 0)) * XP_VALUES.REQUIREMENT;
+          // Consistency XP per distinct active day
           const daysSet = new Set(
             (interactions || []).map((i: any) => new Date(i.date || i.createdAt).toDateString())
           );
           const streakDays = daysSet.size > 0 ? Math.min(daysSet.size, 99) : 0;
-          const consistencyXp = streakDays * 100;
+          const consistencyXp = streakDays * XP_VALUES.CONSISTENCY;
           const level =
             levelFromXp(prospectingXp) +
             levelFromXp(followUpXp) +

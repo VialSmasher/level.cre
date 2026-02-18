@@ -17,6 +17,7 @@ import {
 import { db } from "./db";
 import { eq, and, desc, gte, ne, sql, between } from "drizzle-orm";
 import { randomUUID } from "crypto";
+import { XP_VALUES, actionForInteractionType, inferInteractionTypeFromNote, xpForInteractionType } from "./lib/gamification";
 
 // Updated interface with user-specific CRUD methods
 export interface IStorage {
@@ -34,7 +35,7 @@ export interface IStorage {
   getProspect(id: string, userId: string): Promise<Prospect | undefined>;
   getAllProspects(userId: string): Promise<Prospect[]>;
   createProspect(prospect: InsertProspect & { userId: string }): Promise<Prospect>;
-  updateProspect(id: string, userId: string, prospect: Partial<Prospect>): Promise<Prospect | undefined>;
+  updateProspect(id: string, userId: string, prospect: Partial<Prospect>): Promise<{ prospect: Prospect; newXpGained: number } | undefined>;
   deleteProspect(id: string, userId: string): Promise<boolean>;
   
   // User operations for Replit Auth
@@ -171,12 +172,15 @@ export class DatabaseStorage implements IStorage {
         submarketId: prospects.submarketId,
         lastContactDate: prospects.lastContactDate,
         followUpTimeframe: prospects.followUpTimeframe,
+        followUpDueDate: prospects.followUpDueDate,
         contactName: prospects.contactName,
         contactEmail: prospects.contactEmail,
         contactPhone: prospects.contactPhone,
         contactCompany: prospects.contactCompany,
         size: prospects.size,
         acres: prospects.acres,
+        businessName: prospects.businessName,
+        websiteUrl: prospects.websiteUrl,
         createdAt: prospects.createdAt,
       })
       .from(listingProspects)
@@ -360,7 +364,7 @@ export class DatabaseStorage implements IStorage {
       userId: insertRequirement.userId,
       skillType: 'marketKnowledge',
       action: 'add_requirement',
-      xpGained: 20,
+      xpGained: XP_VALUES.REQUIREMENT,
       relatedId: result.id,
       multiplier: 1
     });
@@ -520,7 +524,7 @@ export class DatabaseStorage implements IStorage {
       userId: insertComp.userId,
       skillType: 'marketKnowledge',
       action: 'add_market_comp',
-      xpGained: 20,
+      xpGained: XP_VALUES.MARKET_COMP,
       relatedId: result.id,
       multiplier: 1,
     });
@@ -647,12 +651,15 @@ export class DatabaseStorage implements IStorage {
       submarketId: row.submarketId || undefined,
       lastContactDate: row.lastContactDate || undefined,
       followUpTimeframe: row.followUpTimeframe as any || undefined,
+      followUpDueDate: row.followUpDueDate?.toISOString() || undefined,
       contactName: row.contactName || undefined,
       contactEmail: row.contactEmail || undefined,
       contactPhone: row.contactPhone || undefined,
       contactCompany: row.contactCompany || undefined,
       size: row.size || undefined,
       acres: row.acres || undefined,
+      businessName: row.businessName || undefined,
+      websiteUrl: row.websiteUrl || undefined,
       createdDate: row.createdAt?.toISOString() || new Date().toISOString()
     };
   }
@@ -673,12 +680,15 @@ export class DatabaseStorage implements IStorage {
         submarketId: prospects.submarketId,
         lastContactDate: prospects.lastContactDate,
         followUpTimeframe: prospects.followUpTimeframe,
+        followUpDueDate: prospects.followUpDueDate,
         contactName: prospects.contactName,
         contactEmail: prospects.contactEmail,
         contactPhone: prospects.contactPhone,
         contactCompany: prospects.contactCompany,
         size: prospects.size,
         acres: prospects.acres,
+        businessName: prospects.businessName,
+        websiteUrl: prospects.websiteUrl,
         createdAt: prospects.createdAt,
       })
       .from(prospects)
@@ -692,12 +702,15 @@ export class DatabaseStorage implements IStorage {
       submarketId: r.submarketId || undefined,
       lastContactDate: r.lastContactDate || undefined,
       followUpTimeframe: r.followUpTimeframe as any || undefined,
+      followUpDueDate: r.followUpDueDate?.toISOString() || undefined,
       contactName: r.contactName || undefined,
       contactEmail: r.contactEmail || undefined,
       contactPhone: r.contactPhone || undefined,
       contactCompany: r.contactCompany || undefined,
       size: r.size || undefined,
       acres: r.acres || undefined,
+      businessName: r.businessName || undefined,
+      websiteUrl: r.websiteUrl || undefined,
       createdDate: r.createdAt?.toISOString() || new Date().toISOString()
     }));
   }
@@ -713,12 +726,15 @@ export class DatabaseStorage implements IStorage {
       ...(insertProspect.submarketId && { submarketId: insertProspect.submarketId }),
       ...(insertProspect.lastContactDate && { lastContactDate: insertProspect.lastContactDate }),
       ...(insertProspect.followUpTimeframe && { followUpTimeframe: insertProspect.followUpTimeframe }),
+      ...(insertProspect.followUpDueDate && { followUpDueDate: new Date(insertProspect.followUpDueDate) }),
       ...(insertProspect.contactName && { contactName: insertProspect.contactName }),
       ...(insertProspect.contactEmail && { contactEmail: insertProspect.contactEmail }),
       ...(insertProspect.contactPhone && { contactPhone: insertProspect.contactPhone }),
       ...(insertProspect.contactCompany && { contactCompany: insertProspect.contactCompany }),
       ...(insertProspect.size && { size: insertProspect.size }),
-      ...(insertProspect.acres && { acres: insertProspect.acres })
+      ...(insertProspect.acres && { acres: insertProspect.acres }),
+      ...(insertProspect.businessName && { businessName: insertProspect.businessName }),
+      ...(insertProspect.websiteUrl && { websiteUrl: insertProspect.websiteUrl }),
     }).returning({
       id: prospects.id,
       name: prospects.name,
@@ -728,12 +744,15 @@ export class DatabaseStorage implements IStorage {
       submarketId: prospects.submarketId,
       lastContactDate: prospects.lastContactDate,
       followUpTimeframe: prospects.followUpTimeframe,
+      followUpDueDate: prospects.followUpDueDate,
       contactName: prospects.contactName,
       contactEmail: prospects.contactEmail,
       contactPhone: prospects.contactPhone,
       contactCompany: prospects.contactCompany,
       size: prospects.size,
       acres: prospects.acres,
+      businessName: prospects.businessName,
+      websiteUrl: prospects.websiteUrl,
       createdAt: prospects.createdAt,
     });
     
@@ -742,7 +761,7 @@ export class DatabaseStorage implements IStorage {
       userId: insertProspect.userId,
       skillType: 'prospecting',
       action: 'add_prospect',
-      xpGained: 25,
+      xpGained: XP_VALUES.PROSPECTING,
       relatedId: result.id,
       multiplier: 1
     });
@@ -756,17 +775,20 @@ export class DatabaseStorage implements IStorage {
       submarketId: result.submarketId || undefined,
       lastContactDate: result.lastContactDate || undefined,
       followUpTimeframe: result.followUpTimeframe as any || undefined,
+      followUpDueDate: result.followUpDueDate?.toISOString() || undefined,
       contactName: result.contactName || undefined,
       contactEmail: result.contactEmail || undefined,
       contactPhone: result.contactPhone || undefined,
       contactCompany: result.contactCompany || undefined,
       size: result.size || undefined,
       acres: result.acres || undefined,
+      businessName: result.businessName || undefined,
+      websiteUrl: result.websiteUrl || undefined,
       createdDate: result.createdAt?.toISOString() || new Date().toISOString()
     };
   }
 
-  async updateProspect(id: string, userId: string, updates: Partial<Prospect>): Promise<Prospect | undefined> {
+  async updateProspect(id: string, userId: string, updates: Partial<Prospect>): Promise<{ prospect: Prospect; newXpGained: number } | undefined> {
     // Common SET payload for both owner and shared edits
     const setPayload: any = {
       ...(updates.name && { name: updates.name }),
@@ -776,12 +798,15 @@ export class DatabaseStorage implements IStorage {
       ...(updates.submarketId !== undefined && { submarketId: updates.submarketId }),
       ...(updates.lastContactDate !== undefined && { lastContactDate: updates.lastContactDate }),
       ...(updates.followUpTimeframe !== undefined && { followUpTimeframe: updates.followUpTimeframe }),
+      ...(updates.followUpDueDate !== undefined && { followUpDueDate: updates.followUpDueDate ? new Date(updates.followUpDueDate) : null }),
       ...(updates.contactName !== undefined && { contactName: updates.contactName }),
       ...(updates.contactEmail !== undefined && { contactEmail: updates.contactEmail }),
       ...(updates.contactPhone !== undefined && { contactPhone: updates.contactPhone }),
       ...(updates.contactCompany !== undefined && { contactCompany: updates.contactCompany }),
       ...(updates.size !== undefined && { size: updates.size }),
       ...(updates.acres !== undefined && { acres: updates.acres }),
+      ...(updates.businessName !== undefined && { businessName: updates.businessName }),
+      ...(updates.websiteUrl !== undefined && { websiteUrl: updates.websiteUrl }),
       updatedAt: new Date()
     };
 
@@ -798,12 +823,15 @@ export class DatabaseStorage implements IStorage {
         submarketId: prospects.submarketId,
         lastContactDate: prospects.lastContactDate,
         followUpTimeframe: prospects.followUpTimeframe,
+        followUpDueDate: prospects.followUpDueDate,
         contactName: prospects.contactName,
         contactEmail: prospects.contactEmail,
         contactPhone: prospects.contactPhone,
         contactCompany: prospects.contactCompany,
         size: prospects.size,
         acres: prospects.acres,
+        businessName: prospects.businessName,
+        websiteUrl: prospects.websiteUrl,
         createdAt: prospects.createdAt,
       });
 
@@ -845,19 +873,22 @@ export class DatabaseStorage implements IStorage {
           submarketId: prospects.submarketId,
           lastContactDate: prospects.lastContactDate,
           followUpTimeframe: prospects.followUpTimeframe,
+          followUpDueDate: prospects.followUpDueDate,
           contactName: prospects.contactName,
           contactEmail: prospects.contactEmail,
           contactPhone: prospects.contactPhone,
           contactCompany: prospects.contactCompany,
           size: prospects.size,
           acres: prospects.acres,
+          businessName: prospects.businessName,
+          websiteUrl: prospects.websiteUrl,
           createdAt: prospects.createdAt,
         });
       result = rows?.[0];
       if (!result) return undefined;
     }
 
-    return {
+    const prospect = {
       id: result.id,
       name: result.name,
       status: result.status as any,
@@ -866,14 +897,56 @@ export class DatabaseStorage implements IStorage {
       submarketId: result.submarketId || undefined,
       lastContactDate: result.lastContactDate || undefined,
       followUpTimeframe: result.followUpTimeframe as any || undefined,
+      followUpDueDate: result.followUpDueDate?.toISOString() || undefined,
       contactName: result.contactName || undefined,
       contactEmail: result.contactEmail || undefined,
       contactPhone: result.contactPhone || undefined,
       contactCompany: result.contactCompany || undefined,
       size: result.size || undefined,
       acres: result.acres || undefined,
+      businessName: result.businessName || undefined,
+      websiteUrl: result.websiteUrl || undefined,
       createdDate: result.createdAt?.toISOString() || new Date().toISOString()
     };
+
+    let newXpGained = 0;
+    const activityWrites: Array<Promise<SkillActivityRow>> = [];
+    const hasStatusUpdate = updates.status !== undefined;
+    const hasFollowUpUpdate = updates.followUpTimeframe !== undefined || updates.followUpDueDate !== undefined;
+    const notedInteractionType = inferInteractionTypeFromNote(updates.notes);
+
+    if (hasStatusUpdate) {
+      newXpGained += XP_VALUES.STATUS_CHANGE;
+      activityWrites.push(this.addSkillActivity({
+        userId,
+        skillType: 'prospecting',
+        action: 'status_change',
+        xpGained: XP_VALUES.STATUS_CHANGE,
+        relatedId: id,
+        multiplier: 1,
+      }));
+    }
+
+    if (hasFollowUpUpdate || notedInteractionType) {
+      const interactionType = notedInteractionType || 'note';
+      const xp = notedInteractionType ? xpForInteractionType(interactionType) : XP_VALUES.FOLLOW_UP_BASE;
+      const action = notedInteractionType ? actionForInteractionType(interactionType) : 'followup_logged';
+      newXpGained += xp;
+      activityWrites.push(this.addSkillActivity({
+        userId,
+        skillType: 'followUp',
+        action,
+        xpGained: xp,
+        relatedId: id,
+        multiplier: 1,
+      }));
+    }
+
+    if (activityWrites.length > 0) {
+      await Promise.all(activityWrites);
+    }
+
+    return { prospect, newXpGained };
   }
 
   async deleteProspect(id: string, userId: string): Promise<boolean> {
@@ -1023,19 +1096,11 @@ export class DatabaseStorage implements IStorage {
       .returning();
     
     // Award XP for follow-up activities
-    let xpGained = 10; // Base XP for interaction
-    let action = 'interaction';
-    
-    if (interactionData.type === 'call') {
-      xpGained = 15;
-      action = 'phone_call';
-    } else if (interactionData.type === 'email') {
-      xpGained = 10;
-      action = 'email_sent';
-    } else if (interactionData.type === 'meeting') {
-      xpGained = 25;
-      action = 'meeting_held';
-    }
+    const interactionType = (interactionData.type === 'call' || interactionData.type === 'email' || interactionData.type === 'meeting')
+      ? interactionData.type
+      : 'note';
+    const xpGained = xpForInteractionType(interactionType);
+    const action = actionForInteractionType(interactionType);
     
     await this.addSkillActivity({
       userId: interactionData.userId,
