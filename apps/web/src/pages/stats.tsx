@@ -4,7 +4,6 @@ import { apiRequest } from '@/lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Trophy, TrendingUp, Phone, MapPin, Target, Brain, Zap, Star } from 'lucide-react';
 import { BrokerSkillsRow, SkillActivityRow, Requirement } from '@level-cre/shared/schema';
 import { Link } from 'wouter';
@@ -274,15 +273,15 @@ export default function StatsPage() {
                 <Trophy className="h-5 w-5 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Broker Stats</h1>
-                <p className="text-sm md:text-base text-gray-600">Track your progress and level up your broker skills</p>
+                <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Performance</h1>
               </div>
             </div>
-            <Link href="/leaderboard">
-              <Button variant="outline" size="sm" className="shrink-0">
-                <Trophy className="h-4 w-4 mr-2" />
-                View Leaderboard
-              </Button>
+            <Link
+              href="/leaderboard"
+              className="inline-flex items-center gap-2 text-xl md:text-2xl font-bold text-gray-900 hover:text-blue-700 transition-colors shrink-0"
+            >
+              <Trophy className="h-5 w-5 md:h-6 md:w-6" />
+              <span>Standings</span>
             </Link>
           </div>
           {/* Overall Stats */}
@@ -349,7 +348,7 @@ export default function StatsPage() {
             return (
               <Card className="mt-3">
                 <CardHeader className="pb-2 pt-4">
-                  <CardTitle>Performance</CardTitle>
+                  <CardTitle>Stats</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-1 pb-4">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

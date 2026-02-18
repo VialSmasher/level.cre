@@ -1984,8 +1984,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           if (await tableExists('prospects')) {
             const r = await pool.query(
-              `SELECT COUNT(*)::int AS c FROM prospects WHERE user_id = $1`,
-              [userId]
+              `SELECT COUNT(*)::int AS c FROM prospects`
             );
             assetsTracked = r?.rows?.[0]?.c ?? 0;
           }
