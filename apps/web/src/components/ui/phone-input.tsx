@@ -17,12 +17,31 @@ function formatUSPhone(digits: string): string {
 }
 
 export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
-  ({ className, value, onChange, onValueChange, ...props }, ref) => {
-    const rawDigits = React.useMemo(() => (typeof value === "string" ? value.replace(/\D/g, "") : ""), [value]);
+  ({ className, value, onChange, onValueChange, defaultValue, ...props }, ref) => {
+    const isControlled = value !== undefined;
+    const initialDigits = React.useMemo(() => {
+      if (typeof defaultValue === "string") return defaultValue.replace(/\D/g, "").slice(0, 10);
+      return "";
+    }, [defaultValue]);
+    const [internalDigits, setInternalDigits] = React.useState<string>(initialDigits);
+
+    React.useEffect(() => {
+      if (!isControlled) return;
+      const digits = typeof value === "string" ? value.replace(/\D/g, "").slice(0, 10) : "";
+      setInternalDigits(digits);
+    }, [isControlled, value]);
+
+    const rawDigits = React.useMemo(() => {
+      if (isControlled) {
+        return typeof value === "string" ? value.replace(/\D/g, "").slice(0, 10) : "";
+      }
+      return internalDigits;
+    }, [isControlled, value, internalDigits]);
     const displayValue = React.useMemo(() => formatUSPhone(rawDigits), [rawDigits]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
+      if (!isControlled) setInternalDigits(digits);
 
       // Fire optional raw digits callback
       onValueChange?.(digits);
@@ -55,4 +74,3 @@ export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
 PhoneInput.displayName = "PhoneInput";
 
 export default PhoneInput;
-

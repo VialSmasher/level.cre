@@ -228,12 +228,6 @@ export default function HomePage() {
   const [originalPolygonCoordinates, setOriginalPolygonCoordinates] = useState<[number, number][] | null>(null);
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
   const [showImportDialog, setShowImportDialog] = useState(false);
-  // Local draft for Notes to keep typing responsive while debounced saves run
-  const [notesDraft, setNotesDraft] = useState<string>("");
-  useEffect(() => {
-    setNotesDraft(selectedProspect?.notes || "");
-  }, [selectedProspect?.id, isEditPanelOpen]);
-
   // Note: Escape key close handler moved below to avoid TDZ on closeEditPanel
   
   // Search pin state
@@ -420,12 +414,64 @@ export default function HomePage() {
   }, [contextMenu, closeContextMenu]);
 
   // Filter prospects based on status and submarket
-  const filteredProspects = prospects.filter(prospect => {
-    const passesStatus = statusFilters.has(prospect.status);
-    const passesSubmarket = selectedSubmarkets.size === 0 || 
-                            (prospect.submarketId && selectedSubmarkets.has(prospect.submarketId));
-    return passesStatus && passesSubmarket;
-  });
+  const filteredProspects = useMemo(() => {
+    return prospects.filter(prospect => {
+      const passesStatus = statusFilters.has(prospect.status);
+      const passesSubmarket = selectedSubmarkets.size === 0 ||
+                              (prospect.submarketId && selectedSubmarkets.has(prospect.submarketId));
+      return passesStatus && passesSubmarket;
+    });
+  }, [prospects, statusFilters, selectedSubmarkets]);
+
+  const renderableProspects = useMemo(() => {
+    return filteredProspects.map((prospect) => {
+      const color = STATUS_META[prospect.status].color;
+      if (prospect.geometry.type === 'Point') {
+        const [lng, lat] = prospect.geometry.coordinates as [number, number];
+        return {
+          id: prospect.id,
+          prospect,
+          color,
+          kind: 'point' as const,
+          position: { lat, lng },
+        };
+      }
+      if (prospect.geometry.type === 'Polygon' || prospect.geometry.type === 'Rectangle') {
+        const coords = prospect.geometry.coordinates as [number, number][][] | [number, number][];
+        const coordinates = (Array.isArray(coords[0]) && Array.isArray(coords[0][0]))
+          ? (coords[0] as [number, number][])
+          : (coords as [number, number][]);
+        return {
+          id: prospect.id,
+          prospect,
+          color,
+          kind: 'polygon' as const,
+          paths: coordinates.map(([lng, lat]) => ({ lat, lng })),
+        };
+      }
+      return null;
+    }).filter(Boolean) as Array<
+      | { id: string; prospect: Prospect; color: string; kind: 'point'; position: { lat: number; lng: number } }
+      | { id: string; prospect: Prospect; color: string; kind: 'polygon'; paths: Array<{ lat: number; lng: number }> }
+    >;
+  }, [filteredProspects]);
+
+  const upsertProspectInCache = useCallback((nextProspect: Prospect) => {
+    queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => {
+      const list = Array.isArray(prev) ? prev : [];
+      const idx = list.findIndex((p) => p.id === nextProspect.id);
+      if (idx === -1) return [...list, nextProspect];
+      const copy = [...list];
+      copy[idx] = nextProspect;
+      return copy;
+    });
+  }, []);
+
+  const removeProspectFromCache = useCallback((prospectId: string) => {
+    queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) =>
+      Array.isArray(prev) ? prev.filter((p) => p.id !== prospectId) : prev
+    );
+  }, []);
 
   // Map event handlers
   const onMapLoad = useCallback((map: google.maps.Map) => {
@@ -625,6 +671,7 @@ export default function HomePage() {
             const savedProspect = await response.json();
             setProspects(prev => [...prev, savedProspect]);
             setSelectedProspect(savedProspect);
+            upsertProspectInCache(savedProspect);
           }
         } else {
           // Update existing prospect
@@ -638,11 +685,8 @@ export default function HomePage() {
             const savedProspect = await response.json();
             setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
             setSelectedProspect(savedProspect);
+            upsertProspectInCache(savedProspect);
           }
-        }
-        // Invalidate React Query cache only if we saved via network
-        if (!isDemoMode) {
-          queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
         }
         
         toast({
@@ -691,7 +735,11 @@ export default function HomePage() {
           setSelectedProspect({ ...savedProspect, name: '' });
           setIsEditPanelOpen(true);
           
-          queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
+          queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => {
+            const list = Array.isArray(prev) ? prev : [];
+            if (list.some((p) => p.id === savedProspect.id)) return list;
+            return [...list, savedProspect];
+          });
           
           toast({
             title: "Prospect Saved",
@@ -712,7 +760,7 @@ export default function HomePage() {
     if (drawingManagerRef.current) {
       drawingManagerRef.current.setDrawingMode(null);
     }
-  }, [drawingForProspect, toast, isDemoMode, prospects]);
+  }, [drawingForProspect, toast, isDemoMode, prospects, selectedProspect, upsertProspectInCache]);
 
   // CSV import handler - save all imported prospects to database
   const handleProspectsImport = useCallback(async (newProspects: Prospect[]) => {
@@ -985,8 +1033,11 @@ export default function HomePage() {
         setSelectedProspect(savedProspect);
         setIsEditPanelOpen(true);
         
-        // Invalidate query cache to refresh
-        queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
+        queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => {
+          const list = Array.isArray(prev) ? prev : [];
+          if (list.some((p) => p.id === savedProspect.id)) return list;
+          return [...list, savedProspect];
+        });
         
         // Clear the search pin and input
         setSearchPin(null);
@@ -1045,7 +1096,7 @@ export default function HomePage() {
         return next;
       });
       if (!isDemoMode) {
-        queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
+        upsertProspectInCache(created);
       }
       setSelectedProspect(created);
       setIsEditPanelOpen(true);
@@ -1278,6 +1329,12 @@ export default function HomePage() {
   const homeSaveTimerRef = useRef<number | null>(null);
   const homePendingPatchRef = useRef<Partial<Prospect>>({});
   const homeLastEditedIdRef = useRef<string | null>(null);
+  const mapVisualFieldsRef = useRef<Set<keyof Prospect>>(new Set<keyof Prospect>([
+    'name',
+    'status',
+    'geometry',
+    'submarketId',
+  ]));
 
   const flushHomeQueuedSave = useCallback(async () => {
     if (!selectedProspect) return;
@@ -1300,14 +1357,13 @@ export default function HomePage() {
       const savedProspect = await response.json();
       setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
       setSelectedProspect(prev => (prev && prev.id === savedProspect.id ? savedProspect : prev));
-      // Invalidate to refresh any other views using this query
-      queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
+      upsertProspectInCache(savedProspect);
     } catch (error) {
       console.error('Error updating prospect:', error);
     }
-  }, [selectedProspect, queryClient, isDemoMode]);
+  }, [selectedProspect, isDemoMode, upsertProspectInCache]);
 
-  const updateSelectedProspect = useCallback((field: keyof Prospect, value: any) => {
+  const queueSelectedProspectPatch = useCallback((field: keyof Prospect, value: any) => {
     if (!selectedProspect) return;
     const id = selectedProspect.id;
     if (homeLastEditedIdRef.current && homeLastEditedIdRef.current !== id && homeSaveTimerRef.current) {
@@ -1316,17 +1372,27 @@ export default function HomePage() {
       homePendingPatchRef.current = {};
     }
     homeLastEditedIdRef.current = id;
-
-    // Optimistic UI update for selected prospect and list
-    const updatedProspect = { ...selectedProspect, [field]: value } as Prospect;
-    setSelectedProspect(updatedProspect);
-    setProspects(prev => prev.map(p => (p.id === id ? ({ ...p, [field]: value } as Prospect) : p)));
-
-    // Queue patch with debounce
     homePendingPatchRef.current = { ...homePendingPatchRef.current, [field]: value };
     if (homeSaveTimerRef.current) window.clearTimeout(homeSaveTimerRef.current);
     homeSaveTimerRef.current = window.setTimeout(() => { homeSaveTimerRef.current = null; void flushHomeQueuedSave(); }, 450);
   }, [selectedProspect, flushHomeQueuedSave]);
+
+  const updateSelectedProspect = useCallback((field: keyof Prospect, value: any) => {
+    if (!selectedProspect) return;
+    const id = selectedProspect.id;
+
+    // Optimistic UI update for selected prospect and list
+    const updatedProspect = { ...selectedProspect, [field]: value } as Prospect;
+    setSelectedProspect(updatedProspect);
+    // Avoid full map/list rerenders for text-heavy fields to keep typing responsive.
+    // Visual map fields can still update optimistically.
+    if (mapVisualFieldsRef.current.has(field)) {
+      setProspects(prev => prev.map(p => (p.id === id ? ({ ...p, [field]: value } as Prospect) : p)));
+    }
+
+    // Queue patch with debounce
+    queueSelectedProspectPatch(field, value);
+  }, [selectedProspect, queueSelectedProspectPatch]);
 
   // Delete prospect handler - remove from database
   const deleteSelectedProspect = useCallback(async () => {
@@ -1356,8 +1422,7 @@ export default function HomePage() {
       setSelectedProspect(null);
       setIsEditPanelOpen(false);
       
-      // Invalidate React Query cache to refresh knowledge dashboard
-      queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
+      removeProspectFromCache(selectedProspect.id);
       
       toast({
         title: "Prospect Deleted",
@@ -1371,7 +1436,7 @@ export default function HomePage() {
         variant: "destructive"
       });
     }
-  }, [selectedProspect, isDemoMode, prospects, toast]);
+  }, [selectedProspect, isDemoMode, prospects, toast, removeProspectFromCache]);
 
   // API key change handler (no-op; use .env key)
   const handleApiKeyChange = useCallback((_newApiKey: string) => {
@@ -1557,20 +1622,17 @@ export default function HomePage() {
           )}
 
           {/* Render Prospects */}
-          {filteredProspects.map((prospect) => {
-          const color = STATUS_META[prospect.status].color;
-            
-            if (prospect.geometry.type === 'Point') {
-              const [lng, lat] = prospect.geometry.coordinates as [number, number];
+          {renderableProspects.map((entry) => {
+            if (entry.kind === 'point') {
               return (
                 <Marker
-                  key={prospect.id}
-                  position={{ lat, lng }}
-                  onClick={() => handleProspectClick(prospect)}
+                  key={entry.id}
+                  position={entry.position}
+                  onClick={() => handleProspectClick(entry.prospect)}
                   clickable={terraMode === 'select'}
                   icon={{
                     path: window.google?.maps?.SymbolPath?.CIRCLE,
-                    fillColor: color,
+                    fillColor: entry.color,
                     fillOpacity: 1,
                     strokeWeight: 2,
                     strokeColor: '#ffffff',
@@ -1578,43 +1640,28 @@ export default function HomePage() {
                   }}
                 />
               );
-            } else if (prospect.geometry.type === 'Polygon' || prospect.geometry.type === 'Rectangle') {
-              // Handle polygon coordinates
-              const coords = prospect.geometry.coordinates as [number, number][][] | [number, number][];
-              let coordinates: [number, number][];
-              
-              if (Array.isArray(coords[0]) && Array.isArray(coords[0][0])) {
-                // New format: [[[lng, lat], ...]]
-                coordinates = coords[0] as [number, number][];
-              } else {
-                // Old format: [[lng, lat], ...]
-                coordinates = coords as [number, number][];
-              }
-              
-              return (
-                <Polygon
-                  key={prospect.id}
-                  paths={coordinates.map(([lng, lat]) => ({ lat, lng }))}
-                  onClick={() => handleProspectClick(prospect)}
-                  onLoad={(polygon) => {
-                    // Store polygon reference for later use
-                    polygonRefs.current.set(prospect.id, polygon);
-                  }}
-                  options={{
-                    fillColor: color,
-                    fillOpacity: editingProspectId === prospect.id ? 0.25 : 0.15,
-                    strokeColor: color,
-                    strokeWeight: editingProspectId === prospect.id ? 3 : 2,
-                    strokeOpacity: 0.8,
-                    clickable: true,
-                    editable: editingProspectId === prospect.id,
-                    draggable: editingProspectId === prospect.id,
-                    zIndex: editingProspectId === prospect.id ? 2 : 1,
-                  }}
-                />
-              );
             }
-            return null;
+            return (
+              <Polygon
+                key={entry.id}
+                paths={entry.paths}
+                onClick={() => handleProspectClick(entry.prospect)}
+                onLoad={(polygon) => {
+                  polygonRefs.current.set(entry.id, polygon);
+                }}
+                options={{
+                  fillColor: entry.color,
+                  fillOpacity: editingProspectId === entry.id ? 0.25 : 0.15,
+                  strokeColor: entry.color,
+                  strokeWeight: editingProspectId === entry.id ? 3 : 2,
+                  strokeOpacity: 0.8,
+                  clickable: true,
+                  editable: editingProspectId === entry.id,
+                  draggable: editingProspectId === entry.id,
+                  zIndex: editingProspectId === entry.id ? 2 : 1,
+                }}
+              />
+            );
           })}
 
           {/* Search Pin */}
@@ -1839,8 +1886,9 @@ export default function HomePage() {
                     const display = /^New\s+(polygon|rectangle|point|marker)/i.test(n) ? '' : n;
                     return (
                       <Input
-                        value={display}
-                        onChange={(e) => updateSelectedProspect('name', e.target.value)}
+                        key={`name-${selectedProspect.id}`}
+                        defaultValue={display}
+                        onChange={(e) => queueSelectedProspectPatch('name', e.target.value)}
                         placeholder="Property address"
                         className="h-8 text-sm"
                       />
@@ -1854,8 +1902,9 @@ export default function HomePage() {
                     <div>
                       <Label className="text-xs font-medium text-gray-700">Business Name</Label>
                       <Input
-                        value={selectedProspect.businessName || ''}
-                        onChange={(e) => updateSelectedProspect('businessName', e.target.value || undefined)}
+                        key={`businessName-${selectedProspect.id}`}
+                        defaultValue={selectedProspect.businessName || ''}
+                        onChange={(e) => queueSelectedProspectPatch('businessName', e.target.value || undefined)}
                         placeholder="Business name"
                         className="h-8 text-sm"
                       />
@@ -1864,8 +1913,9 @@ export default function HomePage() {
                       <Label className="text-xs font-medium text-gray-700">Website</Label>
                       <Input
                         type="url"
-                        value={selectedProspect.websiteUrl || ''}
-                        onChange={(e) => updateSelectedProspect('websiteUrl', e.target.value || undefined)}
+                        key={`websiteUrl-${selectedProspect.id}`}
+                        defaultValue={selectedProspect.websiteUrl || ''}
+                        onChange={(e) => queueSelectedProspectPatch('websiteUrl', e.target.value || undefined)}
                         placeholder="Website URL"
                         className="h-8 text-sm"
                       />
@@ -1989,12 +2039,9 @@ export default function HomePage() {
                 <div>
                   <Label className="text-xs font-medium text-gray-700">Notes</Label>
                   <Textarea
-                    value={notesDraft}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setNotesDraft(v);
-                      updateSelectedProspect('notes', v);
-                    }}
+                    key={`notes-${selectedProspect.id}`}
+                    defaultValue={selectedProspect.notes || ''}
+                    onChange={(e) => queueSelectedProspectPatch('notes', e.target.value)}
                     placeholder="Add notes..."
                     rows={3}
                     className="resize-none text-sm"
@@ -2008,8 +2055,9 @@ export default function HomePage() {
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Contact Name</Label>
                     <Input
-                      value={selectedProspect.contactName || ''}
-                      onChange={(e) => updateSelectedProspect('contactName', e.target.value)}
+                      key={`contactName-${selectedProspect.id}`}
+                      defaultValue={selectedProspect.contactName || ''}
+                      onChange={(e) => queueSelectedProspectPatch('contactName', e.target.value)}
                       placeholder="Name"
                       className="h-8 text-sm"
                     />
@@ -2017,8 +2065,9 @@ export default function HomePage() {
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Company</Label>
                     <Input
-                      value={selectedProspect.contactCompany || ''}
-                      onChange={(e) => updateSelectedProspect('contactCompany', e.target.value)}
+                      key={`contactCompany-${selectedProspect.id}`}
+                      defaultValue={selectedProspect.contactCompany || ''}
+                      onChange={(e) => queueSelectedProspectPatch('contactCompany', e.target.value)}
                       placeholder="Company"
                       className="h-8 text-sm"
                     />
@@ -2031,8 +2080,9 @@ export default function HomePage() {
                     <Label className="text-xs font-medium text-gray-700">Email</Label>
                     <Input
                       type="email"
-                      value={selectedProspect.contactEmail || ''}
-                      onChange={(e) => updateSelectedProspect('contactEmail', e.target.value)}
+                      key={`contactEmail-${selectedProspect.id}`}
+                      defaultValue={selectedProspect.contactEmail || ''}
+                      onChange={(e) => queueSelectedProspectPatch('contactEmail', e.target.value)}
                       placeholder="Email"
                       className="h-8 text-sm"
                     />
@@ -2040,8 +2090,9 @@ export default function HomePage() {
                   <div>
                     <Label className="text-xs font-medium text-gray-700">Phone</Label>
                     <PhoneInput
-                      value={selectedProspect.contactPhone || ''}
-                      onChange={(e) => updateSelectedProspect('contactPhone', e.target.value)}
+                      key={`contactPhone-${selectedProspect.id}`}
+                      defaultValue={selectedProspect.contactPhone || ''}
+                      onChange={(e) => queueSelectedProspectPatch('contactPhone', e.target.value)}
                       placeholder="(000) 000-0000"
                       className="h-8 text-sm"
                     />

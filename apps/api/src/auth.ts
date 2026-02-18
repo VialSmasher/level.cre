@@ -30,6 +30,17 @@ async function verifyBearerJWT(token: string): Promise<JWTPayload | null> {
   }
 }
 
+export async function getUserFromBearerAuthHeader(authHeader?: string): Promise<{ id: string; email?: string } | null> {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null
+  const token = authHeader.slice(7)
+  const payload = await verifyBearerJWT(token)
+  if (!payload || !payload.sub) return null
+  return {
+    id: payload.sub,
+    email: (payload as any).email,
+  }
+}
+
 
 // Supabase JWT verification middleware (stateless)
 export async function verifySupabaseToken(req: Request, res: Response, next: NextFunction) {

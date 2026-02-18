@@ -10,8 +10,13 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, loading } = useAuth()
   const [, setLocation] = useLocation()
 
-  // Check demo mode from localStorage
-  const demo = localStorage.getItem('demo-mode') === 'true'
+  // Check demo mode from localStorage (guarded for restricted contexts)
+  let demo = false
+  try {
+    demo = localStorage.getItem('demo-mode') === 'true'
+  } catch {
+    demo = false
+  }
   // Detect if OAuth is in-flight (PKCE code present). If so, hold navigation.
   const hasAuthParams = (() => {
     try {

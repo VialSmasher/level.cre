@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import jwt from "jsonwebtoken";
 import { storage } from "./storage";
 import { ensureUser } from './ensureUser';
-import { getUserId, requireAuth } from "./auth";
+import { getUserId, requireAuth, getUserFromBearerAuthHeader } from "./auth";
 import { z } from 'zod';
 import { ProspectGeometry, ProspectStatus, FollowUpTimeframe } from '@level-cre/shared/schema';
 import { randomUUID } from 'crypto';
@@ -523,30 +523,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   // User endpoint - returns demo user for unauthenticated requests, real user for authenticated requests
   app.get('/api/auth/user', async (req, res) => {
-    // Check if this is an authenticated request with JWT token
     const authHeader = req.headers.authorization;
-    
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      try {
-        const token = authHeader.slice(7);
-        const decoded = jwt.decode(token) as any;
-        
-        if (decoded && decoded.sub) {
-          // Return user info from JWT token
-          const user = {
-            id: decoded.sub,
-            email: decoded.email,
-            firstName: decoded.user_metadata?.full_name?.split(' ')[0] || 'User',
-            lastName: decoded.user_metadata?.full_name?.split(' ').slice(1).join(' ') || '',
-            profileImageUrl: decoded.user_metadata?.avatar_url || null,
-            createdAt: new Date(decoded.created_at || Date.now()),
-            updatedAt: new Date(),
-          };
-          return res.json(user);
-        }
-      } catch (error) {
-        console.error('Error decoding JWT:', error);
-      }
+    const verified = await getUserFromBearerAuthHeader(authHeader);
+    if (verified?.id) {
+      const decoded = jwt.decode(authHeader!.slice(7)) as any;
+      const user = {
+        id: verified.id,
+        email: verified.email ?? decoded?.email,
+        firstName: decoded?.user_metadata?.full_name?.split(' ')[0] || 'User',
+        lastName: decoded?.user_metadata?.full_name?.split(' ').slice(1).join(' ') || '',
+        profileImageUrl: decoded?.user_metadata?.avatar_url || null,
+        createdAt: new Date(decoded?.created_at || Date.now()),
+        updatedAt: new Date(),
+      };
+      return res.json(user);
     }
     
     // Fall back to demo user without touching DB in demo mode
@@ -1097,16 +1087,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/workspaces/:id', requireAuth, async (req, res) => {
     try {
-      const userId = getUserId(req);
+      await requireViewAccess(req, req.params.id);
       if (isDemo(req)) {
-        const demoListing = await demo.getListing(userId, req.params.id);
+        const demoListing = await demo.getListingAny(req.params.id);
         if (!demoListing) return res.status(404).json({ message: 'Workspace not found' });
         return res.json(demoListing);
       }
-      const listing = await storage.getListing(req.params.id, userId);
+      const listing = await storage.getListingAny(req.params.id);
       if (!listing) return res.status(404).json({ message: 'Workspace not found' });
       res.json(listing);
-    } catch (error) {
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
       console.error('Error getting workspace:', error);
       res.status(500).json({ message: 'Failed to get workspace' });
     }
@@ -1115,6 +1107,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/workspaces/:id/archive', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      await requireOwnerAccess(req, req.params.id);
       if (isDemo(req)) {
         const okDemo = await demo.archiveListing(userId, req.params.id);
         if (!okDemo) return res.status(404).json({ message: 'Workspace not found' });
@@ -1123,7 +1116,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ok = await storage.archiveListing(req.params.id, userId);
       if (!ok) return res.status(404).json({ message: 'Workspace not found' });
       res.json({ ok: true });
-    } catch (error) {
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
       console.error('Error archiving workspace:', error);
       res.status(500).json({ message: 'Failed to archive workspace' });
     }
@@ -1132,6 +1127,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete('/api/workspaces/:id', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      await requireOwnerAccess(req, req.params.id);
       if (isDemo(req)) {
         const okDemo = await demo.deleteListing(userId, req.params.id);
         if (!okDemo) return res.status(404).json({ message: 'Workspace not found' });
@@ -1140,7 +1136,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ok = await storage.deleteListing(req.params.id, userId);
       if (!ok) return res.status(404).json({ message: 'Workspace not found' });
       res.json({ ok: true });
-    } catch (error) {
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
       console.error('Error deleting workspace:', error);
       res.status(500).json({ message: 'Failed to delete workspace' });
     }
@@ -1148,17 +1146,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/workspaces/:id/prospects', requireAuth, async (req, res) => {
     try {
-      const userId = getUserId(req);
+      await requireViewAccess(req, req.params.id);
       if (isDemo(req)) {
-        const links = await demo.getListingLinks(userId, req.params.id);
-        const allProspects = await demo.getProspects(userId);
+        const links = await demo.getListingLinksAll(req.params.id);
+        const allProspects = await demo.getProspectsAll();
         const set = new Set(links.map((l: any) => l.prospectId));
         const list = (allProspects || []).filter((p: any) => set.has(p.id));
         return res.json(list);
       }
-      const list = await storage.getListingProspects(req.params.id, userId);
+      const list = await storage.getListingProspectsAny(req.params.id);
       res.json(list);
-    } catch (error) {
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
       console.error('Error fetching workspace prospects:', error);
       res.status(500).json({ message: 'Failed to fetch workspace prospects' });
     }
@@ -1167,15 +1167,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/workspaces/:id/prospects', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      await requireEditAccess(req, req.params.id);
       const { prospectId } = req.body || {};
       if (!prospectId) return res.status(400).json({ message: 'prospectId is required' });
       if (isDemo(req)) {
         await demo.linkProspect(userId, req.params.id, prospectId);
         return res.status(201).json({ ok: true });
       }
-      await storage.linkProspectToListing({ listingId: req.params.id, prospectId, userId });
+      await storage.linkProspectToListingAny({ listingId: req.params.id, prospectId });
       res.status(201).json({ ok: true });
-    } catch (error) {
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
       console.error('Error linking prospect:', error);
       res.status(500).json({ message: 'Failed to link prospect' });
     }
@@ -1184,15 +1187,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete('/api/workspaces/:id/prospects/:prospectId', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
+      await requireEditAccess(req, req.params.id);
       if (isDemo(req)) {
         const okDemo = await demo.unlinkProspect(userId, req.params.id, req.params.prospectId);
         if (!okDemo) return res.status(404).json({ message: 'Not linked' });
         return res.status(204).send();
       }
-      const ok = await storage.unlinkProspectFromListing({ listingId: req.params.id, prospectId: req.params.prospectId, userId });
+      const ok = await storage.unlinkProspectFromListingAny({ listingId: req.params.id, prospectId: req.params.prospectId });
       if (!ok) return res.status(404).json({ message: 'Not linked' });
       res.status(204).send();
-    } catch (error) {
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
       console.error('Error unlinking prospect:', error);
       res.status(500).json({ message: 'Failed to unlink prospect' });
     }
@@ -1200,14 +1206,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/workspaces/:id/export', requireAuth, async (req, res) => {
     try {
+      await requireViewAccess(req, req.params.id);
       const userId = getUserId(req);
       const { start, end } = req.query as any;
       if (isDemo(req)) {
         const interactionsAll = await demo.getInteractions(userId);
         const interactions = (interactionsAll || []).filter((i: any) => i.listingId === req.params.id)
           .filter((i: any) => (!start || i.date >= start) && (!end || i.date <= end));
-        const links = await demo.getListingLinks(userId, req.params.id);
-        const allProspects = await demo.getProspects(userId);
+        const links = await demo.getListingLinksAll(req.params.id);
+        const allProspects = await demo.getProspectsAll();
         const prospectMap = new Map(allProspects.map((p: any) => [p.id, p]));
         const byType: Record<string, number> = {};
         interactions.forEach((i: any) => { byType[i.type] = (byType[i.type] || 0) + 1; });
@@ -1231,10 +1238,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.setHeader('Content-Disposition', `attachment; filename="workspace-${req.params.id}-export.csv"`);
         return res.send(csv);
       }
-      const listing = await storage.getListing(req.params.id, userId);
+      const listing = await storage.getListingAny(req.params.id);
       if (!listing) return res.status(404).json({ message: 'Workspace not found' });
       const interactions = await storage.getContactInteractions(userId, undefined, req.params.id, start, end);
-      const lp = await storage.getListingProspects(req.params.id, userId);
+      const lp = await storage.getListingProspectsAny(req.params.id);
       const prospectMap = new Map(lp.map(p => [p.id, p]));
       const byType: Record<string, number> = {};
       interactions.forEach(i => { byType[i.type] = (byType[i.type] || 0) + 1; });
@@ -1258,7 +1265,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', `attachment; filename="workspace-${req.params.id}-export.csv"`);
       res.send(csv);
-    } catch (error) {
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
       console.error('Error exporting workspace CSV:', error);
       res.status(500).json({ message: 'Failed to export CSV' });
     }
