@@ -1,11 +1,11 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Trophy, TrendingUp, Phone, MapPin, Target, Brain, Zap, Star, ArrowRight } from 'lucide-react';
+import { Trophy, TrendingUp, Phone, MapPin, Target, Brain, Zap, Star } from 'lucide-react';
 import { BrokerSkillsRow, SkillActivityRow, Requirement } from '@level-cre/shared/schema';
 import { Link } from 'wouter';
 
@@ -45,27 +45,39 @@ const getLevelColor = (level: number): string => {
   return 'text-gray-500'; // Gray for novice
 };
 
-const getSkillIcon = (skill: string) => {
-  switch (skill) {
-    case 'prospecting': return MapPin;
-    case 'followUp': return Phone;
-    case 'consistency': return Zap;
-    case 'marketKnowledge': return Brain;
-    default: return Target;
-  }
-};
-
-const getSkillName = (skill: string): string => {
-  switch (skill) {
-    case 'prospecting': return 'Prospecting';
-    case 'followUp': return 'Follow Up';
-    case 'consistency': return 'Consistency';
-    case 'marketKnowledge': return 'Market Knowledge';
-    default: return skill;
-  }
-};
-
 const LEAD_AGENT_BONUS_XP = 80;
+const EDMONTON_TZ = 'America/Edmonton';
+const FOLLOW_UP_COUNT_ACTIONS = new Set([
+  'call',
+  'email',
+  'meeting',
+  'phone_call',
+  'email_sent',
+  'meeting_held',
+  'followup_logged',
+  'interaction',
+  'note_added',
+]);
+
+const getDatePartsInTimeZone = (date: Date, timeZone: string) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const get = (type: 'year' | 'month' | 'day') => Number(parts.find((p) => p.type === type)?.value || '0');
+  return { year: get('year'), month: get('month'), day: get('day') };
+};
+
+const getWeekKeyInTimeZone = (date: Date, timeZone: string) => {
+  const { year, month, day } = getDatePartsInTimeZone(date, timeZone);
+  const localDateAsUtc = new Date(Date.UTC(year, month - 1, day));
+  const dow = localDateAsUtc.getUTCDay();
+  const diffToMonday = dow === 0 ? -6 : 1 - dow;
+  localDateAsUtc.setUTCDate(localDateAsUtc.getUTCDate() + diffToMonday);
+  return `${localDateAsUtc.getUTCFullYear()}-${String(localDateAsUtc.getUTCMonth() + 1).padStart(2, '0')}-${String(localDateAsUtc.getUTCDate()).padStart(2, '0')}`;
+};
 
 interface SkillCardProps {
   name: string;
@@ -113,15 +125,15 @@ function SkillCard({ name, xp, icon: Icon, description, skillKey, progressPercen
 
   return (
     <Card className="relative overflow-hidden">
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-2 pt-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-blue-50">
               <Icon className="h-5 w-5 text-blue-600" />
             </div>
-            <div>
-              <CardTitle className="text-lg">{name}</CardTitle>
-              <p className="text-sm text-gray-600">{description}</p>
+            <div className="min-w-0">
+              <CardTitle className="text-base md:text-lg">{name}</CardTitle>
+              <p className="text-xs md:text-sm text-gray-600 truncate">{description}</p>
             </div>
           </div>
           <div className="text-right">
@@ -135,18 +147,16 @@ function SkillCard({ name, xp, icon: Icon, description, skillKey, progressPercen
         </div>
       </CardHeader>
       
-      <CardContent>
-        <div className="space-y-2">
+      <CardContent className="pt-1 pb-4">
+        <div className="space-y-1.5">
           <div className="flex justify-between text-sm">
             <span>Progress to level {level + 1}</span>
             <span>{progress}%</span>
           </div>
           <Progress value={progress} className="h-2" />
-          {xpToNext > 0 && (
-            <div className="text-xs text-gray-600 text-center">
-              {actionsToNext}
-            </div>
-          )}
+          <div className="h-4 text-xs text-gray-600 truncate">
+            {xpToNext > 0 ? actionsToNext : ''}
+          </div>
         </div>
       </CardContent>
       
@@ -204,14 +214,8 @@ export default function StatsPage() {
     return map;
   }, [requirements]);
 
-  const weekStartTs = React.useMemo(() => {
-    const now = new Date();
-    const day = now.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
-    const d = new Date(now);
-    d.setDate(now.getDate() + diff);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime();
+  const currentEdmontonWeekKey = React.useMemo(() => {
+    return getWeekKeyInTimeZone(new Date(), EDMONTON_TZ);
   }, []);
 
   const weeklySummary = React.useMemo(() => {
@@ -219,8 +223,8 @@ export default function StatsPage() {
     let followups = 0;
 
     for (const activity of recentActivities || []) {
-      const timestamp = new Date((activity as any).timestamp || (activity as any).date || (activity as any).createdAt || Date.now()).getTime();
-      if (timestamp < weekStartTs) continue;
+      const activityDate = new Date((activity as any).timestamp || (activity as any).date || (activity as any).createdAt || Date.now());
+      if (getWeekKeyInTimeZone(activityDate, EDMONTON_TZ) !== currentEdmontonWeekKey) continue;
 
       const key = String(activity.skillType || '');
       if (!key) continue;
@@ -228,7 +232,7 @@ export default function StatsPage() {
       let xp = Number(activity.xpGained || 0) || 0;
       const action = String(activity.action || '').toLowerCase();
 
-      if (key === 'followUp' && ['phone_call','email_sent','meeting_held','followup_logged'].includes(action)) {
+      if (key === 'followUp' && FOLLOW_UP_COUNT_ACTIONS.has(action)) {
         followups += 1;
       }
 
@@ -255,88 +259,82 @@ export default function StatsPage() {
     }
 
     return { sums, followups };
-  }, [recentActivities, weekStartTs, requirementsById]);
+  }, [recentActivities, currentEdmontonWeekKey, requirementsById]);
 
   const weeklyFollowupsCount = weeklySummary.followups;
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50 p-4 md:p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-3 rounded-lg bg-gradient-to-r from-blue-500 to-purple-600">
-              <Trophy className="h-6 w-6 text-white" />
+        <div className="mb-6">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-lg bg-gradient-to-r from-blue-500 to-purple-600">
+                <Trophy className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Broker Stats</h1>
+                <p className="text-sm md:text-base text-gray-600">Track your progress and level up your broker skills</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Broker Stats</h1>
-              <p className="text-gray-600">Track your progress and level up your broker skills</p>
-            </div>
+            <Link href="/leaderboard">
+              <Button variant="outline" size="sm" className="shrink-0">
+                <Trophy className="h-4 w-4 mr-2" />
+                View Leaderboard
+              </Button>
+            </Link>
           </div>
-
           {/* Overall Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-10">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6">
             <Card>
-              <CardContent className="p-4">
+              <CardContent className="p-3.5">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-600">Total Level</p>
-                    <p className="text-4xl font-bold text-blue-600">{headerLoading || headerError ? 0 : totalLevel}</p>
+                    <p className="text-3xl font-bold text-blue-600">{headerLoading || headerError ? 0 : totalLevel}</p>
                   </div>
-                  <TrendingUp className="h-7 w-7 text-blue-400" />
+                  <TrendingUp className="h-6 w-6 text-blue-400" />
                 </div>
               </CardContent>
             </Card>
             
             <Card>
-              <CardContent className="p-4">
+              <CardContent className="p-3.5">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-600">Assets Tracked</p>
-                    <p className="text-4xl font-bold text-purple-600">{headerLoading || headerError ? 0 : (header?.assetsTracked ?? 0)}</p>
+                    <p className="text-3xl font-bold text-purple-600">{headerLoading || headerError ? 0 : (header?.assetsTracked ?? 0)}</p>
                   </div>
-                  <MapPin className="h-7 w-7 text-purple-400" />
+                  <MapPin className="h-6 w-6 text-purple-400" />
                 </div>
               </CardContent>
             </Card>
             
             <Card>
-              <CardContent className="p-4">
+              <CardContent className="p-3.5">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-600">Follow-Ups Logged</p>
-                    <p className="text-4xl font-bold text-green-600">{weeklyFollowupsCount}</p>
+                    <p className="text-3xl font-bold text-green-600">{weeklyFollowupsCount}</p>
                     <p className="text-xs text-gray-500 mt-1">This week</p>
                   </div>
-                  <Target className="h-7 w-7 text-green-400" />
+                  <Target className="h-6 w-6 text-green-400" />
                 </div>
               </CardContent>
             </Card>
 
             <Card>
-              <CardContent className="p-4">
+              <CardContent className="p-3.5">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-gray-600">Streak Days</p>
-                    <p className="text-4xl font-bold text-orange-600">{headerLoading || headerError ? 0 : (header?.streakDays ?? 0)}</p>
+                    <p className="text-3xl font-bold text-orange-600">{headerLoading || headerError ? 0 : (header?.streakDays ?? 0)}</p>
                   </div>
-                  <Zap className="h-7 w-7 text-orange-400" />
+                  <Zap className="h-6 w-6 text-orange-400" />
                 </div>
               </CardContent>
             </Card>
-          </div>
-
-          {/* Simple page tabs */}
-          <div className="mt-2 mb-4 border-b border-gray-200">
-            <div className="flex gap-6 text-sm">
-              <span className="pb-3 -mb-px border-b-[3px] border-blue-600 text-blue-600 font-semibold">Broker Stats</span>
-              <Link
-                href="/leaderboard"
-                className="pb-3 -mb-px border-b-[3px] border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-300"
-              >
-                Leaderboard
-              </Link>
-            </div>
           </div>
 
           {/* Weekly Rings */}
@@ -349,19 +347,18 @@ export default function StatsPage() {
             ];
 
             return (
-              <Card className="mt-4">
-                <CardHeader>
-                  <CardTitle>Weekly Goals</CardTitle>
-                  <CardDescription>Your weekly goals reset every Monday. Keep your momentum going!</CardDescription>
+              <Card className="mt-3">
+                <CardHeader className="pb-2 pt-4">
+                  <CardTitle>Performance</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <CardContent className="pt-1 pb-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {rings.map((r) => {
                       const pct = Math.min(100, Math.floor((r.value / Math.max(1, r.goal)) * 100));
                       const deg = Math.round((pct / 100) * 360);
                       return (
                         <div key={r.key} className="flex items-center gap-4">
-                          <div className="relative w-20 h-20">
+                          <div className="relative w-16 h-16">
                             <div className="absolute inset-0 rounded-full" style={{ background: `conic-gradient(${r.color} ${deg}deg, #E5E7EB ${deg}deg)` }} />
                             <div className="absolute inset-2 rounded-full bg-white flex items-center justify-center">
                               <div className="flex flex-col items-center text-[11px] font-semibold leading-tight">
@@ -385,9 +382,9 @@ export default function StatsPage() {
         </div>
 
         {/* Main Content */}
-        <div className="grid grid-cols-1 gap-6 mb-8 mt-8">
+        <div className="grid grid-cols-1 gap-4 mb-6 mt-6">
           <div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <SkillCard
                 name="Prospecting"
                 xp={skills?.prospecting || 0}

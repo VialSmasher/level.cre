@@ -99,6 +99,7 @@ function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; on
       queryClient.invalidateQueries({ queryKey: ['/api/interactions'] });
       queryClient.invalidateQueries({ queryKey: ['/api/skills'] });
       queryClient.invalidateQueries({ queryKey: ['/api/skill-activities'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] });
       onClose();
     }
   });
@@ -234,6 +235,7 @@ function QuickEngagement({ prospect, allInteractions }: { prospect: Prospect; al
       queryClient.invalidateQueries({ queryKey: ['/api/interactions'] });
       queryClient.invalidateQueries({ queryKey: ['/api/skills'] });
       queryClient.invalidateQueries({ queryKey: ['/api/skill-activities'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] });
       setEngagingType(null);
       setShowNextFollow(false);
       setNextFollowUpDate('');
@@ -250,6 +252,7 @@ function QuickEngagement({ prospect, allInteractions }: { prospect: Prospect; al
       queryClient.invalidateQueries({ queryKey: ['/api/interactions'] });
       queryClient.invalidateQueries({ queryKey: ['/api/skills'] });
       queryClient.invalidateQueries({ queryKey: ['/api/skill-activities'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] });
     }
   });
 

@@ -1891,6 +1891,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Compute level and streak from existing skills source
       const levelFromXp = (xp: number) => Math.min(99, Math.floor(Math.sqrt(xp / 100)));
+      const edmTz = 'America/Edmonton';
+      const followUpCountActions = new Set([
+        'call',
+        'email',
+        'meeting',
+        'phone_call',
+        'email_sent',
+        'meeting_held',
+        'followup_logged',
+        'interaction',
+        'note_added',
+      ]);
+      const getDatePartsInTimeZone = (date: Date, timeZone: string) => {
+        const parts = new Intl.DateTimeFormat('en-CA', {
+          timeZone,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).formatToParts(date);
+        const get = (type: 'year' | 'month' | 'day') => Number(parts.find((p) => p.type === type)?.value || '0');
+        return { year: get('year'), month: get('month'), day: get('day') };
+      };
+      const getWeekKeyInTimeZone = (date: Date, timeZone: string) => {
+        const { year, month, day } = getDatePartsInTimeZone(date, timeZone);
+        const localDateAsUtc = new Date(Date.UTC(year, month - 1, day));
+        const dow = localDateAsUtc.getUTCDay();
+        const diffToMonday = dow === 0 ? -6 : 1 - dow;
+        localDateAsUtc.setUTCDate(localDateAsUtc.getUTCDate() + diffToMonday);
+        return `${localDateAsUtc.getUTCFullYear()}-${String(localDateAsUtc.getUTCMonth() + 1).padStart(2, '0')}-${String(localDateAsUtc.getUTCDate()).padStart(2, '0')}`;
+      };
+      const currentWeekKey = getWeekKeyInTimeZone(new Date(), edmTz);
       let totalLevel = 0;
       let streakDays = 0;
       let demoProspects: any[] = [];
@@ -1942,9 +1973,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (isDemo(req)) {
         assetsTracked = demoProspects.length;
-        followupsLogged = demoInteractions.filter((i: any) =>
-          ['call', 'email', 'meeting', 'followup_logged'].includes(i.type)
-        ).length;
+        followupsLogged = demoInteractions.filter((i: any) => {
+          const date = new Date(i?.date || i?.createdAt || Date.now());
+          if (getWeekKeyInTimeZone(date, edmTz) !== currentWeekKey) return false;
+          const type = String(i?.type || '').toLowerCase();
+          return followUpCountActions.has(type);
+        }).length;
       } else {
         const hasEvents = await tableExists('events');
         if (hasEvents) {
@@ -1955,16 +1989,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
             );
             assetsTracked = assetRes?.rows?.[0]?.c ?? 0;
           } catch {}
-          try {
-            const fuRes = await pool.query(
-              `SELECT COUNT(*)::int AS c FROM events WHERE user_id = $1 AND type = ANY($2)`,
-              [userId, ['call','email','meeting','followup_logged']]
-            );
-            followupsLogged = fuRes?.rows?.[0]?.c ?? 0;
-          } catch {}
+          // events table is retained for diagnostics/legacy support; follow-ups counter now comes
+          // from weekly skill activities to match the Broker Stats performance ring.
         }
 
-        if (!hasEvents) {
+        // Follow-Ups Logged: current Edmonton week, from skill activities when available.
+        let followupsCountedFromActivities = false;
+        try {
+          if (await tableExists('skill_activities')) {
+            const r = await pool.query(
+              `SELECT timestamp, action
+                 FROM skill_activities
+                WHERE user_id = $1
+                  AND skill_type = $2`,
+              [userId, 'followUp']
+            );
+            const rows = r?.rows || [];
+            followupsLogged = rows.filter((row: any) => {
+              const action = String(row?.action || '').toLowerCase();
+              if (!followUpCountActions.has(action)) return false;
+              const ts = new Date(row?.timestamp || Date.now());
+              return getWeekKeyInTimeZone(ts, edmTz) === currentWeekKey;
+            }).length;
+            followupsCountedFromActivities = true;
+          }
+        } catch {}
+
+        if (!followupsCountedFromActivities) {
           // Fallbacks
           try {
             if (await tableExists('prospects')) {
@@ -1978,16 +2029,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
           try {
             if (await tableExists('contact_interactions')) {
               const r = await pool.query(
-                `SELECT COUNT(*)::int AS c FROM contact_interactions WHERE user_id = $1 AND type = ANY($2)`,
-                [userId, ['call','email','meeting','followup_logged']]
+                `SELECT date, type
+                   FROM contact_interactions
+                  WHERE user_id = $1`,
+                [userId]
               );
-              followupsLogged = r?.rows?.[0]?.c ?? followupsLogged;
+              const rows = r?.rows || [];
+              followupsLogged = rows.filter((row: any) => {
+                const type = String(row?.type || '').toLowerCase();
+                if (!followUpCountActions.has(type)) return false;
+                const ts = new Date(row?.date || Date.now());
+                return getWeekKeyInTimeZone(ts, edmTz) === currentWeekKey;
+              }).length;
             } else if (await tableExists('touches')) {
               const r = await pool.query(
-                `SELECT COUNT(*)::int AS c FROM touches WHERE user_id = $1 AND kind = ANY($2)`,
-                [userId, ['call','email','meeting','followup_logged']]
+                `SELECT created_at, kind
+                   FROM touches
+                  WHERE user_id = $1`,
+                [userId]
               );
-              followupsLogged = r?.rows?.[0]?.c ?? followupsLogged;
+              const rows = r?.rows || [];
+              followupsLogged = rows.filter((row: any) => {
+                const kind = String(row?.kind || '').toLowerCase();
+                if (!followUpCountActions.has(kind)) return false;
+                const ts = new Date(row?.created_at || Date.now());
+                return getWeekKeyInTimeZone(ts, edmTz) === currentWeekKey;
+              }).length;
             }
           } catch {}
         }
