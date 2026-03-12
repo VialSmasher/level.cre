@@ -422,7 +422,12 @@ export default function HomePage() {
   // Avoid resetting local state on user change; we invalidate queries instead (see listener below)
 
   // Use React Query for authenticated data fetching
-  const { data: prospectsData = [], refetch: refetchProspects } = useQuery<Prospect[]>({
+  const {
+    data: prospectsData = [],
+    refetch: refetchProspects,
+    error: prospectsError,
+    isLoading: isProspectsLoading,
+  } = useQuery<Prospect[]>({
     queryKey: ['/api/prospects'],
     enabled: !!currentUser,
     retry: false,
@@ -1870,6 +1875,10 @@ export default function HomePage() {
     }
   }, []);
 
+  const prospectsErrorMessage = prospectsError instanceof Error
+    ? prospectsError.message
+    : null;
+
   if (!isLoaded) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -1885,6 +1894,16 @@ export default function HomePage() {
     <div style={{ position: 'relative', height: 'calc(100vh - 4rem)', width: '100%', overflow: 'hidden' }}>
       {/* Map Canvas */}
       <div style={{ position: 'absolute', inset: 0 }} ref={mapContainerRef}>
+        {(isProspectsLoading || prospectsErrorMessage) && (
+          <div className="absolute left-4 top-4 z-50 max-w-md rounded-md border bg-white/95 px-3 py-2 text-sm shadow-lg backdrop-blur-sm">
+            <div className="font-medium text-gray-900">
+              {prospectsErrorMessage ? 'Asset load failed' : 'Loading assets'}
+            </div>
+            <div className={prospectsErrorMessage ? 'text-red-600' : 'text-gray-600'}>
+              {prospectsErrorMessage || 'Fetching prospects for the main map.'}
+            </div>
+          </div>
+        )}
         <GoogleMap
           mapContainerStyle={MAP_CONTAINER_STYLE}
           center={center}

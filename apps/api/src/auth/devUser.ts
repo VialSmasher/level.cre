@@ -7,6 +7,11 @@ export const devUser = (): RequestHandler => {
     const nodeEnv = process.env.NODE_ENV || req.app?.get('env');
     if (nodeEnv !== 'development') return next();
 
+    // Preserve real auth and explicit demo mode. This middleware is only a local fallback.
+    if (req.headers.authorization?.startsWith('Bearer ') || req.headers['x-demo-mode'] === 'true') {
+      return next();
+    }
+
     const signed = (req as any).signedCookies;
     let uid = signed?.dev_uid;
     if (!uid) {

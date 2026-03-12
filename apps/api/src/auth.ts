@@ -87,18 +87,18 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return next()
   }
 
-  // In development, accept the dev user injected by middleware
+  // Prefer a real bearer token when present, even in development.
+  // The dev user should only be a fallback for truly unauthenticated local requests.
+  const authHeader = req.headers.authorization
+  if (authHeader?.startsWith('Bearer ')) {
+    return verifySupabaseToken(req, res, next)
+  }
+
+  // In development, accept the synthetic dev user only when no real auth was supplied.
   const isDevEnv = process.env.NODE_ENV === 'development' || req.app?.get('env') === 'development'
   if (isDevEnv && (req as any).user?.id) {
-    // In dev, accept the injected dev user without requiring DB
     return next()
   }
 
-  // Otherwise require a valid Bearer token
-  const authHeader = req.headers.authorization
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'Authentication required' })
-  }
-
-  return verifySupabaseToken(req, res, next)
+  return res.status(401).json({ message: 'Authentication required' })
 }

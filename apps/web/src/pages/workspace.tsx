@@ -78,7 +78,12 @@ export default function Workspace() {
   const { user, isDemoMode } = useAuth();
 
   const { data: listing } = useQuery<Listing>({ queryKey: ['/api/listings', listingId], enabled: !!listingId });
-  const { data: linkedProspects = [], refetch: refetchLinked } = useQuery<Prospect[]>({ queryKey: ['/api/listings', listingId, 'prospects'], enabled: !!listingId });
+  const {
+    data: linkedProspects = [],
+    refetch: refetchLinked,
+    error: linkedProspectsError,
+    isLoading: isLinkedProspectsLoading,
+  } = useQuery<Prospect[]>({ queryKey: ['/api/listings', listingId, 'prospects'], enabled: !!listingId });
   const { data: allProspects = [] } = useQuery<Prospect[]>({ queryKey: ['/api/prospects'] });
   const { data: members = [] } = useQuery<{ userId: string; role: 'owner'|'editor'|'viewer'; email?: string|null }[]>({ queryKey: ['/api/listings', listingId, 'members'], enabled: !!listingId });
   const geocode = useGeocode();
@@ -147,6 +152,10 @@ export default function Workspace() {
     googleMapsApiKey: (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '') as string,
     libraries,
   });
+
+  const linkedProspectsErrorMessage = linkedProspectsError instanceof Error
+    ? linkedProspectsError.message
+    : null;
 
   // Follow-up due date helpers
   const timeframeToMonths: Record<FollowUpTimeframeType, number> = {
@@ -1164,6 +1173,16 @@ export default function Workspace() {
         )}
         {isLoaded && apiKey && (
           <div style={{ position: 'absolute', inset: 0 }}>
+            {(isLinkedProspectsLoading || linkedProspectsErrorMessage) && (
+              <div className="absolute left-4 top-4 z-[1001] max-w-md rounded-md border bg-white/95 px-3 py-2 text-sm shadow-lg backdrop-blur-sm">
+                <div className="font-medium text-gray-900">
+                  {linkedProspectsErrorMessage ? 'Workspace asset load failed' : 'Loading workspace assets'}
+                </div>
+                <div className={linkedProspectsErrorMessage ? 'text-red-600' : 'text-gray-600'}>
+                  {linkedProspectsErrorMessage || 'Fetching linked prospects for this workspace.'}
+                </div>
+              </div>
+            )}
             {/* Floating Share button (top-right) */}
             <div
               className="absolute top-4 z-[1000] pointer-events-auto"
