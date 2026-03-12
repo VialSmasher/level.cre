@@ -10,7 +10,8 @@
     "start": "npm run build && NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
     "db:push": "drizzle-kit push",
-    "db:prepare": "node ./scripts/ensure_pgcrypto.mjs && drizzle-kit push"
+    "db:prepare": "node ./scripts/ensure_pgcrypto.mjs && drizzle-kit push",
+    "db:migrate-prospect-numerics": "node ./scripts/migrate_prospect_numeric_fields.mjs"
   },
   "dependencies": {
     "@level-cre/shared": "file:../../packages/shared",

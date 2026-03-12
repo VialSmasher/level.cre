@@ -35,7 +35,18 @@ export interface IStorage {
   getProspect(id: string, userId: string): Promise<Prospect | undefined>;
   getAllProspects(userId: string): Promise<Prospect[]>;
   createProspect(prospect: InsertProspect & { userId: string }): Promise<Prospect>;
-  updateProspect(id: string, userId: string, prospect: Partial<Prospect>): Promise<{ prospect: Prospect; newXpGained: number } | undefined>;
+  updateProspect(
+    id: string,
+    userId: string,
+    prospect: Partial<Prospect> & {
+      followUpDueDate?: string | null;
+      buildingSf?: number | null;
+      lotSizeAcres?: number | null;
+      aiMetadata?: Record<string, any> | null;
+      businessName?: string | null;
+      websiteUrl?: string | null;
+    }
+  ): Promise<{ prospect: Prospect; newXpGained: number } | undefined>;
   deleteProspect(id: string, userId: string): Promise<boolean>;
   
   // User operations for Replit Auth
@@ -177,8 +188,9 @@ export class DatabaseStorage implements IStorage {
         contactEmail: prospects.contactEmail,
         contactPhone: prospects.contactPhone,
         contactCompany: prospects.contactCompany,
-        size: prospects.size,
-        acres: prospects.acres,
+        buildingSf: prospects.buildingSf,
+        lotSizeAcres: prospects.lotSizeAcres,
+        aiMetadata: prospects.aiMetadata,
         businessName: prospects.businessName,
         websiteUrl: prospects.websiteUrl,
         createdAt: prospects.createdAt,
@@ -196,12 +208,16 @@ export class DatabaseStorage implements IStorage {
       submarketId: p.submarketId || undefined,
       lastContactDate: p.lastContactDate || undefined,
       followUpTimeframe: p.followUpTimeframe as any || undefined,
+      followUpDueDate: p.followUpDueDate?.toISOString() || undefined,
       contactName: p.contactName || undefined,
       contactEmail: p.contactEmail || undefined,
       contactPhone: p.contactPhone || undefined,
       contactCompany: p.contactCompany || undefined,
-      size: p.size || undefined,
-      acres: p.acres || undefined,
+      buildingSf: p.buildingSf ?? undefined,
+      lotSizeAcres: p.lotSizeAcres !== null && p.lotSizeAcres !== undefined ? Number(p.lotSizeAcres) : undefined,
+      aiMetadata: (p.aiMetadata as any) || undefined,
+      businessName: p.businessName || undefined,
+      websiteUrl: p.websiteUrl || undefined,
       createdDate: p.createdAt?.toISOString() || new Date().toISOString(),
     }));
   }
@@ -218,12 +234,16 @@ export class DatabaseStorage implements IStorage {
         submarketId: prospects.submarketId,
         lastContactDate: prospects.lastContactDate,
         followUpTimeframe: prospects.followUpTimeframe,
+        followUpDueDate: prospects.followUpDueDate,
         contactName: prospects.contactName,
         contactEmail: prospects.contactEmail,
         contactPhone: prospects.contactPhone,
         contactCompany: prospects.contactCompany,
-        size: prospects.size,
-        acres: prospects.acres,
+        buildingSf: prospects.buildingSf,
+        lotSizeAcres: prospects.lotSizeAcres,
+        aiMetadata: prospects.aiMetadata,
+        businessName: prospects.businessName,
+        websiteUrl: prospects.websiteUrl,
         createdAt: prospects.createdAt,
       })
       .from(listingProspects)
@@ -238,12 +258,16 @@ export class DatabaseStorage implements IStorage {
       submarketId: p.submarketId || undefined,
       lastContactDate: p.lastContactDate || undefined,
       followUpTimeframe: p.followUpTimeframe as any || undefined,
+      followUpDueDate: p.followUpDueDate?.toISOString() || undefined,
       contactName: p.contactName || undefined,
       contactEmail: p.contactEmail || undefined,
       contactPhone: p.contactPhone || undefined,
       contactCompany: p.contactCompany || undefined,
-      size: p.size || undefined,
-      acres: p.acres || undefined,
+      buildingSf: p.buildingSf ?? undefined,
+      lotSizeAcres: p.lotSizeAcres !== null && p.lotSizeAcres !== undefined ? Number(p.lotSizeAcres) : undefined,
+      aiMetadata: (p.aiMetadata as any) || undefined,
+      businessName: p.businessName || undefined,
+      websiteUrl: p.websiteUrl || undefined,
       createdDate: p.createdAt?.toISOString() || new Date().toISOString(),
     }));
   }
@@ -631,12 +655,16 @@ export class DatabaseStorage implements IStorage {
         submarketId: prospects.submarketId,
         lastContactDate: prospects.lastContactDate,
         followUpTimeframe: prospects.followUpTimeframe,
+        followUpDueDate: prospects.followUpDueDate,
         contactName: prospects.contactName,
         contactEmail: prospects.contactEmail,
         contactPhone: prospects.contactPhone,
         contactCompany: prospects.contactCompany,
-        size: prospects.size,
-        acres: prospects.acres,
+        buildingSf: prospects.buildingSf,
+        lotSizeAcres: prospects.lotSizeAcres,
+        aiMetadata: prospects.aiMetadata,
+        businessName: prospects.businessName,
+        websiteUrl: prospects.websiteUrl,
         createdAt: prospects.createdAt,
       })
       .from(prospects)
@@ -656,8 +684,9 @@ export class DatabaseStorage implements IStorage {
       contactEmail: row.contactEmail || undefined,
       contactPhone: row.contactPhone || undefined,
       contactCompany: row.contactCompany || undefined,
-      size: row.size || undefined,
-      acres: row.acres || undefined,
+      buildingSf: row.buildingSf ?? undefined,
+      lotSizeAcres: row.lotSizeAcres !== null && row.lotSizeAcres !== undefined ? Number(row.lotSizeAcres) : undefined,
+      aiMetadata: (row.aiMetadata as any) || undefined,
       businessName: row.businessName || undefined,
       websiteUrl: row.websiteUrl || undefined,
       createdDate: row.createdAt?.toISOString() || new Date().toISOString()
@@ -685,8 +714,9 @@ export class DatabaseStorage implements IStorage {
         contactEmail: prospects.contactEmail,
         contactPhone: prospects.contactPhone,
         contactCompany: prospects.contactCompany,
-        size: prospects.size,
-        acres: prospects.acres,
+        buildingSf: prospects.buildingSf,
+        lotSizeAcres: prospects.lotSizeAcres,
+        aiMetadata: prospects.aiMetadata,
         businessName: prospects.businessName,
         websiteUrl: prospects.websiteUrl,
         createdAt: prospects.createdAt,
@@ -707,8 +737,9 @@ export class DatabaseStorage implements IStorage {
       contactEmail: r.contactEmail || undefined,
       contactPhone: r.contactPhone || undefined,
       contactCompany: r.contactCompany || undefined,
-      size: r.size || undefined,
-      acres: r.acres || undefined,
+      buildingSf: r.buildingSf ?? undefined,
+      lotSizeAcres: r.lotSizeAcres !== null && r.lotSizeAcres !== undefined ? Number(r.lotSizeAcres) : undefined,
+      aiMetadata: (r.aiMetadata as any) || undefined,
       businessName: r.businessName || undefined,
       websiteUrl: r.websiteUrl || undefined,
       createdDate: r.createdAt?.toISOString() || new Date().toISOString()
@@ -731,8 +762,9 @@ export class DatabaseStorage implements IStorage {
       ...(insertProspect.contactEmail && { contactEmail: insertProspect.contactEmail }),
       ...(insertProspect.contactPhone && { contactPhone: insertProspect.contactPhone }),
       ...(insertProspect.contactCompany && { contactCompany: insertProspect.contactCompany }),
-      ...(insertProspect.size && { size: insertProspect.size }),
-      ...(insertProspect.acres && { acres: insertProspect.acres }),
+      ...(insertProspect.buildingSf !== undefined && { buildingSf: insertProspect.buildingSf }),
+      ...(insertProspect.lotSizeAcres !== undefined && { lotSizeAcres: insertProspect.lotSizeAcres }),
+      ...(insertProspect.aiMetadata !== undefined && { aiMetadata: insertProspect.aiMetadata }),
       ...(insertProspect.businessName && { businessName: insertProspect.businessName }),
       ...(insertProspect.websiteUrl && { websiteUrl: insertProspect.websiteUrl }),
     }).returning({
@@ -749,8 +781,9 @@ export class DatabaseStorage implements IStorage {
       contactEmail: prospects.contactEmail,
       contactPhone: prospects.contactPhone,
       contactCompany: prospects.contactCompany,
-      size: prospects.size,
-      acres: prospects.acres,
+      buildingSf: prospects.buildingSf,
+      lotSizeAcres: prospects.lotSizeAcres,
+      aiMetadata: prospects.aiMetadata,
       businessName: prospects.businessName,
       websiteUrl: prospects.websiteUrl,
       createdAt: prospects.createdAt,
@@ -780,15 +813,27 @@ export class DatabaseStorage implements IStorage {
       contactEmail: result.contactEmail || undefined,
       contactPhone: result.contactPhone || undefined,
       contactCompany: result.contactCompany || undefined,
-      size: result.size || undefined,
-      acres: result.acres || undefined,
+      buildingSf: result.buildingSf ?? undefined,
+      lotSizeAcres: result.lotSizeAcres !== null && result.lotSizeAcres !== undefined ? Number(result.lotSizeAcres) : undefined,
+      aiMetadata: (result.aiMetadata as any) || undefined,
       businessName: result.businessName || undefined,
       websiteUrl: result.websiteUrl || undefined,
       createdDate: result.createdAt?.toISOString() || new Date().toISOString()
     };
   }
 
-  async updateProspect(id: string, userId: string, updates: Partial<Prospect>): Promise<{ prospect: Prospect; newXpGained: number } | undefined> {
+  async updateProspect(
+    id: string,
+    userId: string,
+    updates: Partial<Prospect> & {
+      followUpDueDate?: string | null;
+      buildingSf?: number | null;
+      lotSizeAcres?: number | null;
+      aiMetadata?: Record<string, any> | null;
+      businessName?: string | null;
+      websiteUrl?: string | null;
+    }
+  ): Promise<{ prospect: Prospect; newXpGained: number } | undefined> {
     // Common SET payload for both owner and shared edits
     const setPayload: any = {
       ...(updates.name && { name: updates.name }),
@@ -803,8 +848,9 @@ export class DatabaseStorage implements IStorage {
       ...(updates.contactEmail !== undefined && { contactEmail: updates.contactEmail }),
       ...(updates.contactPhone !== undefined && { contactPhone: updates.contactPhone }),
       ...(updates.contactCompany !== undefined && { contactCompany: updates.contactCompany }),
-      ...(updates.size !== undefined && { size: updates.size }),
-      ...(updates.acres !== undefined && { acres: updates.acres }),
+      ...(updates.buildingSf !== undefined && { buildingSf: updates.buildingSf }),
+      ...(updates.lotSizeAcres !== undefined && { lotSizeAcres: updates.lotSizeAcres }),
+      ...(updates.aiMetadata !== undefined && { aiMetadata: updates.aiMetadata }),
       ...(updates.businessName !== undefined && { businessName: updates.businessName }),
       ...(updates.websiteUrl !== undefined && { websiteUrl: updates.websiteUrl }),
       updatedAt: new Date()
@@ -828,8 +874,9 @@ export class DatabaseStorage implements IStorage {
         contactEmail: prospects.contactEmail,
         contactPhone: prospects.contactPhone,
         contactCompany: prospects.contactCompany,
-        size: prospects.size,
-        acres: prospects.acres,
+        buildingSf: prospects.buildingSf,
+        lotSizeAcres: prospects.lotSizeAcres,
+        aiMetadata: prospects.aiMetadata,
         businessName: prospects.businessName,
         websiteUrl: prospects.websiteUrl,
         createdAt: prospects.createdAt,
@@ -878,8 +925,9 @@ export class DatabaseStorage implements IStorage {
           contactEmail: prospects.contactEmail,
           contactPhone: prospects.contactPhone,
           contactCompany: prospects.contactCompany,
-          size: prospects.size,
-          acres: prospects.acres,
+          buildingSf: prospects.buildingSf,
+          lotSizeAcres: prospects.lotSizeAcres,
+          aiMetadata: prospects.aiMetadata,
           businessName: prospects.businessName,
           websiteUrl: prospects.websiteUrl,
           createdAt: prospects.createdAt,
@@ -902,8 +950,9 @@ export class DatabaseStorage implements IStorage {
       contactEmail: result.contactEmail || undefined,
       contactPhone: result.contactPhone || undefined,
       contactCompany: result.contactCompany || undefined,
-      size: result.size || undefined,
-      acres: result.acres || undefined,
+      buildingSf: result.buildingSf ?? undefined,
+      lotSizeAcres: result.lotSizeAcres !== null && result.lotSizeAcres !== undefined ? Number(result.lotSizeAcres) : undefined,
+      aiMetadata: (result.aiMetadata as any) || undefined,
       businessName: result.businessName || undefined,
       websiteUrl: result.websiteUrl || undefined,
       createdDate: result.createdAt?.toISOString() || new Date().toISOString()

@@ -273,6 +273,9 @@ export default function Workspace() {
   const [localContactCompany, setLocalContactCompany] = useState('');
   const [localContactEmail, setLocalContactEmail] = useState('');
   const [localContactPhone, setLocalContactPhone] = useState('');
+  const [localBuildingSf, setLocalBuildingSf] = useState('');
+  const [localLotSizeAcres, setLocalLotSizeAcres] = useState('');
+  const manualLotOverrideRef = useRef<Set<string>>(new Set());
   const [isEditPanelOpen, setIsEditPanelOpen] = useState(false);
   const [editingProspectId, setEditingProspectId] = useState<string | null>(null);
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
@@ -307,8 +310,8 @@ export default function Workspace() {
     contactEmail: data.contactEmail,
     contactPhone: data.contactPhone,
     contactCompany: data.contactCompany,
-    size: data.size,
-    acres: data.acres,
+    buildingSf: data.buildingSf,
+    lotSizeAcres: data.lotSizeAcres,
     businessName: (data as any).businessName,
     websiteUrl: (data as any).websiteUrl,
     // required
@@ -524,14 +527,7 @@ export default function Workspace() {
   const { profile } = useProfile();
   const submarketOptions = uniqueSubmarketNames(profile?.submarkets || []);
 
-  const STANDARD_SIZE_OPTIONS = [
-    '< 5,000 SF',
-    '5,000 - 10,000 SF',
-    '10,000 - 25,000 SF',
-    '25,000 - 50,000 SF',
-    '50,000 - 100,000 SF',
-    '100,000+ SF'
-  ] as const;
+  const SPEED_TAG_SF_VALUES = [5000, 10000, 25000, 50000, 100000] as const;
   const FOLLOW_UP_LABELS: Record<'1_month'|'3_month'|'6_month'|'1_year', string> = {
     '1_month': '1 Month', '3_month': '3 Months', '6_month': '6 Months', '1_year': '1 Year'
   };
@@ -546,11 +542,37 @@ export default function Workspace() {
       const path = coordinates.map((coord: [number, number]) => ({ lat: coord[1], lng: coord[0] }));
       if (window.google?.maps?.geometry?.spherical) {
         const areaInSquareMeters = window.google.maps.geometry.spherical.computeArea(path);
-        const areaInSquareFeet = areaInSquareMeters * 10.764; return areaInSquareFeet / 43560;
+        const areaInSquareFeet = areaInSquareMeters * 10.764;
+        const acres = areaInSquareFeet / 43560;
+        return Math.round((acres + Number.EPSILON) * 100) / 100;
       }
       let area = 0; for (let i = 0; i < path.length; i++) { const j = (i + 1) % path.length; area += path[i].lng * path[j].lat; area -= path[j].lng * path[i].lat; }
-      area = Math.abs(area) / 2; const metersPerDegree = 111320; const areaInSquareMeters = area * metersPerDegree * metersPerDegree; return (areaInSquareMeters * 10.764) / 43560;
+      area = Math.abs(area) / 2;
+      const metersPerDegree = 111320;
+      const areaInSquareMeters = area * metersPerDegree * metersPerDegree;
+      const acres = (areaInSquareMeters * 10.764) / 43560;
+      return Math.round((acres + Number.EPSILON) * 100) / 100;
     } catch { return null; }
+  };
+
+  const formatSfWithCommas = (value?: number | null): string => {
+    if (value === null || value === undefined || Number.isNaN(value)) return '';
+    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
+  };
+
+  const parseSfInput = (raw: string): number | null => {
+    const digitsOnly = raw.replace(/[^\d]/g, '');
+    if (!digitsOnly) return null;
+    const parsed = Number.parseInt(digitsOnly, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const parseAcresInput = (raw: string): number | null => {
+    const cleaned = raw.replace(/[^\d.]/g, '');
+    if (!cleaned || cleaned === '.') return null;
+    const parsed = Number.parseFloat(cleaned);
+    if (!Number.isFinite(parsed)) return null;
+    return Math.round((parsed + Number.EPSILON) * 100) / 100;
   };
 
   // Debounced, optimistic field updates to avoid flicker while typing
@@ -750,6 +772,8 @@ export default function Workspace() {
       setLocalContactCompany('');
       setLocalContactEmail('');
       setLocalContactPhone('');
+      setLocalBuildingSf('');
+      setLocalLotSizeAcres('');
       return;
     }
     setLocalAddress(getDisplayAddressValue(prospectDraft.name));
@@ -758,6 +782,12 @@ export default function Workspace() {
     setLocalContactCompany(prospectDraft.contactCompany || '');
     setLocalContactEmail(prospectDraft.contactEmail || '');
     setLocalContactPhone(prospectDraft.contactPhone || '');
+    setLocalBuildingSf(formatSfWithCommas(prospectDraft.buildingSf));
+    setLocalLotSizeAcres(
+      prospectDraft.lotSizeAcres === null || prospectDraft.lotSizeAcres === undefined
+        ? ''
+        : prospectDraft.lotSizeAcres.toFixed(2)
+    );
   }, [
     prospectDraft,
     cancelAddressSync,
@@ -932,16 +962,17 @@ export default function Workspace() {
           const newGeom = { type: 'Polygon' as const, coordinates: [coords] };
           const acres = calculatePolygonAcres(newGeom);
           try {
+            manualLotOverrideRef.current.delete(prospectId);
             if (isDemoMode) {
               // Local update in demo mode
-              const patch: Partial<Prospect> = { geometry: newGeom, acres: acres ? acres.toString() : undefined };
+              const patch: Partial<Prospect> = { geometry: newGeom, lotSizeAcres: acres };
               queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === prospectId ? { ...p, ...patch } as Prospect : p)) : prev);
               queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === prospectId ? { ...p, ...patch } as Prospect : p)) : prev);
               const all = (queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || []) as Prospect[];
               persistProspectsGlobal(all);
               setSelectedProspect(prev => (prev && prev.id === prospectId) ? ({ ...prev, ...patch } as Prospect) : prev);
             } else {
-              const r = await apiRequest('PATCH', `/api/prospects/${prospectId}`, { geometry: newGeom, acres: acres ? acres.toString() : undefined });
+              const r = await apiRequest('PATCH', `/api/prospects/${prospectId}`, { geometry: newGeom, lotSizeAcres: acres });
               const saved = await r.json();
               setSelectedProspect(prev => prev && prev.id === saved.id ? saved : prev);
               queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev);
@@ -1220,8 +1251,9 @@ export default function Workspace() {
                   const target = drawingForProspectRef.current;
                   if (target && geometry.type === 'Polygon') {
                     try {
+                      manualLotOverrideRef.current.delete(target.id);
                       if (isDemoMode) {
-                        const patch: Partial<Prospect> = { geometry, acres: acres ? acres.toString() : undefined };
+                        const patch: Partial<Prospect> = { geometry, lotSizeAcres: acres };
                         // Update caches
                         queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === target.id ? { ...p, ...patch } as Prospect : p)) : prev);
                         queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === target.id ? { ...p, ...patch } as Prospect : p)) : prev);
@@ -1229,7 +1261,7 @@ export default function Workspace() {
                         persistProspectsGlobal(all);
                         setSelectedProspect((prev) => (prev && prev.id === target.id) ? ({ ...prev, ...patch } as Prospect) : prev);
                       } else {
-                        const r = await apiRequest('PATCH', `/api/prospects/${target.id}`, { geometry, acres: acres ? acres.toString() : undefined });
+                        const r = await apiRequest('PATCH', `/api/prospects/${target.id}`, { geometry, lotSizeAcres: acres });
                         const saved = await r.json();
                         setSelectedProspect((prev) => (prev && prev.id === saved.id ? saved : prev));
                         queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev);
@@ -1249,7 +1281,7 @@ export default function Workspace() {
                   const typeLabel = (type || 'prospect');
                   if (isDemoMode) {
                     // Start with empty name so the Address field placeholder shows and editing is smooth
-                    const saved = buildLocalProspect({ name: '', status: 'prospect' as ProspectStatusType, notes: '', geometry, acres: acres ? acres.toString() : undefined } as any);
+                    const saved = buildLocalProspect({ name: '', status: 'prospect' as ProspectStatusType, notes: '', geometry, lotSizeAcres: acres } as any);
                     // Update caches for both listing and global
                     queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
                     queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
@@ -1273,7 +1305,7 @@ export default function Workspace() {
                     return;
                   }
                   // Use a non-empty default for server validation; user can edit in the panel
-                  const res = await apiRequest('POST', '/api/prospects', { name: `New ${typeLabel}`, status: 'prospect', notes: '', geometry, acres: acres ? acres.toString() : undefined });
+                  const res = await apiRequest('POST', '/api/prospects', { name: `New ${typeLabel}`, status: 'prospect', notes: '', geometry, lotSizeAcres: acres });
                   const saved = await res.json();
                   await apiRequest('POST', `/api/listings/${listingId}/prospects`, { prospectId: saved.id });
                   queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
@@ -1483,7 +1515,7 @@ export default function Workspace() {
                       <Label className="text-xs font-medium text-gray-700">Business Name</Label>
                       <Input
                         value={prospectDraft.businessName || ''}
-                        onChange={(e) => updateSelectedProspect('businessName', e.target.value || undefined)}
+                        onChange={(e) => updateSelectedProspect('businessName', e.target.value || null)}
                         placeholder="Business name"
                         className="h-8 text-sm"
                       />
@@ -1493,7 +1525,7 @@ export default function Workspace() {
                       <Input
                         type="url"
                         value={prospectDraft.websiteUrl || ''}
-                        onChange={(e) => updateSelectedProspect('websiteUrl', e.target.value || undefined)}
+                        onChange={(e) => updateSelectedProspect('websiteUrl', e.target.value || null)}
                         placeholder="Website URL"
                         className="h-8 text-sm"
                       />
@@ -1523,7 +1555,7 @@ export default function Workspace() {
                       const tf = (v === 'none' ? undefined : (v as FollowUpTimeframeType));
                       updateSelectedProspect('followUpTimeframe' as any, tf);
                       const anchor = prospectDraft.lastContactDate || (prospectDraft as any).createdDate;
-                      const due = tf ? computeFollowUpDue(anchor, tf) : undefined;
+                      const due = tf ? computeFollowUpDue(anchor, tf) : null;
                       updateSelectedProspect('followUpDueDate', due);
                     }}>
                       <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="None" /></SelectTrigger>
@@ -1534,20 +1566,55 @@ export default function Workspace() {
                     </Select>
                   </div>
                 </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-gray-700">Speed Tags</Label>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {SPEED_TAG_SF_VALUES.map((sf) => (
+                      <Button
+                        key={sf}
+                        type="button"
+                        variant="outline"
+                        className="h-7 px-0 text-[11px]"
+                        onClick={() => {
+                          setLocalBuildingSf(formatSfWithCommas(sf));
+                          updateSelectedProspect('buildingSf', sf);
+                        }}
+                      >
+                        {sf >= 100000 ? '100k+' : `${Math.round(sf / 1000)}k`}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <Label className="text-xs font-medium text-gray-700">Size</Label>
-                    <Select value={prospectDraft.size || ''} onValueChange={(v) => updateSelectedProspect('size', v === 'none' ? '' : v)}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select size" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">None</SelectItem>
-                        {['< 5,000 SF','5,000 - 10,000 SF','10,000 - 25,000 SF','25,000 - 50,000 SF','50,000 - 100,000 SF','100,000+ SF'].map((x) => (<SelectItem key={x} value={x}>{x}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
+                    <Label className="text-xs font-medium text-gray-700">Building SF</Label>
+                    <Input
+                      value={localBuildingSf}
+                      onChange={(e) => {
+                        const parsed = parseSfInput(e.target.value);
+                        setLocalBuildingSf(parsed === null ? '' : formatSfWithCommas(parsed));
+                        updateSelectedProspect('buildingSf', parsed);
+                      }}
+                      placeholder="e.g. 10,000"
+                      inputMode="numeric"
+                      className="h-8 text-sm"
+                    />
                   </div>
                   <div>
-                    <Label className="text-xs font-medium text-gray-700">Acres</Label>
-                    <Input value={prospectDraft.acres || ''} placeholder="Auto-calculated" className="h-8 text-sm bg-gray-50" disabled />
+                    <Label className="text-xs font-medium text-gray-700">Lot Size (Acres)</Label>
+                    <Input
+                      value={localLotSizeAcres}
+                      onChange={(e) => {
+                        if (!prospectDraft?.id) return;
+                        setLocalLotSizeAcres(e.target.value);
+                        manualLotOverrideRef.current.add(prospectDraft.id);
+                        const parsed = parseAcresInput(e.target.value);
+                        updateSelectedProspect('lotSizeAcres', parsed);
+                      }}
+                      placeholder="Auto or manual"
+                      inputMode="decimal"
+                      className="h-8 text-sm"
+                    />
                   </div>
                 </div>
                 <div>

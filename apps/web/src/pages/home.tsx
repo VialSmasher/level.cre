@@ -24,15 +24,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { MapControls } from '@/features/map/MapControls';
 import { MapContextMenu } from '@/features/map/MapContextMenu';
 
-// Standardized size options for consistent use across Prospects and Requirements
-const STANDARD_SIZE_OPTIONS = [
-  '< 5,000 SF',
-  '5,000 - 10,000 SF',
-  '10,000 - 25,000 SF',
-  '25,000 - 50,000 SF',
-  '50,000 - 100,000 SF',
-  '100,000+ SF'
-] as const;
+const SPEED_TAG_SF_VALUES = [5000, 10000, 25000, 50000, 100000] as const;
 import { SearchComponent } from '@/components/SearchComponent';
 import { CSVUploader } from '@/components/CSVUploader';
 import { DeveloperSettings } from '@/components/DeveloperSettings';
@@ -207,7 +199,8 @@ const calculatePolygonAcres = (geometry: any): number | null => {
     if (window.google?.maps?.geometry?.spherical) {
       const areaInSquareMeters = window.google.maps.geometry.spherical.computeArea(path);
       const areaInSquareFeet = areaInSquareMeters * 10.764; // Convert to square feet
-      return areaInSquareFeet / 43560; // Convert to acres
+      const acres = areaInSquareFeet / 43560; // Convert to acres
+      return Math.round((acres + Number.EPSILON) * 100) / 100;
     }
     
     // Fallback: Shoelace formula for area calculation (approximate)
@@ -223,12 +216,33 @@ const calculatePolygonAcres = (geometry: any): number | null => {
     const metersPerDegree = 111320; // meters per degree at equator
     const areaInSquareMeters = area * metersPerDegree * metersPerDegree;
     const areaInSquareFeet = areaInSquareMeters * 10.764;
-    return areaInSquareFeet / 43560;
+    const acres = areaInSquareFeet / 43560;
+    return Math.round((acres + Number.EPSILON) * 100) / 100;
     
   } catch (error) {
     console.error('Error calculating polygon area:', error);
     return null;
   }
+};
+
+const formatSfWithCommas = (value?: number | null): string => {
+  if (value === null || value === undefined || Number.isNaN(value)) return '';
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
+};
+
+const parseSfInput = (raw: string): number | null => {
+  const digitsOnly = raw.replace(/[^\d]/g, '');
+  if (!digitsOnly) return null;
+  const parsed = Number.parseInt(digitsOnly, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parseAcresInput = (raw: string): number | null => {
+  const cleaned = raw.replace(/[^\d.]/g, '');
+  if (!cleaned || cleaned === '.') return null;
+  const parsed = Number.parseFloat(cleaned);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round((parsed + Number.EPSILON) * 100) / 100;
 };
 
 export default function HomePage() {
@@ -700,9 +714,10 @@ export default function HomePage() {
               coordinates: feature.geometry.coordinates as [number, number][][],
             };
             const acres = calculatePolygonAcres(newGeom);
+            manualLotOverrideRef.current.delete(target.id);
             const response = await apiRequest('PATCH', `/api/prospects/${target.id}` , {
               geometry: newGeom,
-              acres: acres ? acres.toString() : undefined,
+              lotSizeAcres: acres,
             });
             const payload = await response.json();
             const { prospect: saved, newXpGained } = parseProspectPatchResponse(payload);
@@ -819,9 +834,10 @@ export default function HomePage() {
     try {
       if (drawingForProspect && e.type === 'polygon') {
         // Update existing prospect with polygon geometry
+        manualLotOverrideRef.current.delete(drawingForProspect.id);
         const updateData = {
           geometry,
-          acres: acres ? acres.toString() : undefined
+          lotSizeAcres: acres
         };
 
         if (drawingForProspect.id === 'temp-prospect') {
@@ -831,7 +847,7 @@ export default function HomePage() {
             status: drawingForProspect.status,
             notes: drawingForProspect.notes,
             geometry,
-            acres: acres ? acres.toString() : undefined,
+            lotSizeAcres: acres,
             submarketId: drawingForProspect.submarketId
           };
 
@@ -841,7 +857,7 @@ export default function HomePage() {
               status: newProspectData.status,
               notes: newProspectData.notes,
               geometry: newProspectData.geometry,
-              acres: newProspectData.acres,
+              lotSizeAcres: newProspectData.lotSizeAcres,
               submarketId: newProspectData.submarketId,
             } as any);
             const next = [...prospects, localProspect];
@@ -892,14 +908,14 @@ export default function HomePage() {
             status: 'prospect' as ProspectStatusType,
             notes: '',
             geometry,
-            acres: acres ? acres.toString() : undefined
+            lotSizeAcres: acres
           };
           const localProspect = buildLocalProspect({
             name: newProspectData.name,
             status: newProspectData.status,
             notes: newProspectData.notes,
             geometry: newProspectData.geometry,
-            acres: newProspectData.acres,
+            lotSizeAcres: newProspectData.lotSizeAcres,
           } as any);
           const next = [...prospects, localProspect];
           persistProspects(next);
@@ -913,7 +929,7 @@ export default function HomePage() {
             status: 'prospect' as ProspectStatusType,
             notes: '',
             geometry,
-            acres: acres ? acres.toString() : undefined
+            lotSizeAcres: acres
           };
           const response = await apiRequest('POST', '/api/prospects', payload);
           const savedProspect = await response.json();
@@ -1171,8 +1187,8 @@ export default function HomePage() {
     contactEmail: data.contactEmail,
     contactPhone: data.contactPhone,
     contactCompany: data.contactCompany,
-    size: data.size,
-    acres: data.acres,
+    buildingSf: data.buildingSf,
+    lotSizeAcres: data.lotSizeAcres,
     businessName: (data as any).businessName,
     websiteUrl: (data as any).websiteUrl,
     name: data.name,
@@ -1428,9 +1444,10 @@ export default function HomePage() {
             const newGeom = { type: 'Polygon' as const, coordinates: [coords] };
             const acres = calculatePolygonAcres(newGeom);
             try {
+              manualLotOverrideRef.current.delete(prospectId);
               const response = await apiRequest('PATCH', `/api/prospects/${prospectId}`, {
                 geometry: newGeom,
-                acres: acres ? acres.toString() : undefined
+                lotSizeAcres: acres
               });
               const payload = await response.json();
               const { prospect: saved } = parseProspectPatchResponse(payload);
@@ -1482,12 +1499,18 @@ export default function HomePage() {
     };
     
     const acres = calculatePolygonAcres(updatedGeometry);
+    const hadManualOverride = manualLotOverrideRef.current.has(editingProspectId);
+    const polygonMoved = JSON.stringify(newCoordinates) !== JSON.stringify(originalPolygonCoordinates || []);
+    const patchPayload: Record<string, any> = {
+      geometry: updatedGeometry,
+    };
+    if (!hadManualOverride || polygonMoved) {
+      manualLotOverrideRef.current.delete(editingProspectId);
+      patchPayload.lotSizeAcres = acres;
+    }
     
     try {
-      const response = await apiRequest('PATCH', `/api/prospects/${editingProspectId}`, { 
-        geometry: updatedGeometry,
-        acres: acres ? acres.toString() : undefined
-      });
+      const response = await apiRequest('PATCH', `/api/prospects/${editingProspectId}`, patchPayload);
       const payload = await response.json();
       const { prospect: savedProspect } = parseProspectPatchResponse(payload);
       
@@ -1519,7 +1542,7 @@ export default function HomePage() {
         duration: 4000,
       });
     }
-  }, [editingProspectId, selectedProspect, toast, clearPolygonPathListeners]);
+  }, [editingProspectId, selectedProspect, toast, clearPolygonPathListeners, originalPolygonCoordinates]);
 
   // Discard polygon changes and revert to original
   const discardPolygonChanges = useCallback(() => {
@@ -1554,6 +1577,9 @@ export default function HomePage() {
   const homeSaveTimerRef = useRef<number | null>(null);
   const homePendingPatchRef = useRef<Partial<Prospect>>({});
   const homeLastEditedIdRef = useRef<string | null>(null);
+  const manualLotOverrideRef = useRef<Set<string>>(new Set());
+  const [buildingSfInput, setBuildingSfInput] = useState('');
+  const [lotSizeAcresInput, setLotSizeAcresInput] = useState('');
   const mapVisualFieldsRef = useRef<Set<keyof Prospect>>(new Set<keyof Prospect>([
     'name',
     'status',
@@ -1627,6 +1653,20 @@ export default function HomePage() {
     // Queue patch with debounce
     queueSelectedProspectPatch(field, value);
   }, [selectedProspect, queueSelectedProspectPatch]);
+
+  useEffect(() => {
+    if (!selectedProspect) {
+      setBuildingSfInput('');
+      setLotSizeAcresInput('');
+      return;
+    }
+    setBuildingSfInput(formatSfWithCommas(selectedProspect.buildingSf));
+    setLotSizeAcresInput(
+      selectedProspect.lotSizeAcres === null || selectedProspect.lotSizeAcres === undefined
+        ? ''
+        : selectedProspect.lotSizeAcres.toFixed(2)
+    );
+  }, [selectedProspect?.id, selectedProspect?.buildingSf, selectedProspect?.lotSizeAcres]);
 
   const runQuickLog = useCallback(async (type: QuickLogType) => {
     if (!selectedProspect || quickLogPendingType) return;
@@ -2175,7 +2215,7 @@ export default function HomePage() {
                   <Input
                     key={`businessName-${selectedProspect.id}`}
                     defaultValue={selectedProspect.businessName || ''}
-                    onChange={(e) => queueSelectedProspectPatch('businessName', e.target.value || undefined)}
+                    onChange={(e) => queueSelectedProspectPatch('businessName', e.target.value || null)}
                     placeholder="Business name"
                     className="h-8 text-sm"
                   />
@@ -2252,7 +2292,7 @@ export default function HomePage() {
                         const tf = value === 'none' ? undefined : value;
                         updateSelectedProspect('followUpTimeframe', tf);
                         const anchor = selectedProspect.lastContactDate || selectedProspect.createdDate;
-                        const due = tf ? computeFollowUpDue(anchor, tf as FollowUpTimeframeType) : undefined;
+                        const due = tf ? computeFollowUpDue(anchor, tf as FollowUpTimeframeType) : null;
                         updateSelectedProspect('followUpDueDate', due);
                       }}
                     >
@@ -2271,34 +2311,55 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {/* Size and Acres Row */}
+                {/* Building SF and Lot Size (manual override enabled) */}
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-gray-700">Speed Tags</Label>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {SPEED_TAG_SF_VALUES.map((sf) => (
+                      <Button
+                        key={sf}
+                        type="button"
+                        variant="outline"
+                        className="h-7 px-0 text-[11px]"
+                        onClick={() => {
+                          setBuildingSfInput(formatSfWithCommas(sf));
+                          updateSelectedProspect('buildingSf', sf);
+                        }}
+                      >
+                        {sf >= 100000 ? '100k+' : `${Math.round(sf / 1000)}k`}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <Label className="text-xs font-medium text-gray-700">Size</Label>
-                    <Select
-                      value={selectedProspect.size || ''}
-                      onValueChange={(value) => updateSelectedProspect('size', value === 'none' ? '' : value)}
-                    >
-                      <SelectTrigger className="h-8 text-sm">
-                        <SelectValue placeholder="Select size" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">None</SelectItem>
-                        {STANDARD_SIZE_OPTIONS.map((sizeOption) => (
-                          <SelectItem key={sizeOption} value={sizeOption}>
-                            {sizeOption}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Label className="text-xs font-medium text-gray-700">Building SF</Label>
+                    <Input
+                      value={buildingSfInput}
+                      onChange={(e) => {
+                        const parsed = parseSfInput(e.target.value);
+                        setBuildingSfInput(parsed === null ? '' : formatSfWithCommas(parsed));
+                        updateSelectedProspect('buildingSf', parsed);
+                      }}
+                      placeholder="e.g. 10,000"
+                      inputMode="numeric"
+                      className="h-8 text-sm"
+                    />
                   </div>
                   <div>
-                    <Label className="text-xs font-medium text-gray-700">Acres</Label>
+                    <Label className="text-xs font-medium text-gray-700">Lot Size (Acres)</Label>
                     <Input
-                      value={selectedProspect.acres || ''}
-                      placeholder="Auto-calculated from polygon"
-                      className="h-8 text-sm bg-gray-50"
-                      disabled
+                      value={lotSizeAcresInput}
+                      onChange={(e) => {
+                        if (!selectedProspect) return;
+                        setLotSizeAcresInput(e.target.value);
+                        manualLotOverrideRef.current.add(selectedProspect.id);
+                        const parsed = parseAcresInput(e.target.value);
+                        updateSelectedProspect('lotSizeAcres', parsed);
+                      }}
+                      placeholder="Auto or manual"
+                      inputMode="decimal"
+                      className="h-8 text-sm"
                     />
                   </div>
                 </div>
@@ -2353,7 +2414,7 @@ export default function HomePage() {
                     type="url"
                     key={`websiteUrl-${selectedProspect.id}`}
                     defaultValue={selectedProspect.websiteUrl || ''}
-                    onChange={(e) => queueSelectedProspectPatch('websiteUrl', e.target.value || undefined)}
+                    onChange={(e) => queueSelectedProspectPatch('websiteUrl', e.target.value || null)}
                     placeholder="Website URL"
                     className="h-8 text-sm"
                   />

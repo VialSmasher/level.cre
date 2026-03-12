@@ -280,26 +280,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       // Clear demo mode when starting Google flow
       localStorage.removeItem('demo-mode')
-      if (!supabase) throw new Error('Auth is not configured')
-      const appOriginEnv = (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined)?.trim()
-      const origin = (appOriginEnv && appOriginEnv.length > 0 ? appOriginEnv : window.location.origin)
-        .trim()
-        .replace(/\/$/, '')
-      const redirectTo = (
-        (import.meta.env.VITE_AUTH_REDIRECT_URL as string | undefined)?.trim()
-      ) || `${origin}/auth/callback`
-      const { error } = await supabase.auth.signInWithOAuth({ 
-        provider: 'google', 
-        options: { 
-          redirectTo,
-          queryParams: { prompt: 'select_account', access_type: 'offline' },
-          flowType: 'pkce',
-        } 
-      })
-      if (error) throw error
+      // Start OAuth via backend so production callback/origin logic is centralized.
+      window.location.assign(apiUrl('/api/auth/google'))
     } catch (error: any) {
       console.error('OAuth redirect error:', error)
-      throw new Error('Failed to initiate Google sign-in')
+      throw new Error(error?.message || 'Failed to initiate Google sign-in')
     }
   }
 

@@ -9,6 +9,7 @@ import {
   uuid,
   text,
   integer,
+  numeric,
   pgEnum,
   unique,
   primaryKey,
@@ -78,8 +79,9 @@ export const ProspectSchema = z.object({
   contactPhone: z.string().optional(),
   contactCompany: z.string().optional(),
   // Size and area information
-  size: z.string().optional(), // Size description (e.g., "Small Office", "10,000 SF")
-  acres: z.string().optional(), // Calculated acres from polygon area (stored as string)
+  buildingSf: z.number().int().nonnegative().optional(), // Building area in square feet
+  lotSizeAcres: z.number().nonnegative().optional(), // Lot size in acres (2dp precision)
+  aiMetadata: z.record(z.any()).optional(), // Reserved for AI enrichments/classifications
   // Business information
   businessName: z.string().optional(), // Business name from Google Places
   websiteUrl: z.string().optional() // Business website URL
@@ -301,8 +303,9 @@ export const prospects = pgTable("prospects", {
   contactEmail: varchar("contact_email"),
   contactPhone: varchar("contact_phone"),
   contactCompany: varchar("contact_company"),
-  size: varchar("size"), // Size description
-  acres: varchar("acres"), // Calculated acres (stored as string for precision)
+  buildingSf: integer("building_sf"), // Building area in square feet
+  lotSizeAcres: numeric("lot_size_acres", { precision: 10, scale: 2 }), // Lot size in acres
+  aiMetadata: jsonb("ai_metadata"), // Reserved for AI enrichment data
   businessName: varchar("business_name"), // Business name from Google Places
   websiteUrl: varchar("website_url"), // Business website URL
   createdAt: timestamp("created_at").defaultNow(),

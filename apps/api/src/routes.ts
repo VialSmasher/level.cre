@@ -1576,16 +1576,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         submarketId: z.string().optional(),
         lastContactDate: z.string().optional(),
         followUpTimeframe: FollowUpTimeframe.optional(),
-        followUpDueDate: z.string().optional(),
+        followUpDueDate: z.string().nullable().optional(),
         // Contact and business info
         contactName: z.string().optional(),
         contactEmail: z.string().optional(),
         contactPhone: z.string().optional(),
         contactCompany: z.string().optional(),
-        size: z.string().optional(),
-        acres: z.string().optional(),
-        businessName: z.string().optional(),
-        websiteUrl: z.string().optional(),
+        buildingSf: z.number().int().nonnegative().nullable().optional(),
+        lotSizeAcres: z.number().nonnegative().nullable().optional(),
+        aiMetadata: z.record(z.any()).nullable().optional(),
+        businessName: z.string().nullable().optional(),
+        websiteUrl: z.string().nullable().optional(),
       });
 
       const parseResult = ProspectInputSchema.safeParse(req.body);
@@ -1637,15 +1638,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         submarketId: z.string().optional(),
         lastContactDate: z.string().optional(),
         followUpTimeframe: FollowUpTimeframe.optional(),
-        followUpDueDate: z.string().optional(),
+        followUpDueDate: z.string().nullable().optional(),
         contactName: z.string().optional(),
         contactEmail: z.string().optional(),
         contactPhone: z.string().optional(),
         contactCompany: z.string().optional(),
-        size: z.string().optional(),
-        acres: z.string().optional(),
-        businessName: z.string().optional(),
-        websiteUrl: z.string().optional(),
+        buildingSf: z.number().int().nonnegative().nullable().optional(),
+        lotSizeAcres: z.number().nonnegative().nullable().optional(),
+        aiMetadata: z.record(z.any()).nullable().optional(),
+        businessName: z.string().nullable().optional(),
+        websiteUrl: z.string().nullable().optional(),
       }).strict();
 
       const parseResult = ProspectPatchSchema.safeParse(req.body);
