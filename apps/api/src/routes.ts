@@ -29,6 +29,229 @@ export async function registerRoutes(app: Express): Promise<Server> {
     : null;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
   const supabaseAdmin = (supabaseUrl && supabaseServiceKey) ? createClient(supabaseUrl, supabaseServiceKey) : null;
+  const prospectSelect = 'id,user_id,name,status,notes,geometry,submarket_id,last_contact_date,follow_up_timeframe,follow_up_due_date,contact_name,contact_email,contact_phone,contact_company,size,acres,business_name,website_url,created_at,address,location_lat,location_lng';
+  const listingSelect = 'id,user_id,title,address,lat,lng,submarket,deal_type,size,price,created_at,archived_at';
+
+  function isDatabaseConnectivityError(error: unknown): boolean {
+    let current: any = error;
+    while (current) {
+      const code = String(current.code || '');
+      const message = String(current.message || '');
+      if (
+        code === 'ENOTFOUND' ||
+        code === 'ENETUNREACH' ||
+        code === 'ECONNREFUSED' ||
+        code === 'SELF_SIGNED_CERT_IN_CHAIN' ||
+        /ENOTFOUND|ENETUNREACH|ECONNREFUSED|self-signed certificate/i.test(message)
+      ) {
+        return true;
+      }
+      current = current.cause;
+    }
+    return false;
+  }
+
+  function requireSupabaseAdmin() {
+    if (!supabaseAdmin) {
+      throw new Error('Supabase admin client is not configured');
+    }
+    return supabaseAdmin;
+  }
+
+  function mapProspectRow(row: any) {
+    const parsedSize = row.size !== null && row.size !== undefined && row.size !== ''
+      ? Number(row.size)
+      : undefined;
+    return {
+      id: row.id,
+      name: row.name,
+      status: row.status,
+      notes: row.notes || '',
+      geometry: row.geometry,
+      submarketId: row.submarket_id || undefined,
+      lastContactDate: row.last_contact_date || undefined,
+      followUpTimeframe: row.follow_up_timeframe || undefined,
+      followUpDueDate: row.follow_up_due_date ? new Date(row.follow_up_due_date).toISOString() : undefined,
+      contactName: row.contact_name || undefined,
+      contactEmail: row.contact_email || undefined,
+      contactPhone: row.contact_phone || undefined,
+      contactCompany: row.contact_company || undefined,
+      buildingSf: Number.isFinite(parsedSize as number) ? parsedSize : undefined,
+      lotSizeAcres: row.acres !== null && row.acres !== undefined ? Number(row.acres) : undefined,
+      aiMetadata: undefined,
+      businessName: row.business_name || undefined,
+      websiteUrl: row.website_url || undefined,
+      createdDate: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+    };
+  }
+
+  function mapListingRow(row: any) {
+    return {
+      id: row.id,
+      userId: row.user_id,
+      title: row.title,
+      address: row.address,
+      lat: row.lat,
+      lng: row.lng,
+      submarket: row.submarket,
+      dealType: row.deal_type,
+      size: row.size,
+      price: row.price,
+      createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+      archivedAt: row.archived_at ? new Date(row.archived_at).toISOString() : null,
+    };
+  }
+
+  async function getAccessibleListingIdsViaSupabase(userId: string): Promise<string[]> {
+    const admin = requireSupabaseAdmin();
+    const [{ data: owned, error: ownedError }, { data: memberRows, error: memberError }] = await Promise.all([
+      admin.from('listings').select('id').eq('user_id', userId),
+      admin.from('listing_members').select('listing_id').eq('user_id', userId),
+    ]);
+    if (ownedError) throw ownedError;
+    if (memberError) throw memberError;
+    return Array.from(new Set([
+      ...(owned || []).map((row: any) => row.id),
+      ...(memberRows || []).map((row: any) => row.listing_id),
+    ]));
+  }
+
+  async function getListingRoleViaSupabase(userId: string, listingId: string): Promise<'owner' | 'editor' | 'viewer' | null> {
+    const admin = requireSupabaseAdmin();
+    const { data: listing, error: listingError } = await admin
+      .from('listings')
+      .select('id,user_id')
+      .eq('id', listingId)
+      .maybeSingle();
+    if (listingError) throw listingError;
+    if (!listing) return null;
+    if (listing.user_id === userId) return 'owner';
+
+    const { data: member, error: memberError } = await admin
+      .from('listing_members')
+      .select('role')
+      .eq('listing_id', listingId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (memberError) throw memberError;
+    return (member?.role as any) || null;
+  }
+
+  async function getListingsViaSupabase(userId: string, scope: 'owned' | 'shared'): Promise<any[]> {
+    const admin = requireSupabaseAdmin();
+    let listingRows: any[] = [];
+
+    if (scope === 'shared') {
+      const { data: memberRows, error: memberError } = await admin
+        .from('listing_members')
+        .select('listing_id')
+        .eq('user_id', userId);
+      if (memberError) throw memberError;
+      const listingIds = Array.from(new Set((memberRows || []).map((row: any) => row.listing_id)));
+      if (listingIds.length === 0) return [];
+      const { data, error } = await admin
+        .from('listings')
+        .select(listingSelect)
+        .in('id', listingIds)
+        .is('archived_at', null);
+      if (error) throw error;
+      listingRows = data || [];
+    } else {
+      const { data, error } = await admin
+        .from('listings')
+        .select(listingSelect)
+        .eq('user_id', userId)
+        .is('archived_at', null);
+      if (error) throw error;
+      listingRows = data || [];
+    }
+
+    const listingIds = listingRows.map((row: any) => row.id);
+    const countByListingId = new Map<string, number>();
+    if (listingIds.length > 0) {
+      const { data: linkedRows, error: linkedError } = await admin
+        .from('listing_prospects')
+        .select('listing_id')
+        .in('listing_id', listingIds);
+      if (linkedError) throw linkedError;
+      for (const row of linkedRows || []) {
+        countByListingId.set(row.listing_id, (countByListingId.get(row.listing_id) || 0) + 1);
+      }
+    }
+
+    return listingRows.map((row: any) => ({
+      ...mapListingRow(row),
+      prospectCount: countByListingId.get(row.id) || 0,
+    }));
+  }
+
+  async function getListingViaSupabase(listingId: string): Promise<any | null> {
+    const admin = requireSupabaseAdmin();
+    const { data, error } = await admin
+      .from('listings')
+      .select(listingSelect)
+      .eq('id', listingId)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? mapListingRow(data) : null;
+  }
+
+  async function getListingProspectsViaSupabase(listingId: string): Promise<any[]> {
+    const admin = requireSupabaseAdmin();
+    const { data: links, error: linksError } = await admin
+      .from('listing_prospects')
+      .select('prospect_id')
+      .eq('listing_id', listingId);
+    if (linksError) throw linksError;
+    const prospectIds = Array.from(new Set((links || []).map((row: any) => row.prospect_id)));
+    if (prospectIds.length === 0) return [];
+
+    const { data, error } = await admin
+      .from('prospects')
+      .select(prospectSelect)
+      .in('id', prospectIds);
+    if (error) throw error;
+    return (data || []).map(mapProspectRow);
+  }
+
+  async function getAllProspectsViaSupabase(userId: string): Promise<any[]> {
+    const admin = requireSupabaseAdmin();
+    const { data: ownRows, error: ownError } = await admin
+      .from('prospects')
+      .select(prospectSelect)
+      .eq('user_id', userId);
+    if (ownError) throw ownError;
+
+    const accessibleListingIds = await getAccessibleListingIdsViaSupabase(userId);
+    const deduped = new Map<string, any>();
+    for (const row of ownRows || []) {
+      deduped.set(row.id, mapProspectRow(row));
+    }
+
+    if (accessibleListingIds.length > 0) {
+      const { data: linkRows, error: linkError } = await admin
+        .from('listing_prospects')
+        .select('prospect_id')
+        .in('listing_id', accessibleListingIds);
+      if (linkError) throw linkError;
+
+      const sharedProspectIds = Array.from(new Set((linkRows || []).map((row: any) => row.prospect_id)));
+      if (sharedProspectIds.length > 0) {
+        const { data: sharedRows, error: sharedError } = await admin
+          .from('prospects')
+          .select(prospectSelect)
+          .in('id', sharedProspectIds);
+        if (sharedError) throw sharedError;
+        for (const row of sharedRows || []) {
+          if (!deduped.has(row.id)) {
+            deduped.set(row.id, mapProspectRow(row));
+          }
+        }
+      }
+    }
+
+    return Array.from(deduped.values());
+  }
 
   async function checkGoogleOAuthProvider(): Promise<{ ok: true } | { ok: false; message: string }> {
     if (!supabaseUrl || !supabaseKey) {
@@ -71,9 +294,68 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (row.userId === userId) return 'owner';
       const [member] = await db.select().from(listingMembers).where(and(eq(listingMembers.listingId, listingId), eq(listingMembers.userId, userId)));
       return (member?.role as any) || null;
-    } catch {
-      return null;
+    } catch (error) {
+      if (!isDatabaseConnectivityError(error) || !supabaseAdmin) {
+        return null;
+      }
+      try {
+        return await getListingRoleViaSupabase(userId, listingId);
+      } catch {
+        return null;
+      }
     }
+  }
+
+  async function resolveEmailByUserIdViaSupabase(userId: string): Promise<string | null> {
+    const admin = requireSupabaseAdmin();
+    const { data: userRow, error: userError } = await admin
+      .from('users')
+      .select('email')
+      .eq('id', userId)
+      .maybeSingle();
+    if (userError) throw userError;
+    if (userRow?.email) return userRow.email;
+
+    const { data: profileRow, error: profileError } = await admin
+      .from('profiles')
+      .select('email')
+      .eq('id', userId)
+      .maybeSingle();
+    if (profileError) throw profileError;
+    return profileRow?.email || null;
+  }
+
+  async function getListingMembersViaSupabase(listingId: string): Promise<any[]> {
+    const admin = requireSupabaseAdmin();
+    const { data: listing, error: listingError } = await admin
+      .from('listings')
+      .select('user_id')
+      .eq('id', listingId)
+      .maybeSingle();
+    if (listingError) throw listingError;
+    if (!listing) return [];
+
+    const { data: members, error: membersError } = await admin
+      .from('listing_members')
+      .select('user_id,role')
+      .eq('listing_id', listingId);
+    if (membersError) throw membersError;
+
+    const result: any[] = [{
+      userId: listing.user_id,
+      role: 'owner',
+      email: await resolveEmailByUserIdViaSupabase(listing.user_id),
+    }];
+
+    for (const member of members || []) {
+      result.push({
+        userId: member.user_id,
+        role: member.role,
+        email: await resolveEmailByUserIdViaSupabase(member.user_id),
+      });
+    }
+
+    return result;
   }
 
   async function requireViewAccess(req: Request, listingId: string): Promise<'owner' | 'editor' | 'viewer'> {
@@ -662,23 +944,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const list = await demo.getListingsSharedWith(userId);
           return res.json(list);
         }
-        // Shared with current user via listing_members
-        const rows = await db
-          .select({
-            id: listings.id,
-            userId: listings.userId,
-            title: listings.title,
-            address: listings.address,
-            lat: listings.lat,
-            lng: listings.lng,
-            submarket: listings.submarket,
-            createdAt: listings.createdAt,
-            archivedAt: listings.archivedAt,
-            prospectCount: sql<number>`COALESCE((SELECT COUNT(*)::int FROM ${listingProspects} lp WHERE lp.listing_id = ${listings.id}), 0)`,
-          })
-          .from(listings)
-          .innerJoin(listingMembers, and(eq(listingMembers.listingId, listings.id), eq(listingMembers.userId, userId)))
-          .where(and(eq(sql`COALESCE(${listings.archivedAt} IS NULL, TRUE)`, true)));
+        let rows;
+        try {
+          // Shared with current user via listing_members
+          rows = await db
+            .select({
+              id: listings.id,
+              userId: listings.userId,
+              title: listings.title,
+              address: listings.address,
+              lat: listings.lat,
+              lng: listings.lng,
+              submarket: listings.submarket,
+              createdAt: listings.createdAt,
+              archivedAt: listings.archivedAt,
+              prospectCount: sql<number>`COALESCE((SELECT COUNT(*)::int FROM ${listingProspects} lp WHERE lp.listing_id = ${listings.id}), 0)`,
+            })
+            .from(listings)
+            .innerJoin(listingMembers, and(eq(listingMembers.listingId, listings.id), eq(listingMembers.userId, userId)))
+            .where(and(eq(sql`COALESCE(${listings.archivedAt} IS NULL, TRUE)`, true)));
+        } catch (error) {
+          if (!isDatabaseConnectivityError(error) || !supabaseAdmin) throw error;
+          rows = await getListingsViaSupabase(userId, 'shared');
+        }
         return res.json(rows);
       }
       if (isDemo(req)) {
@@ -692,7 +980,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }));
         return res.json(links);
       }
-      const list = await storage.getListings(userId);
+      let list;
+      try {
+        list = await storage.getListings(userId);
+      } catch (error) {
+        if (!isDatabaseConnectivityError(error) || !supabaseAdmin) throw error;
+        list = await getListingsViaSupabase(userId, 'owned');
+      }
       res.json(list);
     } catch (error) {
       console.error('Error fetching listings:', error);
@@ -751,7 +1045,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!demoListing) return res.status(404).json({ message: 'Listing not found' });
         return res.json(demoListing);
       }
-      const listing = await storage.getListingAny(req.params.id);
+      let listing;
+      try {
+        listing = await storage.getListingAny(req.params.id);
+      } catch (error) {
+        if (!isDatabaseConnectivityError(error) || !supabaseAdmin) throw error;
+        listing = await getListingViaSupabase(req.params.id);
+      }
       if (!listing) return res.status(404).json({ message: 'Listing not found' });
       res.json(listing);
     } catch (error) {
@@ -804,7 +1104,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const items = (allProspects || []).filter((p: any) => set.has(p.id));
         return res.json(items);
       }
-      const items = await storage.getListingProspectsAny(req.params.id);
+      let items;
+      try {
+        items = await storage.getListingProspectsAny(req.params.id);
+      } catch (error) {
+        if (!isDatabaseConnectivityError(error) || !supabaseAdmin) throw error;
+        items = await getListingProspectsViaSupabase(req.params.id);
+      }
       res.json(items);
     } catch (error) {
       console.error('Error fetching listing prospects:', error);
@@ -929,19 +1235,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const ownerEntry = owner ? [{ userId: owner.userId, role: 'owner', email: owner.email }] : [];
         return res.json([...ownerEntry, ...list]);
       }
-      // Fetch owner
-      const [listRow] = await db.select().from(listings).where(eq(listings.id, req.params.id));
-      if (!listRow) return res.status(404).json({ message: 'Listing not found' });
-      // Fetch members
-      const members = await db.select().from(listingMembers).where(eq(listingMembers.listingId, req.params.id));
-      // Resolve basic email from users/profiles
-      const results: any[] = [];
-      // Owner entry
-      let ownerEmail: string | null = await resolveEmailByUserId(listRow.userId);
-      results.push({ userId: listRow.userId, role: 'owner', email: ownerEmail });
-      for (const m of members) {
-        const email = await resolveEmailByUserId(m.userId);
-        results.push({ userId: m.userId, role: m.role, email });
+      let results;
+      try {
+        // Fetch owner
+        const [listRow] = await db.select().from(listings).where(eq(listings.id, req.params.id));
+        if (!listRow) return res.status(404).json({ message: 'Listing not found' });
+        // Fetch members
+        const members = await db.select().from(listingMembers).where(eq(listingMembers.listingId, req.params.id));
+        // Resolve basic email from users/profiles
+        results = [];
+        // Owner entry
+        let ownerEmail: string | null = await resolveEmailByUserId(listRow.userId);
+        results.push({ userId: listRow.userId, role: 'owner', email: ownerEmail });
+        for (const m of members) {
+          const email = await resolveEmailByUserId(m.userId);
+          results.push({ userId: m.userId, role: m.role, email });
+        }
+      } catch (error) {
+        if (!isDatabaseConnectivityError(error) || !supabaseAdmin) throw error;
+        results = await getListingMembersViaSupabase(req.params.id);
       }
       res.json(results);
     } catch (error: any) {
@@ -1550,7 +1862,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const list = await demo.getProspects(userId);
         return res.json(list);
       }
-      const prospects = await storage.getAllProspects(userId);
+      let prospects;
+      try {
+        prospects = await storage.getAllProspects(userId);
+      } catch (error) {
+        if (!isDatabaseConnectivityError(error) || !supabaseAdmin) throw error;
+        prospects = await getAllProspectsViaSupabase(userId);
+      }
       res.json(prospects);
     } catch (error) {
       console.error("Error fetching prospects:", error);
