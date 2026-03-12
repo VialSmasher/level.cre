@@ -32,7 +32,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const prospectSelect = 'id,user_id,name,status,notes,geometry,submarket_id,last_contact_date,follow_up_timeframe,follow_up_due_date,contact_name,contact_email,contact_phone,contact_company,size,acres,business_name,website_url,created_at,address,location_lat,location_lng';
   const listingSelect = 'id,user_id,title,address,lat,lng,submarket,deal_type,size,price,created_at,archived_at';
 
-  function isDatabaseConnectivityError(error: unknown): boolean {
+  function shouldUseSupabaseReadFallback(error: unknown): boolean {
     let current: any = error;
     while (current) {
       const code = String(current.code || '');
@@ -41,8 +41,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         code === 'ENOTFOUND' ||
         code === 'ENETUNREACH' ||
         code === 'ECONNREFUSED' ||
+        code === '42703' ||
         code === 'SELF_SIGNED_CERT_IN_CHAIN' ||
-        /ENOTFOUND|ENETUNREACH|ECONNREFUSED|self-signed certificate/i.test(message)
+        /ENOTFOUND|ENETUNREACH|ECONNREFUSED|self-signed certificate|column .* does not exist/i.test(message)
       ) {
         return true;
       }
@@ -295,7 +296,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const [member] = await db.select().from(listingMembers).where(and(eq(listingMembers.listingId, listingId), eq(listingMembers.userId, userId)));
       return (member?.role as any) || null;
     } catch (error) {
-      if (!isDatabaseConnectivityError(error) || !supabaseAdmin) {
+      if (!shouldUseSupabaseReadFallback(error) || !supabaseAdmin) {
         return null;
       }
       try {
@@ -964,7 +965,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .innerJoin(listingMembers, and(eq(listingMembers.listingId, listings.id), eq(listingMembers.userId, userId)))
             .where(and(eq(sql`COALESCE(${listings.archivedAt} IS NULL, TRUE)`, true)));
         } catch (error) {
-          if (!isDatabaseConnectivityError(error) || !supabaseAdmin) throw error;
+          if (!shouldUseSupabaseReadFallback(error) || !supabaseAdmin) throw error;
           rows = await getListingsViaSupabase(userId, 'shared');
         }
         return res.json(rows);
@@ -984,7 +985,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         list = await storage.getListings(userId);
       } catch (error) {
-        if (!isDatabaseConnectivityError(error) || !supabaseAdmin) throw error;
+        if (!shouldUseSupabaseReadFallback(error) || !supabaseAdmin) throw error;
         list = await getListingsViaSupabase(userId, 'owned');
       }
       res.json(list);
@@ -1049,7 +1050,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         listing = await storage.getListingAny(req.params.id);
       } catch (error) {
-        if (!isDatabaseConnectivityError(error) || !supabaseAdmin) throw error;
+        if (!shouldUseSupabaseReadFallback(error) || !supabaseAdmin) throw error;
         listing = await getListingViaSupabase(req.params.id);
       }
       if (!listing) return res.status(404).json({ message: 'Listing not found' });
@@ -1108,7 +1109,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         items = await storage.getListingProspectsAny(req.params.id);
       } catch (error) {
-        if (!isDatabaseConnectivityError(error) || !supabaseAdmin) throw error;
+        if (!shouldUseSupabaseReadFallback(error) || !supabaseAdmin) throw error;
         items = await getListingProspectsViaSupabase(req.params.id);
       }
       res.json(items);
@@ -1252,7 +1253,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           results.push({ userId: m.userId, role: m.role, email });
         }
       } catch (error) {
-        if (!isDatabaseConnectivityError(error) || !supabaseAdmin) throw error;
+        if (!shouldUseSupabaseReadFallback(error) || !supabaseAdmin) throw error;
         results = await getListingMembersViaSupabase(req.params.id);
       }
       res.json(results);
@@ -1866,7 +1867,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         prospects = await storage.getAllProspects(userId);
       } catch (error) {
-        if (!isDatabaseConnectivityError(error) || !supabaseAdmin) throw error;
+        if (!shouldUseSupabaseReadFallback(error) || !supabaseAdmin) throw error;
         prospects = await getAllProspectsViaSupabase(userId);
       }
       res.json(prospects);
