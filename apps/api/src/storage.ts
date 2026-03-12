@@ -15,7 +15,7 @@ import {
   listings, listingProspects, listingMembers
 } from "@level-cre/shared/schema";
 import { db } from "./db";
-import { eq, and, desc, gte, ne, sql, between } from "drizzle-orm";
+import { eq, and, or, desc, gte, ne, sql, between } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { XP_VALUES, actionForInteractionType, inferInteractionTypeFromNote, xpForInteractionType } from "./lib/gamification";
 
@@ -699,7 +699,7 @@ export class DatabaseStorage implements IStorage {
     // This creates a 'Unified Intelligence Layer' allowing users to see collaborative
     // inputs from their team alongside their personal data.
     // DO NOT filter by 'workspace_id is null' here.
-    const rows = await db
+    const ownRows = await db
       .select({
         id: prospects.id,
         name: prospects.name,
@@ -723,7 +723,48 @@ export class DatabaseStorage implements IStorage {
       })
       .from(prospects)
       .where(eq(prospects.userId, userId));
-    return rows.map(r => ({
+
+    const sharedRows = await db
+      .select({
+        id: prospects.id,
+        name: prospects.name,
+        status: prospects.status,
+        notes: prospects.notes,
+        geometryJson: sql<string>`ST_AsGeoJSON(${prospects.geometry})`,
+        submarketId: prospects.submarketId,
+        lastContactDate: prospects.lastContactDate,
+        followUpTimeframe: prospects.followUpTimeframe,
+        followUpDueDate: prospects.followUpDueDate,
+        contactName: prospects.contactName,
+        contactEmail: prospects.contactEmail,
+        contactPhone: prospects.contactPhone,
+        contactCompany: prospects.contactCompany,
+        buildingSf: prospects.buildingSf,
+        lotSizeAcres: prospects.lotSizeAcres,
+        aiMetadata: prospects.aiMetadata,
+        businessName: prospects.businessName,
+        websiteUrl: prospects.websiteUrl,
+        createdAt: prospects.createdAt,
+      })
+      .from(prospects)
+      .innerJoin(listingProspects, eq(listingProspects.prospectId, prospects.id))
+      .innerJoin(listings, eq(listingProspects.listingId, listings.id))
+      .leftJoin(listingMembers, eq(listingMembers.listingId, listings.id))
+      .where(and(
+        ne(prospects.userId, userId),
+        or(
+          eq(listings.userId, userId),
+          eq(listingMembers.userId, userId),
+        ),
+      ));
+
+    const deduped = new Map<string, (typeof ownRows)[number]>();
+    for (const row of ownRows) deduped.set(row.id, row);
+    for (const row of sharedRows) {
+      if (!deduped.has(row.id)) deduped.set(row.id, row as (typeof ownRows)[number]);
+    }
+
+    return Array.from(deduped.values()).map(r => ({
       id: r.id,
       name: r.name,
       status: r.status as any,
