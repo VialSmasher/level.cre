@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/contexts/AuthContext'
+import { supabase } from '@/lib/supabase'
 import { useLocation } from 'wouter'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Loader2, ArrowRight, CheckCircle, ChartSpline } from 'lucide-react'
@@ -30,6 +31,47 @@ export default function Landing() {
     const t = setTimeout(prefetchApp, 300)
     return () => clearTimeout(t)
   }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || loading || user || !supabase) return
+
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    const accessToken = hash.get('access_token')
+    const refreshToken = hash.get('refresh_token')
+    if (!accessToken || !refreshToken) return
+
+    let cancelled = false
+
+    async function restoreImplicitSession() {
+      setIsSigningIn(true)
+      try {
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        })
+        if (error) throw error
+        if (cancelled) return
+        window.location.replace('/app')
+      } catch (err: any) {
+        console.error('Implicit OAuth session restore failed:', err)
+        if (cancelled) return
+
+        const params = new URLSearchParams({ error: 'oauth_callback_failed' })
+        if (err?.message) {
+          params.set('error_description', err.message)
+        }
+        const nextLocation = `/?${params.toString()}`
+        window.location.replace(nextLocation)
+      } finally {
+        if (!cancelled) {
+          setIsSigningIn(false)
+        }
+      }
+    }
+
+    restoreImplicitSession()
+    return () => { cancelled = true }
+  }, [loading, user])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
