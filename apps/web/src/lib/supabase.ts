@@ -10,7 +10,10 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
         flowType: 'pkce',
         autoRefreshToken: true,
         persistSession: true,
-        detectSessionInUrl: true,
+        // The app completes PKCE on the dedicated /auth/callback route.
+        // Auto-detecting sessions from the URL can race with that page and
+        // cause the same auth code to be consumed twice.
+        detectSessionInUrl: false,
       },
     })
   : null

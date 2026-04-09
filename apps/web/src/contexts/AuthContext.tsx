@@ -264,24 +264,43 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (!GOOGLE_ENABLED) {
       throw new Error('Google OAuth disabled')
     }
+    if (!supabase) {
+      throw new Error('Supabase auth is not configured')
+    }
     try {
-      const providerStatusRes = await fetch(apiUrl('/api/auth/google/status'), {
-        method: 'GET',
-        credentials: 'include',
-      })
-      if (!providerStatusRes.ok) {
-        let message = 'Google sign-in is temporarily unavailable. Please use Demo Mode and try again later.'
-        try {
-          const body = await providerStatusRes.json()
-          if (body?.message) message = body.message
-        } catch {}
-        throw new Error(message)
-      }
-
       // Clear demo mode when starting Google flow
       localStorage.removeItem('demo-mode')
-      // Start OAuth via backend so production callback/origin logic is centralized.
-      window.location.assign(apiUrl('/api/auth/google'))
+
+      const redirectTo = `${window.location.origin}/auth/callback`
+      const inIframe = window.self !== window.top
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+          queryParams: { prompt: 'select_account', access_type: 'offline' },
+          skipBrowserRedirect: true,
+        },
+      })
+
+      if (error) {
+        throw error
+      }
+      if (!data?.url) {
+        throw new Error('No OAuth URL returned')
+      }
+
+      if (inIframe) {
+        try {
+          window.top!.location.href = data.url
+          return
+        } catch {
+          const opened = window.open(data.url, '_blank', 'noopener,noreferrer')
+          if (opened) return
+        }
+        throw new Error('Popup blocked. Please allow popups and try again.')
+      }
+
+      window.location.assign(data.url)
     } catch (error: any) {
       console.error('OAuth redirect error:', error)
       throw new Error(error?.message || 'Failed to initiate Google sign-in')

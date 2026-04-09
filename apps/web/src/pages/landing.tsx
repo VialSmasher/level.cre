@@ -31,6 +31,33 @@ export default function Landing() {
     return () => clearTimeout(t)
   }, [])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const url = new URL(window.location.href)
+    const authError = url.searchParams.get('error')
+    if (!authError) return
+
+    const authErrorDescription = url.searchParams.get('error_description')
+    const fallbackDescription =
+      authError === 'auth_not_configured'
+        ? 'Supabase auth is not configured for this environment.'
+        : authError === 'missing_auth_code'
+          ? 'Google returned to the app without an authorization code.'
+          : 'Please try Google sign-in again.'
+
+    toast({
+      title: 'Google sign-in failed',
+      description: authErrorDescription || fallbackDescription,
+      variant: 'destructive',
+    })
+
+    url.searchParams.delete('error')
+    url.searchParams.delete('error_description')
+    const cleanedUrl = `${url.pathname}${url.search}${url.hash}`
+    window.history.replaceState(window.history.state, '', cleanedUrl)
+  }, [toast])
+
   // Optional: auto-redirect authenticated users from '/' to '/app'.
   // Disabled by default so the landing/login page is visible even if signed in.
   const AUTO_REDIRECT_AUTHENTICATED = (
@@ -42,6 +69,18 @@ export default function Landing() {
       setLocation('/app')
     }
   }, [AUTO_REDIRECT_AUTHENTICATED, loading, user, setLocation])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (loading || !user || user.id === 'demo-user') return
+    const hash = window.location.hash || ''
+    const returnedFromImplicitOAuth =
+      hash.includes('access_token=') || hash.includes('refresh_token=')
+    if (!returnedFromImplicitOAuth) return
+
+    window.history.replaceState({}, '', '/app')
+    setLocation('/app')
+  }, [loading, user, setLocation])
 
   const handleGoogle = async () => {
     if (!ENABLE_GOOGLE) return
