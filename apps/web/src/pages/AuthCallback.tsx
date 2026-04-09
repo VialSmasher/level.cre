@@ -79,6 +79,13 @@ export default function AuthCallback() {
         redirectToApp()
       } catch (err: any) {
         console.error('[auth] PKCE exchange failed', err)
+        try {
+          const { data: { session } } = await supabase.auth.getSession()
+          if (!cancelled && session) {
+            redirectToApp()
+            return
+          }
+        } catch {}
         const params = new URLSearchParams({ error: 'oauth_callback_failed' })
         if (err?.message) {
           params.set('error_description', err.message)

@@ -80,6 +80,15 @@ export default function Landing() {
     const authError = url.searchParams.get('error')
     if (!authError) return
 
+    if (user && user.id !== 'demo-user') {
+      url.searchParams.delete('error')
+      url.searchParams.delete('error_description')
+      const cleanedUrl = `${url.pathname}${url.search}${url.hash}`
+      window.history.replaceState(window.history.state, '', cleanedUrl)
+      window.location.replace('/app')
+      return
+    }
+
     const authErrorDescription = url.searchParams.get('error_description')
     const fallbackDescription =
       authError === 'auth_not_configured'
@@ -98,19 +107,13 @@ export default function Landing() {
     url.searchParams.delete('error_description')
     const cleanedUrl = `${url.pathname}${url.search}${url.hash}`
     window.history.replaceState(window.history.state, '', cleanedUrl)
-  }, [toast])
+  }, [toast, user])
 
-  // Optional: auto-redirect authenticated users from '/' to '/app'.
-  // Disabled by default so the landing/login page is visible even if signed in.
-  const AUTO_REDIRECT_AUTHENTICATED = (
-    import.meta.env.VITE_AUTO_REDIRECT_AUTHENTICATED === '1' ||
-    import.meta.env.VITE_AUTO_REDIRECT_AUTHENTICATED === 'true'
-  )
   useEffect(() => {
-    if (AUTO_REDIRECT_AUTHENTICATED && !loading && user && user.id !== 'demo-user') {
-      setLocation('/app')
+    if (!loading && user && user.id !== 'demo-user') {
+      window.location.replace('/app')
     }
-  }, [AUTO_REDIRECT_AUTHENTICATED, loading, user, setLocation])
+  }, [loading, user])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
