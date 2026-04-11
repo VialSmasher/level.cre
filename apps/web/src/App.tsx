@@ -31,9 +31,20 @@ const Privacy = lazy(() => import("./pages/privacy"));
 const AdminDiag = lazy(() => import("./pages/admin-diag"));
 const BrokerStats = lazy(() => import("./pages/broker-stats"));
 const Leaderboard = lazy(() => import("./pages/leaderboard"));
+const IndustrialIntelHomePage = lazy(
+  () => import("./tools/industrial-intel/pages/IndustrialIntelHomePage"),
+);
+const IndustrialIntelInventoryPage = lazy(
+  () => import("./tools/industrial-intel/pages/IndustrialIntelInventoryPage"),
+);
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
+import ToolLayout from "./tools/industrial-intel/ToolLayout";
+
+const INDUSTRIAL_INTEL_ENABLED =
+  String(import.meta.env.VITE_ENABLE_INDUSTRIAL_INTEL ?? "").toLowerCase() === "true" ||
+  String(import.meta.env.VITE_ENABLE_INDUSTRIAL_INTEL ?? "").toLowerCase() === "1";
 
 // Component to handle onboarding check and routing
 function OnboardingCheck({ children }: { children: React.ReactNode }) {
@@ -310,6 +321,30 @@ function Router() {
         setLocation('/app/profile')
         return null
       }} />}
+
+      {INDUSTRIAL_INTEL_ENABLED && (
+        <Route path="/tools/industrial-intel">
+          <ProtectedRoute>
+            <ToolLayout>
+              <Suspense fallback={<Spinner />}>
+                <IndustrialIntelHomePage />
+              </Suspense>
+            </ToolLayout>
+          </ProtectedRoute>
+        </Route>
+      )}
+
+      {INDUSTRIAL_INTEL_ENABLED && (
+        <Route path="/tools/industrial-intel/listings">
+          <ProtectedRoute>
+            <ToolLayout>
+              <Suspense fallback={<Spinner />}>
+                <IndustrialIntelInventoryPage />
+              </Suspense>
+            </ToolLayout>
+          </ProtectedRoute>
+        </Route>
+      )}
       
       <Route component={() => (
         <Suspense fallback={<Spinner />}> 

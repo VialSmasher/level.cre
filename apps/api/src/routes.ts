@@ -19,6 +19,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
 import { XP_VALUES, actionForInteractionType, xpForInteractionType } from './lib/gamification';
+import { registerIndustrialIntelRoutes } from './modules/industrial-intel/registerRoutes';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Supabase client for server-side OAuth
@@ -2685,6 +2686,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: 'Failed to fetch leaderboard' });
     }
   });
+
+  registerIndustrialIntelRoutes(app);
 
   const httpServer = createServer(app);
 
