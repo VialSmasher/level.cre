@@ -42,4 +42,14 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       res.status(500).json({ message: "Failed to fetch industrial intel listings" });
     }
   });
+
+  app.get("/api/intel/changes", requireAuth, async (_req, res) => {
+    try {
+      const changes = await industrialIntelService.getRecentChanges();
+      res.json(changes);
+    } catch (error) {
+      console.error("Error fetching industrial intel changes:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel changes" });
+    }
+  });
 }

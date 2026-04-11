@@ -1,4 +1,5 @@
 import {
+  type IntelChangeListItem,
   industrialIntelRepository,
   type IntelListingListItem,
   type IntelRunListItem,
@@ -21,6 +22,10 @@ export class IndustrialIntelService {
 
   async getListings(): Promise<IntelListingListItem[]> {
     return industrialIntelRepository.getListings();
+  }
+
+  async getRecentChanges(): Promise<IntelChangeListItem[]> {
+    return industrialIntelRepository.getRecentChanges();
   }
 }
 

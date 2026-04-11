@@ -62,6 +62,7 @@ export default function IndustrialIntelInventoryPage() {
                   <tr className="text-left text-slate-500">
                     <th className="py-3 pr-4 font-medium">Listing</th>
                     <th className="py-3 pr-4 font-medium">Source</th>
+                    <th className="py-3 pr-4 font-medium">Status</th>
                     <th className="py-3 pr-4 font-medium">Type</th>
                     <th className="py-3 pr-4 font-medium">Submarket</th>
                     <th className="py-3 pr-4 font-medium">Available SF</th>
@@ -77,6 +78,17 @@ export default function IndustrialIntelInventoryPage() {
                         <p className="mt-1 text-slate-500">{listing.address || "No address yet"}</p>
                       </td>
                       <td className="py-4 pr-4 text-slate-700">{listing.sourceName || "Unknown"}</td>
+                      <td className="py-4 pr-4">
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            listing.removedAt
+                              ? "bg-rose-100 text-rose-700"
+                              : "bg-emerald-100 text-emerald-700"
+                          }`}
+                        >
+                          {listing.removedAt ? "removed" : listing.status}
+                        </span>
+                      </td>
                       <td className="py-4 pr-4">
                         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
                           {listing.listingType}

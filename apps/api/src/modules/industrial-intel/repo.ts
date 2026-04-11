@@ -1,4 +1,5 @@
 import { pool } from "../../db";
+import { getIndustrialIntelSeedPreview } from "./seed";
 
 export type IntelSummary = {
   activeListings: number;
@@ -50,12 +51,24 @@ export type IntelListingListItem = {
   removedAt: string | null;
 };
 
+export type IntelChangeListItem = {
+  id: string;
+  listingId: string;
+  listingTitle: string;
+  sourceName: string | null;
+  changeType: string;
+  changeSummary: string | null;
+  observedAt: string | null;
+};
+
 const CORE_TABLES = [
   "intel_sources",
   "intel_listings",
   "intel_ingest_runs",
   "intel_listing_changes",
 ] as const;
+
+const SHOULD_USE_SAMPLE_FALLBACK = process.env.NODE_ENV !== "production";
 
 function isoOrNull(value: unknown): string | null {
   if (!value) return null;
@@ -76,7 +89,16 @@ function intOrNull(value: unknown): number | null {
 
 function isRecoverableIntelSchemaError(error: unknown): boolean {
   const code = String((error as any)?.code || "");
-  return code === "42P01" || code === "42703";
+  const message = String((error as any)?.message || "");
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code === "ENOTFOUND" ||
+    code === "ENETUNREACH" ||
+    code === "ECONNREFUSED" ||
+    code === "SELF_SIGNED_CERT_IN_CHAIN" ||
+    /ENOTFOUND|ENETUNREACH|ECONNREFUSED|self-signed certificate|does not exist/i.test(message)
+  );
 }
 
 export class IndustrialIntelRepository {
@@ -97,6 +119,9 @@ export class IndustrialIntelRepository {
   async getSummary(): Promise<IntelSummary> {
     try {
       if (!(await this.hasCoreTables())) {
+        if (SHOULD_USE_SAMPLE_FALLBACK) {
+          return getIndustrialIntelSeedPreview().summary;
+        }
         return {
           activeListings: 0,
           newListings: 0,
@@ -150,6 +175,9 @@ export class IndustrialIntelRepository {
       };
     } catch (error) {
       if (isRecoverableIntelSchemaError(error)) {
+        if (SHOULD_USE_SAMPLE_FALLBACK) {
+          return getIndustrialIntelSeedPreview().summary;
+        }
         return {
           activeListings: 0,
           newListings: 0,
@@ -164,7 +192,9 @@ export class IndustrialIntelRepository {
 
   async getSources(): Promise<IntelSourceListItem[]> {
     try {
-      if (!(await this.hasCoreTables())) return [];
+      if (!(await this.hasCoreTables())) {
+        return SHOULD_USE_SAMPLE_FALLBACK ? getIndustrialIntelSeedPreview().sources : [];
+      }
 
       const result = await pool.query<{
         id: string;
@@ -198,14 +228,18 @@ export class IndustrialIntelRepository {
         updatedAt: isoOrNull(row.updated_at),
       }));
     } catch (error) {
-      if (isRecoverableIntelSchemaError(error)) return [];
+      if (isRecoverableIntelSchemaError(error)) {
+        return SHOULD_USE_SAMPLE_FALLBACK ? getIndustrialIntelSeedPreview().sources : [];
+      }
       throw error;
     }
   }
 
   async getRuns(limit = 20): Promise<IntelRunListItem[]> {
     try {
-      if (!(await this.hasCoreTables())) return [];
+      if (!(await this.hasCoreTables())) {
+        return SHOULD_USE_SAMPLE_FALLBACK ? getIndustrialIntelSeedPreview().runs.slice(0, limit) : [];
+      }
 
       const result = await pool.query<{
         id: string;
@@ -271,14 +305,18 @@ export class IndustrialIntelRepository {
         errorMessage: row.error_message,
       }));
     } catch (error) {
-      if (isRecoverableIntelSchemaError(error)) return [];
+      if (isRecoverableIntelSchemaError(error)) {
+        return SHOULD_USE_SAMPLE_FALLBACK ? getIndustrialIntelSeedPreview().runs.slice(0, limit) : [];
+      }
       throw error;
     }
   }
 
   async getListings(limit = 100): Promise<IntelListingListItem[]> {
     try {
-      if (!(await this.hasCoreTables())) return [];
+      if (!(await this.hasCoreTables())) {
+        return SHOULD_USE_SAMPLE_FALLBACK ? getIndustrialIntelSeedPreview().listings.slice(0, limit) : [];
+      }
 
       const result = await pool.query<{
         id: string;
@@ -352,7 +390,67 @@ export class IndustrialIntelRepository {
         removedAt: isoOrNull(row.removed_at),
       }));
     } catch (error) {
-      if (isRecoverableIntelSchemaError(error)) return [];
+      if (isRecoverableIntelSchemaError(error)) {
+        return SHOULD_USE_SAMPLE_FALLBACK ? getIndustrialIntelSeedPreview().listings.slice(0, limit) : [];
+      }
+      throw error;
+    }
+  }
+
+  async getRecentChanges(limit = 10): Promise<IntelChangeListItem[]> {
+    try {
+      if (!(await this.hasCoreTables())) {
+        return SHOULD_USE_SAMPLE_FALLBACK ? getIndustrialIntelSeedPreview().changes.slice(0, limit) : [];
+      }
+
+      const result = await pool.query<{
+        id: string;
+        listing_id: string;
+        listing_title: string;
+        source_name: string | null;
+        change_type: string;
+        change_summary: string | null;
+        observed_at: Date | null;
+      }>(
+        `
+          SELECT
+            changes.id,
+            changes.listing_id,
+            listings.title AS listing_title,
+            sources.name AS source_name,
+            changes.change_type,
+            changes.change_summary,
+            changes.observed_at
+          FROM public.intel_listing_changes changes
+          INNER JOIN public.intel_listings listings ON listings.id = changes.listing_id
+          LEFT JOIN public.intel_sources sources ON sources.id = listings.source_id
+          ORDER BY changes.observed_at DESC NULLS LAST
+          LIMIT $1
+        `,
+        [limit],
+      );
+
+      return result.rows.map((row: {
+        id: string;
+        listing_id: string;
+        listing_title: string;
+        source_name: string | null;
+        change_type: string;
+        change_summary: string | null;
+        observed_at: Date | null;
+      }) => ({
+        id: row.id,
+        listingId: row.listing_id,
+        listingTitle: row.listing_title,
+        sourceName: row.source_name,
+        changeType: row.change_type,
+        changeSummary: row.change_summary,
+        observedAt: isoOrNull(row.observed_at),
+      }));
+    } catch (error) {
+      if (isRecoverableIntelSchemaError(error)) {
+        return SHOULD_USE_SAMPLE_FALLBACK ? getIndustrialIntelSeedPreview().changes.slice(0, limit) : [];
+      }
       throw error;
     }
   }

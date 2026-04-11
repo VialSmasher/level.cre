@@ -34,6 +34,16 @@ type IntelRun = {
   errorMessage: string | null;
 };
 
+type IntelChange = {
+  id: string;
+  listingId: string;
+  listingTitle: string;
+  sourceName: string | null;
+  changeType: string;
+  changeSummary: string | null;
+  observedAt: string | null;
+};
+
 function formatDateTime(value: string | null) {
   if (!value) return "Never";
   const date = new Date(value);
@@ -51,6 +61,9 @@ export default function IndustrialIntelHomePage() {
   const { data: runs = [], isLoading: runsLoading } = useQuery<IntelRun[]>({
     queryKey: ["/api/intel/runs"],
   });
+  const { data: changes = [], isLoading: changesLoading } = useQuery<IntelChange[]>({
+    queryKey: ["/api/intel/changes"],
+  });
 
   const cards = [
     { label: "Active Listings", value: summary?.activeListings ?? 0 },
@@ -66,6 +79,9 @@ export default function IndustrialIntelHomePage() {
         <p className="mt-2 max-w-3xl text-sm text-slate-600">
           Tool B is running in parallel to the live Level CRE app. This slice is read-only and uses
           isolated Industrial Intel tables and APIs only.
+        </p>
+        <p className="mt-2 max-w-3xl text-xs uppercase tracking-wide text-slate-500">
+          Development fallback: sample Intel data will render if the core tables are not yet seeded.
         </p>
       </section>
 
@@ -167,6 +183,45 @@ export default function IndustrialIntelHomePage() {
                         {source.isActive ? "Active" : "Inactive"}
                       </span>
                     </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent Changes</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {changesLoading ? (
+              <p className="text-sm text-slate-500">Loading recent changes...</p>
+            ) : changes.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                No change events yet. Seed or ingest Tool B data to populate daily diffs here.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {changes.map((change) => (
+                  <div
+                    key={change.id}
+                    className="rounded-xl border border-slate-200 px-4 py-3"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-slate-900">{change.listingTitle}</p>
+                        <p className="text-xs uppercase tracking-wide text-slate-500">
+                          {change.sourceName || "Unknown source"} · {change.changeType}
+                        </p>
+                      </div>
+                      <p className="text-xs text-slate-500">{formatDateTime(change.observedAt)}</p>
+                    </div>
+                    {change.changeSummary && (
+                      <p className="mt-2 text-sm text-slate-600">{change.changeSummary}</p>
+                    )}
                   </div>
                 ))}
               </div>
