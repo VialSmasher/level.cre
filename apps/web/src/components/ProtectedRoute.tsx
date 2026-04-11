@@ -1,4 +1,5 @@
 import { useAuth } from '@/contexts/AuthContext'
+import { getOAuthCallbackPath } from '@/lib/authUtils'
 import { useLocation } from 'wouter'
 import { useEffect } from 'react'
 
@@ -17,19 +18,15 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   } catch {
     demo = false
   }
-  // If OAuth lands on a protected route like '/app?code=...',
-  // forward it to the dedicated callback page so the PKCE exchange can complete.
-  const hasAuthCode = (() => {
-    try {
-      const qs = new URLSearchParams(window.location.search)
-      return qs.has('code')
-    } catch { return false }
-  })()
+  // If OAuth lands on a protected route like '/app?code=...' or '/app#access_token=...',
+  // forward it to the dedicated callback page so the session exchange can complete.
+  const oauthCallbackPath = getOAuthCallbackPath()
+  const hasOAuthReturn = Boolean(oauthCallbackPath)
 
   useEffect(() => {
-    if (!loading && !user && !demo && hasAuthCode) {
-      if (import.meta?.env?.DEV) console.log('[gate] ProtectedRoute forwarding OAuth code -> /auth/callback')
-      setLocation(`/auth/callback${window.location.search}`)
+    if (!loading && !user && !demo && oauthCallbackPath) {
+      if (import.meta?.env?.DEV) console.log('[gate] ProtectedRoute forwarding OAuth return ->', oauthCallbackPath)
+      window.location.replace(oauthCallbackPath)
       return
     }
 
@@ -37,16 +34,16 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
       if (import.meta?.env?.DEV) console.log('[gate] ProtectedRoute redirect -> / (no user)')
       setLocation('/')
     }
-  }, [user, loading, demo, hasAuthCode, setLocation])
+  }, [user, loading, demo, oauthCallbackPath, setLocation])
 
   useEffect(() => {
-    if (!user || !hasAuthCode) return
+    if (!user || !hasOAuthReturn) return
     try {
       window.history.replaceState(window.history.state, '', window.location.pathname)
     } catch {}
-  }, [user, hasAuthCode])
+  }, [user, hasOAuthReturn])
 
-  if (loading || (!user && hasAuthCode)) {
+  if (loading || (!user && hasOAuthReturn)) {
     if (import.meta?.env?.DEV && loading) console.log('[gate] ProtectedRoute loading...')
     return (
       <div className="flex items-center justify-center h-screen">

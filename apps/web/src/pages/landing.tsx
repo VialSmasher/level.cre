@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/contexts/AuthContext'
+import { getOAuthCallbackPath } from '@/lib/authUtils'
 import { supabase } from '@/lib/supabase'
 import { useLocation } from 'wouter'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
@@ -32,6 +33,16 @@ export default function Landing() {
     const t = setTimeout(prefetchApp, 300)
     return () => clearTimeout(t)
   }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || loading || user) return
+
+    const oauthCallbackPath = getOAuthCallbackPath({ includeHashTokens: false })
+    if (!oauthCallbackPath) return
+
+    if (import.meta?.env?.DEV) console.log('[auth] Landing forwarding OAuth code ->', oauthCallbackPath)
+    window.location.replace(oauthCallbackPath)
+  }, [loading, user])
 
   useEffect(() => {
     if (typeof window === 'undefined' || loading || user || !supabase) return
