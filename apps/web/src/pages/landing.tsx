@@ -5,6 +5,7 @@ import { useLocation } from 'wouter'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Loader2, ArrowRight, CheckCircle, ChartSpline } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { setStoredPostAuthRedirect } from '@/lib/postAuthRedirect'
 
 // Lazy-load the feature cards so the login route stays fast
 const FeatureCards = lazy(() => import('../components/FeatureCards'))
@@ -141,11 +142,25 @@ export default function Landing() {
     }
   }
 
+  const handleIndustrialIntel = async () => {
+    if (!ENABLE_GOOGLE || isSigningIn) return
+    setIsSigningIn(true)
+    try {
+      await signInWithGoogle('/tools/industrial-intel')
+    } catch (err: any) {
+      console.error('Industrial Intel sign-in error:', err)
+      toast({ title: 'Sign-in unavailable', description: err?.message || 'Please try again later', variant: 'destructive' })
+    } finally {
+      setIsSigningIn(false)
+    }
+  }
+
   const handleDemoMode = () => {
     if (isDemoMode) return // Prevent double-clicks
     setIsDemoMode(true)
     // Set demo flag and reload page to ensure proper initialization
     localStorage.setItem('demo-mode', 'true')
+    setStoredPostAuthRedirect('/app')
     window.location.href = '/app'
   }
 
@@ -199,6 +214,15 @@ export default function Landing() {
                     <ArrowRight className="w-3 h-3 ml-2 group-hover:translate-x-1 transition-transform" />
                   </Button>
                   <div className="text-xs text-slate-600">Signed in as {user.email}</div>
+                  <div>
+                    <Button
+                      variant="outline"
+                      onClick={() => setLocation('/launcher')}
+                      className="h-8 rounded-sm px-3 text-xs font-medium"
+                    >
+                      Open launcher
+                    </Button>
+                  </div>
                 </>
               ) : (
                 <>
@@ -235,8 +259,8 @@ export default function Landing() {
                       onClick={handleDemoMode}
                       disabled={isSigningIn || isDemoMode}
                       className="group px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-sm disabled:opacity-50 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 w-auto"
-                      aria-label="Start Demo Mode"
-                      title="Demo with full features"
+                      aria-label="Try Level CRE Demo"
+                      title="Open the Tool A demo"
                     >
                       {isDemoMode ? (
                         <>
@@ -245,14 +269,25 @@ export default function Landing() {
                         </>
                       ) : (
                         <>
-                          Start Demo Mode
+                          Try Level CRE Demo
                           <ArrowRight className="w-3 h-3 ml-2 group-hover:translate-x-1 transition-transform" />
                         </>
                       )}
                     </Button>
+                    {ENABLE_GOOGLE && (
+                      <Button
+                        onClick={handleIndustrialIntel}
+                        disabled={isSigningIn || isDemoMode}
+                        variant="outline"
+                        className="group w-auto rounded-sm px-6 py-2 text-sm font-medium"
+                      >
+                        Open Industrial Intel
+                        <ArrowRight className="w-3 h-3 ml-2 group-hover:translate-x-1 transition-transform" />
+                      </Button>
+                    )}
                   </div>
                   <p className="text-xs text-slate-600 mt-2 text-center">
-                    Complete prospect mapping platform • No signup required
+                    Demo is for Level CRE only. Use Google sign-in for Industrial Intel.
                   </p>
                 </>
               )}
@@ -270,7 +305,7 @@ export default function Landing() {
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-green-500" />
-                Demo has full features
+                Demo is a Tool A sandbox
               </div>
             </div>
 

@@ -302,6 +302,12 @@ export function AppLayout({ children }: AppLayoutProps) {
                   </p>
                 </div>
                 <DropdownMenuItem asChild>
+                  <Link href="/launcher" className="w-full">
+                    <Layers className="mr-2 h-4 w-4" />
+                    Switch Tools
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
                   <Link href="/app/profile" className="w-full">
                     <Settings className="mr-2 h-4 w-4" />
                     Settings

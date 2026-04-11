@@ -3,6 +3,7 @@ import { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { queryClient, apiRequest } from '@/lib/queryClient'
 import { apiUrl } from '@/lib/api'
+import { setStoredPostAuthRedirect } from '@/lib/postAuthRedirect'
 
 interface AuthContextType {
   user: User | null
@@ -10,7 +11,7 @@ interface AuthContextType {
   loading: boolean
   needsOnboarding: boolean
   isDemoMode: boolean
-  signInWithGoogle: () => Promise<void>
+  signInWithGoogle: (redirectPath?: string) => Promise<void>
   signInWithEmail: (email: string) => Promise<void>
   signOut: () => Promise<void>
   setNeedsOnboarding: (needs: boolean) => void
@@ -26,7 +27,7 @@ const defaultAuthContext: AuthContextType = {
   loading: true,
   needsOnboarding: false,
   isDemoMode: false,
-  signInWithGoogle: async () => {
+  signInWithGoogle: async (_redirectPath?: string) => {
     try { window.location.assign('/api/auth/google') } catch {}
   },
   signInWithEmail: async () => { throw new Error('Magic link disabled') },
@@ -260,7 +261,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const GOOGLE_ENABLED = (import.meta.env.VITE_ENABLE_GOOGLE_AUTH === '1' || import.meta.env.VITE_ENABLE_GOOGLE_AUTH === 'true')
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async (redirectPath?: string) => {
     if (!GOOGLE_ENABLED) {
       throw new Error('Google OAuth disabled')
     }
@@ -270,6 +271,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       // Clear demo mode when starting Google flow
       localStorage.removeItem('demo-mode')
+      setStoredPostAuthRedirect(redirectPath)
 
       const redirectTo = `${window.location.origin}/auth/callback`
       const inIframe = window.self !== window.top

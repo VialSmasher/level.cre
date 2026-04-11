@@ -26,6 +26,7 @@ const Onboarding = lazy(() => import("./pages/onboarding"));
 const WorkspacesIndex = lazy(() => import("./pages/workspaces"));
 const Workspace = lazy(() => import("./pages/workspace"));
 const AuthCallback = lazy(() => import("./pages/AuthCallback"));
+const Launcher = lazy(() => import("./pages/launcher"));
 const Terms = lazy(() => import("./pages/terms"));
 const Privacy = lazy(() => import("./pages/privacy"));
 const AdminDiag = lazy(() => import("./pages/admin-diag"));
@@ -36,6 +37,9 @@ const IndustrialIntelHomePage = lazy(
 );
 const IndustrialIntelInventoryPage = lazy(
   () => import("./tools/industrial-intel/pages/IndustrialIntelInventoryPage"),
+);
+const IndustrialIntelRequirementsPage = lazy(
+  () => import("./tools/industrial-intel/pages/IndustrialIntelRequirementsPage"),
 );
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
@@ -137,6 +141,14 @@ function Router() {
       )} />
       
       {/* Protected app routes - flat structure */}
+      <Route path="/launcher">
+        <ProtectedRoute>
+          <Suspense fallback={<Spinner />}>
+            <Launcher />
+          </Suspense>
+        </ProtectedRoute>
+      </Route>
+
       <Route path="/broker-stats">
         <ProtectedRoute>
           <OnboardingCheck>
@@ -340,6 +352,18 @@ function Router() {
             <ToolLayout>
               <Suspense fallback={<Spinner />}>
                 <IndustrialIntelInventoryPage />
+              </Suspense>
+            </ToolLayout>
+          </ProtectedRoute>
+        </Route>
+      )}
+
+      {INDUSTRIAL_INTEL_ENABLED && (
+        <Route path="/tools/industrial-intel/requirements">
+          <ProtectedRoute>
+            <ToolLayout>
+              <Suspense fallback={<Spinner />}>
+                <IndustrialIntelRequirementsPage />
               </Suspense>
             </ToolLayout>
           </ProtectedRoute>

@@ -1,6 +1,41 @@
 import type { Express } from "express";
-import { requireAuth } from "../../auth";
+import { z } from "zod";
+import { getUserId, requireAuth } from "../../auth";
 import { industrialIntelService } from "./service";
+
+const intelRequirementSchema = z.object({
+  title: z.string().trim().min(1),
+  clientName: z.string().trim().min(1).nullable().optional(),
+  status: z.string().trim().min(1).nullable().optional(),
+  dealType: z.string().trim().min(1).nullable().optional(),
+  market: z.string().trim().min(1).nullable().optional(),
+  submarket: z.string().trim().min(1).nullable().optional(),
+  minSf: z.number().int().nonnegative().nullable().optional(),
+  maxSf: z.number().int().nonnegative().nullable().optional(),
+  minClearHeightFt: z.number().nonnegative().nullable().optional(),
+  maxBudgetPsf: z.number().nonnegative().nullable().optional(),
+  requiredDockDoors: z.number().int().nonnegative().nullable().optional(),
+  requiredGradeDoors: z.number().int().nonnegative().nullable().optional(),
+  minYardAcres: z.number().nonnegative().nullable().optional(),
+  powerNotes: z.string().trim().nullable().optional(),
+  officeNotes: z.string().trim().nullable().optional(),
+  timingNotes: z.string().trim().nullable().optional(),
+  specialNotes: z.string().trim().nullable().optional(),
+  isOffMarketSearchEnabled: z.boolean().nullable().optional(),
+});
+
+const intelRequirementUpdateSchema = intelRequirementSchema.partial();
+
+const intelRequirementPreferenceSchema = z.object({
+  key: z.string().trim().min(1),
+  operator: z.string().trim().min(1).nullable().optional(),
+  valueText: z.string().trim().nullable().optional(),
+  valueNumber: z.number().nullable().optional(),
+  valueBoolean: z.boolean().nullable().optional(),
+  weight: z.number().int().nullable().optional(),
+});
+
+const intelRequirementPreferencesSchema = z.array(intelRequirementPreferenceSchema);
 
 export function registerIndustrialIntelRoutes(app: Express): void {
   app.get("/api/intel/summary", requireAuth, async (_req, res) => {
@@ -50,6 +85,91 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     } catch (error) {
       console.error("Error fetching industrial intel changes:", error);
       res.status(500).json({ message: "Failed to fetch industrial intel changes" });
+    }
+  });
+
+  app.get("/api/intel/requirements", requireAuth, async (req, res) => {
+    try {
+      const requirements = await industrialIntelService.getRequirements(getUserId(req));
+      res.json(requirements);
+    } catch (error) {
+      console.error("Error fetching industrial intel requirements:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel requirements" });
+    }
+  });
+
+  app.post("/api/intel/requirements", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelRequirementSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel requirement", issues: parsed.error.flatten() });
+      }
+      const requirement = await industrialIntelService.createRequirement(getUserId(req), parsed.data);
+      res.status(201).json(requirement);
+    } catch (error) {
+      console.error("Error creating industrial intel requirement:", error);
+      res.status(500).json({ message: "Failed to create industrial intel requirement" });
+    }
+  });
+
+  app.get("/api/intel/requirements/:id", requireAuth, async (req, res) => {
+    try {
+      const requirement = await industrialIntelService.getRequirementById(getUserId(req), req.params.id);
+      if (!requirement) {
+        return res.status(404).json({ message: "Industrial intel requirement not found" });
+      }
+      res.json(requirement);
+    } catch (error) {
+      console.error("Error fetching industrial intel requirement:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel requirement" });
+    }
+  });
+
+  app.patch("/api/intel/requirements/:id", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelRequirementUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel requirement update", issues: parsed.error.flatten() });
+      }
+      const requirement = await industrialIntelService.updateRequirement(getUserId(req), req.params.id, parsed.data);
+      if (!requirement) {
+        return res.status(404).json({ message: "Industrial intel requirement not found" });
+      }
+      res.json(requirement);
+    } catch (error) {
+      console.error("Error updating industrial intel requirement:", error);
+      res.status(500).json({ message: "Failed to update industrial intel requirement" });
+    }
+  });
+
+  app.get("/api/intel/requirements/:id/preferences", requireAuth, async (req, res) => {
+    try {
+      const requirement = await industrialIntelService.getRequirementById(getUserId(req), req.params.id);
+      if (!requirement) {
+        return res.status(404).json({ message: "Industrial intel requirement not found" });
+      }
+      const preferences = await industrialIntelService.getRequirementPreferences(getUserId(req), req.params.id);
+      res.json(preferences);
+    } catch (error) {
+      console.error("Error fetching industrial intel requirement preferences:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel requirement preferences" });
+    }
+  });
+
+  app.put("/api/intel/requirements/:id/preferences", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelRequirementPreferencesSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel requirement preferences", issues: parsed.error.flatten() });
+      }
+      const preferences = await industrialIntelService.replaceRequirementPreferences(getUserId(req), req.params.id, parsed.data);
+      if (!preferences) {
+        return res.status(404).json({ message: "Industrial intel requirement not found" });
+      }
+      res.json(preferences);
+    } catch (error) {
+      console.error("Error replacing industrial intel requirement preferences:", error);
+      res.status(500).json({ message: "Failed to replace industrial intel requirement preferences" });
     }
   });
 }

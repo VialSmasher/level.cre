@@ -8,6 +8,7 @@ type ToolLayoutProps = {
 const NAV_ITEMS = [
   { href: "/tools/industrial-intel", label: "Overview" },
   { href: "/tools/industrial-intel/listings", label: "Listings" },
+  { href: "/tools/industrial-intel/requirements", label: "Requirements" },
 ] as const;
 
 export default function ToolLayout({ children }: ToolLayoutProps) {
@@ -23,9 +24,14 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
             </p>
             <h1 className="text-2xl font-semibold text-slate-950">Industrial Intel</h1>
           </div>
-          <Link href="/app" className="text-sm font-medium text-slate-600 hover:text-slate-950">
-            Open Tool A
-          </Link>
+          <div className="flex items-center gap-4 text-sm font-medium">
+            <Link href="/launcher" className="text-slate-600 hover:text-slate-950">
+              Launcher
+            </Link>
+            <Link href="/app" className="text-slate-600 hover:text-slate-950">
+              Open Tool A
+            </Link>
+          </div>
         </div>
         <div className="mx-auto flex max-w-7xl gap-2 px-6 pb-4">
           {NAV_ITEMS.map((item) => {

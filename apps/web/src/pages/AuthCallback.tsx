@@ -1,14 +1,16 @@
 import { useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import { consumeStoredPostAuthRedirect } from '@/lib/postAuthRedirect'
 
 export default function AuthCallback() {
   useEffect(() => {
     let cancelled = false
 
     const redirectToApp = () => {
+      const nextPath = consumeStoredPostAuthRedirect() || '/app'
       // Use a full-page navigation here so the app boots from the freshly
       // persisted session instead of racing the in-memory auth context.
-      window.location.replace('/app')
+      window.location.replace(nextPath)
     }
 
     const redirectToLanding = (params?: URLSearchParams) => {
