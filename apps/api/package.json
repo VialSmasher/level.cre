@@ -14,7 +14,8 @@
     "db:prepare": "node ./scripts/ensure_pgcrypto.mjs && drizzle-kit push",
     "db:migrate-prospect-numerics": "node ./scripts/migrate_prospect_numeric_fields.mjs",
     "intel:migrate": "DOTENV_CONFIG_PATH=../../.env node --import dotenv/config scripts/ensure_pgcrypto.mjs && DOTENV_CONFIG_PATH=../../.env node --import dotenv/config scripts/run_sql_file.mjs ../../drizzle/0003_industrial_intel_core.sql",
-    "intel:seed": "DOTENV_CONFIG_PATH=../../.env tsx -r dotenv/config scripts/seed-industrial-intel.ts"
+    "intel:seed": "DOTENV_CONFIG_PATH=../../.env tsx -r dotenv/config scripts/seed-industrial-intel.ts",
+    "intel:run-source": "DOTENV_CONFIG_PATH=../../.env tsx -r dotenv/config scripts/run-industrial-intel-source.ts"
   },
   "dependencies": {
     "@level-cre/shared": "file:../../packages/shared",
@@ -28,6 +29,7 @@
     "helmet": "^8.1.0",
     "jose": "^5.10.0",
     "jsonwebtoken": "^9.0.2",
+    "pdf-parse": "^2.4.5",
     "pg": "^8.12.0",
     "zod": "^3.25.76"
   },

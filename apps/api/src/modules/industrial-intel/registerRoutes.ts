@@ -37,6 +37,21 @@ const intelRequirementPreferenceSchema = z.object({
 
 const intelRequirementPreferencesSchema = z.array(intelRequirementPreferenceSchema);
 
+const intelManualListingSchema = z.object({
+  sourceUrl: z.string().trim().url(),
+  title: z.string().trim().min(1),
+  brochureUrl: z.string().trim().url().nullable().optional(),
+  address: z.string().trim().nullable().optional(),
+  market: z.string().trim().nullable().optional(),
+  submarket: z.string().trim().nullable().optional(),
+  listingType: z.string().trim().min(1).nullable().optional(),
+  availableSf: z.number().int().nonnegative().nullable().optional(),
+});
+
+const intelManualListingPreviewSchema = z.object({
+  sourceUrl: z.string().trim().url(),
+});
+
 export function registerIndustrialIntelRoutes(app: Express): void {
   app.get("/api/intel/summary", requireAuth, async (_req, res) => {
     try {
@@ -85,6 +100,34 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     } catch (error) {
       console.error("Error fetching industrial intel changes:", error);
       res.status(500).json({ message: "Failed to fetch industrial intel changes" });
+    }
+  });
+
+  app.post("/api/intel/manual-listings/preview", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelManualListingPreviewSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel manual listing preview", issues: parsed.error.flatten() });
+      }
+      const result = await industrialIntelService.previewManualListing(parsed.data.sourceUrl);
+      res.json(result);
+    } catch (error) {
+      console.error("Error previewing industrial intel manual listing:", error);
+      res.status(500).json({ message: "Failed to preview industrial intel manual listing" });
+    }
+  });
+
+  app.post("/api/intel/manual-listings", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelManualListingSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel manual listing", issues: parsed.error.flatten() });
+      }
+      const result = await industrialIntelService.ingestManualListing(getUserId(req), parsed.data);
+      res.status(201).json(result);
+    } catch (error) {
+      console.error("Error ingesting industrial intel manual listing:", error);
+      res.status(500).json({ message: "Failed to ingest industrial intel manual listing" });
     }
   });
 

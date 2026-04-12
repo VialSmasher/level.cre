@@ -12,6 +12,8 @@ import {
   type ReplaceIntelRequirementPreferencesInput,
   type UpdateIntelRequirementInput,
 } from "./repo";
+import { ingestManualIntelListing, type ManualIntelListingInput } from "./manualIngest";
+import { previewManualIntelListing } from "./manualPreview";
 
 export class IndustrialIntelService {
   async getSummary(): Promise<IntelSummary> {
@@ -60,6 +62,14 @@ export class IndustrialIntelService {
     input: ReplaceIntelRequirementPreferencesInput,
   ): Promise<IntelRequirementPreference[] | null> {
     return industrialIntelRepository.replaceRequirementPreferences(userId, requirementId, input);
+  }
+
+  async ingestManualListing(userId: string, input: ManualIntelListingInput) {
+    return ingestManualIntelListing(userId, input);
+  }
+
+  async previewManualListing(sourceUrl: string) {
+    return previewManualIntelListing(sourceUrl);
   }
 }
 

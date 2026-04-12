@@ -1,5 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { apiRequest } from "@/lib/queryClient";
 
 type IntelListing = {
   id: string;
@@ -26,8 +28,64 @@ function formatDateTime(value: string | null) {
 }
 
 export default function IndustrialIntelInventoryPage() {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState({
+    sourceUrl: "",
+    title: "",
+    brochureUrl: "",
+    address: "",
+    market: "Edmonton Metro",
+    submarket: "",
+    listingType: "lease",
+    availableSf: "",
+  });
   const { data: listings = [], isLoading } = useQuery<IntelListing[]>({
     queryKey: ["/api/intel/listings"],
+  });
+
+  const previewMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/intel/manual-listings/preview", {
+        sourceUrl: form.sourceUrl,
+      });
+      return response.json();
+    },
+    onSuccess: (preview) => {
+      setForm((current) => ({
+        ...current,
+        title: current.title || preview.title || "",
+        brochureUrl: current.brochureUrl || preview.brochureUrl || "",
+        address: current.address || preview.address || "",
+        market: current.market || preview.market || "Edmonton Metro",
+        submarket: current.submarket || preview.submarket || "",
+        listingType: current.listingType || preview.listingType || "lease",
+        availableSf: current.availableSf || (preview.availableSf ? String(preview.availableSf) : ""),
+      }));
+    },
+  });
+
+  const manualIngestMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/intel/manual-listings", {
+        sourceUrl: form.sourceUrl,
+        title: form.title,
+        brochureUrl: form.brochureUrl || null,
+        address: form.address || null,
+        market: form.market || null,
+        submarket: form.submarket || null,
+        listingType: form.listingType || null,
+        availableSf: form.availableSf ? Number(form.availableSf) : null,
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/listings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/runs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/changes"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/sources"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/summary"] });
+      setForm((current) => ({ ...current, sourceUrl: "", title: "", brochureUrl: "", address: "", submarket: "", availableSf: "" }));
+    },
   });
 
   return (
@@ -39,6 +97,61 @@ export default function IndustrialIntelInventoryPage() {
           existing Level CRE listings or workspaces data model.
         </p>
       </section>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Manual URL Intake</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 md:grid-cols-2">
+            <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Listing URL" value={form.sourceUrl} onChange={(event) => setForm({ ...form, sourceUrl: event.target.value })} />
+            <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Title" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
+            <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Brochure URL (optional)" value={form.brochureUrl} onChange={(event) => setForm({ ...form, brochureUrl: event.target.value })} />
+            <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Address (optional)" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} />
+            <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Market" value={form.market} onChange={(event) => setForm({ ...form, market: event.target.value })} />
+            <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Submarket (optional)" value={form.submarket} onChange={(event) => setForm({ ...form, submarket: event.target.value })} />
+            <select className="rounded-lg border border-slate-300 px-3 py-2 text-sm" value={form.listingType} onChange={(event) => setForm({ ...form, listingType: event.target.value })}>
+              <option value="lease">Lease</option>
+              <option value="sale">Sale</option>
+              <option value="sublease">Sublease</option>
+            </select>
+            <input className="rounded-lg border border-slate-300 px-3 py-2 text-sm" placeholder="Available SF (optional)" value={form.availableSf} onChange={(event) => setForm({ ...form, availableSf: event.target.value })} />
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => previewMutation.mutate()}
+              disabled={previewMutation.isPending || !form.sourceUrl}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {previewMutation.isPending ? "Fetching..." : "Autofill from URL"}
+            </button>
+            <button
+              type="button"
+              onClick={() => manualIngestMutation.mutate()}
+              disabled={manualIngestMutation.isPending || !form.sourceUrl || !form.title}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {manualIngestMutation.isPending ? "Saving..." : "Save listing URL"}
+            </button>
+            <p className="text-sm text-slate-500">
+              Start with a public listing URL, autofill what we can, then let Tool B track changes over time.
+            </p>
+          </div>
+          {previewMutation.isError && (
+            <p className="mt-3 text-sm text-rose-600">{(previewMutation.error as Error).message}</p>
+          )}
+          {manualIngestMutation.isError && (
+            <p className="mt-3 text-sm text-rose-600">{(manualIngestMutation.error as Error).message}</p>
+          )}
+          {previewMutation.isSuccess && (
+            <p className="mt-3 text-sm text-emerald-700">Fetched page metadata and filled what was detectable.</p>
+          )}
+          {manualIngestMutation.isSuccess && (
+            <p className="mt-3 text-sm text-emerald-700">Listing saved into Industrial Intel and change tracking.</p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
