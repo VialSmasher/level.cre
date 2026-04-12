@@ -271,7 +271,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       // Clear demo mode when starting Google flow
       localStorage.removeItem('demo-mode')
-      setStoredPostAuthRedirect(redirectPath)
+      setStoredPostAuthRedirect(redirectPath ?? '/launcher')
 
       const redirectTo = `${window.location.origin}/auth/callback`
       const inIframe = window.self !== window.top

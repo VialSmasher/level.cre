@@ -6,7 +6,11 @@ import { useLocation } from 'wouter'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Loader2, ArrowRight, CheckCircle, ChartSpline } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import { setStoredPostAuthRedirect } from '@/lib/postAuthRedirect'
+import {
+  clearStoredPostAuthRedirect,
+  getStoredPostAuthRedirect,
+  setStoredPostAuthRedirect,
+} from '@/lib/postAuthRedirect'
 
 // Lazy-load the feature cards so the login route stays fast
 const FeatureCards = lazy(() => import('../components/FeatureCards'))
@@ -19,6 +23,12 @@ export default function Landing() {
   const { toast } = useToast()
   const hasPrefetched = useRef(false)
   const ENABLE_GOOGLE = (import.meta.env.VITE_ENABLE_GOOGLE_AUTH === '1' || import.meta.env.VITE_ENABLE_GOOGLE_AUTH === 'true')
+
+  const redirectAuthenticatedUser = () => {
+    const nextPath = getStoredPostAuthRedirect() || '/launcher'
+    clearStoredPostAuthRedirect()
+    setLocation(nextPath)
+  }
 
   // Prefetch app modules when CTA is visible or hovered
   const prefetchApp = () => {
@@ -63,7 +73,7 @@ export default function Landing() {
         })
         if (error) throw error
         if (cancelled) return
-        window.location.replace('/app')
+        window.location.replace('/')
       } catch (err: any) {
         console.error('Implicit OAuth session restore failed:', err)
         if (cancelled) return
@@ -97,7 +107,7 @@ export default function Landing() {
       url.searchParams.delete('error_description')
       const cleanedUrl = `${url.pathname}${url.search}${url.hash}`
       window.history.replaceState(window.history.state, '', cleanedUrl)
-      window.location.replace('/app')
+      redirectAuthenticatedUser()
       return
     }
 
@@ -119,13 +129,13 @@ export default function Landing() {
     url.searchParams.delete('error_description')
     const cleanedUrl = `${url.pathname}${url.search}${url.hash}`
     window.history.replaceState(window.history.state, '', cleanedUrl)
-  }, [toast, user])
+  }, [toast, user, setLocation])
 
   useEffect(() => {
     if (!loading && user && user.id !== 'demo-user') {
-      window.location.replace('/app')
+      redirectAuthenticatedUser()
     }
-  }, [loading, user])
+  }, [loading, user, setLocation])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -135,8 +145,10 @@ export default function Landing() {
       hash.includes('access_token=') || hash.includes('refresh_token=')
     if (!returnedFromImplicitOAuth) return
 
-    window.history.replaceState({}, '', '/app')
-    setLocation('/app')
+    const nextPath = getStoredPostAuthRedirect() || '/launcher'
+    clearStoredPostAuthRedirect()
+    window.history.replaceState({}, '', nextPath)
+    setLocation(nextPath)
   }, [loading, user, setLocation])
 
   const handleGoogle = async () => {
@@ -144,22 +156,9 @@ export default function Landing() {
     if (isSigningIn) return
     setIsSigningIn(true)
     try {
-      await signInWithGoogle()
+      await signInWithGoogle('/launcher')
     } catch (err: any) {
       console.error('Google sign-in error:', err)
-      toast({ title: 'Sign-in unavailable', description: err?.message || 'Please try again later', variant: 'destructive' })
-    } finally {
-      setIsSigningIn(false)
-    }
-  }
-
-  const handleIndustrialIntel = async () => {
-    if (!ENABLE_GOOGLE || isSigningIn) return
-    setIsSigningIn(true)
-    try {
-      await signInWithGoogle('/tools/industrial-intel')
-    } catch (err: any) {
-      console.error('Industrial Intel sign-in error:', err)
       toast({ title: 'Sign-in unavailable', description: err?.message || 'Please try again later', variant: 'destructive' })
     } finally {
       setIsSigningIn(false)
@@ -217,23 +216,14 @@ export default function Landing() {
                 <>
                   <Button
                     onMouseEnter={prefetchApp}
-                    onClick={() => setLocation('/app')}
+                    onClick={() => setLocation('/launcher')}
                     className="group h-8 px-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-sm focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 w-auto self-start"
-                    aria-label="Continue to app"
+                    aria-label="Continue to launcher"
                   >
-                    Continue to App
+                    Continue to Launcher
                     <ArrowRight className="w-3 h-3 ml-2 group-hover:translate-x-1 transition-transform" />
                   </Button>
                   <div className="text-xs text-slate-600">Signed in as {user.email}</div>
-                  <div>
-                    <Button
-                      variant="outline"
-                      onClick={() => setLocation('/launcher')}
-                      className="h-8 rounded-sm px-3 text-xs font-medium"
-                    >
-                      Open launcher
-                    </Button>
-                  </div>
                 </>
               ) : (
                 <>
@@ -285,17 +275,6 @@ export default function Landing() {
                         </>
                       )}
                     </Button>
-                    {ENABLE_GOOGLE && (
-                      <Button
-                        onClick={handleIndustrialIntel}
-                        disabled={isSigningIn || isDemoMode}
-                        variant="outline"
-                        className="group w-auto rounded-sm px-6 py-2 text-sm font-medium"
-                      >
-                        Open Industrial Intel
-                        <ArrowRight className="w-3 h-3 ml-2 group-hover:translate-x-1 transition-transform" />
-                      </Button>
-                    )}
                   </div>
                   <p className="text-xs text-slate-600 mt-2 text-center">
                     Demo is for Level CRE only. Use Google sign-in for Industrial Intel.

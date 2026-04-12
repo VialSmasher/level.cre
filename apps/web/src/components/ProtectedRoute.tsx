@@ -1,7 +1,8 @@
 import { useAuth } from '@/contexts/AuthContext'
 import { getOAuthCallbackPath } from '@/lib/authUtils'
 import { useLocation } from 'wouter'
-import { useEffect } from 'react'
+import { clearPostAuthPending, clearStoredPostAuthRedirect, hasPostAuthPending } from '@/lib/postAuthRedirect'
+import { useEffect, useState } from 'react'
 
 interface ProtectedRouteProps {
   children: React.ReactNode
@@ -10,6 +11,7 @@ interface ProtectedRouteProps {
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, loading } = useAuth()
   const [, setLocation] = useLocation()
+  const [authGraceExpired, setAuthGraceExpired] = useState(false)
 
   // Check demo mode from localStorage (guarded for restricted contexts)
   let demo = false
@@ -22,6 +24,28 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   // forward it to the dedicated callback page so the session exchange can complete.
   const oauthCallbackPath = getOAuthCallbackPath()
   const hasOAuthReturn = Boolean(oauthCallbackPath)
+  const postAuthPending = hasPostAuthPending()
+
+  useEffect(() => {
+    if (!postAuthPending) {
+      setAuthGraceExpired(false)
+      return
+    }
+
+    if (user) {
+      clearPostAuthPending()
+      clearStoredPostAuthRedirect()
+      setAuthGraceExpired(false)
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      clearPostAuthPending()
+      setAuthGraceExpired(true)
+    }, 5000)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [postAuthPending, user])
 
   useEffect(() => {
     if (!loading && !user && !demo && oauthCallbackPath) {
@@ -30,11 +54,16 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
       return
     }
 
+    if (!loading && !user && !demo && postAuthPending && !authGraceExpired) {
+      if (import.meta?.env?.DEV) console.log('[gate] ProtectedRoute waiting for post-auth hydration')
+      return
+    }
+
     if (!loading && !user && !demo) {
       if (import.meta?.env?.DEV) console.log('[gate] ProtectedRoute redirect -> / (no user)')
       setLocation('/')
     }
-  }, [user, loading, demo, oauthCallbackPath, setLocation])
+  }, [user, loading, demo, oauthCallbackPath, postAuthPending, authGraceExpired, setLocation])
 
   useEffect(() => {
     if (!user || !hasOAuthReturn) return
@@ -43,7 +72,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     } catch {}
   }, [user, hasOAuthReturn])
 
-  if (loading || (!user && hasOAuthReturn)) {
+  if (loading || (!user && hasOAuthReturn) || (!user && postAuthPending && !authGraceExpired)) {
     if (import.meta?.env?.DEV && loading) console.log('[gate] ProtectedRoute loading...')
     return (
       <div className="flex items-center justify-center h-screen">
