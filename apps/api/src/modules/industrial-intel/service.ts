@@ -64,8 +64,8 @@ export class IndustrialIntelService {
     return industrialIntelRepository.replaceRequirementPreferences(userId, requirementId, input);
   }
 
-  async ingestManualListing(userId: string, input: ManualIntelListingInput) {
-    return ingestManualIntelListing(userId, input);
+  async ingestManualListing(_userId: string, input: ManualIntelListingInput) {
+    return ingestManualIntelListing(null, input);
   }
 
   async previewManualListing(sourceUrl: string) {
