@@ -80,6 +80,7 @@ export async function ingestManualIntelListing(
       sourceSlug: MANUAL_SOURCE.slug,
       triggerType: 'manual_url',
       initiatedByUserId: userId,
+      preserveMissing: true,
     },
     {
       sourceSlug: MANUAL_SOURCE.slug,

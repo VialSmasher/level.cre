@@ -248,39 +248,41 @@ export async function applyNormalizedRecords(
       }
     }
 
-    for (const current of existing.rows) {
-      if (seenKeys.has(current.source_record_key) || current.removed_at) {
-        continue;
+    if (!context.preserveMissing) {
+      for (const current of existing.rows) {
+        if (seenKeys.has(current.source_record_key) || current.removed_at) {
+          continue;
+        }
+
+        await client.query(
+          `
+            UPDATE public.intel_listings
+            SET removed_at = now(), updated_at = now()
+            WHERE id = $1
+          `,
+          [current.id],
+        );
+
+        const listingTitleResult = await client.query<{ title: string }>('select title from public.intel_listings where id = $1', [current.id]);
+        const listingTitle = listingTitleResult.rows[0]?.title || current.source_record_key;
+
+        await client.query(
+          `
+            INSERT INTO public.intel_listing_changes (
+              listing_id,
+              ingest_run_id,
+              change_type,
+              change_summary,
+              previous_hash,
+              new_hash,
+              observed_at
+            ) VALUES ($1, $2, 'removed', $3, $4, null, now())
+          `,
+          [current.id, runId, `Removed listing: ${listingTitle}`, current.content_hash],
+        );
+
+        recordsRemoved += 1;
       }
-
-      await client.query(
-        `
-          UPDATE public.intel_listings
-          SET removed_at = now(), updated_at = now()
-          WHERE id = $1
-        `,
-        [current.id],
-      );
-
-      const listingTitleResult = await client.query<{ title: string }>('select title from public.intel_listings where id = $1', [current.id]);
-      const listingTitle = listingTitleResult.rows[0]?.title || current.source_record_key;
-
-      await client.query(
-        `
-          INSERT INTO public.intel_listing_changes (
-            listing_id,
-            ingest_run_id,
-            change_type,
-            change_summary,
-            previous_hash,
-            new_hash,
-            observed_at
-          ) VALUES ($1, $2, 'removed', $3, $4, null, now())
-        `,
-        [current.id, runId, `Removed listing: ${listingTitle}`, current.content_hash],
-      );
-
-      recordsRemoved += 1;
     }
 
     await client.query(

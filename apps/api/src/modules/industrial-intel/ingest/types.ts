@@ -32,6 +32,7 @@ export type IntelSourceRunContext = {
   sourceSlug: IntelSourceAdapterSlug;
   triggerType?: string;
   initiatedByUserId?: string | null;
+  preserveMissing?: boolean;
 };
 
 export type IntelSourceRunResult = {
