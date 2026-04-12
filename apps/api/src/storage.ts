@@ -19,6 +19,30 @@ import { eq, and, or, desc, gte, ne, sql, between } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { XP_VALUES, actionForInteractionType, inferInteractionTypeFromNote, xpForInteractionType } from "./lib/gamification";
 
+type ProspectCreateInput = Omit<
+  InsertProspect,
+  'followUpDueDate' | 'buildingSf' | 'lotSizeAcres' | 'aiMetadata' | 'businessName' | 'websiteUrl'
+> & {
+  followUpDueDate?: string | null;
+  buildingSf?: number | null;
+  lotSizeAcres?: number | null;
+  aiMetadata?: Record<string, any> | null;
+  businessName?: string | null;
+  websiteUrl?: string | null;
+};
+
+type ProspectUpdateInput = Omit<
+  Partial<Prospect>,
+  'followUpDueDate' | 'buildingSf' | 'lotSizeAcres' | 'aiMetadata' | 'businessName' | 'websiteUrl'
+> & {
+  followUpDueDate?: string | null;
+  buildingSf?: number | null;
+  lotSizeAcres?: number | null;
+  aiMetadata?: Record<string, any> | null;
+  businessName?: string | null;
+  websiteUrl?: string | null;
+};
+
 // Updated interface with user-specific CRUD methods
 export interface IStorage {
   // Listings (workspace)
@@ -34,18 +58,11 @@ export interface IStorage {
   // Prospects operations with user filtering
   getProspect(id: string, userId: string): Promise<Prospect | undefined>;
   getAllProspects(userId: string): Promise<Prospect[]>;
-  createProspect(prospect: InsertProspect & { userId: string }): Promise<Prospect>;
+  createProspect(prospect: ProspectCreateInput & { userId: string }): Promise<Prospect>;
   updateProspect(
     id: string,
     userId: string,
-    prospect: Partial<Prospect> & {
-      followUpDueDate?: string | null;
-      buildingSf?: number | null;
-      lotSizeAcres?: number | null;
-      aiMetadata?: Record<string, any> | null;
-      businessName?: string | null;
-      websiteUrl?: string | null;
-    }
+    prospect: ProspectUpdateInput
   ): Promise<{ prospect: Prospect; newXpGained: number } | undefined>;
   deleteProspect(id: string, userId: string): Promise<boolean>;
   
@@ -787,7 +804,7 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  async createProspect(insertProspect: InsertProspect & { userId: string }): Promise<Prospect> {
+  async createProspect(insertProspect: ProspectCreateInput & { userId: string }): Promise<Prospect> {
     const [result] = await db.insert(prospects).values({
       userId: insertProspect.userId,
       name: insertProspect.name,
@@ -798,16 +815,20 @@ export class DatabaseStorage implements IStorage {
       ...(insertProspect.submarketId && { submarketId: insertProspect.submarketId }),
       ...(insertProspect.lastContactDate && { lastContactDate: insertProspect.lastContactDate }),
       ...(insertProspect.followUpTimeframe && { followUpTimeframe: insertProspect.followUpTimeframe }),
-      ...(insertProspect.followUpDueDate && { followUpDueDate: new Date(insertProspect.followUpDueDate) }),
+      ...(insertProspect.followUpDueDate !== undefined && {
+        followUpDueDate: insertProspect.followUpDueDate ? new Date(insertProspect.followUpDueDate) : null,
+      }),
       ...(insertProspect.contactName && { contactName: insertProspect.contactName }),
       ...(insertProspect.contactEmail && { contactEmail: insertProspect.contactEmail }),
       ...(insertProspect.contactPhone && { contactPhone: insertProspect.contactPhone }),
       ...(insertProspect.contactCompany && { contactCompany: insertProspect.contactCompany }),
       ...(insertProspect.buildingSf !== undefined && { buildingSf: insertProspect.buildingSf }),
-      ...(insertProspect.lotSizeAcres !== undefined && { lotSizeAcres: insertProspect.lotSizeAcres }),
+      ...(insertProspect.lotSizeAcres !== undefined && {
+        lotSizeAcres: insertProspect.lotSizeAcres === null ? null : String(insertProspect.lotSizeAcres),
+      }),
       ...(insertProspect.aiMetadata !== undefined && { aiMetadata: insertProspect.aiMetadata }),
-      ...(insertProspect.businessName && { businessName: insertProspect.businessName }),
-      ...(insertProspect.websiteUrl && { websiteUrl: insertProspect.websiteUrl }),
+      ...(insertProspect.businessName !== undefined && { businessName: insertProspect.businessName }),
+      ...(insertProspect.websiteUrl !== undefined && { websiteUrl: insertProspect.websiteUrl }),
     }).returning({
       id: prospects.id,
       name: prospects.name,
@@ -866,14 +887,7 @@ export class DatabaseStorage implements IStorage {
   async updateProspect(
     id: string,
     userId: string,
-    updates: Partial<Prospect> & {
-      followUpDueDate?: string | null;
-      buildingSf?: number | null;
-      lotSizeAcres?: number | null;
-      aiMetadata?: Record<string, any> | null;
-      businessName?: string | null;
-      websiteUrl?: string | null;
-    }
+    updates: ProspectUpdateInput
   ): Promise<{ prospect: Prospect; newXpGained: number } | undefined> {
     // Common SET payload for both owner and shared edits
     const setPayload: any = {
@@ -890,7 +904,9 @@ export class DatabaseStorage implements IStorage {
       ...(updates.contactPhone !== undefined && { contactPhone: updates.contactPhone }),
       ...(updates.contactCompany !== undefined && { contactCompany: updates.contactCompany }),
       ...(updates.buildingSf !== undefined && { buildingSf: updates.buildingSf }),
-      ...(updates.lotSizeAcres !== undefined && { lotSizeAcres: updates.lotSizeAcres }),
+      ...(updates.lotSizeAcres !== undefined && {
+        lotSizeAcres: updates.lotSizeAcres === null ? null : String(updates.lotSizeAcres),
+      }),
       ...(updates.aiMetadata !== undefined && { aiMetadata: updates.aiMetadata }),
       ...(updates.businessName !== undefined && { businessName: updates.businessName }),
       ...(updates.websiteUrl !== undefined && { websiteUrl: updates.websiteUrl }),

@@ -48,6 +48,15 @@ export async function getProspects(userId: string): Promise<any[]> {
   return cache!.prospects[userId] || [];
 }
 
+export async function getProspectAny(id: string): Promise<any | null> {
+  await ensureLoaded();
+  for (const userId of Object.keys(cache!.prospects || {})) {
+    const found = (cache!.prospects[userId] || []).find((prospect) => prospect.id === id);
+    if (found) return found;
+  }
+  return null;
+}
+
 export async function addProspect(userId: string, prospect: any): Promise<any> {
   await ensureLoaded();
   const list = cache!.prospects[userId] || [];
@@ -152,6 +161,24 @@ export async function getInteractions(userId: string, prospectId?: string): Prom
   const list = (cache!.interactions?.[userId] || []);
   if (!prospectId) return list;
   return list.filter((i) => i.prospectId === prospectId);
+}
+
+export async function getInteractionsForProspectsAny(prospectIds: string[]): Promise<any[]> {
+  await ensureLoaded();
+  if (prospectIds.length === 0) return [];
+  const wanted = new Set(prospectIds);
+  const results: any[] = [];
+
+  for (const userId of Object.keys(cache!.interactions || {})) {
+    const list = cache!.interactions?.[userId] || [];
+    for (const interaction of list) {
+      if (wanted.has(interaction.prospectId)) {
+        results.push(interaction);
+      }
+    }
+  }
+
+  return results;
 }
 
 export async function addInteraction(userId: string, interaction: any): Promise<any> {
@@ -420,31 +447,35 @@ export async function getListingMembers(listingId: string): Promise<{ userId: st
 
 export async function addListingMember(listingId: string, userId: string, role: 'viewer'|'editor'): Promise<void> {
   await ensureLoaded();
-  if (!cache!.listingMembers) cache!.listingMembers = {} as any;
-  const arr = cache!.listingMembers[listingId] || [];
+  const listingMembers =
+    cache!.listingMembers ?? (cache!.listingMembers = {} as Record<string, { userId: string; role: 'viewer' | 'editor' }[]>);
+  const arr = listingMembers[listingId] || [];
   const idx = arr.findIndex((m) => m.userId === userId);
   if (idx === -1) arr.push({ userId, role }); else arr[idx].role = role;
-  cache!.listingMembers[listingId] = arr;
+  listingMembers[listingId] = arr;
   await save();
 }
 
 export async function updateListingMember(listingId: string, userId: string, role: 'viewer'|'editor'|'owner'): Promise<void> {
   await ensureLoaded();
-  if (!cache!.listingMembers) cache!.listingMembers = {} as any;
-  const arr = cache!.listingMembers[listingId] || [];
+  const listingMembers =
+    cache!.listingMembers ?? (cache!.listingMembers = {} as Record<string, { userId: string; role: 'viewer' | 'editor' }[]>);
+  const arr = listingMembers[listingId] || [];
   const idx = arr.findIndex((m) => m.userId === userId);
   if (idx !== -1) {
     if (role === 'owner') return; // owner role derived from creator
     arr[idx].role = role as any;
-    cache!.listingMembers[listingId] = arr;
+    listingMembers[listingId] = arr;
     await save();
   }
 }
 
 export async function removeListingMember(listingId: string, userId: string): Promise<void> {
   await ensureLoaded();
-  const arr = cache!.listingMembers?.[listingId] || [];
-  cache!.listingMembers![listingId] = arr.filter((m) => m.userId !== userId);
+  const listingMembers =
+    cache!.listingMembers ?? (cache!.listingMembers = {} as Record<string, { userId: string; role: 'viewer' | 'editor' }[]>);
+  const arr = listingMembers[listingId] || [];
+  listingMembers[listingId] = arr.filter((m) => m.userId !== userId);
   await save();
 }
 

@@ -1,7 +1,12 @@
 import { useAuth } from '@/contexts/AuthContext'
 import { getOAuthCallbackPath } from '@/lib/authUtils'
 import { useLocation } from 'wouter'
-import { clearPostAuthPending, clearStoredPostAuthRedirect, hasPostAuthPending } from '@/lib/postAuthRedirect'
+import {
+  clearPostAuthPending,
+  clearStoredPostAuthRedirect,
+  hasPostAuthPending,
+  setStoredPostAuthRedirect,
+} from '@/lib/postAuthRedirect'
 import { useEffect, useState } from 'react'
 
 interface ProtectedRouteProps {
@@ -61,6 +66,9 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
     if (!loading && !user && !demo) {
       if (import.meta?.env?.DEV) console.log('[gate] ProtectedRoute redirect -> / (no user)')
+      setStoredPostAuthRedirect(
+        `${window.location.pathname}${window.location.search}${window.location.hash}`,
+      )
       setLocation('/')
     }
   }, [user, loading, demo, oauthCallbackPath, postAuthPending, authGraceExpired, setLocation])

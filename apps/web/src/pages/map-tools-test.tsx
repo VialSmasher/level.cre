@@ -10,14 +10,16 @@ import {
   type GeoJSONStoreFeatures,
 } from "terra-draw";
 import { TerraDrawGoogleMapsAdapter } from "terra-draw-google-maps-adapter";
+import { getGoogleMapsApiKey } from "@/lib/googleMapsApiKey";
 
 const containerStyle = { width: "100%", height: "100%" } as const;
 const defaultCenter = { lat: 39.8283, lng: -98.5795 };
+const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 
 export default function MapToolsTestPage() {
   const { isLoaded, loadError } = useJsApiLoader({
     id: "google-map-script",
-    googleMapsApiKey: (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "") as string,
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
   });
 
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -119,4 +121,3 @@ export default function MapToolsTestPage() {
     </div>
   );
 }
-

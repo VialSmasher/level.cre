@@ -35,6 +35,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
+import { getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
 import { quickLogSpecFor, type QuickLogType } from '@/lib/gamificationUi';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { queryClient, apiRequest } from '@/lib/queryClient';
@@ -66,6 +67,7 @@ const MAP_OPTIONS: google.maps.MapOptions = {
 };
 const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton
 const DEFAULT_ZOOM = 11;
+const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 
 type ContextMenuState = {
   lat: number;
@@ -344,10 +346,10 @@ export default function HomePage() {
   const drawingForProspectRef = useRef<Prospect | null>(null);
   useEffect(() => { drawingForProspectRef.current = drawingForProspect; }, [drawingForProspect]);
 
-  // Google Maps loader (locked to .env key only)
+  // Google Maps loader
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '') as string,
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
     libraries,
   });
 
@@ -1775,7 +1777,7 @@ export default function HomePage() {
 
   // API key change handler (no-op; use .env key)
   const handleApiKeyChange = useCallback((_newApiKey: string) => {
-    // Intentionally no-op: key is sourced from VITE_GOOGLE_MAPS_API_KEY only.
+    // Intentionally no-op: key is sourced from the configured env key.
   }, []);
 
   // Close the edit panel, flush pending changes, and reset drawing state

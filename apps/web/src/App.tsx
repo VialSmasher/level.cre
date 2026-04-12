@@ -25,6 +25,7 @@ const Debug = lazy(() => import("./pages/debug"));
 const Onboarding = lazy(() => import("./pages/onboarding"));
 const WorkspacesIndex = lazy(() => import("./pages/workspaces"));
 const Workspace = lazy(() => import("./pages/workspace"));
+const Review = lazy(() => import("./pages/review"));
 const AuthCallback = lazy(() => import("./pages/AuthCallback"));
 const Launcher = lazy(() => import("./pages/launcher"));
 const Terms = lazy(() => import("./pages/terms"));
@@ -263,6 +264,18 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
+      <Route path="/app/review">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <Suspense fallback={<Spinner />}>
+                <Review />
+              </Suspense>
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
+
       {/* Legacy routes -> redirect to new workspace URLs */}
       <Route path="/app/listings" component={() => { 
         const [, setLocation] = useLocation(); 
@@ -331,6 +344,11 @@ function Router() {
       {user && <Route path="/profile" component={() => { 
         const [, setLocation] = useLocation()
         setLocation('/app/profile')
+        return null
+      }} />}
+      {user && <Route path="/review" component={() => {
+        const [, setLocation] = useLocation()
+        setLocation('/app/review')
         return null
       }} />}
 

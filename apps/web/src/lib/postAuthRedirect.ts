@@ -1,20 +1,72 @@
 const STORAGE_KEY = 'post-auth-redirect'
 const POST_AUTH_PENDING_KEY = 'post-auth-pending'
 const POST_AUTH_PENDING_TTL_MS = 15_000
-
-const ALLOWLIST = new Set([
-  '/app',
+const INTERNAL_BASE_URL = 'https://level-cre.local'
+const EXACT_ALLOWLIST = new Set([
+  '/broker-stats',
   '/launcher',
-  '/tools/industrial-intel',
-  '/tools/industrial-intel/listings',
-  '/tools/industrial-intel/requirements',
+  '/leaderboard',
 ])
+const PREFIX_ALLOWLIST = [
+  '/app',
+  '/tools/industrial-intel',
+]
+const TOOL_A_EXACT_ALLOWLIST = new Set([
+  '/broker-stats',
+  '/leaderboard',
+])
+const TOOL_A_PREFIX_ALLOWLIST = ['/app']
+
+function normalizePathname(pathname: string): string {
+  if (pathname === '/') return pathname
+  const normalized = pathname.replace(/\/+$/, '')
+  return normalized || '/'
+}
+
+function hasAllowedPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`)
+}
+
+function isAllowedPathname(pathname: string): boolean {
+  return (
+    EXACT_ALLOWLIST.has(pathname) ||
+    PREFIX_ALLOWLIST.some((prefix) => hasAllowedPrefix(pathname, prefix))
+  )
+}
+
+function isToolAPathname(pathname: string): boolean {
+  return (
+    TOOL_A_EXACT_ALLOWLIST.has(pathname) ||
+    TOOL_A_PREFIX_ALLOWLIST.some((prefix) => hasAllowedPrefix(pathname, prefix))
+  )
+}
 
 export function sanitizePostAuthRedirect(value?: string | null): string | null {
   if (!value) return null
-  if (!value.startsWith('/')) return null
-  if (value.startsWith('//')) return null
-  return ALLOWLIST.has(value) ? value : null
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('/')) return null
+  if (trimmed.startsWith('//')) return null
+
+  try {
+    const url = new URL(trimmed, INTERNAL_BASE_URL)
+    const pathname = normalizePathname(url.pathname)
+    if (!isAllowedPathname(pathname)) return null
+    return `${pathname}${url.search}${url.hash}`
+  } catch {
+    return null
+  }
+}
+
+export function isToolAPostAuthRedirect(value?: string | null): boolean {
+  const sanitized = sanitizePostAuthRedirect(value)
+  if (!sanitized) return false
+
+  try {
+    const url = new URL(sanitized, INTERNAL_BASE_URL)
+    return isToolAPathname(normalizePathname(url.pathname))
+  } catch {
+    return false
+  }
 }
 
 export function getStoredPostAuthRedirect(): string | null {

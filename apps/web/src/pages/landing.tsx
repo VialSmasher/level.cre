@@ -9,6 +9,7 @@ import { useToast } from '@/hooks/use-toast'
 import {
   clearStoredPostAuthRedirect,
   getStoredPostAuthRedirect,
+  isToolAPostAuthRedirect,
   setStoredPostAuthRedirect,
 } from '@/lib/postAuthRedirect'
 
@@ -156,7 +157,7 @@ export default function Landing() {
     if (isSigningIn) return
     setIsSigningIn(true)
     try {
-      await signInWithGoogle('/launcher')
+      await signInWithGoogle(getStoredPostAuthRedirect() || '/launcher')
     } catch (err: any) {
       console.error('Google sign-in error:', err)
       toast({ title: 'Sign-in unavailable', description: err?.message || 'Please try again later', variant: 'destructive' })
@@ -170,8 +171,10 @@ export default function Landing() {
     setIsDemoMode(true)
     // Set demo flag and reload page to ensure proper initialization
     localStorage.setItem('demo-mode', 'true')
-    setStoredPostAuthRedirect('/app')
-    window.location.href = '/app'
+    const nextPath = getStoredPostAuthRedirect()
+    const demoRedirect = isToolAPostAuthRedirect(nextPath) ? nextPath! : '/app'
+    setStoredPostAuthRedirect(demoRedirect)
+    window.location.href = demoRedirect
   }
 
   if (loading) {

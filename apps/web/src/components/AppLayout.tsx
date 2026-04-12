@@ -21,7 +21,8 @@ import {
   Fingerprint,
   Menu,
   X,
-  ChartSpline
+  ChartSpline,
+  Bot
 } from 'lucide-react'
 import { Table } from 'lucide-react'
 import { Link, useLocation, useRoute } from 'wouter'
@@ -308,6 +309,12 @@ export function AppLayout({ children }: AppLayoutProps) {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
+                  <Link href="/app/review" className="w-full">
+                    <Bot className="mr-2 h-4 w-4" />
+                    Review Console
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
                   <Link href="/app/profile" className="w-full">
                     <Settings className="mr-2 h-4 w-4" />
                     Settings
@@ -472,6 +479,27 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </TooltipTrigger>
                 <TooltipContent side="right">
                   <p>Market Comps</p>
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link 
+                    href="/app/review" 
+                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
+                      isActive('/app/review') 
+                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                    onClick={() => setMobileMenuOpen(false)}
+                    aria-label="Review Console"
+                  >
+                    <Bot size={20} />
+                    <span className="font-medium">Review Console</span>
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p>Review Console</p>
                 </TooltipContent>
               </Tooltip>
 

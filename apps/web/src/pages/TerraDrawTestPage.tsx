@@ -7,6 +7,7 @@ import {
   TerraDrawSelectMode,
 } from 'terra-draw';
 import { TerraDrawGoogleMapsAdapter } from 'terra-draw-google-maps-adapter';
+import { getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
 
 // Simple, standalone test page for Terra Draw + Google Maps
 // Assumes `terra-draw` and `terra-draw-google-maps-adapter` are installed.
@@ -14,11 +15,12 @@ import { TerraDrawGoogleMapsAdapter } from 'terra-draw-google-maps-adapter';
 const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton, Canada
 // Important: keep libraries as a stable, module-scoped constant to avoid reloading the Maps script on re-renders
 const GOOGLE_MAPS_LIBRARIES: ["drawing", "geometry", "places"] = ["drawing", "geometry", "places"];
+const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 
 export default function TerraDrawTestPage() {
   const { isLoaded } = useJsApiLoader({
     id: 'terra-draw-test',
-    googleMapsApiKey: (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '') as string,
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
     // No special libraries required for Terra Draw adapter
     libraries: GOOGLE_MAPS_LIBRARIES,
   });

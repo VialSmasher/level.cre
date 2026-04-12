@@ -14,12 +14,18 @@ function isDemo(req: Request): boolean {
 }
 import { createClient } from '@supabase/supabase-js';
 import { pool, db } from './db';
-import { listings, listingMembers, users, profiles, listingProspects } from '@level-cre/shared/schema';
-import { and, eq, sql } from 'drizzle-orm';
+import { listings, listingMembers, users, profiles, listingProspects, contactInteractions } from '@level-cre/shared/schema';
+import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
 import { XP_VALUES, actionForInteractionType, xpForInteractionType } from './lib/gamification';
 import { registerIndustrialIntelRoutes } from './modules/industrial-intel/registerRoutes';
+import {
+  buildDataQualityReview,
+  buildFollowUpReview,
+  type ToolAReviewInteraction,
+  type ToolAReviewWorkspaceRef,
+} from './lib/toolAReview';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Supabase client for server-side OAuth
@@ -387,6 +393,142 @@ export async function registerRoutes(app: Express): Promise<Server> {
     throw Object.assign(new Error('Forbidden'), { status: 403 });
   }
 
+  function parsePositiveIntParam(value: unknown, fallback: number): number {
+    const parsed = Number.parseInt(String(value ?? ''), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return parsed;
+  }
+
+  async function getToolAReviewProspects(req: Request, listingId?: string): Promise<any[]> {
+    const userId = getUserId(req);
+
+    if (isDemo(req)) {
+      if (!listingId) {
+        return await demo.getProspects(userId);
+      }
+
+      await requireViewAccess(req, listingId);
+      const links = await demo.getListingLinksAll(listingId);
+      const prospectIds = Array.from(new Set(links.map((link) => link.prospectId)));
+      const prospects = await Promise.all(prospectIds.map((prospectId) => demo.getProspectAny(prospectId)));
+      return prospects.filter((prospect): prospect is any => Boolean(prospect));
+    }
+
+    if (listingId) {
+      await requireViewAccess(req, listingId);
+      return await storage.getListingProspectsAny(listingId);
+    }
+
+    return await storage.getAllProspects(userId);
+  }
+
+  async function getToolAReviewInteractions(req: Request, prospectIds: string[]): Promise<ToolAReviewInteraction[]> {
+    const userId = getUserId(req);
+    if (prospectIds.length === 0) return [];
+
+    if (isDemo(req)) {
+      return await demo.getInteractionsForProspectsAny(prospectIds);
+    }
+
+    const rows = await db
+      .select({
+        id: contactInteractions.id,
+        prospectId: contactInteractions.prospectId,
+        userId: contactInteractions.userId,
+        listingId: contactInteractions.listingId,
+        date: contactInteractions.date,
+        type: contactInteractions.type,
+        outcome: contactInteractions.outcome,
+        notes: contactInteractions.notes,
+        nextFollowUp: contactInteractions.nextFollowUp,
+        createdAt: contactInteractions.createdAt,
+      })
+      .from(contactInteractions)
+      .where(inArray(contactInteractions.prospectId, prospectIds));
+
+    return rows.map((row) => ({
+      id: row.id,
+      prospectId: row.prospectId,
+      userId: row.userId,
+      listingId: row.listingId,
+      date: row.date,
+      type: row.type,
+      outcome: row.outcome,
+      notes: row.notes,
+      nextFollowUp: row.nextFollowUp,
+      createdAt: row.createdAt?.toISOString() ?? null,
+    }));
+  }
+
+  async function getToolAReviewWorkspaces(
+    req: Request,
+    prospectIds: string[],
+    listingId?: string,
+  ): Promise<Record<string, ToolAReviewWorkspaceRef[]>> {
+    const userId = getUserId(req);
+    const workspaceMap: Record<string, ToolAReviewWorkspaceRef[]> = {};
+
+    if (prospectIds.length === 0) return workspaceMap;
+
+    if (listingId) {
+      if (isDemo(req)) {
+        const listing = await demo.getListingAny(listingId);
+        const links = await demo.getListingLinksAll(listingId);
+        for (const link of links) {
+          workspaceMap[link.prospectId] = [
+            {
+              id: listingId,
+              title: listing?.title ?? null,
+            },
+          ];
+        }
+        return workspaceMap;
+      }
+
+      const listing = await storage.getListingAny(listingId);
+      for (const prospectId of prospectIds) {
+        workspaceMap[prospectId] = [
+          {
+            id: listingId,
+            title: listing?.title ?? null,
+          },
+        ];
+      }
+      return workspaceMap;
+    }
+
+    if (isDemo(req)) {
+      return workspaceMap;
+    }
+
+    const rows = await db
+      .select({
+        prospectId: listingProspects.prospectId,
+        listingId: listings.id,
+        listingTitle: listings.title,
+      })
+      .from(listingProspects)
+      .innerJoin(listings, eq(listingProspects.listingId, listings.id))
+      .leftJoin(
+        listingMembers,
+        and(eq(listingMembers.listingId, listings.id), eq(listingMembers.userId, userId)),
+      )
+      .where(
+        and(
+          inArray(listingProspects.prospectId, prospectIds),
+          or(eq(listings.userId, userId), eq(listingMembers.userId, userId)),
+        ),
+      );
+
+    for (const row of rows) {
+      const list = workspaceMap[row.prospectId] ?? [];
+      list.push({ id: row.listingId, title: row.listingTitle });
+      workspaceMap[row.prospectId] = list;
+    }
+
+    return workspaceMap;
+  }
+
   // Helper: find userId by email using Supabase Admin if available, else local tables
   async function findUserIdByEmail(email: string): Promise<{ id: string, email: string } | null> {
     const normalized = String(email || '').trim().toLowerCase();
@@ -502,7 +644,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         options: {
           redirectTo: redirectUrl,
           queryParams: { prompt: 'select_account', access_type: 'offline' },
-          flowType: 'pkce',
         }
       });
       
@@ -2190,6 +2331,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get('/api/tool-a/review/followups', requireAuth, async (req, res) => {
+    try {
+      const listingId = typeof req.query.listingId === 'string' ? req.query.listingId : undefined;
+      const dueSoonDays = Math.min(parsePositiveIntParam(req.query.days, 7), 30);
+      const includeAll =
+        String(req.query.includeAll ?? '').toLowerCase() === 'true' ||
+        String(req.query.includeAll ?? '') === '1';
+      const prospects = await getToolAReviewProspects(req, listingId);
+      const prospectIds = prospects.map((prospect) => prospect.id);
+      const [interactions, workspacesByProspectId] = await Promise.all([
+        getToolAReviewInteractions(req, prospectIds),
+        getToolAReviewWorkspaces(req, prospectIds, listingId),
+      ]);
+
+      const review = buildFollowUpReview({
+        prospects,
+        interactions,
+        workspacesByProspectId,
+        dueSoonDays,
+        includeAll,
+      });
+
+      res.json({
+        generatedAt: new Date().toISOString(),
+        listingId: listingId ?? null,
+        daysWindow: dueSoonDays,
+        ...review,
+      });
+    } catch (error: any) {
+      console.error('Error building Tool A follow-up review:', error);
+      res.status(error?.status || 500).json({ message: 'Failed to build Tool A follow-up review' });
+    }
+  });
+
+  app.get('/api/tool-a/review/data-quality', requireAuth, async (req, res) => {
+    try {
+      const listingId = typeof req.query.listingId === 'string' ? req.query.listingId : undefined;
+      const includeClean =
+        String(req.query.includeClean ?? '').toLowerCase() === 'true' ||
+        String(req.query.includeClean ?? '') === '1';
+      const prospects = await getToolAReviewProspects(req, listingId);
+      const prospectIds = prospects.map((prospect) => prospect.id);
+      const [interactions, workspacesByProspectId] = await Promise.all([
+        getToolAReviewInteractions(req, prospectIds),
+        getToolAReviewWorkspaces(req, prospectIds, listingId),
+      ]);
+
+      const review = buildDataQualityReview({
+        prospects,
+        interactions,
+        workspacesByProspectId,
+        includeClean,
+      });
+
+      res.json({
+        generatedAt: new Date().toISOString(),
+        listingId: listingId ?? null,
+        ...review,
+      });
+    } catch (error: any) {
+      console.error('Error building Tool A data quality review:', error);
+      res.status(error?.status || 500).json({ message: 'Failed to build Tool A data quality review' });
+    }
+  });
+
   // Broker Skills Routes
   app.get('/api/stats/header', requireAuth, async (req, res) => {
     try {
@@ -2618,7 +2824,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Match client level logic (L = floor(sqrt(xp/100)))
         const levelFromXp = (xp: number) => Math.min(99, Math.floor(Math.sqrt(xp / 100)));
 
-        async function compute(user: string) {
+        const compute = async (user: string) => {
           const [prospects, interactions, requirements, comps] = await Promise.all([
             demo.getProspects(user),
             demo.getInteractions(user),
@@ -2645,7 +2851,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             levelFromXp(consistencyXp) +
             levelFromXp(marketKnowledgeXp);
           return { prospectingXp, followUpXp, marketKnowledgeXp, consistencyXp, level };
-        }
+        };
 
         const [demoStats, rivalStats, demoName, rivalName] = await Promise.all([
           compute(demoUserId),

@@ -11,6 +11,7 @@ import { Modal, ModalContent, ModalHeader, ModalTitle, ModalTrigger } from '@/co
 import { DeveloperSettings } from '@/components/DeveloperSettings';
 import { CSVUploader } from '@/components/CSVUploaderNew';
 import { SearchComponent } from '@/components/SearchComponent';
+import { getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
 
 import { 
   ChevronLeft, 
@@ -60,7 +61,7 @@ const GOOGLE_MAPS_LIBRARIES: ("drawing" | "geometry" | "places")[] = ["drawing",
 // Initialize API key outside component to prevent re-initialization
 const getApiKey = () => {
   const override = localStorage.getItem('google-maps-api-key-override');
-  const envKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const envKey = getGoogleMapsApiKey();
   return override || envKey || '';
 };
 
@@ -122,7 +123,7 @@ export default function HomePage() {
 
   // Handle API key changes (requires page reload for Google Maps)
   const handleApiKeyChange = (newKey: string) => {
-    const finalKey = newKey || import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
+    const finalKey = newKey || getGoogleMapsApiKey() || '';
     setApiKey(finalKey);
     // Reload page to reinitialize Google Maps with new API key
     window.location.reload();
