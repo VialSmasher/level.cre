@@ -1,14 +1,15 @@
 import { useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import { getStoredPostAuthRedirect, markPostAuthPending } from '@/lib/postAuthRedirect'
 
 export default function AuthCallback() {
   useEffect(() => {
     let cancelled = false
 
-    const redirectToApp = () => {
-      // Use a full-page navigation here so the app boots from the freshly
-      // persisted session instead of racing the in-memory auth context.
-      window.location.replace('/app')
+    const redirectToPostAuthDestination = () => {
+      const nextPath = getStoredPostAuthRedirect() || '/launcher'
+      markPostAuthPending()
+      window.location.replace(nextPath)
     }
 
     const redirectToLanding = (params?: URLSearchParams) => {
@@ -51,7 +52,7 @@ export default function AuthCallback() {
             throw error
           }
           if (cancelled) return
-          redirectToApp()
+          redirectToPostAuthDestination()
           return
         }
 
@@ -60,7 +61,7 @@ export default function AuthCallback() {
           const { data: { session } } = await supabase.auth.getSession()
           if (cancelled) return
           if (session) {
-            redirectToApp()
+            redirectToPostAuthDestination()
           } else {
             redirectToLanding(new URLSearchParams({ error: 'missing_auth_code' }))
           }
@@ -76,13 +77,13 @@ export default function AuthCallback() {
         }
 
         if (cancelled) return
-        redirectToApp()
+        redirectToPostAuthDestination()
       } catch (err: any) {
         console.error('[auth] PKCE exchange failed', err)
         try {
           const { data: { session } } = await supabase.auth.getSession()
           if (!cancelled && session) {
-            redirectToApp()
+            redirectToPostAuthDestination()
             return
           }
         } catch {}

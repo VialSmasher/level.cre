@@ -18,7 +18,9 @@
     "build:api": "npm --workspace @apps/api run build",
     "start": "npm --workspace @apps/api run start",
     "db:push": "npm --workspace @apps/api run db:push",
-    "db:prepare": "npm --workspace @apps/api run db:prepare"
+    "db:prepare": "npm --workspace @apps/api run db:prepare",
+    "intel:migrate": "npm --workspace @apps/api run intel:migrate",
+    "intel:seed": "npm --workspace @apps/api run intel:seed"
   },
   "devDependencies": {
     "npm-run-all": "^4.1.5",

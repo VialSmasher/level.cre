@@ -25,15 +25,31 @@ const Debug = lazy(() => import("./pages/debug"));
 const Onboarding = lazy(() => import("./pages/onboarding"));
 const WorkspacesIndex = lazy(() => import("./pages/workspaces"));
 const Workspace = lazy(() => import("./pages/workspace"));
+const Review = lazy(() => import("./pages/review"));
 const AuthCallback = lazy(() => import("./pages/AuthCallback"));
+const Launcher = lazy(() => import("./pages/launcher"));
 const Terms = lazy(() => import("./pages/terms"));
 const Privacy = lazy(() => import("./pages/privacy"));
 const AdminDiag = lazy(() => import("./pages/admin-diag"));
 const BrokerStats = lazy(() => import("./pages/broker-stats"));
 const Leaderboard = lazy(() => import("./pages/leaderboard"));
+const IndustrialIntelHomePage = lazy(
+  () => import("./tools/industrial-intel/pages/IndustrialIntelHomePage"),
+);
+const IndustrialIntelInventoryPage = lazy(
+  () => import("./tools/industrial-intel/pages/IndustrialIntelInventoryPage"),
+);
+const IndustrialIntelRequirementsPage = lazy(
+  () => import("./tools/industrial-intel/pages/IndustrialIntelRequirementsPage"),
+);
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
+import ToolLayout from "./tools/industrial-intel/ToolLayout";
+
+const INDUSTRIAL_INTEL_ENABLED =
+  String(import.meta.env.VITE_ENABLE_INDUSTRIAL_INTEL ?? "").toLowerCase() === "true" ||
+  String(import.meta.env.VITE_ENABLE_INDUSTRIAL_INTEL ?? "").toLowerCase() === "1";
 
 // Component to handle onboarding check and routing
 function OnboardingCheck({ children }: { children: React.ReactNode }) {
@@ -126,6 +142,14 @@ function Router() {
       )} />
       
       {/* Protected app routes - flat structure */}
+      <Route path="/launcher">
+        <ProtectedRoute>
+          <Suspense fallback={<Spinner />}>
+            <Launcher />
+          </Suspense>
+        </ProtectedRoute>
+      </Route>
+
       <Route path="/broker-stats">
         <ProtectedRoute>
           <OnboardingCheck>
@@ -240,6 +264,18 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
+      <Route path="/app/review">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <Suspense fallback={<Spinner />}>
+                <Review />
+              </Suspense>
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
+
       {/* Legacy routes -> redirect to new workspace URLs */}
       <Route path="/app/listings" component={() => { 
         const [, setLocation] = useLocation(); 
@@ -310,6 +346,47 @@ function Router() {
         setLocation('/app/profile')
         return null
       }} />}
+      {user && <Route path="/review" component={() => {
+        const [, setLocation] = useLocation()
+        setLocation('/app/review')
+        return null
+      }} />}
+
+      {INDUSTRIAL_INTEL_ENABLED && (
+        <Route path="/tools/industrial-intel">
+          <ProtectedRoute>
+            <ToolLayout>
+              <Suspense fallback={<Spinner />}>
+                <IndustrialIntelHomePage />
+              </Suspense>
+            </ToolLayout>
+          </ProtectedRoute>
+        </Route>
+      )}
+
+      {INDUSTRIAL_INTEL_ENABLED && (
+        <Route path="/tools/industrial-intel/listings">
+          <ProtectedRoute>
+            <ToolLayout>
+              <Suspense fallback={<Spinner />}>
+                <IndustrialIntelInventoryPage />
+              </Suspense>
+            </ToolLayout>
+          </ProtectedRoute>
+        </Route>
+      )}
+
+      {INDUSTRIAL_INTEL_ENABLED && (
+        <Route path="/tools/industrial-intel/requirements">
+          <ProtectedRoute>
+            <ToolLayout>
+              <Suspense fallback={<Spinner />}>
+                <IndustrialIntelRequirementsPage />
+              </Suspense>
+            </ToolLayout>
+          </ProtectedRoute>
+        </Route>
+      )}
       
       <Route component={() => (
         <Suspense fallback={<Spinner />}> 

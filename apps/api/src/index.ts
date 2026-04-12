@@ -96,15 +96,15 @@ app.use(devUser());
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+  let capturedJsonResponse: unknown;
   const isDev = req.app?.get('env') === 'development';
   // Only capture and log response bodies in development
   if (isDev) {
-    const originalResJson = res.json;
-    res.json = function (bodyJson, ...args) {
+    const originalResJson = res.json.bind(res);
+    res.json = ((bodyJson: unknown) => {
       capturedJsonResponse = bodyJson;
-      return originalResJson.apply(res, [bodyJson, ...args]);
-    } as any;
+      return originalResJson(bodyJson);
+    }) as typeof res.json;
   }
 
   res.on("finish", () => {

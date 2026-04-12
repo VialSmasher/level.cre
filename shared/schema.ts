@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   index,
   jsonb,
   pgTable,
@@ -582,3 +583,170 @@ export type BrokerSkillsRow = typeof brokerSkills.$inferSelect;
 export type SkillActivityRow = typeof skillActivities.$inferSelect;
 export type InsertBrokerSkills = typeof brokerSkills.$inferInsert;
 export type InsertSkillActivity = typeof skillActivities.$inferInsert;
+
+// Industrial Intel core domain tables
+export const intelSources = pgTable(
+  "intel_sources",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    name: varchar("name").notNull(),
+    slug: varchar("slug").notNull(),
+    kind: varchar("kind").notNull().default("manual_upload"), // manual_upload | csv_url | json_url
+    feedUrl: text("feed_url"),
+    fieldMapping: jsonb("field_mapping").$type<Record<string, string>>().notNull().default({}),
+    isActive: boolean("is_active").notNull().default(true),
+    createdByUserId: varchar("created_by_user_id").references(() => users.id),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    unique("UQ_intel_sources_slug").on(table.slug),
+    index("IDX_intel_sources_active").on(table.isActive),
+  ],
+);
+
+export const intelListings = pgTable(
+  "intel_listings",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    sourceId: varchar("source_id").notNull().references(() => intelSources.id, { onDelete: "cascade" }),
+    sourceRecordKey: varchar("source_record_key").notNull(),
+    externalId: varchar("external_id"),
+    status: varchar("status").notNull().default("active"),
+    listingType: varchar("listing_type").notNull().default("lease"), // lease | sale | sublease
+    title: varchar("title").notNull(),
+    address: text("address"),
+    market: varchar("market"),
+    submarket: varchar("submarket"),
+    lat: numeric("lat", { precision: 9, scale: 6 }),
+    lng: numeric("lng", { precision: 9, scale: 6 }),
+    availableSf: integer("available_sf"),
+    minDivisibleSf: integer("min_divisible_sf"),
+    clearHeightFt: numeric("clear_height_ft", { precision: 6, scale: 2 }),
+    brochureUrl: text("brochure_url"),
+    sourceUrl: text("source_url"),
+    rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().notNull().default({}),
+    contentHash: varchar("content_hash").notNull(),
+    firstSeenAt: timestamp("first_seen_at").defaultNow(),
+    lastSeenAt: timestamp("last_seen_at").defaultNow(),
+    removedAt: timestamp("removed_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    unique("UQ_intel_listings_source_record").on(table.sourceId, table.sourceRecordKey),
+    index("IDX_intel_listings_source").on(table.sourceId),
+    index("IDX_intel_listings_status").on(table.status),
+    index("IDX_intel_listings_submarket").on(table.submarket),
+    index("IDX_intel_listings_last_seen").on(table.lastSeenAt),
+  ],
+);
+
+export const intelIngestRuns = pgTable(
+  "intel_ingest_runs",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    sourceId: varchar("source_id").references(() => intelSources.id, { onDelete: "set null" }),
+    triggerType: varchar("trigger_type").notNull().default("manual"),
+    status: varchar("status").notNull().default("completed"), // queued | running | completed | failed
+    startedAt: timestamp("started_at").defaultNow(),
+    completedAt: timestamp("completed_at"),
+    recordsSeen: integer("records_seen").notNull().default(0),
+    recordsNew: integer("records_new").notNull().default(0),
+    recordsUpdated: integer("records_updated").notNull().default(0),
+    recordsRemoved: integer("records_removed").notNull().default(0),
+    errorMessage: text("error_message"),
+    initiatedByUserId: varchar("initiated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  },
+  (table) => [
+    index("IDX_intel_runs_source").on(table.sourceId),
+    index("IDX_intel_runs_started_at").on(table.startedAt),
+  ],
+);
+
+export const intelListingChanges = pgTable(
+  "intel_listing_changes",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    listingId: varchar("listing_id").notNull().references(() => intelListings.id, { onDelete: "cascade" }),
+    ingestRunId: varchar("ingest_run_id").references(() => intelIngestRuns.id, { onDelete: "set null" }),
+    changeType: varchar("change_type").notNull(), // new | updated | removed | reactivated
+    changeSummary: text("change_summary"),
+    previousHash: varchar("previous_hash"),
+    newHash: varchar("new_hash"),
+    observedAt: timestamp("observed_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_intel_listing_changes_listing").on(table.listingId),
+    index("IDX_intel_listing_changes_observed_at").on(table.observedAt),
+  ],
+);
+
+export const intelRequirements = pgTable(
+  "intel_requirements",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    createdByUserId: varchar("created_by_user_id").notNull().references(() => users.id),
+    title: varchar("title").notNull(),
+    clientName: varchar("client_name"),
+    status: varchar("status").notNull().default("draft"), // draft | active | paused | filled | archived
+    dealType: varchar("deal_type").notNull().default("lease"), // lease | sale | either
+    market: varchar("market"),
+    submarket: varchar("submarket"),
+    minSf: integer("min_sf"),
+    maxSf: integer("max_sf"),
+    minClearHeightFt: numeric("min_clear_height_ft", { precision: 6, scale: 2 }),
+    maxBudgetPsf: numeric("max_budget_psf", { precision: 12, scale: 2 }),
+    requiredDockDoors: integer("required_dock_doors"),
+    requiredGradeDoors: integer("required_grade_doors"),
+    minYardAcres: numeric("min_yard_acres", { precision: 10, scale: 2 }),
+    powerNotes: text("power_notes"),
+    officeNotes: text("office_notes"),
+    timingNotes: text("timing_notes"),
+    specialNotes: text("special_notes"),
+    isOffMarketSearchEnabled: boolean("is_off_market_search_enabled").notNull().default(false),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+    archivedAt: timestamp("archived_at"),
+  },
+  (table) => [
+    index("IDX_intel_requirements_user").on(table.createdByUserId),
+    index("IDX_intel_requirements_status").on(table.status),
+    index("IDX_intel_requirements_market").on(table.market),
+    index("IDX_intel_requirements_submarket").on(table.submarket),
+    index("IDX_intel_requirements_archived_at").on(table.archivedAt),
+  ],
+);
+
+export const intelRequirementPreferences = pgTable(
+  "intel_requirement_preferences",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    requirementId: varchar("requirement_id").notNull().references(() => intelRequirements.id, { onDelete: "cascade" }),
+    key: varchar("key").notNull(),
+    operator: varchar("operator").notNull().default("preferred"), // required | preferred | avoid | note
+    valueText: text("value_text"),
+    valueNumber: numeric("value_number", { precision: 12, scale: 2 }),
+    valueBoolean: boolean("value_boolean"),
+    weight: integer("weight").notNull().default(1),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_intel_requirement_preferences_requirement").on(table.requirementId),
+    index("IDX_intel_requirement_preferences_requirement_key").on(table.requirementId, table.key),
+  ],
+);
+
+export type IntelSource = typeof intelSources.$inferSelect;
+export type InsertIntelSource = typeof intelSources.$inferInsert;
+export type IntelListing = typeof intelListings.$inferSelect;
+export type InsertIntelListing = typeof intelListings.$inferInsert;
+export type IntelIngestRun = typeof intelIngestRuns.$inferSelect;
+export type InsertIntelIngestRun = typeof intelIngestRuns.$inferInsert;
+export type IntelListingChange = typeof intelListingChanges.$inferSelect;
+export type InsertIntelListingChange = typeof intelListingChanges.$inferInsert;
+export type IntelRequirement = typeof intelRequirements.$inferSelect;
+export type InsertIntelRequirement = typeof intelRequirements.$inferInsert;
+export type IntelRequirementPreference = typeof intelRequirementPreferences.$inferSelect;
+export type InsertIntelRequirementPreference = typeof intelRequirementPreferences.$inferInsert;

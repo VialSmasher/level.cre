@@ -28,6 +28,7 @@ import { STATUS_META, type ProspectStatusType } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
 import { MapContextMenu } from '@/features/map/MapContextMenu';
 import { useGeocode } from '@/hooks/useGeocode';
+import { GOOGLE_MAPS_API_KEY_HELP_TEXT, getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 // Note: Avoid importing AlertDialog to prevent a circular-import bundle bug
 
@@ -44,6 +45,7 @@ type Listing = {
 const libraries: any = ['drawing', 'geometry', 'places'];
 const FIELD_BUFFER_DELAY = 600;
 const AUTO_NAME_REGEX = /^New\s+(polygon|rectangle|point|marker)/i;
+const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 const getDisplayAddressValue = (name?: string | null) => {
   if (!name) return '';
   return AUTO_NAME_REGEX.test(name) ? '' : name;
@@ -149,7 +151,7 @@ export default function Workspace() {
 
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '') as string,
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
     libraries,
   });
 
@@ -1155,15 +1157,18 @@ export default function Workspace() {
 
   // Activity logging UI removed in workspace
 
-  const apiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '') as string;
+  const apiKey = GOOGLE_MAPS_API_KEY;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       {/* Map container fills remaining height without causing page scroll */}
       <div className="relative flex-1 min-h-0 w-full overflow-hidden" ref={mapContainerRef}>
         {!apiKey && (
-          <div className="absolute inset-0 flex items-center justify-center text-gray-500">
-            Missing VITE_GOOGLE_MAPS_API_KEY
+          <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+            <div className="max-w-lg space-y-2">
+              <div className="text-base font-medium text-gray-700">Missing Google Maps API key</div>
+              <div className="text-sm text-gray-500">{GOOGLE_MAPS_API_KEY_HELP_TEXT}</div>
+            </div>
           </div>
         )}
         {!isLoaded && apiKey && (
