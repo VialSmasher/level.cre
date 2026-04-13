@@ -37,11 +37,18 @@ export type IndustrialIntelSeedPreview = {
     sourceName: string | null;
     title: string;
     address: string | null;
+    normalizedAddress: string | null;
     market: string | null;
     submarket: string | null;
     status: string;
     listingType: string;
     assetType: string;
+    latitude: number | null;
+    longitude: number | null;
+    geocodeStatus: string | null;
+    geocodeConfidence: number | null;
+    geocodeSource: string | null;
+    dataQualityStatus: string | null;
     availableSf: number | null;
     landAcres: number | null;
     totalPrice: number | null;
@@ -479,11 +486,18 @@ export function getIndustrialIntelSeedPreview(): IndustrialIntelSeedPreview {
         sourceName: sourceNameById.get(listing.sourceId) ?? null,
         title: listing.title,
         address: listing.address,
+        normalizedAddress: listing.address,
         market: listing.market,
         submarket: listing.submarket,
         status: listing.status,
         listingType: listing.listingType,
         assetType: listing.assetType,
+        latitude: listing.lat,
+        longitude: listing.lng,
+        geocodeStatus: listing.lat != null && listing.lng != null ? "success" : listing.address ? "pending" : "blocked",
+        geocodeConfidence: listing.lat != null && listing.lng != null ? 0.9 : null,
+        geocodeSource: listing.lat != null && listing.lng != null ? "seed" : null,
+        dataQualityStatus: listing.address ? "clean" : "review",
         availableSf: listing.availableSf,
         landAcres: listing.landAcres ?? null,
         totalPrice: listing.totalPrice ?? null,

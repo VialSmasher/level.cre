@@ -40,11 +40,18 @@ export type IntelListingListItem = {
   sourceName: string | null;
   title: string;
   address: string | null;
+  normalizedAddress: string | null;
   market: string | null;
   submarket: string | null;
   status: string;
   listingType: string;
   assetType: string;
+  latitude: number | null;
+  longitude: number | null;
+  geocodeStatus: string | null;
+  geocodeConfidence: number | null;
+  geocodeSource: string | null;
+  dataQualityStatus: string | null;
   availableSf: number | null;
   landAcres: number | null;
   totalPrice: number | null;
@@ -435,11 +442,18 @@ export class IndustrialIntelRepository {
         source_name: string | null;
         title: string;
         address: string | null;
+        normalized_address: string | null;
         market: string | null;
         submarket: string | null;
         status: string;
         listing_type: string;
         asset_type: string;
+        lat: string | null;
+        lng: string | null;
+        geocode_status: string | null;
+        geocode_confidence: string | null;
+        geocode_source: string | null;
+        data_quality_status: string | null;
         available_sf: number | null;
         land_acres: string | null;
         total_price: string | null;
@@ -456,11 +470,18 @@ export class IndustrialIntelRepository {
             sources.name AS source_name,
             listings.title,
             listings.address,
+            COALESCE(listings.normalized_address, listings.address) AS normalized_address,
             listings.market,
             listings.submarket,
             listings.status,
             listings.listing_type,
             listings.asset_type,
+            listings.lat,
+            listings.lng,
+            listings.geocode_status,
+            listings.geocode_confidence,
+            listings.geocode_source,
+            listings.data_quality_status,
             listings.available_sf,
             listings.land_acres,
             listings.total_price,
@@ -483,11 +504,18 @@ export class IndustrialIntelRepository {
         source_name: string | null;
         title: string;
         address: string | null;
+        normalized_address: string | null;
         market: string | null;
         submarket: string | null;
         status: string;
         listing_type: string;
         asset_type: string;
+        lat: string | null;
+        lng: string | null;
+        geocode_status: string | null;
+        geocode_confidence: string | null;
+        geocode_source: string | null;
+        data_quality_status: string | null;
         available_sf: number | null;
         land_acres: string | null;
         total_price: string | null;
@@ -502,11 +530,18 @@ export class IndustrialIntelRepository {
         sourceName: row.source_name,
         title: row.title,
         address: row.address,
+        normalizedAddress: row.normalized_address,
         market: row.market,
         submarket: row.submarket,
         status: row.status,
         listingType: row.listing_type,
         assetType: row.asset_type,
+        latitude: numOrNull(row.lat),
+        longitude: numOrNull(row.lng),
+        geocodeStatus: row.geocode_status,
+        geocodeConfidence: numOrNull(row.geocode_confidence),
+        geocodeSource: row.geocode_source,
+        dataQualityStatus: row.data_quality_status,
         availableSf: intOrNull(row.available_sf),
         landAcres: numOrNull(row.land_acres),
         totalPrice: numOrNull(row.total_price),

@@ -51,6 +51,31 @@ function changeSummaryFor(record: NormalizedIntelListingRecord, changeType: stri
   }
 }
 
+function normalizeAddress(value?: string | null): string | null {
+  const normalized = String(value || '').trim().replace(/\s+/g, ' ');
+  return normalized || null;
+}
+
+function deriveGeocodeStatus(record: NormalizedIntelListingRecord): string {
+  if (record.lat != null && record.lng != null) return 'success';
+  if (normalizeAddress(record.address)) return 'pending';
+  return 'blocked';
+}
+
+function deriveGeocodeConfidence(record: NormalizedIntelListingRecord): number | null {
+  if (record.lat != null && record.lng != null) return 0.9;
+  return null;
+}
+
+function deriveGeocodeSource(record: NormalizedIntelListingRecord): string | null {
+  if (record.lat != null && record.lng != null) return 'source_feed';
+  return null;
+}
+
+function deriveDataQualityStatus(record: NormalizedIntelListingRecord): string {
+  return normalizeAddress(record.address) ? 'clean' : 'review';
+}
+
 export async function applyNormalizedRecords(
   context: IntelSourceRunContext,
   result: IntelSourceRunResult,
@@ -108,10 +133,15 @@ export async function applyNormalizedRecords(
               asset_type,
               title,
               address,
+              normalized_address,
               market,
               submarket,
               lat,
               lng,
+              geocode_status,
+              geocode_confidence,
+              geocode_source,
+              data_quality_status,
               available_sf,
               land_acres,
               total_price,
@@ -129,7 +159,7 @@ export async function applyNormalizedRecords(
               updated_at
             ) VALUES (
               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-              $15, $16, $17, $18, $19, $20, $21::jsonb, $22, now(), now(), null, now(), now()
+              $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26::jsonb, $27, now(), now(), null, now(), now()
             )
             RETURNING id
           `,
@@ -142,10 +172,15 @@ export async function applyNormalizedRecords(
             normalizeAssetType(record.assetType),
             record.title,
             record.address ?? null,
+            normalizeAddress(record.address),
             record.market ?? null,
             record.submarket ?? null,
             record.lat ?? null,
             record.lng ?? null,
+            deriveGeocodeStatus(record),
+            deriveGeocodeConfidence(record),
+            deriveGeocodeSource(record),
+            deriveDataQualityStatus(record),
             record.availableSf ?? null,
             record.landAcres ?? null,
             record.totalPrice ?? null,
@@ -192,20 +227,25 @@ export async function applyNormalizedRecords(
               asset_type = $6,
               title = $7,
               address = $8,
-              market = $9,
-              submarket = $10,
-              lat = $11,
-              lng = $12,
-              available_sf = $13,
-              land_acres = $14,
-              total_price = $15,
-              price_per_acre = $16,
-              min_divisible_sf = $17,
-              clear_height_ft = $18,
-              brochure_url = $19,
-              source_url = $20,
-              raw_payload = $21::jsonb,
-              content_hash = $22,
+              normalized_address = $9,
+              market = $10,
+              submarket = $11,
+              lat = $12,
+              lng = $13,
+              geocode_status = $14,
+              geocode_confidence = $15,
+              geocode_source = $16,
+              data_quality_status = $17,
+              available_sf = $18,
+              land_acres = $19,
+              total_price = $20,
+              price_per_acre = $21,
+              min_divisible_sf = $22,
+              clear_height_ft = $23,
+              brochure_url = $24,
+              source_url = $25,
+              raw_payload = $26::jsonb,
+              content_hash = $27,
               last_seen_at = now(),
               removed_at = null,
               updated_at = now()
@@ -220,10 +260,15 @@ export async function applyNormalizedRecords(
             normalizeAssetType(record.assetType),
             record.title,
             record.address ?? null,
+            normalizeAddress(record.address),
             record.market ?? null,
             record.submarket ?? null,
             record.lat ?? null,
             record.lng ?? null,
+            deriveGeocodeStatus(record),
+            deriveGeocodeConfidence(record),
+            deriveGeocodeSource(record),
+            deriveDataQualityStatus(record),
             record.availableSf ?? null,
             record.landAcres ?? null,
             record.totalPrice ?? null,
