@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getGoogleMapsApiKey } from "@/lib/googleMapsApiKey";
 import { apiRequest } from "@/lib/queryClient";
 
 type IntelListing = {
@@ -24,7 +26,20 @@ type IntelListing = {
   sourceUrl: string | null;
   lastSeenAt: string | null;
   removedAt: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  normalizedAddress?: string | null;
+  geocodeStatus?: string | null;
 };
+
+type MappableIntelListing = IntelListing & {
+  latitude: number;
+  longitude: number;
+};
+
+const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
+const DEFAULT_MAP_CENTER = { lat: 53.5461, lng: -113.4938 };
+const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
 
 function formatDateTime(value: string | null) {
   if (!value) return "Never";
@@ -57,9 +72,14 @@ function hasListingQualityIssue(listing: IntelListing) {
   return !listing.address || lowerTitle.length < 12 || lowerTitle.includes("contact an associate");
 }
 
+function isMappableListing(listing: IntelListing): listing is MappableIntelListing {
+  return typeof listing.latitude === "number" && typeof listing.longitude === "number";
+}
+
 export default function IndustrialIntelInventoryPage() {
   const queryClient = useQueryClient();
   const [showManualIntake, setShowManualIntake] = useState(false);
+  const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
   const [filters, setFilters] = useState({
     query: "",
     submarket: "all",
@@ -87,6 +107,11 @@ export default function IndustrialIntelInventoryPage() {
 
   const { data: listings = [], isLoading } = useQuery<IntelListing[]>({
     queryKey: ["/api/intel/listings"],
+  });
+
+  const { isLoaded: isMapLoaded, loadError: mapLoadError } = useJsApiLoader({
+    id: "industrial-intel-map",
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
   });
 
   const previewMutation = useMutation({
@@ -192,6 +217,42 @@ export default function IndustrialIntelInventoryPage() {
       return true;
     });
   }, [filters, listings]);
+
+  const mappableListings = useMemo(
+    () => filteredListings.filter(isMappableListing),
+    [filteredListings],
+  );
+
+  const selectedListing = useMemo(() => {
+    const activeListing = filteredListings.find((listing) => listing.id === selectedListingId) || null;
+    if (activeListing) return activeListing;
+    return mappableListings[0] || filteredListings[0] || null;
+  }, [filteredListings, mappableListings, selectedListingId]);
+
+  const selectedMappableListing = selectedListing && isMappableListing(selectedListing) ? selectedListing : null;
+
+  const mapCenter = useMemo(() => {
+    if (selectedMappableListing) {
+      return { lat: selectedMappableListing.latitude, lng: selectedMappableListing.longitude };
+    }
+
+    if (mappableListings.length > 0) {
+      const totals = mappableListings.reduce(
+        (accumulator, listing) => ({
+          lat: accumulator.lat + listing.latitude,
+          lng: accumulator.lng + listing.longitude,
+        }),
+        { lat: 0, lng: 0 },
+      );
+
+      return {
+        lat: totals.lat / mappableListings.length,
+        lng: totals.lng / mappableListings.length,
+      };
+    }
+
+    return DEFAULT_MAP_CENTER;
+  }, [mappableListings, selectedMappableListing]);
 
   return (
     <div className="space-y-6">
@@ -429,11 +490,109 @@ export default function IndustrialIntelInventoryPage() {
         </Card>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Listings</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.9fr)]">
+        <Card className="xl:order-2">
+          <CardHeader>
+            <CardTitle>Map</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              <p>
+                Showing <span className="font-semibold text-slate-900">{mappableListings.length}</span> mapped listings from the current filtered set.
+              </p>
+              <p>
+                {filteredListings.length - mappableListings.length} still need geocodes or address cleanup.
+              </p>
+            </div>
+
+            {!GOOGLE_MAPS_API_KEY ? (
+              <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 px-6 py-10 text-center">
+                <p className="text-base font-medium text-amber-900">Google Maps key is not available in this environment</p>
+                <p className="mt-2 text-sm text-amber-800">
+                  The page is wired to the shared key helper. Once the key is present at runtime, this map will load without a separate Tool B key path.
+                </p>
+              </div>
+            ) : mapLoadError ? (
+              <div className="rounded-2xl border border-dashed border-rose-300 bg-rose-50 px-6 py-10 text-center">
+                <p className="text-base font-medium text-rose-900">Map failed to load</p>
+                <p className="mt-2 text-sm text-rose-700">Check the shared Google Maps key configuration and allowed referrers.</p>
+              </div>
+            ) : !isMapLoaded ? (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-sm text-slate-600">
+                Loading map...
+              </div>
+            ) : mappableListings.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
+                <p className="text-base font-medium text-slate-900">No mapped listings yet</p>
+                <p className="mt-2 text-sm text-slate-600">
+                  This first slice is wired. As soon as listing records expose latitude and longitude, filtered listings will render here automatically.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="h-[420px] overflow-hidden rounded-2xl border border-slate-200">
+                  <GoogleMap
+                    mapContainerStyle={MAP_CONTAINER_STYLE}
+                    center={mapCenter}
+                    zoom={selectedMappableListing ? 13 : 10}
+                    options={{
+                      streetViewControl: false,
+                      mapTypeControl: false,
+                      fullscreenControl: true,
+                      gestureHandling: "greedy",
+                    }}
+                  >
+                    {mappableListings.map((listing) => (
+                      <MarkerF
+                        key={listing.id}
+                        position={{ lat: listing.latitude, lng: listing.longitude }}
+                        onClick={() => setSelectedListingId(listing.id)}
+                      />
+                    ))}
+                    {selectedMappableListing && (
+                      <InfoWindowF
+                        position={{ lat: selectedMappableListing.latitude, lng: selectedMappableListing.longitude }}
+                        onCloseClick={() => setSelectedListingId(null)}
+                      >
+                        <div className="max-w-[16rem] space-y-2 p-1 text-sm text-slate-700">
+                          <p className="font-semibold text-slate-900">{selectedMappableListing.title}</p>
+                          <p>{selectedMappableListing.normalizedAddress || selectedMappableListing.address || "Address needs review"}</p>
+                          <p>
+                            {formatListingType(selectedMappableListing.listingType)} · {formatSize(selectedMappableListing)}
+                          </p>
+                          <p>{selectedMappableListing.sourceName || "Unknown source"}</p>
+                          <div className="flex flex-wrap gap-3">
+                            {selectedMappableListing.brochureUrl && (
+                              <a href={selectedMappableListing.brochureUrl} target="_blank" rel="noreferrer" className="text-sky-700 hover:text-sky-900">
+                                Brochure
+                              </a>
+                            )}
+                            {selectedMappableListing.sourceUrl && (
+                              <a href={selectedMappableListing.sourceUrl} target="_blank" rel="noreferrer" className="text-sky-700 hover:text-sky-900">
+                                Source
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </InfoWindowF>
+                    )}
+                  </GoogleMap>
+                </div>
+                {selectedListing && !selectedMappableListing && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <span className="font-medium text-amber-900">Selected listing is not mappable yet.</span> It still needs geocoding or address cleanup before it can render on the map.
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="xl:order-1">
+          <CardHeader>
+            <CardTitle>Listings</CardTitle>
+          </CardHeader>
+          <CardContent>
           {isLoading ? (
             <p className="text-sm text-slate-500">Loading listings...</p>
           ) : listings.length === 0 ? (
@@ -468,17 +627,33 @@ export default function IndustrialIntelInventoryPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredListings.map((listing) => (
-                    <tr key={listing.id} className="align-top">
+                    <tr
+                      key={listing.id}
+                      className={`align-top ${selectedListing?.id === listing.id ? "bg-sky-50/80" : ""}`}
+                    >
                       <td className="max-w-[28rem] py-4 pr-4">
-                        <div className="space-y-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedListingId(listing.id)}
+                          className="w-full text-left"
+                        >
+                          <div className="space-y-1.5">
                           <p className="line-clamp-2 font-medium text-slate-900">{listing.title}</p>
                           <p className="text-slate-500">{listing.address || "Address still needs review"}</p>
-                          {hasListingQualityIssue(listing) && (
-                            <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
-                              Needs review
-                            </span>
-                          )}
+                          <div className="flex flex-wrap items-center gap-2">
+                            {isMappableListing(listing) && (
+                              <span className="inline-flex rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-700">
+                                Mapped
+                              </span>
+                            )}
+                            {hasListingQualityIssue(listing) && (
+                              <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                                Needs review
+                              </span>
+                            )}
+                          </div>
                         </div>
+                        </button>
                       </td>
                       <td className="py-4 pr-4 text-slate-700">
                         <div className="max-w-[11rem]">
@@ -547,7 +722,8 @@ export default function IndustrialIntelInventoryPage() {
             </div>
           )}
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     </div>
   );
 }
