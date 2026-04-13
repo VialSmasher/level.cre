@@ -51,7 +51,13 @@ function parseLandAcres(size: string): number | null {
 
 function inferAssetType(title: string, description: string): string {
   const combined = `${title} ${description}`.toLowerCase();
-  if (combined.includes('industrial land') || combined.includes('land for sale') || combined.includes('land for lease')) return 'land';
+  const hasBuildingSignals = ['building', 'warehouse', 'shop', 'available sf', 'sf freestanding'].some((token) =>
+    combined.includes(token),
+  );
+  if (hasBuildingSignals) return 'building';
+  if (combined.includes('industrial land') || combined.includes('land for sale') || combined.includes('land for lease')) {
+    return 'land';
+  }
   if (combined.includes('yard')) return 'yard';
   return 'building';
 }
@@ -73,12 +79,41 @@ function inferCity(...parts: Array<string | null | undefined>): string | null {
 
 function inferListingType(title: string, description: string): string {
   const combined = `${title} ${description}`.toLowerCase();
-  return combined.includes('sale') ? 'sale' : 'lease';
+  if (combined.includes('lease')) return 'lease';
+  if (combined.includes('sale')) return 'sale';
+  return 'lease';
 }
 
 function isIndustrial(title: string, description: string): boolean {
   const combined = `${title} ${description}`.toLowerCase();
   return ['industrial', 'warehouse', 'yard', 'shop'].some((token) => combined.includes(token));
+}
+
+function applyRecordOverrides(
+  url: string,
+  record: Omit<NormalizedIntelListingRecord, 'contentHash'>,
+): Omit<NormalizedIntelListingRecord, 'contentHash'> {
+  if (url.includes('/fort-saskatchewan-industrial-building-land/')) {
+    return {
+      ...record,
+      title: 'Industrial Building for Lease - 55017 RGE RD 230, Sturgeon County',
+      address: '55017 RGE RD 230, Sturgeon County, AB',
+      listingType: 'lease',
+      assetType: 'building',
+      availableSf: 12537,
+      landAcres: 73.28,
+      totalPrice: null,
+      brochureUrl: 'https://cwedm.com/wp-content/uploads/2023/05/55017RGE_230RD_WEB-2.pdf',
+      rawPayload: {
+        ...record.rawPayload,
+        overrideApplied: 'fort_saskatchewan_building_land',
+        availableSf: 12537,
+        landAcres: 73.28,
+      },
+    };
+  }
+
+  return record;
 }
 
 async function fetchText(url: string): Promise<string> {
@@ -128,36 +163,44 @@ export async function runCwedmSource(): Promise<Array<Omit<NormalizedIntelListin
     const normalizedSize = normalizeSize(
       extractFirst(/([0-9,]+\s*SF)/i, description) || extractFirst(/([0-9,.]+\s*acres?)/i, description),
     );
+    const listingType = inferListingType(title, description);
+    const availableSf = parseAvailableSf(description) ?? parseAvailableSf(normalizedSize);
+    const landAcres = parseLandAcres(description) ?? parseLandAcres(normalizedSize);
 
-    records.push({
-      sourceRecordKey: url.replace(/^https?:\/\//i, '').replace(/\/$/, ''),
-      externalId: null,
-      status: 'active',
-      listingType: inferListingType(title, description),
-      assetType: inferAssetType(title, description),
-      title: title || address || url,
-      address: address || null,
-      market: inferCity(title, description, address),
-      submarket: null,
-      lat: null,
-      lng: null,
-      availableSf: parseAvailableSf(normalizedSize),
-      landAcres: parseLandAcres(normalizedSize),
-      totalPrice: inferCurrencyValue(description, /\$\s*([0-9][0-9,]{4,}(?:\.[0-9]{1,2})?)/i),
-      pricePerAcre: inferCurrencyValue(description, /\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:\/|per\s+)acre/i),
-      minDivisibleSf: null,
-      clearHeightFt: null,
-      brochureUrl: null,
-      sourceUrl: url,
-      rawPayload: {
-        discoverUrl: DISCOVER_URL,
-        title,
-        description,
-        address,
+    records.push(
+      applyRecordOverrides(url, {
+        sourceRecordKey: url.replace(/^https?:\/\//i, '').replace(/\/$/, ''),
+        externalId: null,
+        status: 'active',
+        listingType,
         assetType: inferAssetType(title, description),
-        size: normalizedSize || null,
-      },
-    });
+        title: title || address || url,
+        address: address || null,
+        market: inferCity(title, description, address),
+        submarket: null,
+        lat: null,
+        lng: null,
+        availableSf,
+        landAcres,
+        totalPrice: listingType === 'sale' ? inferCurrencyValue(description, /\$\s*([0-9][0-9,]{4,}(?:\.[0-9]{1,2})?)/i) : null,
+        pricePerAcre: inferCurrencyValue(description, /\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:\/|per\s+)acre/i),
+        minDivisibleSf: null,
+        clearHeightFt: null,
+        brochureUrl: null,
+        sourceUrl: url,
+        rawPayload: {
+          discoverUrl: DISCOVER_URL,
+          title,
+          description,
+          address,
+          assetType: inferAssetType(title, description),
+          size: normalizedSize || null,
+          availableSf,
+          landAcres,
+          listingType,
+        },
+      }),
+    );
   }
 
   return records;
