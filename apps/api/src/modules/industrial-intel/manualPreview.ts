@@ -8,7 +8,11 @@ export type ManualIntelListingPreview = {
   market: string | null;
   submarket: string | null;
   listingType: string | null;
+  assetType: string | null;
   availableSf: number | null;
+  landAcres: number | null;
+  totalPrice: number | null;
+  pricePerAcre: number | null;
 };
 
 function cleanText(value?: string | null): string {
@@ -43,6 +47,35 @@ function inferAvailableSf(text: string): number | null {
   if (!match) return null;
   const value = Number(match[1].replace(/,/g, ''));
   return Number.isFinite(value) ? value : null;
+}
+
+function inferAssetType(text: string): string | null {
+  const lower = text.toLowerCase();
+  if (lower.includes('industrial land') || lower.includes('land for sale') || lower.includes('land for lease') || lower.includes('acres')) {
+    return 'land';
+  }
+  if (lower.includes('yard')) return 'yard';
+  if (lower.includes('industrial') || lower.includes('warehouse') || lower.includes('shop') || lower.includes('facility')) {
+    return 'building';
+  }
+  return null;
+}
+
+function inferLandAcres(text: string): number | null {
+  const match = text.match(/([0-9]+(?:\.[0-9]+)?)\s*acres?/i);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function inferCurrencyValue(text: string, labelPatterns: RegExp[]): number | null {
+  for (const pattern of labelPatterns) {
+    const match = text.match(pattern);
+    if (!match) continue;
+    const value = Number(match[1].replace(/,/g, ''));
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
 }
 
 function inferAddress(text: string): string | null {
@@ -98,6 +131,16 @@ export async function previewManualIntelListing(sourceUrl: string): Promise<Manu
     market: pageText.toLowerCase().includes('edmonton') ? 'Edmonton Metro' : null,
     submarket: pageText.toLowerCase().includes('acheson') ? 'Acheson' : null,
     listingType: inferListingType(pageText),
+    assetType: inferAssetType(pageText),
     availableSf: inferAvailableSf(pageText),
+    landAcres: inferLandAcres(pageText),
+    totalPrice: inferCurrencyValue(pageText, [
+      /(?:price|asking price|purchase price)\s*[:\-]?\s*\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i,
+      /\$\s*([0-9][0-9,]{4,}(?:\.[0-9]{1,2})?)/i,
+    ]),
+    pricePerAcre: inferCurrencyValue(pageText, [
+      /\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:\/|per\s+)acre/i,
+      /price per acre\s*[:\-]?\s*\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i,
+    ]),
   };
 }

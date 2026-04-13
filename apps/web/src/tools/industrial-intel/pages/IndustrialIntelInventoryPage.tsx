@@ -15,7 +15,11 @@ type IntelListing = {
   submarket: string | null;
   status: string;
   listingType: string;
+  assetType: string;
   availableSf: number | null;
+  landAcres: number | null;
+  totalPrice: number | null;
+  pricePerAcre: number | null;
   brochureUrl: string | null;
   sourceUrl: string | null;
   lastSeenAt: string | null;
@@ -35,6 +39,17 @@ function formatListingType(value: string) {
 
 function formatStatus(value: string) {
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : "Unknown";
+}
+
+function formatAssetType(value: string) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : "Unknown";
+}
+
+function formatSize(listing: IntelListing) {
+  if (listing.assetType === "land") {
+    return listing.landAcres ? `${listing.landAcres.toLocaleString()} ac` : "—";
+  }
+  return listing.availableSf?.toLocaleString() || "—";
 }
 
 function hasListingQualityIssue(listing: IntelListing) {
@@ -62,7 +77,11 @@ export default function IndustrialIntelInventoryPage() {
     market: "Edmonton Metro",
     submarket: "",
     listingType: "lease",
+    assetType: "building",
     availableSf: "",
+    landAcres: "",
+    totalPrice: "",
+    pricePerAcre: "",
   });
 
   const { data: listings = [], isLoading } = useQuery<IntelListing[]>({
@@ -85,7 +104,11 @@ export default function IndustrialIntelInventoryPage() {
         market: current.market || preview.market || "Edmonton Metro",
         submarket: current.submarket || preview.submarket || "",
         listingType: current.listingType || preview.listingType || "lease",
+        assetType: current.assetType || preview.assetType || "building",
         availableSf: current.availableSf || (preview.availableSf ? String(preview.availableSf) : ""),
+        landAcres: current.landAcres || (preview.landAcres ? String(preview.landAcres) : ""),
+        totalPrice: current.totalPrice || (preview.totalPrice ? String(preview.totalPrice) : ""),
+        pricePerAcre: current.pricePerAcre || (preview.pricePerAcre ? String(preview.pricePerAcre) : ""),
       }));
     },
   });
@@ -100,7 +123,11 @@ export default function IndustrialIntelInventoryPage() {
         market: form.market || null,
         submarket: form.submarket || null,
         listingType: form.listingType || null,
+        assetType: form.assetType || null,
         availableSf: form.availableSf ? Number(form.availableSf) : null,
+        landAcres: form.landAcres ? Number(form.landAcres) : null,
+        totalPrice: form.totalPrice ? Number(form.totalPrice) : null,
+        pricePerAcre: form.pricePerAcre ? Number(form.pricePerAcre) : null,
       });
       return response.json();
     },
@@ -110,7 +137,18 @@ export default function IndustrialIntelInventoryPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/intel/changes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/intel/sources"] });
       queryClient.invalidateQueries({ queryKey: ["/api/intel/summary"] });
-      setForm((current) => ({ ...current, sourceUrl: "", title: "", brochureUrl: "", address: "", submarket: "", availableSf: "" }));
+      setForm((current) => ({
+        ...current,
+        sourceUrl: "",
+        title: "",
+        brochureUrl: "",
+        address: "",
+        submarket: "",
+        availableSf: "",
+        landAcres: "",
+        totalPrice: "",
+        pricePerAcre: "",
+      }));
       setShowManualIntake(false);
     },
   });
@@ -321,8 +359,29 @@ export default function IndustrialIntelInventoryPage() {
                 </select>
               </div>
               <div className="space-y-2">
+                <Label htmlFor="assetType">Asset type</Label>
+                <select id="assetType" className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm" value={form.assetType} onChange={(event) => setForm({ ...form, assetType: event.target.value })}>
+                  <option value="building">Building</option>
+                  <option value="land">Land</option>
+                  <option value="yard">Yard</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="availableSf">Available SF</Label>
                 <Input id="availableSf" placeholder="Optional square footage" value={form.availableSf} onChange={(event) => setForm({ ...form, availableSf: event.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="landAcres">Land acres</Label>
+                <Input id="landAcres" placeholder="Optional acreage" value={form.landAcres} onChange={(event) => setForm({ ...form, landAcres: event.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="totalPrice">Total price</Label>
+                <Input id="totalPrice" placeholder="Optional total price" value={form.totalPrice} onChange={(event) => setForm({ ...form, totalPrice: event.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="pricePerAcre">Price per acre</Label>
+                <Input id="pricePerAcre" placeholder="Optional price per acre" value={form.pricePerAcre} onChange={(event) => setForm({ ...form, pricePerAcre: event.target.value })} />
               </div>
             </div>
 
@@ -393,8 +452,9 @@ export default function IndustrialIntelInventoryPage() {
                     <th className="py-3 pr-4 font-medium">Source</th>
                     <th className="py-3 pr-4 font-medium">Status</th>
                     <th className="py-3 pr-4 font-medium">Type</th>
+                    <th className="py-3 pr-4 font-medium">Asset</th>
                     <th className="py-3 pr-4 font-medium">Submarket</th>
-                    <th className="py-3 pr-4 font-medium">Available SF</th>
+                    <th className="py-3 pr-4 font-medium">Size</th>
                     <th className="py-3 pr-4 font-medium">Last Seen</th>
                     <th className="py-3 pr-4 font-medium">Links</th>
                   </tr>
@@ -434,11 +494,16 @@ export default function IndustrialIntelInventoryPage() {
                           {formatListingType(listing.listingType)}
                         </span>
                       </td>
+                      <td className="py-4 pr-4">
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                          {formatAssetType(listing.assetType)}
+                        </span>
+                      </td>
                       <td className="py-4 pr-4 text-slate-700">
                         {listing.submarket || listing.market || "Unassigned"}
                       </td>
                       <td className="py-4 pr-4 text-slate-700">
-                        {listing.availableSf?.toLocaleString() || "—"}
+                        {formatSize(listing)}
                       </td>
                       <td className="py-4 pr-4 text-slate-700">{formatDateTime(listing.lastSeenAt)}</td>
                       <td className="py-4 pr-4">

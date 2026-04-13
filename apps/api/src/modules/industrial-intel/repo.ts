@@ -44,7 +44,11 @@ export type IntelListingListItem = {
   submarket: string | null;
   status: string;
   listingType: string;
+  assetType: string;
   availableSf: number | null;
+  landAcres: number | null;
+  totalPrice: number | null;
+  pricePerAcre: number | null;
   brochureUrl: string | null;
   sourceUrl: string | null;
   lastSeenAt: string | null;
@@ -160,6 +164,12 @@ function intOrZero(value: unknown): number {
 }
 
 function intOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function numOrNull(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
@@ -429,7 +439,11 @@ export class IndustrialIntelRepository {
         submarket: string | null;
         status: string;
         listing_type: string;
+        asset_type: string;
         available_sf: number | null;
+        land_acres: string | null;
+        total_price: string | null;
+        price_per_acre: string | null;
         brochure_url: string | null;
         source_url: string | null;
         last_seen_at: Date | null;
@@ -446,7 +460,11 @@ export class IndustrialIntelRepository {
             listings.submarket,
             listings.status,
             listings.listing_type,
+            listings.asset_type,
             listings.available_sf,
+            listings.land_acres,
+            listings.total_price,
+            listings.price_per_acre,
             listings.brochure_url,
             listings.source_url,
             listings.last_seen_at,
@@ -469,7 +487,11 @@ export class IndustrialIntelRepository {
         submarket: string | null;
         status: string;
         listing_type: string;
+        asset_type: string;
         available_sf: number | null;
+        land_acres: string | null;
+        total_price: string | null;
+        price_per_acre: string | null;
         brochure_url: string | null;
         source_url: string | null;
         last_seen_at: Date | null;
@@ -484,7 +506,11 @@ export class IndustrialIntelRepository {
         submarket: row.submarket,
         status: row.status,
         listingType: row.listing_type,
+        assetType: row.asset_type,
         availableSf: intOrNull(row.available_sf),
+        landAcres: numOrNull(row.land_acres),
+        totalPrice: numOrNull(row.total_price),
+        pricePerAcre: numOrNull(row.price_per_acre),
         brochureUrl: row.brochure_url,
         sourceUrl: row.source_url,
         lastSeenAt: isoOrNull(row.last_seen_at),

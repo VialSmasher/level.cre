@@ -41,7 +41,11 @@ export type IndustrialIntelSeedPreview = {
     submarket: string | null;
     status: string;
     listingType: string;
+    assetType: string;
     availableSf: number | null;
+    landAcres: number | null;
+    totalPrice: number | null;
+    pricePerAcre: number | null;
     brochureUrl: string | null;
     sourceUrl: string | null;
     lastSeenAt: string | null;
@@ -129,6 +133,7 @@ type ListingSeed = {
   externalId: string;
   status: string;
   listingType: string;
+  assetType: string;
   title: string;
   address: string;
   market: string;
@@ -136,6 +141,9 @@ type ListingSeed = {
   lat: number;
   lng: number;
   availableSf: number;
+  landAcres?: number | null;
+  totalPrice?: number | null;
+  pricePerAcre?: number | null;
   minDivisibleSf: number;
   clearHeightFt: number;
   brochureUrl: string;
@@ -262,6 +270,7 @@ function buildSeedData() {
       externalId: "CBRE-1001",
       status: "active",
       listingType: "lease",
+      assetType: "building",
       title: "Nisku Crossdock Opportunity",
       address: "1804 8 Street, Nisku, AB",
       market: "Edmonton Region",
@@ -290,6 +299,7 @@ function buildSeedData() {
       externalId: "LNET-2209",
       status: "active",
       listingType: "sale",
+      assetType: "building",
       title: "Sherwood Park Front-Load Bay",
       address: "120 Pembina Road, Sherwood Park, AB",
       market: "Edmonton Region",
@@ -318,6 +328,7 @@ function buildSeedData() {
       externalId: "DIR-50YARD",
       status: "removed",
       listingType: "lease",
+      assetType: "yard",
       title: "50 Street IOS Yard",
       address: "6820 50 Street NW, Edmonton, AB",
       market: "Edmonton Region",
@@ -346,6 +357,7 @@ function buildSeedData() {
       externalId: "CBRE-2044",
       status: "active",
       listingType: "lease",
+      assetType: "building",
       title: "Acheson Bulk Distribution",
       address: "27721 Acheson Road, Acheson, AB",
       market: "Edmonton Region",
@@ -471,7 +483,11 @@ export function getIndustrialIntelSeedPreview(): IndustrialIntelSeedPreview {
         submarket: listing.submarket,
         status: listing.status,
         listingType: listing.listingType,
+        assetType: listing.assetType,
         availableSf: listing.availableSf,
+        landAcres: listing.landAcres ?? null,
+        totalPrice: listing.totalPrice ?? null,
+        pricePerAcre: listing.pricePerAcre ?? null,
         brochureUrl: listing.brochureUrl,
         sourceUrl: listing.sourceUrl,
         lastSeenAt: isoOrNull(listing.lastSeenAt),

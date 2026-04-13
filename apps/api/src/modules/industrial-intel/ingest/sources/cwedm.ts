@@ -42,6 +42,27 @@ function parseAvailableSf(size: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+function parseLandAcres(size: string): number | null {
+  const acresMatch = size.match(/([0-9]+(?:\.[0-9]+)?)\s*acres?/i);
+  if (!acresMatch) return null;
+  const value = Number(acresMatch[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function inferAssetType(title: string, description: string): string {
+  const combined = `${title} ${description}`.toLowerCase();
+  if (combined.includes('industrial land') || combined.includes('land for sale') || combined.includes('land for lease')) return 'land';
+  if (combined.includes('yard')) return 'yard';
+  return 'building';
+}
+
+function inferCurrencyValue(text: string, pattern: RegExp): number | null {
+  const match = text.match(pattern);
+  if (!match) return null;
+  const value = Number(match[1].replace(/,/g, ''));
+  return Number.isFinite(value) ? value : null;
+}
+
 function inferCity(...parts: Array<string | null | undefined>): string | null {
   const combined = parts.filter(Boolean).join(' ').toLowerCase();
   for (const label of CITY_LABELS) {
@@ -113,6 +134,7 @@ export async function runCwedmSource(): Promise<Array<Omit<NormalizedIntelListin
       externalId: null,
       status: 'active',
       listingType: inferListingType(title, description),
+      assetType: inferAssetType(title, description),
       title: title || address || url,
       address: address || null,
       market: inferCity(title, description, address),
@@ -120,6 +142,9 @@ export async function runCwedmSource(): Promise<Array<Omit<NormalizedIntelListin
       lat: null,
       lng: null,
       availableSf: parseAvailableSf(normalizedSize),
+      landAcres: parseLandAcres(normalizedSize),
+      totalPrice: inferCurrencyValue(description, /\$\s*([0-9][0-9,]{4,}(?:\.[0-9]{1,2})?)/i),
+      pricePerAcre: inferCurrencyValue(description, /\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:\/|per\s+)acre/i),
       minDivisibleSf: null,
       clearHeightFt: null,
       brochureUrl: null,
@@ -129,6 +154,7 @@ export async function runCwedmSource(): Promise<Array<Omit<NormalizedIntelListin
         title,
         description,
         address,
+        assetType: inferAssetType(title, description),
         size: normalizedSize || null,
       },
     });

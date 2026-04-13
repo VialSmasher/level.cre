@@ -12,6 +12,7 @@ export type NormalizedIntelListingRecord = {
   externalId?: string | null;
   status?: string | null;
   listingType?: string | null;
+  assetType?: string | null;
   title: string;
   address?: string | null;
   market?: string | null;
@@ -19,6 +20,9 @@ export type NormalizedIntelListingRecord = {
   lat?: number | null;
   lng?: number | null;
   availableSf?: number | null;
+  landAcres?: number | null;
+  totalPrice?: number | null;
+  pricePerAcre?: number | null;
   minDivisibleSf?: number | null;
   clearHeightFt?: number | null;
   brochureUrl?: string | null;

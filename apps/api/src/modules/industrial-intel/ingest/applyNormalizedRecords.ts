@@ -19,7 +19,16 @@ type ExistingListingRow = {
 function normalizeListingType(value?: string | null): string {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'sale') return 'sale';
+  if (normalized === 'sublease') return 'sublease';
   return 'lease';
+}
+
+function normalizeAssetType(value?: string | null): string {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'land') return 'land';
+  if (normalized === 'yard') return 'yard';
+  if (normalized === 'other') return 'other';
+  return 'building';
 }
 
 function normalizeStatus(value?: string | null): string {
@@ -96,6 +105,7 @@ export async function applyNormalizedRecords(
               external_id,
               status,
               listing_type,
+              asset_type,
               title,
               address,
               market,
@@ -103,6 +113,9 @@ export async function applyNormalizedRecords(
               lat,
               lng,
               available_sf,
+              land_acres,
+              total_price,
+              price_per_acre,
               min_divisible_sf,
               clear_height_ft,
               brochure_url,
@@ -116,7 +129,7 @@ export async function applyNormalizedRecords(
               updated_at
             ) VALUES (
               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-              $15, $16, $17::jsonb, $18, now(), now(), null, now(), now()
+              $15, $16, $17, $18, $19, $20, $21::jsonb, $22, now(), now(), null, now(), now()
             )
             RETURNING id
           `,
@@ -126,6 +139,7 @@ export async function applyNormalizedRecords(
             record.externalId ?? null,
             normalizeStatus(record.status),
             normalizeListingType(record.listingType),
+            normalizeAssetType(record.assetType),
             record.title,
             record.address ?? null,
             record.market ?? null,
@@ -133,6 +147,9 @@ export async function applyNormalizedRecords(
             record.lat ?? null,
             record.lng ?? null,
             record.availableSf ?? null,
+            record.landAcres ?? null,
+            record.totalPrice ?? null,
+            record.pricePerAcre ?? null,
             record.minDivisibleSf ?? null,
             record.clearHeightFt ?? null,
             record.brochureUrl ?? null,
@@ -172,19 +189,23 @@ export async function applyNormalizedRecords(
               external_id = $3,
               status = $4,
               listing_type = $5,
-              title = $6,
-              address = $7,
-              market = $8,
-              submarket = $9,
-              lat = $10,
-              lng = $11,
-              available_sf = $12,
-              min_divisible_sf = $13,
-              clear_height_ft = $14,
-              brochure_url = $15,
-              source_url = $16,
-              raw_payload = $17::jsonb,
-              content_hash = $18,
+              asset_type = $6,
+              title = $7,
+              address = $8,
+              market = $9,
+              submarket = $10,
+              lat = $11,
+              lng = $12,
+              available_sf = $13,
+              land_acres = $14,
+              total_price = $15,
+              price_per_acre = $16,
+              min_divisible_sf = $17,
+              clear_height_ft = $18,
+              brochure_url = $19,
+              source_url = $20,
+              raw_payload = $21::jsonb,
+              content_hash = $22,
               last_seen_at = now(),
               removed_at = null,
               updated_at = now()
@@ -196,6 +217,7 @@ export async function applyNormalizedRecords(
             record.externalId ?? null,
             normalizeStatus(record.status),
             normalizeListingType(record.listingType),
+            normalizeAssetType(record.assetType),
             record.title,
             record.address ?? null,
             record.market ?? null,
@@ -203,6 +225,9 @@ export async function applyNormalizedRecords(
             record.lat ?? null,
             record.lng ?? null,
             record.availableSf ?? null,
+            record.landAcres ?? null,
+            record.totalPrice ?? null,
+            record.pricePerAcre ?? null,
             record.minDivisibleSf ?? null,
             record.clearHeightFt ?? null,
             record.brochureUrl ?? null,

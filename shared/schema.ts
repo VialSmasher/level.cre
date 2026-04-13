@@ -614,6 +614,7 @@ export const intelListings = pgTable(
     externalId: varchar("external_id"),
     status: varchar("status").notNull().default("active"),
     listingType: varchar("listing_type").notNull().default("lease"), // lease | sale | sublease
+    assetType: varchar("asset_type").notNull().default("building"), // building | land | yard | other
     title: varchar("title").notNull(),
     address: text("address"),
     market: varchar("market"),
@@ -621,6 +622,9 @@ export const intelListings = pgTable(
     lat: numeric("lat", { precision: 9, scale: 6 }),
     lng: numeric("lng", { precision: 9, scale: 6 }),
     availableSf: integer("available_sf"),
+    landAcres: numeric("land_acres", { precision: 12, scale: 2 }),
+    totalPrice: numeric("total_price", { precision: 14, scale: 2 }),
+    pricePerAcre: numeric("price_per_acre", { precision: 14, scale: 2 }),
     minDivisibleSf: integer("min_divisible_sf"),
     clearHeightFt: numeric("clear_height_ft", { precision: 6, scale: 2 }),
     brochureUrl: text("brochure_url"),
@@ -637,6 +641,7 @@ export const intelListings = pgTable(
     unique("UQ_intel_listings_source_record").on(table.sourceId, table.sourceRecordKey),
     index("IDX_intel_listings_source").on(table.sourceId),
     index("IDX_intel_listings_status").on(table.status),
+    index("IDX_intel_listings_asset_type").on(table.assetType),
     index("IDX_intel_listings_submarket").on(table.submarket),
     index("IDX_intel_listings_last_seen").on(table.lastSeenAt),
   ],

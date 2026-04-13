@@ -45,7 +45,11 @@ const intelManualListingSchema = z.object({
   market: z.string().trim().nullable().optional(),
   submarket: z.string().trim().nullable().optional(),
   listingType: z.string().trim().min(1).nullable().optional(),
+  assetType: z.string().trim().min(1).nullable().optional(),
   availableSf: z.number().int().nonnegative().nullable().optional(),
+  landAcres: z.number().nonnegative().nullable().optional(),
+  totalPrice: z.number().nonnegative().nullable().optional(),
+  pricePerAcre: z.number().nonnegative().nullable().optional(),
 });
 
 const intelManualListingPreviewSchema = z.object({

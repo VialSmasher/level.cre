@@ -11,7 +11,11 @@ export type ManualIntelListingInput = {
   market?: string | null;
   submarket?: string | null;
   listingType?: string | null;
+  assetType?: string | null;
   availableSf?: number | null;
+  landAcres?: number | null;
+  totalPrice?: number | null;
+  pricePerAcre?: number | null;
 };
 
 const MANUAL_SOURCE: { slug: IntelSourceAdapterSlug; name: string; kind: string; feedUrl: string | null } = {
@@ -50,6 +54,7 @@ export async function ingestManualIntelListing(
     externalId: null,
     status: 'active',
     listingType: input.listingType || 'lease',
+    assetType: input.assetType || 'building',
     title: input.title,
     address: input.address ?? null,
     market: input.market ?? null,
@@ -57,6 +62,9 @@ export async function ingestManualIntelListing(
     lat: null,
     lng: null,
     availableSf: input.availableSf ?? null,
+    landAcres: input.landAcres ?? null,
+    totalPrice: input.totalPrice ?? null,
+    pricePerAcre: input.pricePerAcre ?? null,
     minDivisibleSf: null,
     clearHeightFt: null,
     brochureUrl: input.brochureUrl ?? null,
@@ -70,7 +78,11 @@ export async function ingestManualIntelListing(
       market: input.market ?? null,
       submarket: input.submarket ?? null,
       listingType: input.listingType || 'lease',
+      assetType: input.assetType || 'building',
       availableSf: input.availableSf ?? null,
+      landAcres: input.landAcres ?? null,
+      totalPrice: input.totalPrice ?? null,
+      pricePerAcre: input.pricePerAcre ?? null,
     },
   });
 
