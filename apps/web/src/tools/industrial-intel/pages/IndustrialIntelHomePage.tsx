@@ -51,6 +51,14 @@ function formatDateTime(value: string | null) {
   return date.toLocaleString();
 }
 
+function formatRunStatus(value: string) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1).toLowerCase() : "Unknown";
+}
+
+function formatSourceKind(value: string) {
+  return value.replace(/_/g, " ").toLowerCase();
+}
+
 export default function IndustrialIntelHomePage() {
   const { data: summary, isLoading: summaryLoading } = useQuery<IntelSummary>({
     queryKey: ["/api/intel/summary"],
@@ -75,13 +83,10 @@ export default function IndustrialIntelHomePage() {
   return (
     <div className="space-y-6">
       <section>
-        <h2 className="text-3xl font-semibold text-slate-950">Overview</h2>
+        <h2 className="text-4xl font-semibold tracking-tight text-slate-950">Overview</h2>
         <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          Tool B is running in parallel to the live Level CRE app. This slice is read-only and uses
-          isolated Industrial Intel tables and APIs only.
-        </p>
-        <p className="mt-2 max-w-3xl text-xs uppercase tracking-wide text-slate-500">
-          Development fallback: sample Intel data will render if the core tables are not yet seeded.
+          Track external inventory, monitor source runs, and review fresh listing changes without
+          touching the live Tool A workflow.
         </p>
       </section>
 
@@ -110,7 +115,7 @@ export default function IndustrialIntelHomePage() {
               <p className="text-sm text-slate-500">Loading runs...</p>
             ) : runs.length === 0 ? (
               <p className="text-sm text-slate-500">
-                No ingest runs yet. The Intel job wiring is ready for the VPS claw to trigger next.
+                No source runs yet. Once a source or manual intake completes, the latest activity will show here.
               </p>
             ) : (
               <div className="space-y-3">
@@ -119,16 +124,21 @@ export default function IndustrialIntelHomePage() {
                     key={run.id}
                     className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
                   >
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="font-medium text-slate-900">
                           {run.sourceName || "Unknown source"}
                         </p>
-                        <p className="text-xs uppercase tracking-wide text-slate-500">
-                          {run.triggerType} · {run.status}
-                        </p>
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-700">
+                            {run.triggerType}
+                          </span>
+                          <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                            {formatRunStatus(run.status)}
+                          </span>
+                        </div>
                       </div>
-                      <p className="text-xs text-slate-500">{formatDateTime(run.startedAt)}</p>
+                      <p className="text-xs text-slate-500">{formatDateTime(run.completedAt || run.startedAt)}</p>
                     </div>
                     <p className="mt-2 text-sm text-slate-600">
                       Seen {run.recordsSeen} · New {run.recordsNew} · Updated {run.recordsUpdated} · Removed{" "}
@@ -157,7 +167,7 @@ export default function IndustrialIntelHomePage() {
               <p className="text-sm text-slate-500">Loading sources...</p>
             ) : sources.length === 0 ? (
               <p className="text-sm text-slate-500">
-                No sources configured yet. Manual upload and scheduled feed sources will land here.
+                No sources configured yet. Manual intake and automated feeds will appear here once they are active.
               </p>
             ) : (
               <div className="space-y-3">
@@ -170,7 +180,7 @@ export default function IndustrialIntelHomePage() {
                       <div>
                         <p className="font-medium text-slate-900">{source.name}</p>
                         <p className="text-xs uppercase tracking-wide text-slate-500">
-                          {source.kind} · {source.slug}
+                          {formatSourceKind(source.kind)} · {source.slug}
                         </p>
                       </div>
                       <span
@@ -201,7 +211,7 @@ export default function IndustrialIntelHomePage() {
               <p className="text-sm text-slate-500">Loading recent changes...</p>
             ) : changes.length === 0 ? (
               <p className="text-sm text-slate-500">
-                No change events yet. Seed or ingest Tool B data to populate daily diffs here.
+                No recent changes yet. New, updated, and removed listing events will appear here after source runs.
               </p>
             ) : (
               <div className="space-y-3">

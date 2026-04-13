@@ -159,8 +159,8 @@ export default function IndustrialIntelRequirementsPage() {
       <section>
         <h2 className="text-3xl font-semibold text-slate-950">Requirements</h2>
         <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          This is the first Tool B requirement intake slice. It stores structured search criteria in
-          Industrial Intel tables only, so later matching can stay isolated from Tool A.
+          Capture a clean requirement, keep the search criteria structured, and prepare the next
+          Tool B slice to score listings against it.
         </p>
       </section>
 
@@ -171,6 +171,16 @@ export default function IndustrialIntelRequirementsPage() {
           </CardHeader>
           <CardContent>
             <form className="space-y-4" onSubmit={handleSubmit}>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                Start with the basics, add any hard building constraints, then save the requirement
+                when it is ready for review or matching.
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Basics</h3>
+                  <p className="mt-1 text-sm text-slate-500">Who the requirement is for, where it should land, and what type of deal it is.</p>
+                </div>
               <div className="space-y-2">
                 <Label htmlFor="title">Title</Label>
                 <Input id="title" value={form.title} onChange={(e) => updateField("title", e.target.value)} placeholder="West Edmonton lease requirement" />
@@ -210,6 +220,13 @@ export default function IndustrialIntelRequirementsPage() {
                 </div>
               </div>
 
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Size and building</h3>
+                  <p className="mt-1 text-sm text-slate-500">Capture the core size range and physical constraints that matter for screening listings.</p>
+                </div>
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <div className="space-y-2">
                   <Label htmlFor="minSf">Min SF</Label>
@@ -244,6 +261,13 @@ export default function IndustrialIntelRequirementsPage() {
                 </div>
               </div>
 
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Notes and intent</h3>
+                  <p className="mt-1 text-sm text-slate-500">Use notes for nuance that should influence matching, review, or off-market follow-up.</p>
+                </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="powerNotes">Power notes</Label>
@@ -271,6 +295,8 @@ export default function IndustrialIntelRequirementsPage() {
                 Include off-market search intent for this requirement
               </label>
 
+              </div>
+
               <Button type="submit" disabled={createRequirementMutation.isPending} className="bg-slate-950 text-white hover:bg-slate-800">
                 {createRequirementMutation.isPending ? "Saving..." : "Create requirement"}
               </Button>
@@ -287,9 +313,9 @@ export default function IndustrialIntelRequirementsPage() {
               <p className="text-sm text-slate-500">Loading requirements...</p>
             ) : requirements.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
-                <p className="text-base font-medium text-slate-900">No Tool B requirements yet</p>
+                <p className="text-base font-medium text-slate-900">No saved requirements yet</p>
                 <p className="mt-2 text-sm text-slate-600">
-                  Create the first one here. Once requirements exist, the next slice can start scoring listings against them.
+                  Your saved requirements will appear here. Start with one clear requirement, then the next Tool B slice can score listings against it.
                 </p>
               </div>
             ) : (
