@@ -78,6 +78,7 @@ export default function IndustrialIntelInventoryPage() {
     submarket: "",
     listingType: "lease",
     assetType: "building",
+    recordKeySuffix: "",
     availableSf: "",
     landAcres: "",
     totalPrice: "",
@@ -124,6 +125,7 @@ export default function IndustrialIntelInventoryPage() {
         submarket: form.submarket || null,
         listingType: form.listingType || null,
         assetType: form.assetType || null,
+        recordKeySuffix: form.recordKeySuffix || null,
         availableSf: form.availableSf ? Number(form.availableSf) : null,
         landAcres: form.landAcres ? Number(form.landAcres) : null,
         totalPrice: form.totalPrice ? Number(form.totalPrice) : null,
@@ -144,6 +146,7 @@ export default function IndustrialIntelInventoryPage() {
         brochureUrl: "",
         address: "",
         submarket: "",
+        recordKeySuffix: "",
         availableSf: "",
         landAcres: "",
         totalPrice: "",
@@ -368,6 +371,10 @@ export default function IndustrialIntelInventoryPage() {
                 </select>
               </div>
               <div className="space-y-2">
+                <Label htmlFor="recordKeySuffix">Record key suffix</Label>
+                <Input id="recordKeySuffix" placeholder="Optional, e.g. sale or lease" value={form.recordKeySuffix} onChange={(event) => setForm({ ...form, recordKeySuffix: event.target.value })} />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="availableSf">Available SF</Label>
                 <Input id="availableSf" placeholder="Optional square footage" value={form.availableSf} onChange={(event) => setForm({ ...form, availableSf: event.target.value })} />
               </div>
@@ -403,7 +410,7 @@ export default function IndustrialIntelInventoryPage() {
                 {manualIngestMutation.isPending ? "Saving..." : "Save to Tool B"}
               </button>
               <p className="text-sm text-slate-500">
-                Review any autofilled values before saving. Use this only when the automated lane is not the right fit.
+                Review any autofilled values before saving. Use the record key suffix when one source URL intentionally needs separate sale and lease entries.
               </p>
             </div>
             {previewMutation.isError && (

@@ -12,6 +12,7 @@ export type ManualIntelListingInput = {
   submarket?: string | null;
   listingType?: string | null;
   assetType?: string | null;
+  recordKeySuffix?: string | null;
   availableSf?: number | null;
   landAcres?: number | null;
   totalPrice?: number | null;
@@ -24,6 +25,12 @@ const MANUAL_SOURCE: { slug: IntelSourceAdapterSlug; name: string; kind: string;
   kind: 'manual',
   feedUrl: null,
 };
+
+function buildManualSourceRecordKey(sourceUrl: string, recordKeySuffix?: string | null): string {
+  const base = sourceUrl.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+  const suffix = String(recordKeySuffix || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  return suffix ? `${base}#${suffix}` : base;
+}
 
 async function ensureManualSource(): Promise<string> {
   const existing = await pool.query<{ id: string }>(
@@ -50,7 +57,7 @@ export async function ingestManualIntelListing(
 ): Promise<{ runId: string; recordsSeen: number; recordsNew: number; recordsUpdated: number; recordsRemoved: number }> {
   const sourceId = await ensureManualSource();
   const normalized: NormalizedIntelListingRecord = ensureContentHash({
-    sourceRecordKey: input.sourceUrl.replace(/^https?:\/\//i, '').replace(/\/$/, ''),
+    sourceRecordKey: buildManualSourceRecordKey(input.sourceUrl, input.recordKeySuffix),
     externalId: null,
     status: 'active',
     listingType: input.listingType || 'lease',
@@ -73,6 +80,7 @@ export async function ingestManualIntelListing(
       intakeMethod: 'manual_url',
       title: input.title,
       sourceUrl: input.sourceUrl,
+      recordKeySuffix: input.recordKeySuffix ?? null,
       brochureUrl: input.brochureUrl ?? null,
       address: input.address ?? null,
       market: input.market ?? null,

@@ -46,6 +46,7 @@ const intelManualListingSchema = z.object({
   submarket: z.string().trim().nullable().optional(),
   listingType: z.string().trim().min(1).nullable().optional(),
   assetType: z.string().trim().min(1).nullable().optional(),
+  recordKeySuffix: z.string().trim().min(1).nullable().optional(),
   availableSf: z.number().int().nonnegative().nullable().optional(),
   landAcres: z.number().nonnegative().nullable().optional(),
   totalPrice: z.number().nonnegative().nullable().optional(),
