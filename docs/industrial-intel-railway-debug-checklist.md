@@ -119,6 +119,17 @@ Action:
 - verify why stale cached empty response persisted
 - confirm listings page updates live
 
+## Adjacent follow-up, email -> Telegram/OpenClaw path
+Pat reported the email/Telegram integration is about 90% complete from terminal work but not fully tidied up.
+
+Add this to tomorrow's follow-up list:
+- audit current OpenClaw mail hook state
+- inspect `hooks.gmail` in `~/.openclaw/openclaw.json`
+- verify Gmail auth/OAuth still holds
+- run Gmail webhook setup and runtime commands if needed
+- confirm incoming email path actually lands where expected for Telegram/OpenClaw handling
+- avoid rotating unrelated OpenClaw settings while fixing this
+
 ## Fastest success signal tomorrow
 The fastest clean proof is:
 1. Railway DB row counts
