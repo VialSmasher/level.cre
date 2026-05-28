@@ -580,15 +580,20 @@ export default function FollowUpPage() {
     queryKey: ['/api/interactions'],
   });
 
+  const safeInteractions = useMemo(
+    () => Array.isArray(allInteractions) ? allInteractions : [],
+    [allInteractions],
+  );
+
   const interactionsByProspectId = useMemo(() => {
     const grouped = new Map<string, ContactInteractionRow[]>();
-    for (const interaction of allInteractions) {
+    for (const interaction of safeInteractions) {
       const list = grouped.get(interaction.prospectId) ?? [];
       list.push(interaction);
       grouped.set(interaction.prospectId, list);
     }
     return grouped;
-  }, [allInteractions]);
+  }, [safeInteractions]);
 
   // Compute due date (prefer stored followUpDueDate; fall back to timeframe-based)
   const now = new Date();

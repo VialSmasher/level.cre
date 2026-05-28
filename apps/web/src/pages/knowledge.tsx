@@ -75,16 +75,19 @@ export default function Knowledge() {
   }, []);
   const [selectedSubmarket, setSelectedSubmarket] = useState<string>('all');
 
+  const safeProspects = useMemo(() => Array.isArray(prospects) ? prospects : [], [prospects]);
+  const safeInteractions = useMemo(() => Array.isArray(interactions) ? interactions : [], [interactions]);
+
   const filteredProspects = useMemo(() => {
-    if (selectedSubmarket === 'all') return prospects;
+    if (selectedSubmarket === 'all') return safeProspects;
     // For profile-based submarkets, filter by submarket name instead of ID
-    return prospects.filter(p => p.submarketId === selectedSubmarket);
-  }, [prospects, selectedSubmarket]);
+    return safeProspects.filter(p => p.submarketId === selectedSubmarket);
+  }, [safeProspects, selectedSubmarket]);
 
   const analytics = useMemo(() => {
     const total = filteredProspects.length;
     const interactionsByProspectId = new Map<string, any[]>();
-    for (const interaction of interactions) {
+    for (const interaction of safeInteractions) {
       const list = interactionsByProspectId.get(interaction.prospectId) ?? [];
       list.push(interaction);
       interactionsByProspectId.set(interaction.prospectId, list);
@@ -122,7 +125,7 @@ export default function Knowledge() {
       staleProspects,
       interactionsByProspectId,
     };
-  }, [filteredProspects, interactions]);
+  }, [filteredProspects, safeInteractions]);
 
   const ProgressRing = ({ progress, size = 60 }: { progress: number; size?: number }) => {
     const safeProgress = progress || 0;
