@@ -857,7 +857,7 @@ export default function Knowledge() {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => setLocation('/app')}
+                      onClick={() => setLocation(`/app?prospectId=${encodeURIComponent(selectedProspect.id)}`)}
                     >
                       Open map
                     </Button>

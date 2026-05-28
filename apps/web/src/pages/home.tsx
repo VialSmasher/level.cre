@@ -318,6 +318,7 @@ export default function HomePage() {
   // Legend open/close managed inside StatusLegend component
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [isEditPanelOpen, setIsEditPanelOpen] = useState(false);
+  const focusedProspectIdRef = useRef<string | null>(null);
   const [editingProspectId, setEditingProspectId] = useState<string | null>(null);
   const [originalPolygonCoordinates, setOriginalPolygonCoordinates] = useState<[number, number][] | null>(null);
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
@@ -1178,6 +1179,27 @@ export default function HomePage() {
     () => getProspectLatLng(selectedProspect),
     [getProspectLatLng, selectedProspect]
   );
+
+  useEffect(() => {
+    if (!map || prospects.length === 0 || typeof window === 'undefined') return;
+    const targetId = new URLSearchParams(window.location.search).get('prospectId');
+    if (!targetId || focusedProspectIdRef.current === targetId) return;
+
+    const targetProspect = prospects.find((prospect) => prospect.id === targetId);
+    if (!targetProspect) return;
+
+    focusedProspectIdRef.current = targetId;
+    const targetLatLng = getProspectLatLng(targetProspect);
+    if (targetLatLng) {
+      map.panTo(targetLatLng);
+      map.setZoom(Math.max(map.getZoom() || 15, 16));
+      setCenter(targetLatLng);
+      setZoom(Math.max(map.getZoom() || 16, 16));
+    }
+    setSelectedProspect(targetProspect);
+    setIsEditPanelOpen(true);
+    setIsControlPanelOpen(false);
+  }, [map, prospects, getProspectLatLng]);
 
   // Demo helpers: id generation, building & persisting local prospects
   const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
