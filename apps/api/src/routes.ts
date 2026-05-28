@@ -78,6 +78,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return supabaseAdmin;
   }
 
+  async function ensureListingInvitesTable(): Promise<void> {
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS public.listing_invites (
+          id varchar PRIMARY KEY DEFAULT gen_random_uuid()::text,
+          listing_id varchar NOT NULL REFERENCES public.listings(id) ON DELETE CASCADE,
+          email varchar NOT NULL,
+          role varchar NOT NULL DEFAULT 'viewer',
+          invited_by varchar NOT NULL REFERENCES public.users(id),
+          status varchar NOT NULL DEFAULT 'pending',
+          created_at timestamp DEFAULT now(),
+          accepted_at timestamp
+        );
+      `);
+      await pool.query(`CREATE INDEX IF NOT EXISTS "IDX_listing_invites_listing" ON public.listing_invites(listing_id);`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS "IDX_listing_invites_email" ON public.listing_invites(email);`);
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS "UQ_listing_invites_pending_email"
+          ON public.listing_invites(listing_id, email)
+          WHERE status = 'pending';
+      `);
+    } catch (error: any) {
+      console.error('Failed to ensure listing_invites table:', error?.message || error);
+    }
+  }
+
+  await ensureListingInvitesTable();
+
   function mapProspectRow(row: any) {
     const parsedSize = row.size !== null && row.size !== undefined && row.size !== ''
       ? Number(row.size)
@@ -368,6 +396,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }];
 
     for (const member of members || []) {
+      if (member.user_id === listing.user_id) continue;
       result.push({
         userId: member.user_id,
         role: member.role,
@@ -432,6 +461,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     return accepted;
+  }
+
+  function getPrimaryAppOrigin(req: Request): string | null {
+    const originCandidates = (process.env.APP_ORIGIN || '')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean)
+      .filter((origin) => !origin.includes('*'));
+    if (originCandidates[0]) return originCandidates[0].replace(/\/$/, '');
+
+    const host = req.get('host') || '';
+    if (!host) return null;
+    const inferredProtocol = (host.includes('replit.app') || host.includes('replit.dev')) ? 'https' : req.protocol;
+    return `${inferredProtocol}://${host}`;
+  }
+
+  async function sendWorkspaceInviteEmail(req: Request, email: string): Promise<'sent' | 'not_configured' | 'failed'> {
+    if (!supabaseAdmin) return 'not_configured';
+    const appOrigin = getPrimaryAppOrigin(req);
+    const redirectTo = appOrigin ? `${appOrigin}/auth/callback` : undefined;
+    try {
+      const { error } = await (supabaseAdmin as any).auth.admin.inviteUserByEmail(email, {
+        redirectTo,
+      });
+      if (error) {
+        console.warn('Supabase invite email failed:', error?.message || error);
+        return 'failed';
+      }
+      return 'sent';
+    } catch (error: any) {
+      console.warn('Supabase invite email failed:', error?.message || error);
+      return 'failed';
+    }
   }
 
   async function requireViewAccess(req: Request, listingId: string): Promise<'owner' | 'editor' | 'viewer'> {
@@ -1464,6 +1526,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let ownerEmail: string | null = await resolveEmailByUserId(listRow.userId);
         results.push({ userId: listRow.userId, role: 'owner', email: ownerEmail });
         for (const m of members) {
+          if (m.userId === listRow.userId) continue;
           const email = await resolveEmailByUserId(m.userId);
           results.push({ userId: m.userId, role: m.role, email });
         }
@@ -1557,6 +1620,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
         .returning();
 
+      const emailDelivery = await sendWorkspaceInviteEmail(req, normalizedEmail);
+
       return res.status(201).json({
         id: invite.id,
         email: invite.email,
@@ -1564,6 +1629,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: invite.status,
         createdAt: invite.createdAt,
         kind: 'invite',
+        emailDelivery,
       });
     } catch (error: any) {
       const status = (error && typeof error === 'object' && (error as any).status) || 500;

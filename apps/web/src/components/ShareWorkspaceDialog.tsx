@@ -17,6 +17,7 @@ type ShareEntry = {
   role: 'owner'|'editor'|'viewer';
   status?: 'pending'|'accepted'|'revoked';
   kind?: 'member'|'invite';
+  emailDelivery?: 'sent'|'not_configured'|'failed';
 };
 
 function errorMessage(err: any): string {
@@ -62,7 +63,9 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
       toast({
         title: member.kind === 'invite' ? 'Invite pending' : 'Workspace shared',
         description: member.kind === 'invite'
-          ? 'They will get access once they sign in with this email.'
+          ? member.emailDelivery === 'sent'
+            ? 'Email sent. They will get access once they sign in with this email.'
+            : 'They will get access once they sign in with this email. Email delivery is not configured yet.'
           : `${member.email || member.userId} now has ${member.role} access.`,
       });
     },
