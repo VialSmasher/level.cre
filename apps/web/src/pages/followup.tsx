@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -254,7 +254,7 @@ function nextStepToIso(nextStep: NextStepKey, customDate: string) {
   return undefined;
 }
 
-function QuickEngagement({ prospect, allInteractions }: { prospect: Prospect; allInteractions: ContactInteractionRow[] }) {
+function QuickEngagement({ prospect, prospectInteractions }: { prospect: Prospect; prospectInteractions: ContactInteractionRow[] }) {
   const [activeAction, setActiveAction] = useState<QuickActionType | null>(null);
   const [outcome, setOutcome] = useState<QuickOutcome>('contacted');
   const [nextStep, setNextStep] = useState<NextStepKey>('1w');
@@ -264,7 +264,6 @@ function QuickEngagement({ prospect, allInteractions }: { prospect: Prospect; al
   const queryClient = useQueryClient();
 
   // Calculate interaction counts by type
-  const prospectInteractions = allInteractions.filter(i => i.prospectId === prospect.id);
   const callCount = prospectInteractions.filter(i => i.type === 'call').length;
   const emailCount = prospectInteractions.filter(i => i.type === 'email').length;
   const meetingCount = prospectInteractions.filter(i => i.type === 'meeting').length;
@@ -581,6 +580,16 @@ export default function FollowUpPage() {
     queryKey: ['/api/interactions'],
   });
 
+  const interactionsByProspectId = useMemo(() => {
+    const grouped = new Map<string, ContactInteractionRow[]>();
+    for (const interaction of allInteractions) {
+      const list = grouped.get(interaction.prospectId) ?? [];
+      list.push(interaction);
+      grouped.set(interaction.prospectId, list);
+    }
+    return grouped;
+  }, [allInteractions]);
+
   // Compute due date (prefer stored followUpDueDate; fall back to timeframe-based)
   const now = new Date();
   const getDueDate = (p: Prospect) => {
@@ -624,7 +633,7 @@ export default function FollowUpPage() {
 
   // Apply engagement filter
   const engagementFilteredProspects = baseProspects.filter((prospect: Prospect) => {
-    const prospectInteractions = allInteractions.filter(i => i.prospectId === prospect.id);
+    const prospectInteractions = interactionsByProspectId.get(prospect.id) ?? [];
     
     if (showEngagementFilter === 'no_engagement') {
       return prospectInteractions.length === 0; // Only prospects with no interactions
@@ -852,7 +861,7 @@ export default function FollowUpPage() {
                       
                       {/* Quick Engagement & Snooze */}
                       <div className="flex flex-col items-end gap-1" onClick={(e) => e.stopPropagation()}>
-                        <QuickEngagement prospect={prospect} allInteractions={allInteractions} />
+                        <QuickEngagement prospect={prospect} prospectInteractions={interactionsByProspectId.get(prospect.id) ?? []} />
                         <SnoozeButtons prospect={prospect} />
                       </div>
                     </div>

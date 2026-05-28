@@ -16,9 +16,8 @@ function getInteractionDate(interaction: any) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function getLatestInteractionDate(interactions: any[], prospectId: string) {
+function getLatestInteractionDate(interactions: any[]) {
   const timestamps = interactions
-    .filter(i => i.prospectId === prospectId)
     .map(getInteractionDate)
     .filter((date): date is Date => Boolean(date))
     .map(date => date.getTime());
@@ -84,6 +83,12 @@ export default function Knowledge() {
 
   const analytics = useMemo(() => {
     const total = filteredProspects.length;
+    const interactionsByProspectId = new Map<string, any[]>();
+    for (const interaction of interactions) {
+      const list = interactionsByProspectId.get(interaction.prospectId) ?? [];
+      list.push(interaction);
+      interactionsByProspectId.set(interaction.prospectId, list);
+    }
 
     // Contact coverage: % with status != 'prospect'
     const contacted = filteredProspects.filter(p => p.status !== 'prospect').length;
@@ -94,15 +99,15 @@ export default function Knowledge() {
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
 
     const recentActivity = filteredProspects.filter(p => {
-      const latestInteraction = getLatestInteractionDate(interactions, p.id);
+      const latestInteraction = getLatestInteractionDate(interactionsByProspectId.get(p.id) ?? []);
       return latestInteraction ? latestInteraction > sixtyDaysAgo : false;
     }).length;
     const freshnessPercent = total > 0 ? (recentActivity / total) * 100 : 0;
 
     // Lists for gaps and stale (stale relative to 60 days)
-    const noTouches = filteredProspects.filter(p => !interactions.some(i => i.prospectId === p.id));
+    const noTouches = filteredProspects.filter(p => !(interactionsByProspectId.get(p.id)?.length));
     const staleProspects = filteredProspects.filter(p => {
-      const latestInteraction = getLatestInteractionDate(interactions, p.id);
+      const latestInteraction = getLatestInteractionDate(interactionsByProspectId.get(p.id) ?? []);
       if (!latestInteraction) return true;
       return latestInteraction <= sixtyDaysAgo;
     });
@@ -115,6 +120,7 @@ export default function Knowledge() {
       freshnessPercent,
       noTouches,
       staleProspects,
+      interactionsByProspectId,
     };
   }, [filteredProspects, interactions]);
 
@@ -305,7 +311,7 @@ export default function Knowledge() {
                     .filter(p => ['contacted', 'followup'].includes(p.status))
                     .slice(0, 8)
                     .map((prospect) => {
-                      const latestInteraction = getLatestInteractionDate(interactions, prospect.id);
+                      const latestInteraction = getLatestInteractionDate(analytics.interactionsByProspectId.get(prospect.id) ?? []);
                       const lastTouchLabel = formatLastTouchLabel(latestInteraction);
                       
                       return (
