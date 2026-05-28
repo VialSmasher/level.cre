@@ -68,6 +68,14 @@ function formatDueBadgeLabel(dueDate: Date | null, now = new Date()) {
   return `Due in ${daysUntil}d`;
 }
 
+function toNoonUtcIso(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 12, 0, 0)).toISOString();
+}
+
+function addDaysIsoFromNow(days: number) {
+  return toNoonUtcIso(addDays(new Date(), days));
+}
+
 // Contact Interaction Modal Component
 function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
   const [interactionType, setInteractionType] = useState<string>('call');
@@ -212,50 +220,104 @@ function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; on
 }
 
 // Quick Engagement Component
+type QuickActionType = 'call' | 'email' | 'meeting' | 'note';
+type QuickOutcome = 'contacted' | 'no_answer' | 'left_message' | 'scheduled_meeting' | 'not_interested' | 'follow_up_later';
+type NextStepKey = 'tomorrow' | '3d' | '1w' | '1m' | 'custom' | 'none';
+
+const QUICK_OUTCOMES: Array<{ value: QuickOutcome; label: string }> = [
+  { value: 'contacted', label: 'Connected' },
+  { value: 'no_answer', label: 'No answer' },
+  { value: 'left_message', label: 'Left VM' },
+  { value: 'scheduled_meeting', label: 'Meeting set' },
+  { value: 'follow_up_later', label: 'Later' },
+  { value: 'not_interested', label: 'Bad fit' },
+];
+
+const NEXT_STEPS: Array<{ value: NextStepKey; label: string }> = [
+  { value: 'tomorrow', label: 'Tomorrow' },
+  { value: '3d', label: '3d' },
+  { value: '1w', label: '1w' },
+  { value: '1m', label: '1mo' },
+  { value: 'custom', label: 'Custom' },
+  { value: 'none', label: 'No follow-up' },
+];
+
+function nextStepToIso(nextStep: NextStepKey, customDate: string) {
+  if (nextStep === 'none') return null;
+  if (nextStep === 'custom') {
+    return customDate ? new Date(`${customDate}T12:00:00Z`).toISOString() : undefined;
+  }
+  if (nextStep === 'tomorrow') return addDaysIsoFromNow(1);
+  if (nextStep === '3d') return addDaysIsoFromNow(3);
+  if (nextStep === '1w') return addDaysIsoFromNow(7);
+  if (nextStep === '1m') return toNoonUtcIso(addMonthsSafe(new Date(), 1));
+  return undefined;
+}
+
 function QuickEngagement({ prospect, allInteractions }: { prospect: Prospect; allInteractions: ContactInteractionRow[] }) {
-  const [engagingType, setEngagingType] = useState<string | null>(null);
-  const [showNextFollow, setShowNextFollow] = useState<boolean>(false);
-  const [nextFollowUpDate, setNextFollowUpDate] = useState<string>(''); // YYYY-MM-DD
+  const [activeAction, setActiveAction] = useState<QuickActionType | null>(null);
+  const [outcome, setOutcome] = useState<QuickOutcome>('contacted');
+  const [nextStep, setNextStep] = useState<NextStepKey>('1w');
+  const [customDate, setCustomDate] = useState<string>('');
+  const [notes, setNotes] = useState<string>('');
+  const [savedMessage, setSavedMessage] = useState<string>('');
   const queryClient = useQueryClient();
 
   // Calculate interaction counts by type
   const prospectInteractions = allInteractions.filter(i => i.prospectId === prospect.id);
   const callCount = prospectInteractions.filter(i => i.type === 'call').length;
   const emailCount = prospectInteractions.filter(i => i.type === 'email').length;
+  const meetingCount = prospectInteractions.filter(i => i.type === 'meeting').length;
   const lastInteraction = prospectInteractions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
 
   const quickEngageMutation = useMutation({
-    mutationFn: async (type: 'call' | 'email') => {
+    mutationFn: async () => {
+      if (!activeAction) return null;
+      const nextFollowUpIso = nextStepToIso(nextStep, customDate);
+      const actionLabel = activeAction === 'call'
+        ? 'Call'
+        : activeAction === 'email'
+          ? 'Email'
+          : activeAction === 'meeting'
+            ? 'Meeting'
+            : 'Note';
+      const outcomeLabel = QUICK_OUTCOMES.find(item => item.value === outcome)?.label ?? outcome;
       const response = await apiRequest('POST', '/api/interactions', {
         prospectId: prospect.id,
         date: new Date().toISOString(),
-        type,
-        outcome: 'contacted',
-        notes: `Quick ${type} engagement`,
-        nextFollowUp: nextFollowUpDate || undefined,
+        type: activeAction,
+        outcome,
+        notes: notes.trim() || `${actionLabel} logged: ${outcomeLabel}`,
+        nextFollowUp: nextFollowUpIso || undefined,
       });
-      return response.json();
+      const interaction = await response.json();
+      const patch: Record<string, string | null> = {
+        lastContactDate: new Date().toISOString(),
+      };
+      if (nextFollowUpIso !== undefined) {
+        patch.followUpDueDate = nextFollowUpIso;
+      }
+      await apiRequest('PATCH', `/api/prospects/${prospect.id}`, patch);
+      return { interaction, nextFollowUpIso, actionLabel };
     },
-    onSuccess: async () => {
-      try {
-        const patch: Record<string, string> = {
-          lastContactDate: new Date().toISOString(),
-        };
-        if (nextFollowUpDate) {
-          // Normalize to noon UTC to avoid TZ off-by-one
-          const iso = new Date(`${nextFollowUpDate}T12:00:00Z`).toISOString();
-          patch.followUpDueDate = iso;
-        }
-        await apiRequest('PATCH', `/api/prospects/${prospect.id}`, patch);
-      } catch {}
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
       queryClient.invalidateQueries({ queryKey: ['/api/interactions'] });
       queryClient.invalidateQueries({ queryKey: ['/api/skills'] });
       queryClient.invalidateQueries({ queryKey: ['/api/skill-activities'] });
       queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] });
-      setEngagingType(null);
-      setShowNextFollow(false);
-      setNextFollowUpDate('');
+      const nextLabel = result?.nextFollowUpIso
+        ? `Next touch: ${new Date(result.nextFollowUpIso).toLocaleDateString()}`
+        : nextStep === 'none'
+          ? 'Follow-up cleared'
+          : 'Activity logged';
+      setSavedMessage(`${result?.actionLabel ?? 'Activity'} logged. ${nextLabel}.`);
+      setActiveAction(null);
+      setOutcome('contacted');
+      setNextStep('1w');
+      setCustomDate('');
+      setNotes('');
+      window.setTimeout(() => setSavedMessage(''), 3200);
     }
   });
 
@@ -273,16 +335,12 @@ function QuickEngagement({ prospect, allInteractions }: { prospect: Prospect; al
     }
   });
 
-  const handleQuickCall = (e: React.MouseEvent) => {
+  const startAction = (e: React.MouseEvent, type: QuickActionType) => {
     e.stopPropagation();
-    setEngagingType('call');
-    quickEngageMutation.mutate('call');
-  };
-
-  const handleQuickEmail = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setEngagingType('email');
-    quickEngageMutation.mutate('email');
+    setSavedMessage('');
+    setActiveAction(type);
+    setOutcome(type === 'meeting' ? 'scheduled_meeting' : 'contacted');
+    setNextStep(type === 'note' ? '3d' : '1w');
   };
 
   const handleUndo = (e: React.MouseEvent) => {
@@ -291,100 +349,158 @@ function QuickEngagement({ prospect, allInteractions }: { prospect: Prospect; al
   };
 
   return (
-    <div className="flex items-center gap-1">
-      {/* Toggle next follow-up date input */}
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={(e) => { e.stopPropagation(); setShowNextFollow((s) => !s); }}
-        className="flex items-center gap-1 transition-all px-2 hover:bg-amber-50 hover:border-amber-300"
-        title="Set next follow-up date"
-      >
-        <Clock className="h-3 w-3" />
-      </Button>
-
-      {showNextFollow && (
-        <div className="flex items-center gap-1">
-          <Input
-            type="date"
-            value={nextFollowUpDate}
-            onChange={(e) => { e.stopPropagation(); setNextFollowUpDate(e.target.value); }}
-            className="h-7 text-xs"
-          />
-          {nextFollowUpDate && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={(e) => { e.stopPropagation(); setNextFollowUpDate(''); }}
-              className="px-2"
-              title="Clear date"
-            >
-              <X className="h-3 w-3" />
-            </Button>
-          )}
-        </div>
-      )}
-
-      {/* Phone Button with Call Count */}
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={handleQuickCall}
-        disabled={quickEngageMutation.isPending}
-        className={`flex items-center gap-1 transition-all px-2 ${
-          engagingType === 'call' ? 'bg-green-100 border-green-300' : 'hover:bg-blue-50 hover:border-blue-300'
-        }`}
-      >
-        {quickEngageMutation.isPending && engagingType === 'call' ? (
-          <Zap className="h-3 w-3 animate-spin" />
-        ) : (
-          <PhoneCall className="h-3 w-3" />
-        )}
-        <span className={`text-xs font-semibold px-1 py-0.5 rounded-full min-w-[16px] text-center ${
-          callCount > 0 ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'
-        }`}>
-          {callCount}
-        </span>
-      </Button>
-      
-      {/* Email Button with Email Count */}
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={handleQuickEmail}
-        disabled={quickEngageMutation.isPending}
-        className={`flex items-center gap-1 transition-all px-2 ${
-          engagingType === 'email' ? 'bg-green-100 border-green-300' : 'hover:bg-orange-50 hover:border-orange-300'
-        }`}
-      >
-        {quickEngageMutation.isPending && engagingType === 'email' ? (
-          <Zap className="h-3 w-3 animate-spin" />
-        ) : (
-          <Mail className="h-3 w-3" />
-        )}
-        <span className={`text-xs font-semibold px-1 py-0.5 rounded-full min-w-[16px] text-center ${
-          emailCount > 0 ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-600'
-        }`}>
-          {emailCount}
-        </span>
-      </Button>
-
-      {/* Undo Button - only show if there are interactions */}
-      {prospectInteractions.length > 0 && (
+    <div className="w-full max-w-[280px] space-y-2">
+      <div className="flex items-center justify-end gap-1">
         <Button
           size="sm"
           variant="outline"
-          onClick={handleUndo}
-          disabled={undoMutation.isPending}
-          className="flex items-center gap-1 transition-all px-2 hover:bg-red-50 hover:border-red-300"
-          title="Undo last interaction"
+          onClick={(e) => startAction(e, 'call')}
+          disabled={quickEngageMutation.isPending}
+          className="flex items-center gap-1 px-2 transition-all hover:bg-blue-50 hover:border-blue-300"
+          title="Log call"
         >
-          {undoMutation.isPending ? (
-            <Zap className="h-3 w-3 animate-spin" />
-          ) : (
-            <Undo2 className="h-3 w-3 text-red-600" />
-          )}
+          <PhoneCall className="h-3 w-3" />
+          <span className="text-xs font-semibold">{callCount}</span>
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={(e) => startAction(e, 'email')}
+          disabled={quickEngageMutation.isPending}
+          className="flex items-center gap-1 px-2 transition-all hover:bg-orange-50 hover:border-orange-300"
+          title="Log email"
+        >
+          <Mail className="h-3 w-3" />
+          <span className="text-xs font-semibold">{emailCount}</span>
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={(e) => startAction(e, 'meeting')}
+          disabled={quickEngageMutation.isPending}
+          className="flex items-center gap-1 px-2 transition-all hover:bg-violet-50 hover:border-violet-300"
+          title="Log meeting"
+        >
+          <Users className="h-3 w-3" />
+          <span className="text-xs font-semibold">{meetingCount}</span>
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={(e) => startAction(e, 'note')}
+          disabled={quickEngageMutation.isPending}
+          className="px-2 transition-all hover:bg-slate-50 hover:border-slate-300"
+          title="Add note"
+        >
+          <MessageSquare className="h-3 w-3" />
+        </Button>
+        {prospectInteractions.length > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleUndo}
+            disabled={undoMutation.isPending}
+            className="px-2 transition-all hover:bg-red-50 hover:border-red-300"
+            title="Undo last interaction"
+          >
+            {undoMutation.isPending ? (
+              <Zap className="h-3 w-3 animate-spin" />
+            ) : (
+              <Undo2 className="h-3 w-3 text-red-600" />
+            )}
+          </Button>
+        )}
+      </div>
+
+      {savedMessage && (
+        <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs font-medium text-green-800 shadow-sm animate-in fade-in zoom-in-95">
+          <CheckCircle className="mr-1 inline h-3 w-3" />
+          {savedMessage}
+        </div>
+      )}
+
+      {activeAction && (
+        <div className="rounded-md border border-blue-100 bg-white p-3 text-left shadow-sm animate-in fade-in slide-in-from-top-1">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              {activeAction === 'call' ? 'Log call' : activeAction === 'email' ? 'Log email' : activeAction === 'meeting' ? 'Log meeting' : 'Add note'}
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2"
+              onClick={(e) => { e.stopPropagation(); setActiveAction(null); }}
+              title="Close"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+
+          <div className="mb-3 flex flex-wrap gap-1">
+            {QUICK_OUTCOMES.map(item => (
+              <Button
+                key={item.value}
+                size="sm"
+                variant={outcome === item.value ? 'default' : 'outline'}
+                className="h-7 px-2 text-[11px]"
+                onClick={(e) => { e.stopPropagation(); setOutcome(item.value); }}
+              >
+                {item.label}
+              </Button>
+            ))}
+          </div>
+
+          <div className="mb-3 flex flex-wrap gap-1">
+            {NEXT_STEPS.map(item => (
+              <Button
+                key={item.value}
+                size="sm"
+                variant={nextStep === item.value ? 'default' : 'outline'}
+                className="h-7 px-2 text-[11px]"
+                onClick={(e) => { e.stopPropagation(); setNextStep(item.value); }}
+              >
+                {item.label}
+              </Button>
+            ))}
+          </div>
+
+          {nextStep === 'custom' && (
+            <Input
+              type="date"
+              value={customDate}
+              onChange={(e) => { e.stopPropagation(); setCustomDate(e.target.value); }}
+              onClick={(e) => e.stopPropagation()}
+              className="mb-3 h-8 text-xs"
+            />
+          )}
+
+          <Input
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="Optional note"
+            className="mb-3 h-8 text-xs"
+          />
+
+          <Button
+            size="sm"
+            className="h-8 w-full"
+            disabled={quickEngageMutation.isPending || (nextStep === 'custom' && !customDate)}
+            onClick={(e) => { e.stopPropagation(); quickEngageMutation.mutate(); }}
+          >
+            {quickEngageMutation.isPending ? (
+              <>
+                <Zap className="h-3 w-3 animate-spin" />
+                Saving
+              </>
+            ) : (
+              <>
+                <CheckCircle className="h-3 w-3" />
+                Log and move forward
+              </>
+            )}
+          </Button>
+        </div>
       )}
     </div>
   );
