@@ -857,7 +857,12 @@ export default function Knowledge() {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => setLocation(`/app?prospectId=${encodeURIComponent(selectedProspect.id)}`)}
+                      onClick={() => {
+                        try {
+                          window.localStorage.setItem('levelcre:focusProspectId', selectedProspect.id);
+                        } catch {}
+                        setLocation('/app');
+                      }}
                     >
                       Open map
                     </Button>

@@ -1182,7 +1182,11 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!map || prospects.length === 0 || typeof window === 'undefined') return;
-    const targetId = new URLSearchParams(window.location.search).get('prospectId');
+    let storedTargetId: string | null = null;
+    try {
+      storedTargetId = window.localStorage.getItem('levelcre:focusProspectId');
+    } catch {}
+    const targetId = new URLSearchParams(window.location.search).get('prospectId') || storedTargetId;
     if (!targetId || focusedProspectIdRef.current === targetId) return;
 
     const targetProspect = prospects.find((prospect) => prospect.id === targetId);
@@ -1199,6 +1203,9 @@ export default function HomePage() {
     setSelectedProspect(targetProspect);
     setIsEditPanelOpen(true);
     setIsControlPanelOpen(false);
+    try {
+      window.localStorage.removeItem('levelcre:focusProspectId');
+    } catch {}
   }, [map, prospects, getProspectLatLng]);
 
   // Demo helpers: id generation, building & persisting local prospects
