@@ -259,6 +259,28 @@ export const listingMembers = pgTable(
 export type ListingMember = typeof listingMembers.$inferSelect;
 export type InsertListingMember = typeof listingMembers.$inferInsert;
 
+// Pending workspace invitations for emails that are not members yet.
+export const listingInvites = pgTable(
+  "listing_invites",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    listingId: varchar("listing_id").notNull().references(() => listings.id, { onDelete: 'cascade' }),
+    email: varchar("email").notNull(),
+    role: varchar("role").notNull().default('viewer'), // editor | viewer
+    invitedBy: varchar("invited_by").notNull().references(() => users.id),
+    status: varchar("status").notNull().default('pending'), // pending | accepted | revoked
+    createdAt: timestamp("created_at").defaultNow(),
+    acceptedAt: timestamp("accepted_at"),
+  },
+  (table) => [
+    index("IDX_listing_invites_listing").on(table.listingId),
+    index("IDX_listing_invites_email").on(table.email),
+  ],
+);
+
+export type ListingInvite = typeof listingInvites.$inferSelect;
+export type InsertListingInvite = typeof listingInvites.$inferInsert;
+
 // Contact interactions table
 export const contactInteractions = pgTable(
   "contact_interactions",

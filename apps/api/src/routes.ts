@@ -14,7 +14,7 @@ function isDemo(req: Request): boolean {
 }
 import { createClient } from '@supabase/supabase-js';
 import { pool, db } from './db';
-import { listings, listingMembers, users, profiles, listingProspects, contactInteractions } from '@level-cre/shared/schema';
+import { listings, listingMembers, listingInvites, users, profiles, listingProspects, contactInteractions } from '@level-cre/shared/schema';
 import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
@@ -57,6 +57,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       current = current.cause;
     }
     return false;
+  }
+
+  function normalizeInviteEmail(email: unknown): string {
+    return String(email || '').trim().toLowerCase();
+  }
+
+  function isValidInviteEmail(email: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  }
+
+  function normalizeWorkspaceRole(role: unknown): 'editor' | 'viewer' {
+    return role === 'editor' ? 'editor' : 'viewer';
   }
 
   function requireSupabaseAdmin() {
@@ -363,7 +375,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
 
+    const { data: invites, error: invitesError } = await admin
+      .from('listing_invites')
+      .select('id,email,role,status,created_at')
+      .eq('listing_id', listingId)
+      .eq('status', 'pending');
+    if (invitesError) throw invitesError;
+
+    for (const invite of invites || []) {
+      result.push({
+        id: invite.id,
+        email: invite.email,
+        role: invite.role,
+        status: invite.status,
+        createdAt: invite.created_at,
+        kind: 'invite',
+      });
+    }
+
     return result;
+  }
+
+  async function acceptPendingListingInvites(userId: string, email?: string | null): Promise<number> {
+    const normalized = normalizeInviteEmail(email);
+    if (!normalized) return 0;
+
+    const pending = await db
+      .select()
+      .from(listingInvites)
+      .where(and(eq(listingInvites.email, normalized), eq(listingInvites.status, 'pending')));
+
+    let accepted = 0;
+    for (const invite of pending) {
+      const [listing] = await db.select().from(listings).where(eq(listings.id, invite.listingId));
+      if (!listing || listing.userId === userId) {
+        await db
+          .update(listingInvites)
+          .set({ status: 'accepted', acceptedAt: new Date() })
+          .where(eq(listingInvites.id, invite.id));
+        continue;
+      }
+
+      await db
+        .insert(listingMembers)
+        .values({ listingId: invite.listingId, userId, role: normalizeWorkspaceRole(invite.role) })
+        .onConflictDoUpdate({
+          target: [listingMembers.listingId, listingMembers.userId],
+          set: { role: normalizeWorkspaceRole(invite.role) },
+        });
+
+      await db
+        .update(listingInvites)
+        .set({ status: 'accepted', acceptedAt: new Date() })
+        .where(eq(listingInvites.id, invite.id));
+      accepted += 1;
+    }
+
+    return accepted;
   }
 
   async function requireViewAccess(req: Request, listingId: string): Promise<'owner' | 'editor' | 'viewer'> {
@@ -531,7 +599,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Helper: find userId by email using Supabase Admin if available, else local tables
   async function findUserIdByEmail(email: string): Promise<{ id: string, email: string } | null> {
-    const normalized = String(email || '').trim().toLowerCase();
+    const normalized = normalizeInviteEmail(email);
     if (!normalized) return null;
     if (isDemo({ headers: {} } as any)) {
       if (normalized === 'demo@example.com') return { id: 'demo-user', email: 'demo@example.com' };
@@ -1022,6 +1090,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const email = (req as any)?.user?.email || null;
       if (!isDemo(req)) {
         await ensureUser(userId, email);
+        try {
+          await acceptPendingListingInvites(userId, email);
+        } catch (inviteError: any) {
+          console.error('Pending invite acceptance failed:', inviteError?.message || inviteError);
+        }
       }
       const fromDemo = isDemo(req);
       let profile: any = null;
@@ -1394,6 +1467,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const email = await resolveEmailByUserId(m.userId);
           results.push({ userId: m.userId, role: m.role, email });
         }
+        const invites = await db
+          .select()
+          .from(listingInvites)
+          .where(and(eq(listingInvites.listingId, req.params.id), eq(listingInvites.status, 'pending')));
+        for (const invite of invites) {
+          results.push({
+            id: invite.id,
+            email: invite.email,
+            role: invite.role,
+            status: invite.status,
+            createdAt: invite.createdAt,
+            kind: 'invite',
+          });
+        }
       } catch (error) {
         if (!shouldUseSupabaseReadFallback(error) || !supabaseAdmin) throw error;
         results = await getListingMembersViaSupabase(req.params.id);
@@ -1411,27 +1498,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       await requireOwnerAccess(req, req.params.id);
       const { email, role } = req.body || {};
-      if (!email) return res.status(400).json({ error: 'email is required' });
+      const normalizedEmail = normalizeInviteEmail(email);
+      if (!normalizedEmail || !isValidInviteEmail(normalizedEmail)) {
+        return res.status(400).json({ code: 'invalid_email', message: 'Enter a valid email address.' });
+      }
       if (isDemo(req)) {
         // Explicitly disallow invites in demo mode
-        return res.status(400).json({ error: 'Invites disabled in demo mode' });
+        return res.status(400).json({ code: 'demo_invites_disabled', message: 'Invites are disabled in demo mode.' });
       }
-      const roleValue = (role === 'editor' || role === 'viewer') ? role : 'viewer';
+      const roleValue = normalizeWorkspaceRole(role);
       // Lookup user by email
-      const found = await findUserIdByEmail(email);
-      if (!found) return res.status(404).json({ error: 'User not found' });
-      // Ensure target user exists for FK, then upsert member
-      await ensureUser(found.id, found.email);
-      await db
-        .insert(listingMembers)
-        .values({ listingId: req.params.id, userId: found.id, role: roleValue })
-        .onConflictDoUpdate({ target: [listingMembers.listingId, listingMembers.userId], set: { role: roleValue } });
-      return res.status(201).json({ userId: found.id, email: found.email, role: roleValue });
+      const found = await findUserIdByEmail(normalizedEmail);
+      const [listing] = await db.select().from(listings).where(eq(listings.id, req.params.id));
+      if (!listing) return res.status(404).json({ code: 'workspace_not_found', message: 'Workspace not found.' });
+
+      if (found) {
+        if (listing.userId === found.id) {
+          return res.status(409).json({ code: 'already_member', message: 'That email is already the workspace owner.' });
+        }
+
+        const [existingMember] = await db
+          .select()
+          .from(listingMembers)
+          .where(and(eq(listingMembers.listingId, req.params.id), eq(listingMembers.userId, found.id)));
+        if (existingMember) {
+          return res.status(409).json({ code: 'already_member', message: 'That email is already a member.' });
+        }
+
+        // Ensure target user exists for FK, then add member.
+        await ensureUser(found.id, found.email);
+        await db
+          .insert(listingMembers)
+          .values({ listingId: req.params.id, userId: found.id, role: roleValue })
+          .onConflictDoUpdate({ target: [listingMembers.listingId, listingMembers.userId], set: { role: roleValue } });
+        await db
+          .update(listingInvites)
+          .set({ status: 'accepted', acceptedAt: new Date() })
+          .where(and(eq(listingInvites.listingId, req.params.id), eq(listingInvites.email, normalizedEmail), eq(listingInvites.status, 'pending')));
+        return res.status(201).json({ userId: found.id, email: found.email, role: roleValue, kind: 'member' });
+      }
+
+      const [existingInvite] = await db
+        .select()
+        .from(listingInvites)
+        .where(and(eq(listingInvites.listingId, req.params.id), eq(listingInvites.email, normalizedEmail), eq(listingInvites.status, 'pending')));
+      if (existingInvite) {
+        return res.status(409).json({ code: 'invite_pending', message: 'Invite already pending for this email.' });
+      }
+
+      const [invite] = await db
+        .insert(listingInvites)
+        .values({
+          listingId: req.params.id,
+          email: normalizedEmail,
+          role: roleValue,
+          invitedBy: getUserId(req),
+          status: 'pending',
+        })
+        .returning();
+
+      return res.status(201).json({
+        id: invite.id,
+        email: invite.email,
+        role: invite.role,
+        status: invite.status,
+        createdAt: invite.createdAt,
+        kind: 'invite',
+      });
     } catch (error: any) {
       const status = (error && typeof error === 'object' && (error as any).status) || 500;
       if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
       console.error('Error adding listing member:', error);
       res.status(500).json({ message: 'Failed to add listing member' });
+    }
+  });
+
+  app.delete('/api/listings/:id/invites/:inviteId', requireAuth, async (req, res) => {
+    try {
+      await requireOwnerAccess(req, req.params.id);
+      if (isDemo(req)) {
+        return res.status(400).json({ code: 'demo_invites_disabled', message: 'Invites are disabled in demo mode.' });
+      }
+      await db
+        .update(listingInvites)
+        .set({ status: 'revoked' })
+        .where(and(eq(listingInvites.id, req.params.inviteId), eq(listingInvites.listingId, req.params.id), eq(listingInvites.status, 'pending')));
+      res.status(204).send();
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
+      console.error('Error revoking listing invite:', error);
+      res.status(500).json({ message: 'Failed to revoke invite' });
     }
   });
 

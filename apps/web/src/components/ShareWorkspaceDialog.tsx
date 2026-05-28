@@ -8,15 +8,35 @@ import { apiRequest } from '@/lib/queryClient';
 import { Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { Modal, ModalContent, ModalHeader, ModalTitle, ModalFooter, ModalClose } from '@/components/primitives/Modal';
+import { Modal, ModalContent, ModalHeader, ModalTitle, ModalClose } from '@/components/primitives/Modal';
 
-type Member = { userId: string; email?: string | null; role: 'owner'|'editor'|'viewer' };
+type ShareEntry = {
+  userId?: string;
+  id?: string;
+  email?: string | null;
+  role: 'owner'|'editor'|'viewer';
+  status?: 'pending'|'accepted'|'revoked';
+  kind?: 'member'|'invite';
+};
+
+function errorMessage(err: any): string {
+  const raw = String(err?.message || '');
+  const jsonStart = raw.indexOf('{');
+  if (jsonStart >= 0) {
+    try {
+      const payload = JSON.parse(raw.slice(jsonStart));
+      if (payload?.message) return payload.message;
+      if (payload?.error) return payload.error;
+    } catch {}
+  }
+  return raw || 'Failed to invite';
+}
 
 export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage }: { listingId: string; open: boolean; onOpenChange: (v: boolean) => void; canManage: boolean; }) {
   const qc = useQueryClient();
   const { isDemoMode } = useAuth();
   const { toast } = useToast();
-  const { data: members = [] } = useQuery<Member[]>({ queryKey: ['/api/listings', listingId, 'members'], enabled: open && !!listingId });
+  const { data: members = [] } = useQuery<ShareEntry[]>({ queryKey: ['/api/listings', listingId, 'members'], enabled: open && !!listingId });
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'viewer'|'editor'>('viewer');
@@ -26,19 +46,28 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
       const res = await apiRequest('POST', `/api/listings/${listingId}/members`, { email: inviteEmail.trim(), role: inviteRole });
       return res.json();
     },
-    onSuccess: (member: Member) => {
-      qc.setQueryData<Member[]>(['/api/listings', listingId, 'members'], (prev) => {
+    onSuccess: (member: ShareEntry) => {
+      qc.setQueryData<ShareEntry[]>(['/api/listings', listingId, 'members'], (prev) => {
         const arr = Array.isArray(prev) ? [...prev] : [];
-        const idx = arr.findIndex((m) => m.userId === member.userId);
+        const idx = arr.findIndex((m) => (
+          member.kind === 'invite'
+            ? m.kind === 'invite' && m.id === member.id
+            : m.userId === member.userId
+        ));
         if (idx === -1) arr.push(member); else arr[idx] = member;
         return arr;
       });
       setInviteEmail('');
       setInviteRole('viewer');
-      toast({ title: 'Invite sent', description: member.email || member.userId });
+      toast({
+        title: member.kind === 'invite' ? 'Invite pending' : 'Workspace shared',
+        description: member.kind === 'invite'
+          ? 'They will get access once they sign in with this email.'
+          : `${member.email || member.userId} now has ${member.role} access.`,
+      });
     },
     onError: async (err: any) => {
-      const msg = err?.message || 'Failed to invite';
+      const msg = errorMessage(err);
       toast({ title: 'Invite failed', description: msg, variant: 'destructive' });
     }
   });
@@ -51,8 +80,8 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
     },
     onMutate: async ({ userId, role }) => {
       const key = ['/api/listings', listingId, 'members'];
-      const prev = qc.getQueryData<Member[]>(key) || [];
-      qc.setQueryData<Member[]>(key, prev.map((m) => (m.userId === userId ? { ...m, role } : m)));
+      const prev = qc.getQueryData<ShareEntry[]>(key) || [];
+      qc.setQueryData<ShareEntry[]>(key, prev.map((m) => (m.userId === userId ? { ...m, role } : m)));
       return { prev };
     },
     onError: (_err, _vars, ctx) => { if (ctx?.prev) qc.setQueryData(['/api/listings', listingId, 'members'], ctx.prev); },
@@ -67,8 +96,24 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
     },
     onMutate: async (userId) => {
       const key = ['/api/listings', listingId, 'members'];
-      const prev = qc.getQueryData<Member[]>(key) || [];
-      qc.setQueryData<Member[]>(key, prev.filter((m) => m.userId !== userId));
+      const prev = qc.getQueryData<ShareEntry[]>(key) || [];
+      qc.setQueryData<ShareEntry[]>(key, prev.filter((m) => m.userId !== userId));
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => { if (ctx?.prev) qc.setQueryData(['/api/listings', listingId, 'members'], ctx.prev); },
+    onSettled: () => { qc.invalidateQueries({ queryKey: ['/api/listings', listingId, 'members'] }); }
+  });
+
+  const revokeInviteMutation = useMutation({
+    mutationFn: async (inviteId: string) => {
+      const res = await apiRequest('DELETE', `/api/listings/${listingId}/invites/${inviteId}`);
+      if (!res.ok) throw new Error('Failed');
+      return inviteId;
+    },
+    onMutate: async (inviteId) => {
+      const key = ['/api/listings', listingId, 'members'];
+      const prev = qc.getQueryData<ShareEntry[]>(key) || [];
+      qc.setQueryData<ShareEntry[]>(key, prev.filter((m) => m.id !== inviteId));
       return { prev };
     },
     onError: (_err, _vars, ctx) => { if (ctx?.prev) qc.setQueryData(['/api/listings', listingId, 'members'], ctx.prev); },
@@ -121,14 +166,21 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
               <div>Member</div><div>Role</div><div></div>
             </div>
             <div className="max-h-72 overflow-auto">
-              {members.map((m) => (
-                <div key={m.userId} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 px-3 py-2 border-b last:border-b-0">
-                  <div className="text-sm">{m.email || m.userId}{m.role === 'owner' && <span className="ml-2 text-xs text-gray-500">(Owner)</span>}</div>
+              {members.map((m) => {
+                const isInvite = m.kind === 'invite' || m.status === 'pending';
+                const key = isInvite ? `invite-${m.id || m.email}` : `member-${m.userId}`;
+                return (
+                <div key={key} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 px-3 py-2 border-b last:border-b-0">
+                  <div className="text-sm">
+                    {m.email || m.userId}
+                    {m.role === 'owner' && <span className="ml-2 text-xs text-gray-500">(Owner)</span>}
+                    {isInvite && <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200">Pending</span>}
+                  </div>
                   <div>
-                    {m.role === 'owner' ? (
-                      <span className="text-xs">owner</span>
+                    {m.role === 'owner' || isInvite ? (
+                      <span className="text-xs">{m.role}</span>
                     ) : (
-                      <Select value={m.role} onValueChange={(role) => updateRoleMutation.mutate({ userId: m.userId, role: role as any })} disabled={!canManage}>
+                      <Select value={m.role} onValueChange={(role) => updateRoleMutation.mutate({ userId: m.userId!, role: role as any })} disabled={!canManage}>
                         <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="viewer">viewer</SelectItem>
@@ -138,14 +190,19 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
                     )}
                   </div>
                   <div className="flex items-center justify-end">
-                    {m.role !== 'owner' && canManage && (
-                      <Button variant="ghost" size="icon" onClick={() => removeMutation.mutate(m.userId)} aria-label="Remove">
+                    {isInvite && canManage && m.id && (
+                      <Button variant="ghost" size="icon" onClick={() => revokeInviteMutation.mutate(m.id!)} aria-label="Revoke invite">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {!isInvite && m.role !== 'owner' && canManage && m.userId && (
+                      <Button variant="ghost" size="icon" onClick={() => removeMutation.mutate(m.userId!)} aria-label="Remove">
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     )}
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           </div>
         </div>
