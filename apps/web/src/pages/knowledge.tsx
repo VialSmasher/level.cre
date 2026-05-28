@@ -3,14 +3,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { ArrowRight, Building2, Calendar, CheckCircle2, Clock, MapPin, Phone, Target, Users, Wrench } from 'lucide-react';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Textarea } from '@/components/ui/textarea';
+import { ArrowRight, Building2, Calendar, CheckCircle2, Clock, Mail, MapPin, MessageSquare, Phone, Target, Users, Wrench } from 'lucide-react';
 import { Prospect, Submarket } from '@level-cre/shared/schema';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/hooks/useProfile';
 import { useLocation } from 'wouter';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospectDisplay';
+import { apiRequest } from '@/lib/queryClient';
 
 function getInteractionDate(interaction: any) {
   const parsed = new Date(interaction?.date || interaction?.createdAt || '');
@@ -41,10 +44,17 @@ function formatStatusLabel(status: string) {
   return status.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function addDaysIso(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0)).toISOString();
+}
+
 export default function Knowledge() {
   const { user } = useAuth();
   const { profile } = useProfile();
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
   const currentUser = user;
   
   // Load data from database APIs instead of localStorage
@@ -83,6 +93,8 @@ export default function Knowledge() {
   }, []);
   const [selectedSubmarket, setSelectedSubmarket] = useState<string>('all');
   const [activeQueue, setActiveQueue] = useState<FocusQueue>('new');
+  const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
+  const [quickNote, setQuickNote] = useState('');
 
   const safeProspects = useMemo(() => Array.isArray(prospects) ? prospects : [], [prospects]);
   const safeInteractions = useMemo(() => Array.isArray(interactions) ? interactions : [], [interactions]);
@@ -273,6 +285,64 @@ export default function Knowledge() {
     return badges;
   };
 
+  const selectedInteractions = selectedProspect
+    ? analytics.interactionsByProspectId.get(selectedProspect.id) ?? []
+    : [];
+  const selectedLatestInteraction = getLatestInteractionDate(selectedInteractions);
+
+  const invalidateDashboardData = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['/api/prospects'] }),
+      queryClient.invalidateQueries({ queryKey: ['/api/interactions'] }),
+      queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] }),
+      queryClient.invalidateQueries({ queryKey: ['/api/skills'] }),
+      queryClient.invalidateQueries({ queryKey: ['/api/skill-activities'] }),
+    ]);
+  };
+
+  const logInteractionMutation = useMutation({
+    mutationFn: async ({ prospect, type, outcome, notes }: {
+      prospect: Prospect;
+      type: 'call' | 'email' | 'meeting' | 'note';
+      outcome: 'contacted' | 'no_answer' | 'left_message' | 'scheduled_meeting' | 'not_interested' | 'follow_up_later';
+      notes?: string;
+    }) => {
+      await apiRequest('POST', '/api/interactions', {
+        prospectId: prospect.id,
+        date: new Date().toISOString(),
+        type,
+        outcome,
+        notes: notes || '',
+      });
+
+      const patch: Record<string, string> = {
+        lastContactDate: new Date().toISOString(),
+      };
+      if (prospect.status === 'prospect' && type !== 'note') {
+        patch.status = 'contacted';
+      }
+      await apiRequest('PATCH', `/api/prospects/${prospect.id}`, patch);
+    },
+    onSuccess: async () => {
+      setQuickNote('');
+      await invalidateDashboardData();
+    },
+  });
+
+  const snoozeMutation = useMutation({
+    mutationFn: async ({ prospect, days }: { prospect: Prospect; days: number }) => {
+      await apiRequest('PATCH', `/api/prospects/${prospect.id}`, {
+        followUpDueDate: addDaysIso(days),
+      });
+    },
+    onSuccess: invalidateDashboardData,
+  });
+
+  const openProspect = (prospect: Prospect) => {
+    setSelectedProspect(prospect);
+    setQuickNote('');
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -435,7 +505,12 @@ export default function Knowledge() {
                       const latestInteraction = getLatestInteractionDate(analytics.interactionsByProspectId.get(prospect.id) ?? []);
                       const secondary = getProspectSecondaryName(prospect);
                       return (
-                        <div key={prospect.id} className="group rounded-lg border border-slate-200 bg-white p-3 transition-colors hover:border-blue-200 hover:bg-blue-50/40">
+                        <button
+                          key={prospect.id}
+                          type="button"
+                          className="group w-full rounded-lg border border-slate-200 bg-white p-3 text-left transition-colors hover:border-blue-200 hover:bg-blue-50/40 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          onClick={() => openProspect(prospect)}
+                        >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="truncate font-semibold text-slate-950">{getProspectDisplayName(prospect)}</div>
@@ -452,7 +527,7 @@ export default function Knowledge() {
                               </Badge>
                             ))}
                           </div>
-                        </div>
+                        </button>
                       );
                     })
                 )}
@@ -488,7 +563,12 @@ export default function Knowledge() {
                       const secondary = getProspectSecondaryName(prospect);
                       
                       return (
-                        <div key={prospect.id} className="group rounded-lg border border-slate-200 bg-white p-3 transition-colors hover:border-orange-200 hover:bg-orange-50/40">
+                        <button
+                          key={prospect.id}
+                          type="button"
+                          className="group w-full rounded-lg border border-slate-200 bg-white p-3 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/40 focus:outline-none focus:ring-2 focus:ring-orange-200"
+                          onClick={() => openProspect(prospect)}
+                        >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="truncate font-semibold text-slate-950">{getProspectDisplayName(prospect)}</div>
@@ -510,7 +590,7 @@ export default function Knowledge() {
                               {formatStatusLabel(prospect.status)}
                             </Badge>
                           </div>
-                        </div>
+                        </button>
                       );
                     })
                 )}
@@ -519,6 +599,186 @@ export default function Knowledge() {
           </Card>
         </div>
       </div>
+
+      <Sheet open={Boolean(selectedProspect)} onOpenChange={(open) => !open && setSelectedProspect(null)}>
+        <SheetContent className="w-full overflow-y-auto p-0 sm:max-w-xl">
+          {selectedProspect && (
+            <div className="flex min-h-full flex-col">
+              <SheetHeader className="border-b border-slate-200 p-6 pr-12">
+                <div className="mb-2 flex flex-wrap gap-2">
+                  <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
+                    {formatStatusLabel(selectedProspect.status)}
+                  </Badge>
+                  <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
+                    {getSubmarketLabel(selectedProspect.submarketId)}
+                  </Badge>
+                  <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
+                    {formatLastTouchLabel(selectedLatestInteraction)}
+                  </Badge>
+                </div>
+                <SheetTitle className="text-2xl font-bold text-slate-950">
+                  {getProspectDisplayName(selectedProspect)}
+                </SheetTitle>
+                <SheetDescription>
+                  {getProspectSecondaryName(selectedProspect) || 'Open the record, log the next touch, or clean up the missing details.'}
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="flex-1 space-y-5 p-6">
+                <section className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="mb-3 text-sm font-semibold text-slate-900">Quick actions</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      className="gap-2"
+                      disabled={logInteractionMutation.isPending}
+                      onClick={() => logInteractionMutation.mutate({ prospect: selectedProspect, type: 'call', outcome: 'contacted', notes: 'Call logged from Knowledge Dashboard.' })}
+                    >
+                      <Phone className="h-4 w-4" />
+                      Log call
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="gap-2"
+                      disabled={logInteractionMutation.isPending}
+                      onClick={() => logInteractionMutation.mutate({ prospect: selectedProspect, type: 'email', outcome: 'contacted', notes: 'Email logged from Knowledge Dashboard.' })}
+                    >
+                      <Mail className="h-4 w-4" />
+                      Log email
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={snoozeMutation.isPending}
+                      onClick={() => snoozeMutation.mutate({ prospect: selectedProspect, days: 7 })}
+                    >
+                      Snooze 7d
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setLocation('/app')}
+                    >
+                      Open map
+                    </Button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="gap-2"
+                      disabled={!selectedProspect.contactPhone}
+                      asChild={Boolean(selectedProspect.contactPhone)}
+                    >
+                      {selectedProspect.contactPhone ? (
+                        <a href={`tel:${selectedProspect.contactPhone}`}>
+                          <Phone className="h-4 w-4" />
+                          Call phone
+                        </a>
+                      ) : (
+                        <span className="inline-flex items-center gap-2">
+                          <Phone className="h-4 w-4" />
+                          No phone
+                        </span>
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="gap-2"
+                      disabled={!selectedProspect.contactEmail}
+                      asChild={Boolean(selectedProspect.contactEmail)}
+                    >
+                      {selectedProspect.contactEmail ? (
+                        <a href={`mailto:${selectedProspect.contactEmail}`}>
+                          <Mail className="h-4 w-4" />
+                          Send email
+                        </a>
+                      ) : (
+                        <span className="inline-flex items-center gap-2">
+                          <Mail className="h-4 w-4" />
+                          No email
+                        </span>
+                      )}
+                    </Button>
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <MessageSquare className="h-4 w-4 text-blue-600" />
+                    Add note
+                  </div>
+                  <Textarea
+                    value={quickNote}
+                    onChange={(event) => setQuickNote(event.target.value)}
+                    placeholder="Add ownership intel, call notes, cleanup context..."
+                    rows={4}
+                  />
+                  <Button
+                    type="button"
+                    className="mt-3 w-full"
+                    disabled={logInteractionMutation.isPending || !quickNote.trim()}
+                    onClick={() => logInteractionMutation.mutate({ prospect: selectedProspect, type: 'note', outcome: 'follow_up_later', notes: quickNote.trim() })}
+                  >
+                    Save note
+                  </Button>
+                </section>
+
+                <section className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="mb-3 text-sm font-semibold text-slate-900">Record details</div>
+                  <div className="grid gap-3 text-sm">
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-slate-500">Contact</span>
+                      <span className="text-right font-medium text-slate-900">
+                        {selectedProspect.contactName || selectedProspect.contactCompany || 'Missing'}
+                      </span>
+                    </div>
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-slate-500">Phone</span>
+                      <span className="text-right font-medium text-slate-900">{selectedProspect.contactPhone || 'Missing'}</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-slate-500">Email</span>
+                      <span className="text-right font-medium text-slate-900">{selectedProspect.contactEmail || 'Missing'}</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-slate-500">Building SF</span>
+                      <span className="text-right font-medium text-slate-900">{selectedProspect.buildingSf?.toLocaleString() || 'Missing'}</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-4">
+                      <span className="text-slate-500">Lot size</span>
+                      <span className="text-right font-medium text-slate-900">
+                        {selectedProspect.lotSizeAcres ? `${selectedProspect.lotSizeAcres} ac` : 'Missing'}
+                      </span>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="mb-3 text-sm font-semibold text-slate-900">Recent activity</div>
+                  {selectedInteractions.length === 0 ? (
+                    <p className="text-sm text-slate-500">No activity logged yet.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {selectedInteractions.slice(-4).reverse().map((interaction) => (
+                        <div key={interaction.id || `${interaction.date}-${interaction.type}`} className="rounded-md bg-slate-50 p-3 text-sm">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="font-semibold text-slate-900">{formatStatusLabel(interaction.type || 'activity')}</span>
+                            <span className="text-xs text-slate-500">{formatLastTouchLabel(getInteractionDate(interaction))}</span>
+                          </div>
+                          {interaction.notes && <p className="mt-1 text-slate-600">{interaction.notes}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
