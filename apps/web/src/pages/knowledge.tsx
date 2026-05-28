@@ -1,6 +1,7 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -50,6 +51,49 @@ function addDaysIso(days: number) {
   return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0)).toISOString();
 }
 
+type DrawerForm = {
+  businessName: string;
+  contactName: string;
+  contactCompany: string;
+  contactPhone: string;
+  contactEmail: string;
+  submarketId: string;
+  buildingSf: string;
+  lotSizeAcres: string;
+};
+
+const EMPTY_DRAWER_FORM: DrawerForm = {
+  businessName: '',
+  contactName: '',
+  contactCompany: '',
+  contactPhone: '',
+  contactEmail: '',
+  submarketId: '',
+  buildingSf: '',
+  lotSizeAcres: '',
+};
+
+function drawerFormFromProspect(prospect: Prospect | null): DrawerForm {
+  if (!prospect) return EMPTY_DRAWER_FORM;
+  return {
+    businessName: prospect.businessName || '',
+    contactName: prospect.contactName || '',
+    contactCompany: prospect.contactCompany || '',
+    contactPhone: prospect.contactPhone || '',
+    contactEmail: prospect.contactEmail || '',
+    submarketId: prospect.submarketId || '',
+    buildingSf: prospect.buildingSf ? String(prospect.buildingSf) : '',
+    lotSizeAcres: prospect.lotSizeAcres ? String(prospect.lotSizeAcres) : '',
+  };
+}
+
+function optionalNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed.replace(/,/g, ''));
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 export default function Knowledge() {
   const { user } = useAuth();
   const { profile } = useProfile();
@@ -95,6 +139,9 @@ export default function Knowledge() {
   const [activeQueue, setActiveQueue] = useState<FocusQueue>('new');
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [quickNote, setQuickNote] = useState('');
+  const [drawerForm, setDrawerForm] = useState<DrawerForm>(EMPTY_DRAWER_FORM);
+  const phoneInputRef = useRef<HTMLInputElement | null>(null);
+  const emailInputRef = useRef<HTMLInputElement | null>(null);
 
   const safeProspects = useMemo(() => Array.isArray(prospects) ? prospects : [], [prospects]);
   const safeInteractions = useMemo(() => Array.isArray(interactions) ? interactions : [], [interactions]);
@@ -289,6 +336,37 @@ export default function Knowledge() {
     ? analytics.interactionsByProspectId.get(selectedProspect.id) ?? []
     : [];
   const selectedLatestInteraction = getLatestInteractionDate(selectedInteractions);
+  const drawerMode: FocusQueue = selectedProspect
+    ? analytics.newProspects.some((prospect) => prospect.id === selectedProspect.id)
+      ? 'new'
+      : analytics.missingContacts.some((prospect) => prospect.id === selectedProspect.id)
+        ? 'missing'
+        : analytics.relationshipProspects.some((prospect) => prospect.id === selectedProspect.id)
+          ? 'followups'
+          : 'stale'
+    : activeQueue;
+  const drawerCopy = {
+    new: {
+      title: 'Log first touch',
+      description: 'Add the first useful activity and capture any contact intel you find.',
+      primary: 'Log first call',
+    },
+    missing: {
+      title: 'Clean up this prospect',
+      description: 'Fill the missing details so this record becomes usable CRM data.',
+      primary: 'Save cleanup',
+    },
+    stale: {
+      title: 'Refresh this record',
+      description: 'Confirm what changed, add a note, or schedule the next touch.',
+      primary: 'Save cleanup',
+    },
+    followups: {
+      title: 'Move this follow-up forward',
+      description: 'Log the touch, snooze it, or add the next piece of relationship context.',
+      primary: 'Log follow-up',
+    },
+  } satisfies Record<FocusQueue, { title: string; description: string; primary: string }>;
 
   const invalidateDashboardData = async () => {
     await Promise.all([
@@ -338,9 +416,39 @@ export default function Knowledge() {
     onSuccess: invalidateDashboardData,
   });
 
+  const saveProspectMutation = useMutation({
+    mutationFn: async ({ prospect, values }: { prospect: Prospect; values: DrawerForm }) => {
+      const buildingSf = optionalNumber(values.buildingSf);
+      const lotSizeAcres = optionalNumber(values.lotSizeAcres);
+      const patch = {
+        businessName: values.businessName.trim(),
+        contactName: values.contactName.trim(),
+        contactCompany: values.contactCompany.trim(),
+        contactPhone: values.contactPhone.trim(),
+        contactEmail: values.contactEmail.trim(),
+        submarketId: values.submarketId.trim(),
+        buildingSf,
+        lotSizeAcres,
+      };
+      await apiRequest('PATCH', `/api/prospects/${prospect.id}`, patch);
+    },
+    onSuccess: invalidateDashboardData,
+  });
+
   const openProspect = (prospect: Prospect) => {
     setSelectedProspect(prospect);
     setQuickNote('');
+    setDrawerForm(drawerFormFromProspect(prospect));
+  };
+
+  const closeDrawer = () => {
+    setSelectedProspect(null);
+    setQuickNote('');
+    setDrawerForm(EMPTY_DRAWER_FORM);
+  };
+
+  const updateDrawerForm = (key: keyof DrawerForm, value: string) => {
+    setDrawerForm((current) => ({ ...current, [key]: value }));
   };
 
   return (
@@ -600,7 +708,7 @@ export default function Knowledge() {
         </div>
       </div>
 
-      <Sheet open={Boolean(selectedProspect)} onOpenChange={(open) => !open && setSelectedProspect(null)}>
+      <Sheet open={Boolean(selectedProspect)} onOpenChange={(open) => !open && closeDrawer()}>
         <SheetContent className="w-full overflow-y-auto p-0 sm:max-w-xl">
           {selectedProspect && (
             <div className="flex min-h-full flex-col">
@@ -613,18 +721,109 @@ export default function Knowledge() {
                     {getSubmarketLabel(selectedProspect.submarketId)}
                   </Badge>
                   <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
-                    {formatLastTouchLabel(selectedLatestInteraction)}
-                  </Badge>
-                </div>
-                <SheetTitle className="text-2xl font-bold text-slate-950">
-                  {getProspectDisplayName(selectedProspect)}
-                </SheetTitle>
-                <SheetDescription>
-                  {getProspectSecondaryName(selectedProspect) || 'Open the record, log the next touch, or clean up the missing details.'}
-                </SheetDescription>
+                  {formatLastTouchLabel(selectedLatestInteraction)}
+                </Badge>
+              </div>
+              <SheetTitle className="text-2xl font-bold text-slate-950">
+                {drawerCopy[drawerMode].title}
+              </SheetTitle>
+              <SheetDescription>
+                <span className="font-medium text-slate-900">{getProspectDisplayName(selectedProspect)}</span>
+                <span className="mx-1 text-slate-400">-</span>
+                {drawerCopy[drawerMode].description}
+              </SheetDescription>
               </SheetHeader>
 
               <div className="flex-1 space-y-5 p-6">
+                <section className="rounded-lg border border-blue-100 bg-blue-50/50 p-4">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <Wrench className="h-4 w-4 text-blue-600" />
+                    Cleanup fields
+                  </div>
+                  <div className="grid gap-3">
+                    <label className="grid gap-1 text-sm">
+                      <span className="font-medium text-slate-700">Business / property name</span>
+                      <Input
+                        value={drawerForm.businessName}
+                        onChange={(event) => updateDrawerForm('businessName', event.target.value)}
+                        placeholder={getProspectDisplayName(selectedProspect)}
+                      />
+                    </label>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <label className="grid gap-1 text-sm">
+                        <span className="font-medium text-slate-700">Contact name</span>
+                        <Input
+                          value={drawerForm.contactName}
+                          onChange={(event) => updateDrawerForm('contactName', event.target.value)}
+                          placeholder="Add contact"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span className="font-medium text-slate-700">Company</span>
+                        <Input
+                          value={drawerForm.contactCompany}
+                          onChange={(event) => updateDrawerForm('contactCompany', event.target.value)}
+                          placeholder="Add company"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span className="font-medium text-slate-700">Phone</span>
+                        <Input
+                          ref={phoneInputRef}
+                          value={drawerForm.contactPhone}
+                          onChange={(event) => updateDrawerForm('contactPhone', event.target.value)}
+                          placeholder="Add phone"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span className="font-medium text-slate-700">Email</span>
+                        <Input
+                          ref={emailInputRef}
+                          value={drawerForm.contactEmail}
+                          onChange={(event) => updateDrawerForm('contactEmail', event.target.value)}
+                          placeholder="Add email"
+                        />
+                      </label>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <label className="grid gap-1 text-sm">
+                        <span className="font-medium text-slate-700">Submarket</span>
+                        <Input
+                          value={drawerForm.submarketId}
+                          onChange={(event) => updateDrawerForm('submarketId', event.target.value)}
+                          placeholder="SE, NW..."
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span className="font-medium text-slate-700">Building SF</span>
+                        <Input
+                          inputMode="numeric"
+                          value={drawerForm.buildingSf}
+                          onChange={(event) => updateDrawerForm('buildingSf', event.target.value)}
+                          placeholder="0"
+                        />
+                      </label>
+                      <label className="grid gap-1 text-sm">
+                        <span className="font-medium text-slate-700">Lot acres</span>
+                        <Input
+                          inputMode="decimal"
+                          value={drawerForm.lotSizeAcres}
+                          onChange={(event) => updateDrawerForm('lotSizeAcres', event.target.value)}
+                          placeholder="0.00"
+                        />
+                      </label>
+                    </div>
+                    <Button
+                      type="button"
+                      className="w-full"
+                      disabled={saveProspectMutation.isPending}
+                      onClick={() => saveProspectMutation.mutate({ prospect: selectedProspect, values: drawerForm })}
+                    >
+                      {saveProspectMutation.isPending ? 'Saving...' : drawerCopy[drawerMode].primary}
+                    </Button>
+                  </div>
+                </section>
+
                 <section className="rounded-lg border border-slate-200 bg-white p-4">
                   <div className="mb-3 text-sm font-semibold text-slate-900">Quick actions</div>
                   <div className="grid grid-cols-2 gap-2">
@@ -635,7 +834,7 @@ export default function Knowledge() {
                       onClick={() => logInteractionMutation.mutate({ prospect: selectedProspect, type: 'call', outcome: 'contacted', notes: 'Call logged from Knowledge Dashboard.' })}
                     >
                       <Phone className="h-4 w-4" />
-                      Log call
+                      {drawerMode === 'new' ? 'Log first call' : 'Log call'}
                     </Button>
                     <Button
                       type="button"
@@ -664,44 +863,46 @@ export default function Knowledge() {
                     </Button>
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="gap-2"
-                      disabled={!selectedProspect.contactPhone}
-                      asChild={Boolean(selectedProspect.contactPhone)}
-                    >
-                      {selectedProspect.contactPhone ? (
+                    {selectedProspect.contactPhone ? (
+                      <Button type="button" variant="secondary" className="gap-2" asChild>
                         <a href={`tel:${selectedProspect.contactPhone}`}>
                           <Phone className="h-4 w-4" />
                           Call phone
                         </a>
-                      ) : (
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="gap-2"
+                        onClick={() => phoneInputRef.current?.focus()}
+                      >
                         <span className="inline-flex items-center gap-2">
                           <Phone className="h-4 w-4" />
-                          No phone
+                          Add phone
                         </span>
-                      )}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      className="gap-2"
-                      disabled={!selectedProspect.contactEmail}
-                      asChild={Boolean(selectedProspect.contactEmail)}
-                    >
-                      {selectedProspect.contactEmail ? (
+                      </Button>
+                    )}
+                    {selectedProspect.contactEmail ? (
+                      <Button type="button" variant="secondary" className="gap-2" asChild>
                         <a href={`mailto:${selectedProspect.contactEmail}`}>
                           <Mail className="h-4 w-4" />
                           Send email
                         </a>
-                      ) : (
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="gap-2"
+                        onClick={() => emailInputRef.current?.focus()}
+                      >
                         <span className="inline-flex items-center gap-2">
                           <Mail className="h-4 w-4" />
-                          No email
+                          Add email
                         </span>
-                      )}
-                    </Button>
+                      </Button>
+                    )}
                   </div>
                 </section>
 
