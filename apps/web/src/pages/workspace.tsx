@@ -1302,7 +1302,6 @@ export default function Workspace() {
                   }
 
                   // Otherwise, create a brand-new prospect and link it
-                  const typeLabel = (type || 'prospect');
                   if (isDemoMode) {
                     // Start with empty name so the Address field placeholder shows and editing is smooth
                     const saved = buildLocalProspect({ name: '', status: 'prospect' as ProspectStatusType, notes: '', geometry, lotSizeAcres: acres } as any);
@@ -1329,7 +1328,7 @@ export default function Workspace() {
                     return;
                   }
                   // Use a non-empty default for server validation; user can edit in the panel
-                  const res = await apiRequest('POST', '/api/prospects', { name: `New ${typeLabel}`, status: 'prospect', notes: '', geometry, lotSizeAcres: acres });
+                  const res = await apiRequest('POST', '/api/prospects', { name: type === 'marker' ? 'Dropped pin' : 'Mapped area', status: 'prospect', notes: '', geometry, lotSizeAcres: acres });
                   const saved = await res.json();
                   await apiRequest('POST', `/api/listings/${listingId}/prospects`, { prospectId: saved.id });
                   queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);

@@ -36,6 +36,7 @@ import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 import { getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
+import { getProspectDisplayName } from '@/lib/prospectDisplay';
 import { quickLogSpecFor, type QuickLogType } from '@/lib/gamificationUi';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { queryClient, apiRequest } from '@/lib/queryClient';
@@ -932,7 +933,9 @@ export default function HomePage() {
         } else {
           // Server requires non-empty name; send a placeholder then clear locally for smooth editing
           const payload = {
-            name: `New ${e.type}`,
+            name: e.type === 'marker'
+              ? `Dropped pin`
+              : 'Mapped area',
             status: 'prospect' as ProspectStatusType,
             notes: '',
             geometry,
@@ -1258,7 +1261,7 @@ export default function HomePage() {
         setSearchPin(null);
         // Also clear the search input field
         setClearSearchSignal((s) => s + 1);
-        toast({ title: 'Prospect saved (demo)', description: `"${localProspect.name}" added locally.` });
+        toast({ title: 'Prospect saved (demo)', description: `"${getProspectDisplayName(localProspect)}" added locally.` });
       } else {
         // Save directly to database
         const response = await apiRequest('POST', '/api/prospects', newProspectData);
@@ -1282,7 +1285,7 @@ export default function HomePage() {
         // Show success message
         toast({
           title: "Prospect saved successfully",
-          description: `"${savedProspect.name}" has been added to your map.`
+          description: `"${getProspectDisplayName(savedProspect)}" has been added to your map.`
         });
         
         console.log('Search pin saved as prospect:', savedProspect);
@@ -1337,7 +1340,7 @@ export default function HomePage() {
       setSelectedProspect(created);
       setIsEditPanelOpen(true);
       closeContextMenu();
-      const label = created.name?.trim() || 'Prospect';
+      const label = getProspectDisplayName(created);
       toast({
         title: isDemoMode ? 'Prospect added (demo)' : 'Prospect added',
         description: `${label} saved to your map`,
@@ -1375,7 +1378,7 @@ export default function HomePage() {
       setIsEditPanelOpen(false); // Close panel to allow drawing
       toast({
         title: "Draw Mode Enabled",
-        description: `Click on the map to draw an area for ${selectedProspect.name}.`,
+        description: `Click on the map to draw an area for ${getProspectDisplayName(selectedProspect)}.`,
       });
     }
     
@@ -1841,7 +1844,7 @@ export default function HomePage() {
   const handleMapPolygonTool = useCallback(() => {
     if (selectedProspect) {
       setDrawingForProspect(selectedProspect);
-      toast({ title: 'Draw Mode', description: `Draw an area for ${selectedProspect.name}.` });
+      toast({ title: 'Draw Mode', description: `Draw an area for ${getProspectDisplayName(selectedProspect)}.` });
     }
     if (drawingManagerRef.current) {
       drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.POLYGON);

@@ -1,6 +1,7 @@
 import { useRef, useState, useMemo, useEffect } from 'react';
 import { Search, Square, Star } from 'lucide-react';
 import type { Prospect } from '@level-cre/shared/schema';
+import { getProspectDisplayName, getProspectSecondaryName, isPlaceholderProspectName } from '@/lib/prospectDisplay';
 import usePlacesAutocomplete, {
   getGeocode,
   getLatLng,
@@ -74,7 +75,7 @@ export function SearchBar({
     return prospects
       .filter((p) => {
         const businessName = (p.businessName || '').toLowerCase();
-        const address = (p.name || ((p as any).address as string) || '').toLowerCase();
+        const address = (isPlaceholderProspectName(p.name) ? '' : p.name || ((p as any).address as string) || '').toLowerCase();
         return businessName.includes(normalizedInput) || address.includes(normalizedInput);
       })
       .slice(0, 8);
@@ -82,14 +83,12 @@ export function SearchBar({
 
   const combinedResults = useMemo(() => {
     const localItems: CombinedSearchItem[] = localResults.map((prospect) => {
-      const address = (prospect.name || ((prospect as any).address as string) || '').trim();
-      const business = (prospect.businessName || '').trim();
       return {
         type: 'local',
         key: `local-${prospect.id}`,
         prospect,
-        label: business || address || 'Local Prospect',
-        secondary: business && address && business !== address ? address : undefined,
+        label: getProspectDisplayName(prospect),
+        secondary: getProspectSecondaryName(prospect),
       };
     });
     const googleItems: CombinedSearchItem[] = data.map((suggestion, idx) => ({
@@ -119,9 +118,7 @@ export function SearchBar({
   };
 
   const handleLocalSelect = (prospect: Prospect) => () => {
-    const business = (prospect.businessName || '').trim();
-    const address = (prospect.name || ((prospect as any).address as string) || '').trim();
-    setValue(business || address, false);
+    setValue(getProspectDisplayName(prospect), false);
     clearSuggestions();
     setActiveIndex(-1);
     onProspectClick?.(prospect);

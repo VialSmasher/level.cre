@@ -11,6 +11,7 @@ import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/primi
 import { Calendar, MapPin, Phone, Mail, Building2, Clock, Filter, Plus, MessageSquare, X, PhoneCall, Zap, CheckCircle, Undo2 } from 'lucide-react';
 import { Prospect, ProspectStatusType, FollowUpTimeframeType, Submarket, ContactInteractionType, ContactInteractionRow } from '@level-cre/shared/schema';
 import { apiRequest } from '@/lib/queryClient';
+import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospectDisplay';
 
 const FOLLOW_UP_LABELS: Record<FollowUpTimeframeType, string> = {
   '1_month': '1 Month',
@@ -122,7 +123,7 @@ function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; on
             <MessageSquare className="h-5 w-5" />
             Log Contact Interaction
           </ModalTitle>
-          <p className="text-sm text-gray-600">{prospect.name}</p>
+          <p className="text-sm text-gray-600">{getProspectDisplayName(prospect)}</p>
         </ModalHeader>
         
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -686,8 +687,11 @@ export default function FollowUpPage() {
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <CardTitle className="text-lg font-semibold text-gray-900 mb-2">
-                          {prospect.name}
+                          {getProspectDisplayName(prospect)}
                         </CardTitle>
+                        {getProspectSecondaryName(prospect) && (
+                          <p className="mb-2 text-sm text-gray-500">{getProspectSecondaryName(prospect)}</p>
+                        )}
                         <div className="flex items-center gap-2 mb-2">
                           <div 
                             className="w-3 h-3 rounded-full border"

@@ -71,6 +71,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return role === 'editor' ? 'editor' : 'viewer';
   }
 
+  function isPlaceholderProspectName(value?: string | null): boolean {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return true;
+    return /^(new\s+(marker|point|polygon|rectangle|prospect)|new\s+\w+)$/.test(normalized);
+  }
+
+  function geometryFallbackName(geometry: unknown): string {
+    const g = geometry as any;
+    if (g?.type === 'Point' && Array.isArray(g.coordinates)) {
+      const [lng, lat] = g.coordinates;
+      if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
+        return `Dropped pin (${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)})`;
+      }
+    }
+    if (g?.type === 'Polygon') return 'Mapped area';
+    return 'Untitled Prospect';
+  }
+
+  function cleanProspectName(data: { name?: string | null; businessName?: string | null; contactCompany?: string | null; geometry?: unknown }): string {
+    const business = data.businessName?.trim();
+    const company = data.contactCompany?.trim();
+    const name = data.name?.trim();
+    if (business) return business;
+    if (name && !isPlaceholderProspectName(name)) return name;
+    if (company) return company;
+    return geometryFallbackName(data.geometry);
+  }
+
   function requireSupabaseAdmin() {
     if (!supabaseAdmin) {
       throw new Error('Supabase admin client is not configured');
@@ -2291,13 +2319,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const created = {
           id: randomUUID(),
           ...parseResult.data,
+          name: cleanProspectName(parseResult.data),
           createdDate: new Date().toISOString(),
         };
         await demo.addProspect(userId, created);
         return res.status(201).json(created);
       }
 
-      const prospect = await storage.createProspect({ ...parseResult.data, userId });
+      const prospect = await storage.createProspect({ ...parseResult.data, name: cleanProspectName(parseResult.data), userId });
       const t1 = Date.now();
       console.log(`[route] POST /api/prospects -> 201 in ${t1 - t0}ms user=${userId}`);
       res.status(201).json(prospect);

@@ -203,6 +203,17 @@ function isPlaceholderProspectName(value?: string | null): boolean {
   return /^(new\s+(polygon|rectangle|point|marker)|new\s+\w+)/i.test(normalized);
 }
 
+function getProspectDisplayName(prospect: Prospect): string {
+  const business = prospect.businessName?.trim();
+  const name = prospect.name?.trim();
+  const company = prospect.contactCompany?.trim();
+  if (business) return business;
+  if (name && !isPlaceholderProspectName(name)) return name;
+  if (company) return company;
+  if (name) return name;
+  return 'Untitled Prospect';
+}
+
 function isLikelyEmail(value?: string | null): boolean {
   if (!value) return false;
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
@@ -372,7 +383,7 @@ export function buildFollowUpReview({
 
       return {
         prospectId: prospect.id,
-        name: prospect.name,
+        name: getProspectDisplayName(prospect),
         status: prospect.status,
         severity,
         flags,
@@ -526,7 +537,7 @@ export function buildDataQualityReview({
 
       return {
         prospectId: prospect.id,
-        name: prospect.name,
+        name: getProspectDisplayName(prospect),
         status: prospect.status,
         severity,
         issueCount: issues.length,

@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
+import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospectDisplay';
 
 export default function Knowledge() {
   const { user } = useAuth();
@@ -253,7 +254,12 @@ export default function Knowledge() {
                     .slice(0, 8)
                     .map((prospect) => (
                       <div key={prospect.id} className="flex justify-between items-center p-3 border rounded hover:bg-green-50 hover:border-green-200 cursor-pointer transition-colors">
-                        <div className="font-medium">{prospect.name}</div>
+                        <div>
+                          <div className="font-medium">{getProspectDisplayName(prospect)}</div>
+                          {getProspectSecondaryName(prospect) && (
+                            <div className="text-xs text-gray-500">{getProspectSecondaryName(prospect)}</div>
+                          )}
+                        </div>
                         <div className="text-sm text-green-600 font-medium">Call now</div>
                       </div>
                     ))
@@ -288,7 +294,12 @@ export default function Knowledge() {
                       
                       return (
                         <div key={prospect.id} className="flex justify-between items-center p-3 border rounded hover:bg-orange-50 hover:border-orange-200 cursor-pointer transition-colors">
-                          <div className="font-medium">{prospect.name}</div>
+                          <div>
+                            <div className="font-medium">{getProspectDisplayName(prospect)}</div>
+                            {getProspectSecondaryName(prospect) && (
+                              <div className="text-xs text-gray-500">{getProspectSecondaryName(prospect)}</div>
+                            )}
+                          </div>
                           <div className="text-sm text-orange-600 font-medium">{daysSince}d ago</div>
                         </div>
                       );
