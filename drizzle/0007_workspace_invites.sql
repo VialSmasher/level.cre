@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS public.listing_invites (
   role varchar NOT NULL DEFAULT 'viewer',
   invited_by varchar NOT NULL REFERENCES public.users(id),
   status varchar NOT NULL DEFAULT 'pending',
+  email_delivery varchar DEFAULT 'not_configured',
   created_at timestamp DEFAULT now(),
   accepted_at timestamp
 );

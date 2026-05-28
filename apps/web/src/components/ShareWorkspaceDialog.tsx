@@ -33,6 +33,18 @@ function errorMessage(err: any): string {
   return raw || 'Failed to invite';
 }
 
+function deliveryLabel(status: ShareEntry['emailDelivery']): string {
+  if (status === 'sent') return 'Email sent';
+  if (status === 'failed') return 'Email failed';
+  return 'Email not configured';
+}
+
+function deliveryClassName(status: ShareEntry['emailDelivery']): string {
+  if (status === 'sent') return 'bg-emerald-50 text-emerald-800 ring-emerald-200';
+  if (status === 'failed') return 'bg-red-50 text-red-800 ring-red-200';
+  return 'bg-slate-50 text-slate-700 ring-slate-200';
+}
+
 export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage }: { listingId: string; open: boolean; onOpenChange: (v: boolean) => void; canManage: boolean; }) {
   const qc = useQueryClient();
   const { isDemoMode } = useAuth();
@@ -178,6 +190,11 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
                     {m.email || m.userId}
                     {m.role === 'owner' && <span className="ml-2 text-xs text-gray-500">(Owner)</span>}
                     {isInvite && <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200">Pending</span>}
+                    {isInvite && (
+                      <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${deliveryClassName(m.emailDelivery)}`}>
+                        {deliveryLabel(m.emailDelivery)}
+                      </span>
+                    )}
                   </div>
                   <div>
                     {m.role === 'owner' || isInvite ? (

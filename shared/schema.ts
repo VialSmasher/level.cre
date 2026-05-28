@@ -269,6 +269,7 @@ export const listingInvites = pgTable(
     role: varchar("role").notNull().default('viewer'), // editor | viewer
     invitedBy: varchar("invited_by").notNull().references(() => users.id),
     status: varchar("status").notNull().default('pending'), // pending | accepted | revoked
+    emailDelivery: varchar("email_delivery").default('not_configured'), // sent | not_configured | failed
     createdAt: timestamp("created_at").defaultNow(),
     acceptedAt: timestamp("accepted_at"),
   },

@@ -88,10 +88,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           role varchar NOT NULL DEFAULT 'viewer',
           invited_by varchar NOT NULL REFERENCES public.users(id),
           status varchar NOT NULL DEFAULT 'pending',
+          email_delivery varchar DEFAULT 'not_configured',
           created_at timestamp DEFAULT now(),
           accepted_at timestamp
         );
       `);
+      await pool.query(`ALTER TABLE public.listing_invites ADD COLUMN IF NOT EXISTS email_delivery varchar DEFAULT 'not_configured';`);
       await pool.query(`CREATE INDEX IF NOT EXISTS "IDX_listing_invites_listing" ON public.listing_invites(listing_id);`);
       await pool.query(`CREATE INDEX IF NOT EXISTS "IDX_listing_invites_email" ON public.listing_invites(email);`);
       await pool.query(`
@@ -406,7 +408,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const { data: invites, error: invitesError } = await admin
       .from('listing_invites')
-      .select('id,email,role,status,created_at')
+      .select('id,email,role,status,email_delivery,created_at')
       .eq('listing_id', listingId)
       .eq('status', 'pending');
     if (invitesError) throw invitesError;
@@ -417,6 +419,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         email: invite.email,
         role: invite.role,
         status: invite.status,
+        emailDelivery: invite.email_delivery,
         createdAt: invite.created_at,
         kind: 'invite',
       });
@@ -1540,6 +1543,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             email: invite.email,
             role: invite.role,
             status: invite.status,
+            emailDelivery: invite.emailDelivery,
             createdAt: invite.createdAt,
             kind: 'invite',
           });
@@ -1621,6 +1625,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .returning();
 
       const emailDelivery = await sendWorkspaceInviteEmail(req, normalizedEmail);
+      await db
+        .update(listingInvites)
+        .set({ emailDelivery })
+        .where(eq(listingInvites.id, invite.id));
 
       return res.status(201).json({
         id: invite.id,
