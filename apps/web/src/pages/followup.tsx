@@ -13,13 +13,6 @@ import { Prospect, ProspectStatusType, FollowUpTimeframeType, Submarket, Contact
 import { apiRequest } from '@/lib/queryClient';
 import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospectDisplay';
 
-const FOLLOW_UP_LABELS: Record<FollowUpTimeframeType, string> = {
-  '1_month': '1 Month',
-  '3_month': '3 Months',
-  '6_month': '6 Months',
-  '1_year': '1 Year'
-};
-
 const STATUS_COLORS: Record<ProspectStatusType, string> = {
   prospect: '#FBBF24',
   contacted: '#3B82F6',
@@ -58,6 +51,23 @@ function addDays(d: Date, days: number) {
   return nd;
 }
 
+function daysBetweenCalendarDates(from: Date, to: Date) {
+  const start = new Date(from);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setHours(0, 0, 0, 0);
+  return Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function formatDueBadgeLabel(dueDate: Date | null, now = new Date()) {
+  if (!dueDate) return 'No follow-up set';
+  const daysUntil = daysBetweenCalendarDates(now, dueDate);
+  if (daysUntil < 0) return `Overdue by ${Math.abs(daysUntil)}d`;
+  if (daysUntil === 0) return 'Due today';
+  if (daysUntil === 1) return 'Due tomorrow';
+  return `Due in ${daysUntil}d`;
+}
+
 // Contact Interaction Modal Component
 function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
   const [interactionType, setInteractionType] = useState<string>('call');
@@ -87,14 +97,16 @@ function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; on
     },
     onSuccess: async () => {
       try {
+        const patch: Record<string, string> = {
+          lastContactDate: new Date().toISOString(),
+        };
         if (nextFollowUp) {
           const iso = toIsoAtNoonUtc(nextFollowUp);
           if (iso) {
-            await apiRequest('PATCH', `/api/prospects/${prospect.id}`, {
-              followUpDueDate: iso,
-            });
+            patch.followUpDueDate = iso;
           }
         }
+        await apiRequest('PATCH', `/api/prospects/${prospect.id}`, patch);
       } catch {}
       queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
       queryClient.invalidateQueries({ queryKey: ['/api/interactions'] });
@@ -226,11 +238,15 @@ function QuickEngagement({ prospect, allInteractions }: { prospect: Prospect; al
     },
     onSuccess: async () => {
       try {
+        const patch: Record<string, string> = {
+          lastContactDate: new Date().toISOString(),
+        };
         if (nextFollowUpDate) {
           // Normalize to noon UTC to avoid TZ off-by-one
           const iso = new Date(`${nextFollowUpDate}T12:00:00Z`).toISOString();
-          await apiRequest('PATCH', `/api/prospects/${prospect.id}`, { followUpDueDate: iso });
+          patch.followUpDueDate = iso;
         }
+        await apiRequest('PATCH', `/api/prospects/${prospect.id}`, patch);
       } catch {}
       queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
       queryClient.invalidateQueries({ queryKey: ['/api/interactions'] });
@@ -708,15 +724,7 @@ export default function FollowUpPage() {
                             : (status === 'today' || status === 'soon')
                               ? 'bg-amber-50 text-amber-700 border-amber-200'
                               : 'bg-green-50 text-green-700 border-green-200';
-                          const label = prospect.followUpTimeframe
-                            ? FOLLOW_UP_LABELS[prospect.followUpTimeframe]
-                            : status === 'overdue'
-                              ? 'Overdue'
-                              : status === 'today'
-                                ? 'Due Today'
-                                : status === 'soon'
-                                  ? 'Due Soon'
-                                  : 'Upcoming';
+                          const label = formatDueBadgeLabel(getDueDate(prospect), now);
                           return (
                             <Badge variant="outline" className={classes}>
                               <Clock className="h-3 w-3 mr-1" />
@@ -803,7 +811,7 @@ export default function FollowUpPage() {
                       Added: {new Date(prospect.createdDate).toLocaleDateString()}
                       {(() => {
                         const d = getDueDate(prospect);
-                        return d ? ` · Due: ${d.toLocaleDateString()}` : '';
+                        return d ? ` - Due: ${d.toLocaleDateString()}` : '';
                       })()}
                     </div>
                   </div>

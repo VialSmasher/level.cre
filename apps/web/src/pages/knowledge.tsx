@@ -11,6 +11,30 @@ import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospectDisplay';
 
+function getInteractionDate(interaction: any) {
+  const parsed = new Date(interaction?.date || interaction?.createdAt || '');
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getLatestInteractionDate(interactions: any[], prospectId: string) {
+  const timestamps = interactions
+    .filter(i => i.prospectId === prospectId)
+    .map(getInteractionDate)
+    .filter((date): date is Date => Boolean(date))
+    .map(date => date.getTime());
+
+  if (timestamps.length === 0) return null;
+  return new Date(Math.max(...timestamps));
+}
+
+function formatLastTouchLabel(date: Date | null) {
+  if (!date) return 'No activity logged';
+  const daysSince = Math.max(0, Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24)));
+  if (daysSince === 0) return 'Touched today';
+  if (daysSince === 1) return 'Touched yesterday';
+  return `${daysSince}d since touch`;
+}
+
 export default function Knowledge() {
   const { user } = useAuth();
   const { profile } = useProfile();
@@ -70,20 +94,17 @@ export default function Knowledge() {
     sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
 
     const recentActivity = filteredProspects.filter(p => {
-      const prospectInteractions = interactions.filter(i => i.prospectId === p.id);
-      return prospectInteractions.some(i => new Date(i.date || i.createdAt) > sixtyDaysAgo);
+      const latestInteraction = getLatestInteractionDate(interactions, p.id);
+      return latestInteraction ? latestInteraction > sixtyDaysAgo : false;
     }).length;
     const freshnessPercent = total > 0 ? (recentActivity / total) * 100 : 0;
 
     // Lists for gaps and stale (stale relative to 60 days)
     const noTouches = filteredProspects.filter(p => !interactions.some(i => i.prospectId === p.id));
     const staleProspects = filteredProspects.filter(p => {
-      const prospectInteractions = interactions.filter(i => i.prospectId === p.id);
-      if (prospectInteractions.length === 0) return true;
-      const latestInteraction = Math.max(
-        ...prospectInteractions.map(i => new Date(i.date || i.createdAt).getTime())
-      );
-      return new Date(latestInteraction) <= sixtyDaysAgo;
+      const latestInteraction = getLatestInteractionDate(interactions, p.id);
+      if (!latestInteraction) return true;
+      return latestInteraction <= sixtyDaysAgo;
     });
 
     return {
@@ -284,13 +305,8 @@ export default function Knowledge() {
                     .filter(p => ['contacted', 'followup'].includes(p.status))
                     .slice(0, 8)
                     .map((prospect) => {
-                      const prospectInteractions = interactions.filter(i => i.prospectId === prospect.id);
-                      const latestInteraction = prospectInteractions.length > 0 
-                        ? new Date(Math.max(...prospectInteractions.map(i => new Date(i.date || i.createdAt).getTime())))
-                        : null;
-                      
-                      const daysSince = latestInteraction ? 
-                        Math.floor((Date.now() - latestInteraction.getTime()) / (1000 * 60 * 60 * 24)) : 999;
+                      const latestInteraction = getLatestInteractionDate(interactions, prospect.id);
+                      const lastTouchLabel = formatLastTouchLabel(latestInteraction);
                       
                       return (
                         <div key={prospect.id} className="flex justify-between items-center p-3 border rounded hover:bg-orange-50 hover:border-orange-200 cursor-pointer transition-colors">
@@ -300,7 +316,7 @@ export default function Knowledge() {
                               <div className="text-xs text-gray-500">{getProspectSecondaryName(prospect)}</div>
                             )}
                           </div>
-                          <div className="text-sm text-orange-600 font-medium">{daysSince}d ago</div>
+                          <div className="text-sm text-orange-600 font-medium">{lastTouchLabel}</div>
                         </div>
                       );
                     })
