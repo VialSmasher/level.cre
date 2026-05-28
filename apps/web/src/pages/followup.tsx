@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/primitives/Modal';
 import { Calendar, MapPin, Phone, Mail, Building2, Clock, Filter, Plus, MessageSquare, X, PhoneCall, Zap, CheckCircle, Undo2, Users } from 'lucide-react';
 import { Prospect, ProspectStatusType, FollowUpTimeframeType, Submarket, ContactInteractionType, ContactInteractionRow } from '@level-cre/shared/schema';
@@ -547,10 +548,13 @@ function SnoozeButtons({ prospect }: { prospect: Prospect }) {
 export default function FollowUpPage() {
   const [selectedSubmarket, setSelectedSubmarket] = useState<string>('all');
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
+  const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
+  const [isLogModalOpen, setIsLogModalOpen] = useState(false);
   const [showEngagementFilter, setShowEngagementFilter] = useState<string>('all'); // 'all', 'no_engagement', 'has_engagement'
   const [filterMode, setFilterMode] = useState<'client' | 'server'>('client'); // toggle between client vs server due filtering
   const [dueFilter, setDueFilter] = useState<'due_soon' | 'due_only' | 'all'>('due_soon');
   const [dueSoonDays, setDueSoonDays] = useState<number>(7);
+  const [activeQueue, setActiveQueue] = useState<'overdue' | 'today' | 'week' | 'no_activity' | 'no_contact'>('overdue');
   
   const useServerDueOnly = dueFilter === 'due_only' && filterMode === 'server';
   const apiKey = useServerDueOnly ? '/api/prospects?dueOnly=1' : '/api/prospects';
@@ -584,6 +588,7 @@ export default function FollowUpPage() {
     () => Array.isArray(allInteractions) ? allInteractions : [],
     [allInteractions],
   );
+  const safeProspects = useMemo(() => Array.isArray(prospects) ? prospects : [], [prospects]);
 
   const interactionsByProspectId = useMemo(() => {
     const grouped = new Map<string, ContactInteractionRow[]>();
@@ -627,7 +632,28 @@ export default function FollowUpPage() {
   };
 
   // Base list respecting selected due filter
-  const baseProspects = prospects.filter((p) => {
+  const hasContact = (p: Prospect) => Boolean(p.contactName || p.contactCompany || p.contactEmail || p.contactPhone);
+
+  const queueCounts = useMemo(() => {
+    const counts = {
+      overdue: 0,
+      today: 0,
+      week: 0,
+      no_activity: 0,
+      no_contact: 0,
+    };
+    for (const prospect of safeProspects) {
+      const status = getDueStatus(prospect);
+      if (status === 'overdue') counts.overdue += 1;
+      if (status === 'today') counts.today += 1;
+      if (status === 'overdue' || status === 'today' || status === 'soon') counts.week += 1;
+      if (!(interactionsByProspectId.get(prospect.id)?.length)) counts.no_activity += 1;
+      if (!hasContact(prospect)) counts.no_contact += 1;
+    }
+    return counts;
+  }, [safeProspects, interactionsByProspectId, dueSoonDays]);
+
+  const baseProspects = safeProspects.filter((p) => {
     if (dueFilter === 'all') return true;
     const status = getDueStatus(p);
     if (!status) return false;
@@ -680,6 +706,48 @@ export default function FollowUpPage() {
     return a.name.localeCompare(b.name);
   });
 
+  const applyQueue = (queue: typeof activeQueue) => {
+    setActiveQueue(queue);
+    if (queue === 'overdue' || queue === 'today') {
+      setDueFilter('due_only');
+      setShowEngagementFilter('all');
+      return;
+    }
+    if (queue === 'week') {
+      setDueFilter('due_soon');
+      setShowEngagementFilter('all');
+      return;
+    }
+    if (queue === 'no_activity') {
+      setDueFilter('all');
+      setShowEngagementFilter('no_engagement');
+      return;
+    }
+    if (queue === 'no_contact') {
+      setDueFilter('all');
+      setShowEngagementFilter('all');
+    }
+  };
+
+  const queueFilteredProspects = sortedProspects.filter((prospect) => {
+    const status = getDueStatus(prospect);
+    if (activeQueue === 'overdue') return status === 'overdue';
+    if (activeQueue === 'today') return status === 'today';
+    if (activeQueue === 'week') return status === 'overdue' || status === 'today' || status === 'soon';
+    if (activeQueue === 'no_activity') return !(interactionsByProspectId.get(prospect.id)?.length);
+    if (activeQueue === 'no_contact') return !hasContact(prospect);
+    return true;
+  });
+
+  const openProspectDrawer = (prospect: Prospect) => {
+    setSelectedProspect(prospect);
+    setIsDetailDrawerOpen(true);
+  };
+
+  const selectedProspectInteractions = selectedProspect
+    ? interactionsByProspectId.get(selectedProspect.id) ?? []
+    : [];
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -696,7 +764,7 @@ export default function FollowUpPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Follow-Up Schedule</h1>
             <p className="text-gray-600 mt-1">
-              {filteredProspects.length} prospects 
+              {queueFilteredProspects.length} prospects 
               {showEngagementFilter === 'no_engagement' && ' with no engagement'}
               {showEngagementFilter === 'has_engagement' && ' with logged activity'}
               {showEngagementFilter === 'all' && ' scheduled for follow-up'}
@@ -806,7 +874,39 @@ export default function FollowUpPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-6">
-        {filteredProspects.length === 0 ? (
+        <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-5">
+          {[
+            { key: 'overdue' as const, label: 'Overdue', count: queueCounts.overdue, tone: 'red' },
+            { key: 'today' as const, label: 'Due today', count: queueCounts.today, tone: 'amber' },
+            { key: 'week' as const, label: 'This week', count: queueCounts.week, tone: 'blue' },
+            { key: 'no_activity' as const, label: 'No activity', count: queueCounts.no_activity, tone: 'slate' },
+            { key: 'no_contact' as const, label: 'No contact', count: queueCounts.no_contact, tone: 'sky' },
+          ].map((queue) => {
+            const active = activeQueue === queue.key;
+            const activeClass = queue.tone === 'red'
+              ? 'border-red-300 bg-red-50 text-red-950'
+              : queue.tone === 'amber'
+                ? 'border-amber-300 bg-amber-50 text-amber-950'
+                : queue.tone === 'blue'
+                  ? 'border-blue-300 bg-blue-50 text-blue-950'
+                  : queue.tone === 'sky'
+                    ? 'border-sky-300 bg-sky-50 text-sky-950'
+                    : 'border-slate-300 bg-slate-50 text-slate-950';
+            return (
+              <button
+                key={queue.key}
+                type="button"
+                onClick={() => applyQueue(queue.key)}
+                className={`rounded-lg border p-4 text-left transition-colors ${active ? activeClass : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+              >
+                <div className="text-sm font-semibold">{queue.label}</div>
+                <div className="mt-2 text-3xl font-bold">{queue.count}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        {queueFilteredProspects.length === 0 ? (
           <div className="text-center py-12">
             <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -823,14 +923,23 @@ export default function FollowUpPage() {
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {sortedProspects.map((prospect) => (
+            {queueFilteredProspects.map((prospect) => {
+              const dueStatus = getDueStatus(prospect);
+              const dueDate = getDueDate(prospect);
+              const dueClasses = dueStatus === 'overdue'
+                ? 'bg-red-50 text-red-700 border-red-200'
+                : (dueStatus === 'today' || dueStatus === 'soon')
+                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                  : 'bg-green-50 text-green-700 border-green-200';
+              const prospectInteractions = interactionsByProspectId.get(prospect.id) ?? [];
+              return (
                 <Card 
                   key={prospect.id} 
-                  className="hover:shadow-md transition-shadow cursor-pointer"
-                  onClick={() => setSelectedProspect(prospect)}
+                  className="hover:shadow-md transition-shadow cursor-pointer border-slate-200"
+                  onClick={() => openProspectDrawer(prospect)}
                 >
                   <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between">
+                    <div className="flex items-start justify-between gap-3">
                       <div className="flex-1">
                         <CardTitle className="text-lg font-semibold text-gray-900 mb-2">
                           {getProspectDisplayName(prospect)}
@@ -847,27 +956,20 @@ export default function FollowUpPage() {
                             {prospect.status.replace('_', ' ')}
                           </span>
                         </div>
-                        {(() => {
-                          const status = getDueStatus(prospect);
-                          const classes = status === 'overdue'
-                            ? 'bg-red-50 text-red-700 border-red-200'
-                            : (status === 'today' || status === 'soon')
-                              ? 'bg-amber-50 text-amber-700 border-amber-200'
-                              : 'bg-green-50 text-green-700 border-green-200';
-                          const label = formatDueBadgeLabel(getDueDate(prospect), now);
-                          return (
-                            <Badge variant="outline" className={classes}>
-                              <Clock className="h-3 w-3 mr-1" />
-                              {label}
-                            </Badge>
-                          );
-                        })()}
+                        <Badge variant="outline" className={dueClasses}>
+                          <Clock className="h-3 w-3 mr-1" />
+                          {formatDueBadgeLabel(dueDate, now)}
+                        </Badge>
                       </div>
-                      
-                      {/* Quick Engagement & Snooze */}
-                      <div className="flex flex-col items-end gap-1" onClick={(e) => e.stopPropagation()}>
-                        <QuickEngagement prospect={prospect} prospectInteractions={interactionsByProspectId.get(prospect.id) ?? []} />
-                        <SnoozeButtons prospect={prospect} />
+                      <div className="flex flex-col items-end gap-2">
+                        <Badge variant="outline" className="bg-white text-slate-600">
+                          {prospectInteractions.length} touches
+                        </Badge>
+                        {!hasContact(prospect) && (
+                          <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">
+                            No contact
+                          </Badge>
+                        )}
                       </div>
                     </div>
                 </CardHeader>
@@ -936,27 +1038,111 @@ export default function FollowUpPage() {
                       </div>
                     )}
 
-                    {/* Created Date */}
-                    <div className="text-xs text-gray-500 border-t pt-2">
-                      Added: {new Date(prospect.createdDate).toLocaleDateString()}
-                      {(() => {
-                        const d = getDueDate(prospect);
-                        return d ? ` - Due: ${d.toLocaleDateString()}` : '';
-                      })()}
+                    <div className="flex items-center justify-between gap-3 border-t pt-3">
+                      <div className="text-xs text-gray-500">
+                        Added {new Date(prospect.createdDate).toLocaleDateString()}
+                        {dueDate ? ` - Due ${dueDate.toLocaleDateString()}` : ''}
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-8 shrink-0"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openProspectDrawer(prospect);
+                        }}
+                      >
+                        Log follow-up
+                      </Button>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-            ))}
+            );
+            })}
           </div>
         )}
       </div>
 
-      {/* Contact Interaction Modal */}
-      {selectedProspect && (
+      <Sheet open={isDetailDrawerOpen && Boolean(selectedProspect)} onOpenChange={(open) => {
+        setIsDetailDrawerOpen(open);
+        if (!open) setSelectedProspect(null);
+      }}>
+        <SheetContent className="w-full overflow-y-auto p-0 sm:max-w-xl">
+          {selectedProspect && (
+            <div className="flex min-h-full flex-col">
+              <SheetHeader className="border-b p-6 pr-12">
+                <div className="mb-2 flex flex-wrap gap-2">
+                  <Badge variant="outline" className="bg-slate-50 text-slate-700">
+                    {selectedProspect.status.replace('_', ' ')}
+                  </Badge>
+                  <Badge variant="outline" className={(() => {
+                    const status = getDueStatus(selectedProspect);
+                    return status === 'overdue'
+                      ? 'border-red-200 bg-red-50 text-red-700'
+                      : (status === 'today' || status === 'soon')
+                        ? 'border-amber-200 bg-amber-50 text-amber-700'
+                        : 'border-slate-200 bg-slate-50 text-slate-700';
+                  })()}>
+                    {formatDueBadgeLabel(getDueDate(selectedProspect), now)}
+                  </Badge>
+                </div>
+                <SheetTitle className="text-2xl font-bold">
+                  {getProspectDisplayName(selectedProspect)}
+                </SheetTitle>
+                <SheetDescription>
+                  Log the touch, snooze the task, or open the full contact modal for detailed notes.
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="space-y-5 p-6">
+                <section className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="mb-3 text-sm font-semibold text-slate-900">Move it forward</div>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <QuickEngagement prospect={selectedProspect} prospectInteractions={selectedProspectInteractions} />
+                    <SnoozeButtons prospect={selectedProspect} />
+                  </div>
+                  <Button
+                    type="button"
+                    className="mt-4 w-full"
+                    onClick={() => setIsLogModalOpen(true)}
+                  >
+                    Open full log form
+                  </Button>
+                </section>
+
+                <section className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="mb-3 text-sm font-semibold text-slate-900">Contact</div>
+                  <div className="grid gap-2 text-sm text-slate-700">
+                    <div><span className="font-medium">Name:</span> {selectedProspect.contactName || 'Missing'}</div>
+                    <div><span className="font-medium">Company:</span> {selectedProspect.contactCompany || 'Missing'}</div>
+                    <div className="flex flex-wrap gap-3">
+                      {selectedProspect.contactPhone ? (
+                        <a className="text-blue-600 hover:underline" href={`tel:${selectedProspect.contactPhone}`}>Call {selectedProspect.contactPhone}</a>
+                      ) : <span className="text-slate-500">No phone</span>}
+                      {selectedProspect.contactEmail ? (
+                        <a className="text-blue-600 hover:underline" href={`mailto:${selectedProspect.contactEmail}`}>Email</a>
+                      ) : <span className="text-slate-500">No email</span>}
+                    </div>
+                  </div>
+                </section>
+
+                {selectedProspect.notes && (
+                  <section className="rounded-lg border border-slate-200 bg-white p-4">
+                    <div className="mb-2 text-sm font-semibold text-slate-900">Notes</div>
+                    <p className="whitespace-pre-wrap text-sm text-slate-600">{selectedProspect.notes}</p>
+                  </section>
+                )}
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {selectedProspect && isLogModalOpen && (
         <ContactInteractionModal 
           prospect={selectedProspect} 
-          onClose={() => setSelectedProspect(null)} 
+          onClose={() => setIsLogModalOpen(false)} 
         />
       )}
     </div>
