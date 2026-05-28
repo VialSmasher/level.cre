@@ -15,7 +15,8 @@ export function getProspectDisplayName(prospect: Partial<Prospect> & { name?: st
   if (business) return business;
   if (name && !isPlaceholderProspectName(name)) return name;
   if (company) return company;
-  if (name) return name;
+  if (prospect.geometry?.type === 'Point') return 'Dropped pin';
+  if (prospect.geometry?.type === 'Polygon') return 'Mapped area';
   return 'Untitled Prospect';
 }
 
