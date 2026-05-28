@@ -3,11 +3,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Users, Phone, Calendar, Clock } from 'lucide-react';
-import { Prospect, Submarket, ProspectStatusType } from '@level-cre/shared/schema';
+import { ArrowRight, Building2, Calendar, CheckCircle2, Clock, MapPin, Phone, Target, Users, Wrench } from 'lucide-react';
+import { Prospect, Submarket } from '@level-cre/shared/schema';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/hooks/useProfile';
+import { useLocation } from 'wouter';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospectDisplay';
 
@@ -27,16 +28,23 @@ function getLatestInteractionDate(interactions: any[]) {
 }
 
 function formatLastTouchLabel(date: Date | null) {
-  if (!date) return 'No activity logged';
+  if (!date) return 'Untouched';
   const daysSince = Math.max(0, Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24)));
   if (daysSince === 0) return 'Touched today';
   if (daysSince === 1) return 'Touched yesterday';
   return `${daysSince}d since touch`;
 }
 
+type FocusQueue = 'new' | 'missing' | 'stale' | 'followups';
+
+function formatStatusLabel(status: string) {
+  return status.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export default function Knowledge() {
   const { user } = useAuth();
   const { profile } = useProfile();
+  const [, setLocation] = useLocation();
   const currentUser = user;
   
   // Load data from database APIs instead of localStorage
@@ -74,6 +82,7 @@ export default function Knowledge() {
     return () => window.removeEventListener('userChanged', handleUserChange);
   }, []);
   const [selectedSubmarket, setSelectedSubmarket] = useState<string>('all');
+  const [activeQueue, setActiveQueue] = useState<FocusQueue>('new');
 
   const safeProspects = useMemo(() => Array.isArray(prospects) ? prospects : [], [prospects]);
   const safeInteractions = useMemo(() => Array.isArray(interactions) ? interactions : [], [interactions]);
@@ -114,6 +123,13 @@ export default function Knowledge() {
       if (!latestInteraction) return true;
       return latestInteraction <= sixtyDaysAgo;
     });
+    const missingContacts = filteredProspects.filter(p =>
+      !p.contactName && !p.contactEmail && !p.contactPhone && !p.contactCompany
+    );
+    const newProspects = noTouches.filter(p => p.status === 'prospect');
+    const relationshipProspects = staleProspects.filter(p =>
+      ['contacted', 'followup', 'listing', 'client', 'development'].includes(p.status)
+    );
 
     return {
       total,
@@ -122,7 +138,10 @@ export default function Knowledge() {
       contactPercent,
       freshnessPercent,
       noTouches,
+      newProspects,
+      missingContacts,
       staleProspects,
+      relationshipProspects,
       interactionsByProspectId,
     };
   }, [filteredProspects, safeInteractions]);
@@ -166,34 +185,123 @@ export default function Knowledge() {
     );
   };
 
-  // Removed Knowledge Score color helper
+  const getSubmarketLabel = (value?: string | null) => {
+    if (!value) return 'No submarket';
+    const byId = submarkets.find((submarket) => String(submarket.id) === String(value));
+    return byId?.name ?? value;
+  };
 
-  const getStatusColor = (status: ProspectStatusType) => {
-    const colors = {
-      prospect: 'bg-yellow-100 text-yellow-800',
-      contacted: 'bg-blue-100 text-blue-800',
-      listing: 'bg-green-100 text-green-800',
-      client: 'bg-purple-100 text-purple-800',
-      no_go: 'bg-red-100 text-red-800'
+  const queueConfig = {
+    new: {
+      label: 'New prospects',
+      title: 'New Prospects',
+      description: 'Untouched records ready for first contact.',
+      icon: Phone,
+      count: analytics.newProspects.length,
+      items: analytics.newProspects,
+      tint: 'emerald',
+      action: 'Call now',
+    },
+    missing: {
+      label: 'Missing contacts',
+      title: 'Missing Contact Info',
+      description: 'Assets that need a person, company, phone, or email.',
+      icon: Wrench,
+      count: analytics.missingContacts.length,
+      items: analytics.missingContacts,
+      tint: 'sky',
+      action: 'Clean up',
+    },
+    stale: {
+      label: 'Stale records',
+      title: 'Stale Records',
+      description: 'Properties that have not been touched in 60+ days.',
+      icon: Calendar,
+      count: analytics.staleProspects.length,
+      items: analytics.staleProspects,
+      tint: 'amber',
+      action: 'Review',
+    },
+    followups: {
+      label: 'Follow-ups',
+      title: 'Follow-up Lane',
+      description: 'Relationship records that need a touch.',
+      icon: Clock,
+      count: analytics.relationshipProspects.length,
+      items: analytics.relationshipProspects,
+      tint: 'orange',
+      action: 'Move forward',
+    },
+  } satisfies Record<FocusQueue, {
+    label: string;
+    title: string;
+    description: string;
+    icon: typeof Phone;
+    count: number;
+    items: Prospect[];
+    tint: string;
+    action: string;
+  }>;
+
+  const activeQueueConfig = queueConfig[activeQueue];
+  const ActiveQueueIcon = activeQueueConfig.icon;
+
+  const queueButtonClass = (queue: FocusQueue) => {
+    const isActive = activeQueue === queue;
+    const activeClasses = {
+      new: 'border-emerald-300 bg-emerald-50 text-emerald-950 shadow-sm',
+      missing: 'border-sky-300 bg-sky-50 text-sky-950 shadow-sm',
+      stale: 'border-amber-300 bg-amber-50 text-amber-950 shadow-sm',
+      followups: 'border-orange-300 bg-orange-50 text-orange-950 shadow-sm',
     };
-    return colors[status];
+    return isActive
+      ? activeClasses[queue]
+      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50';
+  };
+
+  const prospectMetaBadges = (prospect: Prospect, latestInteraction: Date | null) => {
+    const badges = [
+      getSubmarketLabel(prospect.submarketId),
+      formatStatusLabel(prospect.status),
+      formatLastTouchLabel(latestInteraction),
+    ];
+
+    if (!prospect.contactName && !prospect.contactEmail && !prospect.contactPhone && !prospect.contactCompany) {
+      badges.push('No contact');
+    }
+
+    return badges;
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-7xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Knowledge Dashboard</h1>
-          <p className="text-gray-600">Track your prospect pipeline performance and identify opportunities</p>
+    <div className="min-h-screen bg-slate-50 p-4">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
+              <Target className="h-3.5 w-3.5" />
+              Command center
+            </div>
+            <h1 className="text-3xl font-bold text-slate-950 mb-2">Knowledge Dashboard</h1>
+            <p className="text-slate-600">Pick a queue, clean the data, and move the next best prospects forward.</p>
+          </div>
+
+          <Button
+            type="button"
+            className="w-full gap-2 bg-slate-950 text-white hover:bg-slate-800 md:w-auto"
+            onClick={() => setLocation('/app/followup')}
+          >
+            Open Follow-ups
+            <ArrowRight className="h-4 w-4" />
+          </Button>
         </div>
 
-        {/* Submarket Filter */}
-        <Card className="mb-6">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-4">
-              <label className="text-sm font-medium text-gray-700">Filter by Submarket:</label>
+        <Card className="border-slate-200 bg-white/90 shadow-sm">
+          <CardContent className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <label className="text-sm font-medium text-slate-700">Submarket</label>
               <Select value={selectedSubmarket} onValueChange={setSelectedSubmarket}>
-                <SelectTrigger className="w-48">
+                <SelectTrigger className="h-10 w-full rounded-full border-slate-200 bg-slate-50 sm:w-56">
                   <SelectValue placeholder="All Submarkets" />
                 </SelectTrigger>
                 <SelectContent>
@@ -206,126 +314,202 @@ export default function Knowledge() {
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="flex flex-wrap gap-2">
+              {(Object.keys(queueConfig) as FocusQueue[]).map((queue) => {
+                const config = queueConfig[queue];
+                const Icon = config.icon;
+                return (
+                  <button
+                    key={queue}
+                    type="button"
+                    className={`inline-flex min-h-10 items-center gap-2 rounded-full border px-3 text-sm font-medium transition-colors ${queueButtonClass(queue)}`}
+                    onClick={() => setActiveQueue(queue)}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span>{config.label}</span>
+                    <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs font-bold">{config.count}</span>
+                  </button>
+                );
+              })}
+            </div>
           </CardContent>
         </Card>
 
-        {/* Filter chip */}
-        {selectedSubmarket !== 'all' && (
-          <div className="mb-4">
-            <Badge variant="secondary" className="bg-blue-100 text-blue-800">
-              Filtered by: {selectedSubmarket}
-            </Badge>
-          </div>
-        )}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {(Object.keys(queueConfig) as FocusQueue[]).map((queue) => {
+            const config = queueConfig[queue];
+            const Icon = config.icon;
+            const isActive = activeQueue === queue;
+            return (
+              <button
+                key={queue}
+                type="button"
+                className={`rounded-lg border p-4 text-left transition-all ${queueButtonClass(queue)} ${isActive ? 'ring-2 ring-blue-100' : ''}`}
+                onClick={() => setActiveQueue(queue)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold">{config.label}</div>
+                    <div className="mt-2 text-3xl font-bold tracking-tight">{config.count}</div>
+                  </div>
+                  <span className="rounded-full bg-white/80 p-2">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                </div>
+                <p className="mt-3 min-h-10 text-sm text-slate-600">{config.description}</p>
+              </button>
+            );
+          })}
+        </div>
 
-        {/* Analytics Cards (simplified) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          <Card>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card className="border-slate-200 bg-white shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Assets</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium text-slate-600">Assets Tracked</CardTitle>
+              <Users className="h-4 w-4 text-slate-400" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{analytics.total}</div>
+              <div className="text-3xl font-bold text-slate-950">{analytics.total}</div>
+              <p className="mt-1 text-sm text-slate-500">
+                {selectedSubmarket === 'all' ? 'Across all submarkets' : `Filtered to ${selectedSubmarket}`}
+              </p>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="border-slate-200 bg-white shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Contact Coverage</CardTitle>
-              <Phone className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium text-slate-600">Contact Coverage</CardTitle>
+              <Phone className="h-4 w-4 text-slate-400" />
             </CardHeader>
             <CardContent className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold">{analytics.contacted}</div>
-                <p className="text-xs text-muted-foreground">of {analytics.total}</p>
+                <div className="text-3xl font-bold text-slate-950">{analytics.contacted}</div>
+                <p className="mt-1 text-sm text-slate-500">of {analytics.total} assets</p>
               </div>
               <ProgressRing progress={analytics.contactPercent} />
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="border-slate-200 bg-white shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Freshness</CardTitle>
-              <Calendar className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-sm font-medium text-slate-600">Freshness</CardTitle>
+              <CheckCircle2 className="h-4 w-4 text-slate-400" />
             </CardHeader>
             <CardContent className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold">{analytics.recentActivity}</div>
-                <p className="text-xs text-muted-foreground">last 60 days</p>
+                <div className="text-3xl font-bold text-slate-950">{analytics.recentActivity}</div>
+                <p className="mt-1 text-sm text-slate-500">touched in 60 days</p>
               </div>
               <ProgressRing progress={analytics.freshnessPercent} />
             </CardContent>
           </Card>
-
-          
-
-          
         </div>
 
 
 
-        {/* Action Lists */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Phone className="mr-2 h-4 w-4 text-green-500" />
-                New Prospects ({analytics.noTouches.filter(p => p.status === 'prospect').length})
+          <Card className="border-slate-200 bg-white shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-2">
+                  <ActiveQueueIcon className="h-5 w-5 text-blue-600" />
+                  {activeQueueConfig.title}
+                </span>
+                <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
+                  {activeQueueConfig.count}
+                </Badge>
               </CardTitle>
+              <CardDescription>{activeQueueConfig.description}</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {analytics.noTouches.filter(p => p.status === 'prospect').length === 0 ? (
-                  <p className="text-gray-500 text-sm">All prospects contacted!</p>
+              <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                {activeQueueConfig.items.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
+                    This queue is clear.
+                  </div>
                 ) : (
-                  analytics.noTouches
-                    .filter(p => p.status === 'prospect')
+                  activeQueueConfig.items
                     .slice(0, 8)
-                    .map((prospect) => (
-                      <div key={prospect.id} className="flex justify-between items-center p-3 border rounded hover:bg-green-50 hover:border-green-200 cursor-pointer transition-colors">
-                        <div>
-                          <div className="font-medium">{getProspectDisplayName(prospect)}</div>
-                          {getProspectSecondaryName(prospect) && (
-                            <div className="text-xs text-gray-500">{getProspectSecondaryName(prospect)}</div>
-                          )}
+                    .map((prospect) => {
+                      const latestInteraction = getLatestInteractionDate(analytics.interactionsByProspectId.get(prospect.id) ?? []);
+                      const secondary = getProspectSecondaryName(prospect);
+                      return (
+                        <div key={prospect.id} className="group rounded-lg border border-slate-200 bg-white p-3 transition-colors hover:border-blue-200 hover:bg-blue-50/40">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate font-semibold text-slate-950">{getProspectDisplayName(prospect)}</div>
+                              {secondary && (
+                                <div className="mt-0.5 truncate text-xs text-slate-500">{secondary}</div>
+                              )}
+                            </div>
+                            <span className="shrink-0 text-sm font-semibold text-blue-600">{activeQueueConfig.action}</span>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-1.5">
+                            {prospectMetaBadges(prospect, latestInteraction).slice(0, 4).map((badge) => (
+                              <Badge key={badge} variant="outline" className="border-slate-200 bg-slate-50 px-2 py-0 text-xs font-medium text-slate-600">
+                                {badge}
+                              </Badge>
+                            ))}
+                          </div>
                         </div>
-                        <div className="text-sm text-green-600 font-medium">Call now</div>
-                      </div>
-                    ))
+                      );
+                    })
                 )}
               </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Clock className="mr-2 h-4 w-4 text-orange-500" />
-                Follow-ups ({analytics.staleProspects.filter(p => ['contacted', 'followup'].includes(p.status)).length})
+          <Card className="border-slate-200 bg-white shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-orange-500" />
+                  Follow-ups
+                </span>
+                <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
+                  {analytics.relationshipProspects.length}
+                </Badge>
               </CardTitle>
+              <CardDescription>Relationship records that need a timely next touch.</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {analytics.staleProspects.filter(p => ['contacted', 'followup'].includes(p.status)).length === 0 ? (
-                  <p className="text-gray-500 text-sm">All caught up!</p>
+              <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                {analytics.relationshipProspects.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
+                    All caught up.
+                  </div>
                 ) : (
-                  analytics.staleProspects
-                    .filter(p => ['contacted', 'followup'].includes(p.status))
+                  analytics.relationshipProspects
                     .slice(0, 8)
                     .map((prospect) => {
                       const latestInteraction = getLatestInteractionDate(analytics.interactionsByProspectId.get(prospect.id) ?? []);
                       const lastTouchLabel = formatLastTouchLabel(latestInteraction);
+                      const secondary = getProspectSecondaryName(prospect);
                       
                       return (
-                        <div key={prospect.id} className="flex justify-between items-center p-3 border rounded hover:bg-orange-50 hover:border-orange-200 cursor-pointer transition-colors">
-                          <div>
-                            <div className="font-medium">{getProspectDisplayName(prospect)}</div>
-                            {getProspectSecondaryName(prospect) && (
-                              <div className="text-xs text-gray-500">{getProspectSecondaryName(prospect)}</div>
-                            )}
+                        <div key={prospect.id} className="group rounded-lg border border-slate-200 bg-white p-3 transition-colors hover:border-orange-200 hover:bg-orange-50/40">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="truncate font-semibold text-slate-950">{getProspectDisplayName(prospect)}</div>
+                              {secondary && (
+                                <div className="mt-0.5 truncate text-xs text-slate-500">{secondary}</div>
+                              )}
+                            </div>
+                            <span className="shrink-0 rounded-full bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-700">
+                              {lastTouchLabel}
+                            </span>
                           </div>
-                          <div className="text-sm text-orange-600 font-medium">{lastTouchLabel}</div>
+                          <div className="mt-3 flex flex-wrap gap-1.5">
+                            <Badge variant="outline" className="border-slate-200 bg-slate-50 px-2 py-0 text-xs font-medium text-slate-600">
+                              <MapPin className="mr-1 h-3 w-3" />
+                              {getSubmarketLabel(prospect.submarketId)}
+                            </Badge>
+                            <Badge variant="outline" className="border-slate-200 bg-slate-50 px-2 py-0 text-xs font-medium text-slate-600">
+                              <Building2 className="mr-1 h-3 w-3" />
+                              {formatStatusLabel(prospect.status)}
+                            </Badge>
+                          </div>
                         </div>
                       );
                     })
