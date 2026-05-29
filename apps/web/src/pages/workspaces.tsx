@@ -147,13 +147,16 @@ export default function WorkspacesIndex() {
   const queryClient = useQueryClient();
   const { user, isDemoMode } = useAuth();
   const [open, setOpen] = useState(false);
-  const { data: listings = [], isLoading } = useQuery<ListingRow[]>({ queryKey: ['/api/listings'] });
-  const { data: shared = [], isLoading: isLoadingShared } = useQuery<ListingRow[]>({ queryKey: ['/api/listings', 'shared'], queryFn: async () => {
+  const { data: listingsResponse = [], isLoading } = useQuery<ListingRow[]>({ queryKey: ['/api/listings'] });
+  const { data: sharedResponse = [], isLoading: isLoadingShared } = useQuery<ListingRow[]>({ queryKey: ['/api/listings', 'shared'], queryFn: async () => {
     const res = await apiRequest('GET', '/api/listings?scope=shared');
     const ct = res.headers.get('content-type') || '';
     if (!ct.includes('application/json')) return [] as any;
-    return res.json();
+    const json = await res.json();
+    return Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
   }});
+  const listings = Array.isArray(listingsResponse) ? listingsResponse : [];
+  const shared = Array.isArray(sharedResponse) ? sharedResponse : [];
 
   // Remember the last place inside the Workspaces section
   useEffect(() => {
