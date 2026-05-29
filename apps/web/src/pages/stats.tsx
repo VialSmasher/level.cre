@@ -337,7 +337,7 @@ export default function StatsPage() {
               <div>
                 <div className="mb-1 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
                   <BarChart3 className="h-3.5 w-3.5" />
-                  Weekly command center
+                  Weekly scorecard
                 </div>
                 <h1 className="text-2xl md:text-3xl font-bold text-slate-950">Broker Performance</h1>
                 <p className="mt-1 text-sm text-slate-600">Weekly activity, CRM momentum, and market knowledge progress.</p>

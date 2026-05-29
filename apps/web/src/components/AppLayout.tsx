@@ -1,4 +1,5 @@
 import { useAuth } from '@/contexts/AuthContext'
+import type { ComponentType } from 'react'
 import { Button } from '@/components/ui/button'
 import { 
   DropdownMenu, 
@@ -73,6 +74,32 @@ export function AppLayout({ children }: AppLayoutProps) {
     return location === path
   }
 
+  const isScorecardActive = location === '/broker-stats' || location === '/leaderboard'
+  const profileLabel = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'
+
+  type NavItem = {
+    label: string
+    href: string
+    icon: ComponentType<{ size?: number; className?: string }>
+    active?: boolean
+  }
+
+  const navGroups: NavItem[][] = [
+    [
+      { label: 'Map', href: '/app', icon: Map, active: isActive('/app') },
+      { label: 'Workspaces', href: workspacesHref, icon: Briefcase, active: isActive('/app/workspaces') },
+      { label: 'Follow-ups', href: '/app/followup', icon: RotateCcw, active: isActive('/app/followup') },
+    ],
+    [
+      { label: 'Knowledge', href: '/app/knowledge', icon: Brain, active: isActive('/app/knowledge') },
+      { label: 'Requirements', href: '/app/requirements', icon: Layers, active: isActive('/app/requirements') },
+      { label: 'Market Comps', href: '/app/market-comps', icon: Table, active: isActive('/app/market-comps') },
+    ],
+    [
+      { label: 'Scorecard', href: '/broker-stats', icon: BarChart3, active: isScorecardActive },
+    ],
+  ]
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
       {/* Top Navigation */}
@@ -104,158 +131,37 @@ export function AppLayout({ children }: AppLayoutProps) {
             </div>
 
             {/* Navigation Links */}
-            <div className="hidden md:flex items-center space-x-6">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app" 
-                    className={`p-3 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                      isActive('/app') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30 opacity-100' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 opacity-70 hover:opacity-100'
-                    }`}
-                    aria-label="Map"
-                  >
-                    <Map size={22} />
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Map</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href={workspacesHref} 
-                    className={`p-3 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                      isActive('/app/workspaces') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30 opacity-100' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 opacity-70 hover:opacity-100'
-                    }`}
-                    aria-label="Workspaces"
-                  >
-                    <Briefcase size={22} />
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Workspaces</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/knowledge" 
-                    className={`p-3 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                      isActive('/app/knowledge') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30 opacity-100' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 opacity-70 hover:opacity-100'
-                    }`}
-                    aria-label="Knowledge"
-                  >
-                    <Brain size={22} />
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Knowledge</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/followup" 
-                    className={`p-3 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                      isActive('/app/followup') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30 opacity-100' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 opacity-70 hover:opacity-100'
-                    }`}
-                    aria-label="Follow Up"
-                  >
-                    <RotateCcw size={22} />
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Follow Up</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/broker-stats" 
-                    className={`p-3 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                      isActive('/broker-stats') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30 opacity-100' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 opacity-70 hover:opacity-100'
-                    }`}
-                    aria-label="Broker Stats"
-                  >
-                    <BarChart3 size={22} />
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Broker Stats</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/requirements" 
-                    className={`p-3 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                      isActive('/app/requirements') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30 opacity-100' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 opacity-70 hover:opacity-100'
-                    }`}
-                    aria-label="Requirements"
-                  >
-                    <Layers size={22} />
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Requirements</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/market-comps" 
-                    className={`p-3 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                      isActive('/app/market-comps') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30 opacity-100' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 opacity-70 hover:opacity-100'
-                    }`}
-                    aria-label="Market Comps"
-                  >
-                    <Table size={22} />
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Market Comps</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/profile" 
-                    className={`p-3 rounded-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                      isActive('/app/profile') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30 opacity-100' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 opacity-70 hover:opacity-100'
-                    }`}
-                    aria-label="Profile"
-                  >
-                    <Fingerprint size={22} />
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Profile</p>
-                </TooltipContent>
-              </Tooltip>
+            <div className="hidden md:flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50/80 p-1 shadow-inner dark:border-gray-700 dark:bg-gray-900/40">
+              {navGroups.map((group, groupIndex) => (
+                <div key={groupIndex} className="flex items-center gap-1">
+                  {groupIndex > 0 && <div className="mx-1 h-6 w-px bg-slate-200 dark:bg-gray-700" />}
+                  {group.map((item) => {
+                    const Icon = item.icon
+                    const active = !!item.active
+                    return (
+                      <Tooltip key={item.label}>
+                        <TooltipTrigger asChild>
+                          <Link
+                            href={item.href}
+                            className={`inline-flex h-10 items-center justify-center gap-2 rounded-full px-3 text-sm font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                              active
+                                ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:ring-blue-900'
+                                : 'text-slate-500 hover:bg-white hover:text-slate-900 hover:shadow-sm dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100'
+                            }`}
+                            aria-label={item.label}
+                          >
+                            <Icon size={20} />
+                            {active && <span>{item.label}</span>}
+                          </Link>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>{item.label}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    )
+                  })}
+                </div>
+              ))}
             </div>
 
             {/* Mobile menu button and Profile */}
@@ -275,7 +181,7 @@ export function AppLayout({ children }: AppLayoutProps) {
               {/* Profile Dropdown */}
               <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="flex items-center space-x-2">
+                <Button variant="ghost" className="flex max-w-[260px] items-center space-x-2 rounded-full px-2">
                   <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
                     {user?.user_metadata?.avatar_url ? (
                       <img 
@@ -287,8 +193,8 @@ export function AppLayout({ children }: AppLayoutProps) {
                       <User className="h-4 w-4 text-blue-600" />
                     )}
                   </div>
-                  <span className="hidden md:block text-sm text-gray-700">
-                    {user?.email || 'User'}
+                  <span className="hidden max-w-[170px] truncate text-sm font-medium text-gray-700 md:block">
+                    {profileLabel}
                   </span>
                   <ChevronDown className="h-4 w-4 text-gray-400" />
                 </Button>
