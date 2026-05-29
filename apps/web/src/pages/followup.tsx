@@ -759,28 +759,43 @@ export default function FollowUpPage() {
   return (
     <div className="h-full flex flex-col bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Follow-Up Schedule</h1>
-            <p className="text-gray-600 mt-1">
-              {queueFilteredProspects.length} prospects 
-              {showEngagementFilter === 'no_engagement' && ' with no engagement'}
-              {showEngagementFilter === 'has_engagement' && ' with logged activity'}
-              {showEngagementFilter === 'all' && ' scheduled for follow-up'}
-              {selectedSubmarketLabel && (
-                <span className="ml-2">
-                  in {selectedSubmarketLabel}
-                </span>
-              )}
-            </p>
+      <div className="border-b border-slate-200 bg-white px-6 py-5">
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <Badge variant="outline" className="mb-2 gap-2 rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
+                <PhoneCall className="h-3.5 w-3.5" />
+                Follow-up queue
+              </Badge>
+              <h1 className="text-2xl font-bold text-slate-950">Follow-Up Schedule</h1>
+              <p className="mt-1 text-sm text-slate-600">
+                {queueFilteredProspects.length} prospects
+                {showEngagementFilter === 'no_engagement' && ' with no engagement'}
+                {showEngagementFilter === 'has_engagement' && ' with logged activity'}
+                {showEngagementFilter === 'all' && ' scheduled for follow-up'}
+                {selectedSubmarketLabel && (
+                  <span className="ml-1">
+                    in {selectedSubmarketLabel}
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600">
+              <Calendar className="h-4 w-4 text-blue-600" />
+              {new Date().toLocaleDateString('en-US', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+              })}
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-            {/* Filter Mode (Client vs Server) */}
-            <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-gray-500" />
+
+          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 shadow-sm lg:flex-row lg:flex-wrap lg:items-center">
+            <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-slate-100">
+              <Clock className="h-4 w-4 text-slate-500" />
               <Select value={filterMode} onValueChange={(v) => setFilterMode(v as 'client' | 'server')}>
-                <SelectTrigger className="h-8 w-[170px]">
+                <SelectTrigger className="h-8 w-[160px] border-0 bg-transparent px-0 shadow-none focus:ring-0">
                   <SelectValue placeholder="Filter mode" />
                 </SelectTrigger>
                 <SelectContent>
@@ -789,11 +804,11 @@ export default function FollowUpPage() {
                 </SelectContent>
               </Select>
             </div>
-            {/* Engagement Filter */}
-            <div className="flex items-center gap-2">
-              <MessageSquare className="h-4 w-4 text-gray-500" />
+
+            <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-slate-100">
+              <MessageSquare className="h-4 w-4 text-slate-500" />
               <Select value={showEngagementFilter} onValueChange={setShowEngagementFilter}>
-                <SelectTrigger className="w-48">
+                <SelectTrigger className="h-8 w-[170px] border-0 bg-transparent px-0 shadow-none focus:ring-0">
                   <SelectValue placeholder="Filter by engagement" />
                 </SelectTrigger>
                 <SelectContent>
@@ -803,11 +818,11 @@ export default function FollowUpPage() {
                 </SelectContent>
               </Select>
             </div>
-            {/* Due Filter Controls */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-600">Show</span>
+
+            <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-slate-100">
+              <span className="text-sm font-medium text-slate-500">Show</span>
               <Select value={dueFilter} onValueChange={(v) => setDueFilter(v as 'due_soon' | 'due_only' | 'all')}>
-                <SelectTrigger className="h-8 w-[160px]">
+                <SelectTrigger className="h-8 w-[150px] border-0 bg-transparent px-0 shadow-none focus:ring-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -817,24 +832,26 @@ export default function FollowUpPage() {
                 </SelectContent>
               </Select>
               {dueFilter === 'due_soon' && (
-                <Select value={String(dueSoonDays)} onValueChange={(v) => setDueSoonDays(Number(v))}>
-                  <SelectTrigger className="h-8 w-[110px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="3">3 days</SelectItem>
-                    <SelectItem value="7">7 days</SelectItem>
-                    <SelectItem value="14">14 days</SelectItem>
-                  </SelectContent>
-                </Select>
+                <>
+                  <div className="h-6 w-px bg-slate-200" />
+                  <Select value={String(dueSoonDays)} onValueChange={(v) => setDueSoonDays(Number(v))}>
+                    <SelectTrigger className="h-8 w-[86px] border-0 bg-transparent px-0 shadow-none focus:ring-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="3">3 days</SelectItem>
+                      <SelectItem value="7">7 days</SelectItem>
+                      <SelectItem value="14">14 days</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </>
               )}
             </div>
-            
-            {/* Submarket Filter */}
-            <div className="flex items-center gap-2">
-              <Filter className="h-4 w-4 text-gray-500" />
+
+            <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-slate-100">
+              <Filter className="h-4 w-4 text-slate-500" />
               <Select value={selectedSubmarket} onValueChange={setSelectedSubmarket}>
-                <SelectTrigger className="w-40">
+                <SelectTrigger className="h-8 w-[150px] border-0 bg-transparent px-0 shadow-none focus:ring-0">
                   <SelectValue placeholder="Filter by submarket" />
                 </SelectTrigger>
                 <SelectContent>
@@ -844,8 +861,8 @@ export default function FollowUpPage() {
                     <SelectItem key={submarket.id} value={String(submarket.id)}>
                       <div className="flex items-center gap-2">
                         {submarket.color && (
-                          <div 
-                            className="w-3 h-3 rounded-full border" 
+                          <div
+                            className="h-3 w-3 rounded-full border"
                             style={{ backgroundColor: submarket.color }}
                           />
                         )}
@@ -855,18 +872,6 @@ export default function FollowUpPage() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-blue-600" />
-              <span className="text-sm text-gray-600">
-                {new Date().toLocaleDateString('en-US', { 
-                  weekday: 'long', 
-                  year: 'numeric', 
-                  month: 'long', 
-                  day: 'numeric' 
-                })}
-              </span>
             </div>
           </div>
         </div>
