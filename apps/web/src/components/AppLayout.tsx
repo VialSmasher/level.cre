@@ -38,18 +38,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   const { user, signOut } = useAuth()
   const [location] = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  // Decide where the Workspace nav goes: last place visited in the Workspaces section
-  const workspacesHref = (() => {
-    try {
-      const lastNew = typeof window !== 'undefined' ? localStorage.getItem('lastWorkspacesLocation') : null
-      if (lastNew && lastNew.startsWith('/app/workspaces')) return lastNew
-      const lastOld = typeof window !== 'undefined' ? localStorage.getItem('lastListingsLocation') : null
-      if (lastOld && lastOld.startsWith('/app/listings')) return lastOld.replace('/app/listings', '/app/workspaces')
-      return '/app/workspaces'
-    } catch {
-      return '/app/workspaces';
-    }
-  })()
+  const workspacesHref = '/app/workspaces'
 
   const handleSignOut = async () => {
     try {

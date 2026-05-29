@@ -3,6 +3,7 @@ import { useLocation } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/primitives/Modal';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,7 +12,7 @@ import { apiRequest } from '@/lib/queryClient';
 import { prospectLabel } from '@/lib/copy';
 import { useAuth } from '@/contexts/AuthContext';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
-import { MoreHorizontal, Trash2, Pencil, Share2, Plus } from 'lucide-react';
+import { ArrowRight, Briefcase, CalendarDays, MoreHorizontal, Pencil, Plus, Share2, Sparkles, Trash2, Users } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
@@ -34,6 +35,105 @@ type ListingRow = {
   createdAt?: string | Date | null;
   archivedAt?: string | Date | null;
   prospectCount: number;
+}
+
+const formatDate = (value?: string | Date | null) => {
+  if (!value) return 'No date';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'No date';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
+function WorkspaceCard({
+  workspace,
+  kind,
+  onOpen,
+  onRename,
+  onShare,
+  onDelete,
+  deleteDisabled,
+}: {
+  workspace: ListingRow;
+  kind: 'owned' | 'shared';
+  onOpen: () => void;
+  onRename: () => void;
+  onShare: () => void;
+  onDelete: () => void;
+  deleteDisabled?: boolean;
+}) {
+  const count = workspace.prospectCount ?? 0;
+  const name = workspace.title || workspace.address || 'Untitled workspace';
+
+  return (
+    <Card
+      className="group relative cursor-pointer overflow-hidden border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+      onClick={onOpen}
+    >
+      <CardHeader className="space-y-0 pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+              {kind === 'shared' ? <Users className="h-5 w-5" /> : <Briefcase className="h-5 w-5" />}
+            </div>
+            <div className="min-w-0">
+              <CardTitle className="truncate text-base leading-tight text-slate-950" title={name}>
+                {name}
+              </CardTitle>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 px-2 py-0 text-xs text-slate-600">
+                  {kind === 'shared' ? 'Shared' : 'Workspace'}
+                </Badge>
+                <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+                  <CalendarDays className="h-3.5 w-3.5" />
+                  {formatDate(workspace.createdAt)}
+                </span>
+              </div>
+            </div>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 shrink-0 rounded-full opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                aria-label="Workspace actions"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRename(); }}>
+                <Pencil className="mr-2 h-4 w-4" /> Rename
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={(e) => { e.preventDefault(); e.stopPropagation(); onShare(); }}>
+                <Share2 className="mr-2 h-4 w-4" /> Share
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-red-600 focus:text-red-700"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(); }}
+                disabled={deleteDisabled}
+              >
+                <Trash2 className="mr-2 h-4 w-4" /> Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <div className="flex items-center justify-between border-t border-slate-100 pt-4">
+          <div>
+            <p className="text-2xl font-bold text-slate-950">{count}</p>
+            <p className="text-xs text-slate-500">{prospectLabel(count)}</p>
+          </div>
+          <div className="inline-flex items-center gap-1 text-sm font-semibold text-blue-700 opacity-0 transition-opacity group-hover:opacity-100">
+            Open
+            <ArrowRight className="h-4 w-4" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
@@ -157,6 +257,16 @@ export default function WorkspacesIndex() {
   }});
   const listings = Array.isArray(listingsResponse) ? listingsResponse : [];
   const shared = Array.isArray(sharedResponse) ? sharedResponse : [];
+  const totalOwnedProspects = listings.reduce((sum, item) => sum + Number(item.prospectCount || 0), 0);
+  const totalSharedProspects = shared.reduce((sum, item) => sum + Number(item.prospectCount || 0), 0);
+  const openWorkspace = (workspace: ListingRow) => {
+    try {
+      localStorage.setItem('lastWorkspaceId', workspace.id);
+      localStorage.setItem('lastWorkspacesLocation', `/app/workspaces/${workspace.id}`);
+      localStorage.setItem('lastListingsLocation', `/app/listings/${workspace.id}`);
+    } catch {}
+    setLocation(`/app/workspaces/${workspace.id}`);
+  };
 
   // Remember the last place inside the Workspaces section
   useEffect(() => {
@@ -242,13 +352,22 @@ export default function WorkspacesIndex() {
   });
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Workspaces</h1>
+    <div className="min-h-screen bg-slate-50 px-6 py-8">
+      <div className="mx-auto max-w-6xl space-y-6">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <Badge variant="outline" className="mb-2 gap-2 rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
+            <Briefcase className="h-3.5 w-3.5" />
+            Workspace library
+          </Badge>
+          <h1 className="text-3xl font-bold text-slate-950">Workspaces</h1>
+          <p className="mt-1 text-sm text-slate-600">Organize pursuit maps, shared prospect sets, and client-specific canvassing work.</p>
+        </div>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button size="icon" onClick={() => setOpen(true)} aria-label="Create Workspace">
-              <Plus className="h-4 w-4" />
+            <Button onClick={() => setOpen(true)} aria-label="Create Workspace" className="h-10 rounded-full px-4">
+              <Plus className="mr-2 h-4 w-4" />
+              New workspace
             </Button>
           </TooltipTrigger>
           <TooltipContent>
@@ -256,192 +375,128 @@ export default function WorkspacesIndex() {
           </TooltipContent>
         </Tooltip>
       </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardContent className="flex items-center justify-between p-5">
+            <div>
+              <p className="text-sm font-medium text-slate-600">Owned workspaces</p>
+              <p className="mt-1 text-3xl font-bold text-slate-950">{listings.length}</p>
+            </div>
+            <div className="rounded-xl bg-blue-50 p-2 text-blue-600">
+              <Briefcase className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardContent className="flex items-center justify-between p-5">
+            <div>
+              <p className="text-sm font-medium text-slate-600">Owned prospects</p>
+              <p className="mt-1 text-3xl font-bold text-slate-950">{totalOwnedProspects}</p>
+            </div>
+            <div className="rounded-xl bg-emerald-50 p-2 text-emerald-600">
+              <Sparkles className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardContent className="flex items-center justify-between p-5">
+            <div>
+              <p className="text-sm font-medium text-slate-600">Shared prospects</p>
+              <p className="mt-1 text-3xl font-bold text-slate-950">{totalSharedProspects}</p>
+            </div>
+            <div className="rounded-xl bg-violet-50 p-2 text-violet-600">
+              <Users className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       {isLoading ? (
-        <div>Loading...</div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-40 animate-pulse rounded-2xl bg-white shadow-sm" />
+          ))}
+        </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <section className="space-y-3">
+          <div className="flex items-end justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-slate-950">My workspaces</h2>
+              <p className="text-sm text-slate-600">Client maps and prospecting boards you own.</p>
+            </div>
+            <Badge variant="outline" className="rounded-full bg-white">{listings.length}</Badge>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {listings.length === 0 && (
-            <Card className="col-span-full">
+            <Card className="col-span-full border-dashed border-slate-300 bg-white">
               <CardHeader>
                 <CardTitle>No workspaces yet</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground">Create your first workspace to start scoping prospects.</p>
+                <p className="text-sm text-slate-600">Create your first workspace to start scoping prospects.</p>
               </CardContent>
             </Card>
           )}
 
           {listings.map((l) => (
-            <Card
+            <WorkspaceCard
               key={l.id}
-              className="group relative cursor-pointer transition-shadow hover:shadow-md hover:border-blue-300"
-              onClick={() => {
-                try {
-                  localStorage.setItem('lastWorkspaceId', l.id);
-                  localStorage.setItem('lastWorkspacesLocation', `/app/workspaces/${l.id}`);
-                  // Backwards-compat for older nav state
-                  localStorage.setItem('lastListingsLocation', `/app/listings/${l.id}`);
-                } catch {}
-                setLocation(`/app/workspaces/${l.id}`);
+              workspace={l}
+              kind="owned"
+              onOpen={() => openWorkspace(l)}
+              onRename={() => toast({ title: 'Rename', description: 'Coming soon.' })}
+              onShare={() => toast({ title: 'Share', description: 'Coming soon.' })}
+              onDelete={() => {
+                if (confirm('Delete this workspace? This cannot be undone.')) deleteMutation.mutate(l.id);
               }}
-            >
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-2">
-                  <CardTitle className="text-lg leading-tight truncate">
-                    {l.title || l.address}
-                  </CardTitle>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">
-                      {new Date(l.createdAt || Date.now()).toLocaleDateString()}
-                    </span>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                          aria-label="Workspace actions"
-                        >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-44">
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            toast({ title: 'Rename', description: 'Coming soon.' });
-                          }}
-                        >
-                          <Pencil className="mr-2 h-4 w-4" /> Rename
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            toast({ title: 'Share', description: 'Coming soon.' });
-                          }}
-                        >
-                          <Share2 className="mr-2 h-4 w-4" /> Share
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="text-red-600 focus:text-red-700"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (confirm('Delete this workspace? This cannot be undone.')) {
-                              deleteMutation.mutate(l.id);
-                            }
-                          }}
-                          disabled={deleteMutation.isPending}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" /> Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-sm text-muted-foreground">
-                  <span className="font-medium text-foreground">{prospectLabel(l.prospectCount)}:</span> {l.prospectCount ?? 0}
-                </div>
-              </CardContent>
-            </Card>
+              deleteDisabled={deleteMutation.isPending}
+            />
           ))}
           </div>
+          </section>
 
         {/* Shared Section */}
-        <div className="mt-8">
-          <h2 className="text-xl font-semibold mb-4">Shared</h2>
+        <section className="space-y-3">
+          <div className="flex items-end justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-slate-950">Shared with me</h2>
+              <p className="text-sm text-slate-600">Workspaces where you have collaborator access.</p>
+            </div>
+            <Badge variant="outline" className="rounded-full bg-white">{shared.length}</Badge>
+          </div>
           {isLoadingShared ? (
-            <div>Loading...</div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-40 animate-pulse rounded-2xl bg-white shadow-sm" />
+              ))}
+            </div>
           ) : shared.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No shared workspaces yet.</p>
+            <Card className="border-dashed border-slate-300 bg-white">
+              <CardContent className="p-5 text-sm text-slate-600">No shared workspaces yet.</CardContent>
+            </Card>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {shared.map((l) => (
-                <Card
+                <WorkspaceCard
                   key={l.id}
-                  className="group relative cursor-pointer transition-shadow hover:shadow-md hover:border-blue-300"
-                  onClick={() => {
-                    try {
-                      localStorage.setItem('lastWorkspaceId', l.id);
-                      localStorage.setItem('lastWorkspacesLocation', `/app/workspaces/${l.id}`);
-                      localStorage.setItem('lastListingsLocation', `/app/listings/${l.id}`);
-                    } catch {}
-                    setLocation(`/app/workspaces/${l.id}`);
-                  }}
-                >
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <CardTitle className="text-lg leading-tight truncate">
-                        {l.title || l.address}
-                      </CardTitle>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground whitespace-nowrap">
-                          {new Date(l.createdAt || Date.now()).toLocaleDateString()}
-                        </span>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
-                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                              aria-label="Workspace actions"
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-44">
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                toast({ title: 'Rename', description: 'Coming soon.' });
-                              }}
-                            >
-                              <Pencil className="mr-2 h-4 w-4" /> Rename
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                toast({ title: 'Share', description: 'Coming soon.' });
-                              }}
-                            >
-                              <Share2 className="mr-2 h-4 w-4" /> Share
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="text-red-600 focus:text-red-700"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                toast({ title: 'Delete', description: 'Coming soon.' });
-                              }}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" /> Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-sm text-muted-foreground">{prospectLabel(l.prospectCount)}: {l.prospectCount ?? 0}</div>
-                  </CardContent>
-                </Card>
+                  workspace={l}
+                  kind="shared"
+                  onOpen={() => openWorkspace(l)}
+                  onRename={() => toast({ title: 'Rename', description: 'Coming soon.' })}
+                  onShare={() => toast({ title: 'Share', description: 'Coming soon.' })}
+                  onDelete={() => toast({ title: 'Delete', description: 'Coming soon.' })}
+                />
               ))}
             </div>
           )}
-        </div>
+        </section>
         </>
       )}
 
       <CreateWorkspaceModal open={open} onOpenChange={setOpen} />
+      </div>
     </div>
   );
 }
