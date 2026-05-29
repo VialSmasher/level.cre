@@ -551,13 +551,11 @@ export default function FollowUpPage() {
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
   const [showEngagementFilter, setShowEngagementFilter] = useState<string>('all'); // 'all', 'no_engagement', 'has_engagement'
-  const [filterMode, setFilterMode] = useState<'client' | 'server'>('client'); // toggle between client vs server due filtering
   const [dueFilter, setDueFilter] = useState<'due_soon' | 'due_only' | 'all'>('due_soon');
   const [dueSoonDays, setDueSoonDays] = useState<number>(7);
   const [activeQueue, setActiveQueue] = useState<'overdue' | 'today' | 'week' | 'no_activity' | 'no_contact'>('overdue');
   
-  const useServerDueOnly = dueFilter === 'due_only' && filterMode === 'server';
-  const apiKey = useServerDueOnly ? '/api/prospects?dueOnly=1' : '/api/prospects';
+  const apiKey = '/api/prospects';
   const { data: prospects = [], isLoading } = useQuery<Prospect[]>({
     queryKey: [apiKey],
   });
@@ -791,20 +789,7 @@ export default function FollowUpPage() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 shadow-sm lg:flex-row lg:flex-wrap lg:items-center">
-            <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-slate-100">
-              <Clock className="h-4 w-4 text-slate-500" />
-              <Select value={filterMode} onValueChange={(v) => setFilterMode(v as 'client' | 'server')}>
-                <SelectTrigger className="h-8 w-[160px] border-0 bg-transparent px-0 shadow-none focus:ring-0">
-                  <SelectValue placeholder="Filter mode" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="client">Client filter</SelectItem>
-                  <SelectItem value="server">Server filter</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
+          <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-2 shadow-sm lg:flex-row lg:flex-wrap lg:items-center">
             <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-slate-100">
               <MessageSquare className="h-4 w-4 text-slate-500" />
               <Select value={showEngagementFilter} onValueChange={setShowEngagementFilter}>
