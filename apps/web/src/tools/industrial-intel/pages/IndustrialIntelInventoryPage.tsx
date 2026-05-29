@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getGoogleMapsApiKey } from "@/lib/googleMapsApiKey";
@@ -30,6 +31,8 @@ type IntelListing = {
   longitude?: number | null;
   normalizedAddress?: string | null;
   geocodeStatus?: string | null;
+  geocodeConfidence?: number | null;
+  dataQualityStatus?: string | null;
 };
 
 type MappableIntelListing = IntelListing & {
@@ -60,16 +63,22 @@ function formatAssetType(value: string) {
   return value ? value.charAt(0).toUpperCase() + value.slice(1) : "Unknown";
 }
 
-function formatSize(listing: IntelListing) {
+function formatListingSize(listing: IntelListing) {
   if (listing.assetType === "land") {
-    return listing.landAcres ? `${listing.landAcres.toLocaleString()} ac` : "—";
+    return listing.landAcres ? `${listing.landAcres.toLocaleString()} ac` : "-";
   }
-  return listing.availableSf?.toLocaleString() || "—";
+  return listing.availableSf?.toLocaleString() || "-";
 }
 
 function hasListingQualityIssue(listing: IntelListing) {
   const lowerTitle = listing.title.toLowerCase();
-  return !listing.address || lowerTitle.length < 12 || lowerTitle.includes("contact an associate");
+  return (
+    !listing.address ||
+    lowerTitle.length < 12 ||
+    lowerTitle.includes("contact an associate") ||
+    listing.dataQualityStatus === "review" ||
+    listing.geocodeStatus === "blocked"
+  );
 }
 
 function isMappableListing(listing: IntelListing): listing is MappableIntelListing {
@@ -230,6 +239,17 @@ export default function IndustrialIntelInventoryPage() {
   }, [filteredListings, mappableListings, selectedListingId]);
 
   const selectedMappableListing = selectedListing && isMappableListing(selectedListing) ? selectedListing : null;
+  const activeListings = useMemo(() => listings.filter((listing) => !listing.removedAt), [listings]);
+  const mappedCount = useMemo(() => listings.filter(isMappableListing).length, [listings]);
+  const needsGeocodeCount = useMemo(
+    () => listings.filter((listing) => !listing.removedAt && !isMappableListing(listing)).length,
+    [listings],
+  );
+  const needsReviewCount = useMemo(
+    () => listings.filter((listing) => !listing.removedAt && hasListingQualityIssue(listing)).length,
+    [listings],
+  );
+  const removedCount = useMemo(() => listings.filter((listing) => Boolean(listing.removedAt)).length, [listings]);
 
   const mapCenter = useMemo(() => {
     if (selectedMappableListing) {
@@ -256,19 +276,46 @@ export default function IndustrialIntelInventoryPage() {
 
   return (
     <div className="space-y-6">
-      <section>
-        <h2 className="text-3xl font-semibold text-slate-950">External Inventory</h2>
-        <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          Review tracked external listings, narrow the set quickly with filters, and keep manual intake tucked away for the rare edge case.
-        </p>
+      <section className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <Badge variant="outline" className="mb-2 rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
+            Industrial Intel
+          </Badge>
+          <h2 className="text-3xl font-semibold text-slate-950">External Inventory</h2>
+          <p className="mt-2 max-w-3xl text-sm text-slate-600">
+            Review tracked external listings, narrow the set quickly with filters, and keep manual intake tucked away for the rare edge case.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowManualIntake((current) => !current)}
+          className="w-fit rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm hover:border-blue-200 hover:text-blue-700"
+        >
+          {showManualIntake ? "Hide manual intake" : "Manual intake"}
+        </button>
       </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Filters</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        {[
+          { label: "Active", value: activeListings.length, caption: "not removed" },
+          { label: "Mapped", value: mappedCount, caption: "ready for map" },
+          { label: "Needs geocode", value: needsGeocodeCount, caption: "address cleanup" },
+          { label: "Needs review", value: needsReviewCount, caption: "quality flags" },
+          { label: "Removed", value: removedCount, caption: "source disappeared" },
+        ].map((item) => (
+          <Card key={item.label} className="border-slate-200 bg-white shadow-sm">
+            <CardContent className="p-4">
+              <p className="text-sm font-medium text-slate-600">{item.label}</p>
+              <p className="mt-1 text-3xl font-bold text-slate-950">{item.value}</p>
+              <p className="mt-1 text-xs text-slate-500">{item.caption}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </section>
+
+      <Card className="border-slate-200 bg-white shadow-sm">
+        <CardContent className="space-y-4 p-4">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div className="space-y-2 xl:col-span-2">
               <Label htmlFor="searchListings">Search listings</Label>
               <Input
@@ -366,13 +413,6 @@ export default function IndustrialIntelInventoryPage() {
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
               >
                 Clear filters
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowManualIntake((current) => !current)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
-              >
-                {showManualIntake ? "Hide manual intake" : "Show manual intake"}
               </button>
             </div>
           </div>
@@ -558,7 +598,7 @@ export default function IndustrialIntelInventoryPage() {
                           <p className="font-semibold text-slate-900">{selectedMappableListing.title}</p>
                           <p>{selectedMappableListing.normalizedAddress || selectedMappableListing.address || "Address needs review"}</p>
                           <p>
-                            {formatListingType(selectedMappableListing.listingType)} · {formatSize(selectedMappableListing)}
+                            {formatListingType(selectedMappableListing.listingType)} - {formatListingSize(selectedMappableListing)}
                           </p>
                           <p>{selectedMappableListing.sourceName || "Unknown source"}</p>
                           <div className="flex flex-wrap gap-3">
@@ -641,9 +681,13 @@ export default function IndustrialIntelInventoryPage() {
                           <p className="line-clamp-2 font-medium text-slate-900">{listing.title}</p>
                           <p className="text-slate-500">{listing.address || "Address still needs review"}</p>
                           <div className="flex flex-wrap items-center gap-2">
-                            {isMappableListing(listing) && (
+                            {isMappableListing(listing) ? (
                               <span className="inline-flex rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-700">
                                 Mapped
+                              </span>
+                            ) : (
+                              <span className="inline-flex rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-700">
+                                Needs geocode
                               </span>
                             )}
                             {hasListingQualityIssue(listing) && (
@@ -685,7 +729,7 @@ export default function IndustrialIntelInventoryPage() {
                         {listing.submarket || listing.market || "Unassigned"}
                       </td>
                       <td className="py-4 pr-4 text-slate-700">
-                        {formatSize(listing)}
+                        {formatListingSize(listing)}
                       </td>
                       <td className="py-4 pr-4 text-slate-700">{formatDateTime(listing.lastSeenAt)}</td>
                       <td className="py-4 pr-4">
@@ -711,7 +755,7 @@ export default function IndustrialIntelInventoryPage() {
                             </a>
                           )}
                           {!listing.brochureUrl && !listing.sourceUrl && (
-                            <span className="text-slate-400">—</span>
+                            <span className="text-slate-400">-</span>
                           )}
                         </div>
                       </td>
