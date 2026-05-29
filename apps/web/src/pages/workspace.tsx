@@ -1190,39 +1190,40 @@ export default function Workspace() {
             )}
             {/* Floating workspace actions (top-right) */}
             <div
-              className="absolute top-4 z-[1000] flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm"
+              className="absolute top-4 z-[1000] flex items-center gap-1 rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm"
               style={{ right: isEditPanelOpen ? 352 : 16 }}
             >
-              <div className="flex min-w-0 items-center gap-2 pl-2 pr-1">
+              <div className="flex min-w-0 items-center gap-2 px-2">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
                   <Briefcase className="h-4 w-4" />
                 </div>
-                <div className="hidden min-w-0 sm:block">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Workspace</p>
+                <div className="min-w-0">
+                  <p className="hidden text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:block">Workspace</p>
                   <p className="max-w-[220px] truncate text-sm font-semibold text-slate-950" title={listing?.title || listing?.address || 'Workspace'}>
                     {listing?.title || listing?.address || 'Workspace'}
                   </p>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setLocation('/app/workspaces')}
-                  className="h-8 rounded-xl px-2 text-slate-600 hover:bg-slate-100 hover:text-slate-950"
-                  aria-label="Back to workspaces"
-                  title="Back to workspaces"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                </Button>
               </div>
+              <div className="h-7 w-px bg-slate-200" />
               <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setLocation('/app/workspaces')}
+                className="h-9 w-9 rounded-xl p-0 text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+                aria-label="Back to workspaces"
+                title="Back to workspaces"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
                 size="sm"
                 onClick={() => setShareOpen(true)}
-                className="h-9 rounded-xl border border-neutral-800 bg-neutral-900/90 px-3 text-white shadow-sm hover:bg-neutral-800/90 focus:ring-2 focus:ring-white/20"
+                className="h-9 w-9 rounded-xl p-0 text-slate-700 hover:bg-blue-50 hover:text-blue-700"
                 aria-label="Share workspace"
                 title="Share workspace"
               >
-                <Share2 className="h-4 w-4 mr-1.5" />
-                Share
+                <Share2 className="h-4 w-4" />
               </Button>
             </div>
             <GoogleMap
