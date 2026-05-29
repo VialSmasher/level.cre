@@ -2,9 +2,8 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Trophy, TrendingUp, Phone, MapPin, Target, Brain, Zap, Star } from 'lucide-react';
+import { ArrowRight, BarChart3, Brain, CalendarCheck, CheckCircle2, MapPin, Phone, Sparkles, Target, Trophy, Users, Zap } from 'lucide-react';
 import { BrokerSkillsRow, SkillActivityRow, Requirement } from '@level-cre/shared/schema';
 import { Link } from 'wouter';
 
@@ -43,6 +42,33 @@ const getLevelColor = (level: number): string => {
   if (level >= 20) return 'text-orange-500'; // Orange for beginner
   return 'text-gray-500'; // Gray for novice
 };
+
+const SKILL_TONES = {
+  prospecting: {
+    iconBg: 'bg-blue-50',
+    iconText: 'text-blue-600',
+    fill: 'bg-blue-500',
+    ring: 'border-blue-100',
+  },
+  followUp: {
+    iconBg: 'bg-emerald-50',
+    iconText: 'text-emerald-600',
+    fill: 'bg-emerald-500',
+    ring: 'border-emerald-100',
+  },
+  consistency: {
+    iconBg: 'bg-orange-50',
+    iconText: 'text-orange-600',
+    fill: 'bg-orange-500',
+    ring: 'border-orange-100',
+  },
+  marketKnowledge: {
+    iconBg: 'bg-violet-50',
+    iconText: 'text-violet-600',
+    fill: 'bg-violet-500',
+    ring: 'border-violet-100',
+  },
+} as const;
 
 const LEAD_AGENT_BONUS_XP = 80;
 const EDMONTON_TZ = 'America/Edmonton';
@@ -93,6 +119,7 @@ function SkillCard({ name, xp, icon: Icon, description, skillKey, progressPercen
   const progress = typeof progressPercentOverride === 'number' ? progressPercentOverride : getProgressToNextLevel(xp);
   const xpToNext = getXpToNextLevel(xp);
   const levelColor = getLevelColor(level);
+  const tone = SKILL_TONES[skillKey];
   const actionsToNext = (() => {
     if (typeof progressLabelOverride === 'string') return progressLabelOverride;
     if (xpToNext <= 0) return '';
@@ -123,16 +150,16 @@ function SkillCard({ name, xp, icon: Icon, description, skillKey, progressPercen
   })();
 
   return (
-    <Card className="relative overflow-hidden">
+    <Card className={`relative overflow-hidden border-slate-200 bg-white shadow-sm ${tone.ring}`}>
       <CardHeader className="pb-2 pt-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-blue-50">
-              <Icon className="h-5 w-5 text-blue-600" />
+            <div className={`p-2 rounded-lg ${tone.iconBg}`}>
+              <Icon className={`h-5 w-5 ${tone.iconText}`} />
             </div>
             <div className="min-w-0">
-              <CardTitle className="text-base md:text-lg">{name}</CardTitle>
-              <p className="text-xs md:text-sm text-gray-600 truncate">{description}</p>
+              <CardTitle className="text-base md:text-lg text-slate-950">{name}</CardTitle>
+              <p className="text-xs md:text-sm text-slate-600 truncate">{description}</p>
             </div>
           </div>
           <div className="text-right">
@@ -147,13 +174,15 @@ function SkillCard({ name, xp, icon: Icon, description, skillKey, progressPercen
       </CardHeader>
       
       <CardContent className="pt-1 pb-4">
-        <div className="space-y-1.5">
-          <div className="flex justify-between text-sm">
-            <span>Progress to level {level + 1}</span>
-            <span>{progress}%</span>
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm text-slate-700">
+            <span>Level {level + 1} progress</span>
+            <span className="font-semibold">{progress}%</span>
           </div>
-          <Progress value={progress} className="h-2" />
-          <div className="h-4 text-xs text-gray-600 truncate">
+          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+            <div className={`h-full rounded-full ${tone.fill}`} style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
+          </div>
+          <div className="h-4 text-xs text-slate-600 truncate">
             {xpToNext > 0 ? actionsToNext : ''}
           </div>
         </div>
@@ -162,7 +191,7 @@ function SkillCard({ name, xp, icon: Icon, description, skillKey, progressPercen
       {level >= 99 && (
         <div className="absolute top-2 right-2">
           <Badge className="bg-yellow-500 text-white">
-            <Star className="h-3 w-3 mr-1" />
+            <Sparkles className="h-3 w-3 mr-1" />
             MAX
           </Badge>
         </div>
@@ -261,127 +290,194 @@ export default function StatsPage() {
   }, [recentActivities, currentEdmontonWeekKey, requirementsById]);
 
   const weeklyFollowupsCount = weeklySummary.followups;
+  const weeklyXpTotal = Object.values(weeklySummary.sums).reduce((sum, value) => sum + Number(value || 0), 0);
+  const followupsToTarget = Math.max(0, 5 - weeklyFollowupsCount);
+  const streakToTarget = Math.max(0, 5 - (header?.streakDays ?? 0));
+
+  const nextActions = [
+    {
+      label: followupsToTarget > 0 ? `Log ${followupsToTarget} more follow-up${followupsToTarget === 1 ? '' : 's'} this week` : 'Weekly follow-up target hit',
+      description: followupsToTarget > 0 ? 'Keep the relationship engine moving.' : 'Nice. Bank the momentum or push for a bigger week.',
+      href: '/app/followup',
+      icon: Phone,
+      tone: 'emerald',
+    },
+    {
+      label: 'Review stale prospects',
+      description: 'Use Knowledge to find records that need a touch or cleanup.',
+      href: '/app/knowledge',
+      icon: Brain,
+      tone: 'blue',
+    },
+    {
+      label: 'Add a requirement or comp',
+      description: 'Feed market knowledge so matching gets smarter.',
+      href: '/app/requirements',
+      icon: Target,
+      tone: 'violet',
+    },
+  ];
+
+  const weeklyRings = [
+    { key: 'prospecting', label: 'Prospecting', color: 'bg-blue-500', value: weeklySummary.sums['prospecting'] || 0, goal: 250 },
+    { key: 'followUp', label: 'Follow-up', color: 'bg-emerald-500', value: weeklySummary.sums['followUp'] || 0, goal: 400 },
+    { key: 'marketKnowledge', label: 'Knowledge', color: 'bg-violet-500', value: weeklySummary.sums['marketKnowledge'] || 0, goal: 200 },
+  ];
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-6">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-slate-50 p-4 md:p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
-        <div className="mb-6">
-          <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <div className="mb-5 flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-lg bg-gradient-to-r from-blue-500 to-purple-600">
+              <div className="p-2.5 rounded-lg bg-slate-950">
                 <Trophy className="h-5 w-5 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Performance</h1>
+                <div className="mb-1 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                  <BarChart3 className="h-3.5 w-3.5" />
+                  Weekly command center
+                </div>
+                <h1 className="text-2xl md:text-3xl font-bold text-slate-950">Broker Performance</h1>
+                <p className="mt-1 text-sm text-slate-600">Weekly activity, CRM momentum, and market knowledge progress.</p>
               </div>
             </div>
             <Link
               href="/leaderboard"
-              className="inline-flex items-center gap-2 text-xl md:text-2xl font-bold text-gray-900 hover:text-blue-700 transition-colors shrink-0"
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm hover:bg-slate-50 transition-colors shrink-0"
             >
-              <Trophy className="h-5 w-5 md:h-6 md:w-6" />
+              <Trophy className="h-4 w-4" />
               <span>Standings</span>
             </Link>
           </div>
+
           {/* Overall Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6">
-            <Card>
-              <CardContent className="p-3.5">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <Card className="border-slate-200 bg-white shadow-sm">
+              <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">Total Level</p>
-                    <p className="text-3xl font-bold text-blue-600">{headerLoading || headerError ? 0 : totalLevel}</p>
+                    <p className="text-sm font-medium text-slate-600">Level</p>
+                    <p className="text-3xl font-bold text-slate-950">{headerLoading || headerError ? 0 : totalLevel}</p>
+                    <p className="mt-1 text-xs text-slate-500">Across all skills</p>
                   </div>
-                  <TrendingUp className="h-6 w-6 text-blue-400" />
+                  <Trophy className="h-6 w-6 text-blue-500" />
                 </div>
               </CardContent>
             </Card>
             
-            <Card>
-              <CardContent className="p-3.5">
+            <Card className="border-slate-200 bg-white shadow-sm">
+              <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">Assets Tracked</p>
-                    <p className="text-3xl font-bold text-purple-600">{headerLoading || headerError ? 0 : (header?.assetsTracked ?? 0)}</p>
+                    <p className="text-sm font-medium text-slate-600">Assets tracked</p>
+                    <p className="text-3xl font-bold text-violet-600">{headerLoading || headerError ? 0 : (header?.assetsTracked ?? 0)}</p>
+                    <p className="mt-1 text-xs text-slate-500">Market coverage base</p>
                   </div>
-                  <MapPin className="h-6 w-6 text-purple-400" />
+                  <MapPin className="h-6 w-6 text-violet-400" />
                 </div>
               </CardContent>
             </Card>
             
-            <Card>
-              <CardContent className="p-3.5">
+            <Card className="border-slate-200 bg-white shadow-sm">
+              <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">Follow-Ups Logged</p>
-                    <p className="text-3xl font-bold text-green-600">{weeklyFollowupsCount}</p>
-                    <p className="text-xs text-gray-500 mt-1">This week</p>
+                    <p className="text-sm font-medium text-slate-600">Follow-ups this week</p>
+                    <p className="text-3xl font-bold text-emerald-600">{weeklyFollowupsCount}</p>
+                    <p className="mt-1 text-xs text-slate-500">{followupsToTarget > 0 ? `${followupsToTarget} to weekly target` : 'Target hit'}</p>
                   </div>
-                  <Target className="h-6 w-6 text-green-400" />
+                  <Phone className="h-6 w-6 text-emerald-400" />
                 </div>
               </CardContent>
             </Card>
 
-            <Card>
-              <CardContent className="p-3.5">
+            <Card className="border-slate-200 bg-white shadow-sm">
+              <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">Streak Days</p>
+                    <p className="text-sm font-medium text-slate-600">Streak days</p>
                     <p className="text-3xl font-bold text-orange-600">{headerLoading || headerError ? 0 : (header?.streakDays ?? 0)}</p>
+                    <p className="mt-1 text-xs text-slate-500">{streakToTarget > 0 ? `${streakToTarget} to 5-day rhythm` : '5-day rhythm hit'}</p>
                   </div>
                   <Zap className="h-6 w-6 text-orange-400" />
                 </div>
               </CardContent>
             </Card>
           </div>
+        </div>
 
-          {/* Weekly Rings */}
-          {(() => {
-            const sums = weeklySummary.sums;
-            const rings = [
-              { key: 'prospecting', label: 'Prospecting', color: '#3B82F6', value: sums['prospecting'] || 0, goal: 250 },
-              { key: 'followUp', label: 'Follow-Up', color: '#10B981', value: sums['followUp'] || 0, goal: 400 },
-              { key: 'marketKnowledge', label: 'Knowledge', color: '#8B5CF6', value: sums['marketKnowledge'] || 0, goal: 200 },
-            ];
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.1fr_1.9fr]">
+          <Card className="border-slate-200 bg-white shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Sparkles className="h-5 w-5 text-blue-600" />
+                Next Best Actions
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {nextActions.map((action) => {
+                const Icon = action.icon;
+                return (
+                  <Link
+                    key={action.label}
+                    href={action.href}
+                    className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 p-3 transition-colors hover:bg-slate-50"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="rounded-lg bg-slate-50 p-2">
+                        <Icon className="h-4 w-4 text-slate-700" />
+                      </span>
+                      <span>
+                        <span className="block text-sm font-semibold text-slate-950">{action.label}</span>
+                        <span className="mt-0.5 block text-xs text-slate-500">{action.description}</span>
+                      </span>
+                    </div>
+                    <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-slate-400" />
+                  </Link>
+                );
+              })}
+            </CardContent>
+          </Card>
 
-            return (
-              <Card className="mt-3">
-                <CardHeader className="pb-2 pt-4">
-                  <CardTitle>Stats</CardTitle>
-                </CardHeader>
-                <CardContent className="pt-1 pb-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {rings.map((r) => {
-                      const pct = Math.min(100, Math.floor((r.value / Math.max(1, r.goal)) * 100));
-                      const deg = Math.round((pct / 100) * 360);
-                      return (
-                        <div key={r.key} className="flex items-center gap-4">
-                          <div className="relative w-16 h-16">
-                            <div className="absolute inset-0 rounded-full" style={{ background: `conic-gradient(${r.color} ${deg}deg, #E5E7EB ${deg}deg)` }} />
-                            <div className="absolute inset-2 rounded-full bg-white flex items-center justify-center">
-                              <div className="flex flex-col items-center text-[11px] font-semibold leading-tight">
-                                <span>{r.value} XP</span>
-                                <span className="text-gray-500">of {r.goal}</span>
-                              </div>
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-sm font-medium">{r.label}</div>
-                            <div className="text-xs text-gray-600">{r.value} XP this week</div>
-                          </div>
-                        </div>
-                      );
-                    })}
+          <Card className="border-slate-200 bg-white shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center justify-between gap-3 text-lg">
+                <span>This Week</span>
+                <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
+                  {weeklyXpTotal} XP
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {weeklyRings.map((r) => {
+                const pct = Math.min(100, Math.floor((r.value / Math.max(1, r.goal)) * 100));
+                return (
+                  <div key={r.key} className="grid gap-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-slate-800">{r.label}</span>
+                      <span className="text-slate-500">{r.value} / {r.goal} XP</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                      <div className={`h-full rounded-full ${r.color}`} style={{ width: `${pct}%` }} />
+                    </div>
                   </div>
-                </CardContent>
-              </Card>
-            );
-          })()}
+                );
+              })}
+            </CardContent>
+          </Card>
         </div>
 
         {/* Main Content */}
-        <div className="grid grid-cols-1 gap-4 mb-6 mt-6">
+        <div className="grid grid-cols-1 gap-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-slate-950">Skill Progress</h2>
+              <p className="text-sm text-slate-600">Broker-specific XP paths and what moves each one forward.</p>
+            </div>
+            <CalendarCheck className="h-5 w-5 text-slate-400" />
+          </div>
           <div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <SkillCard
