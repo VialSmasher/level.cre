@@ -145,9 +145,11 @@ function Router() {
       {/* Protected app routes - flat structure */}
       <Route path="/launcher">
         <ProtectedRoute>
-          <Suspense fallback={<Spinner />}>
-            <Launcher />
-          </Suspense>
+          <RouteErrorBoundary>
+            <Suspense fallback={<Spinner />}>
+              <Launcher />
+            </Suspense>
+          </RouteErrorBoundary>
         </ProtectedRoute>
       </Route>
 

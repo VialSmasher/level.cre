@@ -1,5 +1,5 @@
 import { Link } from 'wouter'
-import { ArrowRight, BriefcaseBusiness, ChartSpline, Lock, Map, Search } from 'lucide-react'
+import { ArrowRight, Briefcase, ChartSpline, Lock, Map, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -16,7 +16,7 @@ export default function LauncherPage() {
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="space-y-3">
             <p className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">
-              <BriefcaseBusiness className="h-3.5 w-3.5" />
+              <Briefcase className="h-3.5 w-3.5" />
               Broker tools
             </p>
             <div className="flex items-center gap-2 text-3xl font-black tracking-tight text-slate-950">
