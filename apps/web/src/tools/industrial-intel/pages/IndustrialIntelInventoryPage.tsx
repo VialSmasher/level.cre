@@ -56,6 +56,32 @@ type DuplicateGroup = {
   listings: DuplicateListing[];
 };
 
+type PublicLinkCandidate = {
+  id: string;
+  listingId: string;
+  candidateUrl: string;
+  domain: string;
+  title: string | null;
+  snippet: string | null;
+  confidence: number;
+  status: "pending" | "approved" | "rejected";
+  source: "resolver" | "manual";
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+type PublicLinksResponse = {
+  candidates: PublicLinkCandidate[];
+};
+
+type ResolvePublicLinksResponse = {
+  status: "resolved" | "not_configured";
+  message: string;
+  candidates?: PublicLinkCandidate[];
+  persistedCandidates?: PublicLinkCandidate[];
+  queries?: string[];
+};
+
 type UploadListingRecord = {
   sourceUrl: string | null;
   title: string;
@@ -672,6 +698,76 @@ export default function IndustrialIntelInventoryPage() {
   }, [filteredListings, mappableListings, selectedListingId]);
 
   const selectedMappableListing = selectedListing && isMappableListing(selectedListing) ? selectedListing : null;
+  const publicLinksQueryKey = selectedListing
+    ? [`/api/intel/listings/${selectedListing.id}/public-links`]
+    : ["/api/intel/listings/no-selection/public-links"];
+  const {
+    data: publicLinksData,
+    isLoading: isLoadingPublicLinks,
+    isError: isPublicLinksError,
+    error: publicLinksError,
+  } = useQuery<PublicLinksResponse>({
+    queryKey: publicLinksQueryKey,
+    enabled: Boolean(selectedListing),
+  });
+  const publicLinkCandidates = publicLinksData?.candidates || [];
+  const approvedPublicLink = publicLinkCandidates.find((candidate) => candidate.status === "approved") || null;
+
+  const resolvePublicLinksMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedListing) throw new Error("Pick a listing before resolving public links.");
+      const response = await apiRequest("POST", `/api/intel/listings/${selectedListing.id}/resolve-public-links`);
+      return response.json() as Promise<ResolvePublicLinksResponse>;
+    },
+    onSuccess: (result) => {
+      if (selectedListing) {
+        queryClient.invalidateQueries({ queryKey: [`/api/intel/listings/${selectedListing.id}/public-links`] });
+      }
+      if (result.status === "not_configured") {
+        toast({
+          title: "Search provider not configured",
+          description: result.message,
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: (result.persistedCandidates?.length || 0) > 0 ? "Candidates ready" : "No candidates found",
+        description: result.message,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Resolver failed",
+        description: error?.message || "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updatePublicLinkMutation = useMutation({
+    mutationFn: async ({ candidateId, action }: { candidateId: string; action: "approve" | "reject" }) => {
+      if (!selectedListing) throw new Error("Pick a listing before updating a public link.");
+      const response = await apiRequest(
+        "POST",
+        `/api/intel/listings/${selectedListing.id}/public-links/${candidateId}/${action}`,
+      );
+      return response.json() as Promise<PublicLinkCandidate>;
+    },
+    onSuccess: () => {
+      if (selectedListing) {
+        queryClient.invalidateQueries({ queryKey: [`/api/intel/listings/${selectedListing.id}/public-links`] });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Public link update failed",
+        description: error?.message || "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
   const activeListings = useMemo(() => listings.filter((listing) => !listing.removedAt), [listings]);
   const mappedCount = useMemo(() => listings.filter(isMappableListing).length, [listings]);
   const needsGeocodeCount = useMemo(
@@ -1391,6 +1487,121 @@ export default function IndustrialIntelInventoryPage() {
                         <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">Ready for matching</span>
                       )}
                     </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-950">Public listing link</p>
+                        <p className="mt-1 text-sm text-slate-500">
+                          Resolve broker/landlord pages from trusted public sources, then approve the best match.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {approvedPublicLink && (
+                          <a
+                            href={approvedPublicLink.candidateUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white"
+                          >
+                            Open public listing
+                          </a>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => resolvePublicLinksMutation.mutate()}
+                          disabled={resolvePublicLinksMutation.isPending}
+                          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {resolvePublicLinksMutation.isPending ? "Searching..." : "Find public link"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {resolvePublicLinksMutation.data?.status === "not_configured" && (
+                      <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                        {resolvePublicLinksMutation.data.message}
+                      </div>
+                    )}
+                    {resolvePublicLinksMutation.isError && (
+                      <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                        Resolver failed. {(resolvePublicLinksMutation.error as Error)?.message || "Please try again."}
+                      </div>
+                    )}
+                    {isPublicLinksError && (
+                      <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                        Public links failed to load. {(publicLinksError as Error)?.message || "Please try again."}
+                      </div>
+                    )}
+                    {resolvePublicLinksMutation.data?.status === "resolved" && publicLinkCandidates.length === 0 && (
+                      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                        No candidates found for this listing yet.
+                      </div>
+                    )}
+
+                    {isLoadingPublicLinks ? (
+                      <p className="mt-4 text-sm text-slate-500">Loading public link candidates...</p>
+                    ) : publicLinkCandidates.length > 0 ? (
+                      <div className="mt-4 space-y-3">
+                        {publicLinkCandidates.map((candidate) => (
+                          <div key={candidate.id} className="rounded-xl border border-slate-200 bg-white p-3">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                                    {candidate.domain}
+                                  </span>
+                                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                    candidate.status === "approved"
+                                      ? "bg-emerald-100 text-emerald-700"
+                                      : candidate.status === "rejected"
+                                        ? "bg-rose-100 text-rose-700"
+                                        : "bg-blue-100 text-blue-700"
+                                  }`}>
+                                    {candidate.status}
+                                  </span>
+                                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                                    {candidate.confidence}% confidence
+                                  </span>
+                                </div>
+                                <a
+                                  href={candidate.candidateUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="mt-2 line-clamp-2 block text-sm font-semibold text-slate-950 hover:text-blue-700"
+                                >
+                                  {candidate.title || candidate.candidateUrl}
+                                </a>
+                                {candidate.snippet && (
+                                  <p className="mt-1 line-clamp-3 text-sm text-slate-600">{candidate.snippet}</p>
+                                )}
+                              </div>
+                              <div className="flex shrink-0 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => updatePublicLinkMutation.mutate({ candidateId: candidate.id, action: "approve" })}
+                                  disabled={updatePublicLinkMutation.isPending || candidate.status === "approved"}
+                                  className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updatePublicLinkMutation.mutate({ candidateId: candidate.id, action: "reject" })}
+                                  disabled={updatePublicLinkMutation.isPending || candidate.status === "rejected"}
+                                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-4 text-sm text-slate-500">No public link candidates saved yet.</p>
+                    )}
                   </div>
 
                   <div className="flex flex-wrap gap-3">

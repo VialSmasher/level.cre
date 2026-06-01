@@ -677,6 +677,28 @@ export const intelListings = pgTable(
   ],
 );
 
+export const intelListingPublicLinkCandidates = pgTable(
+  "intel_listing_public_link_candidates",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    listingId: varchar("listing_id").notNull().references(() => intelListings.id, { onDelete: "cascade" }),
+    candidateUrl: text("candidate_url").notNull(),
+    domain: varchar("domain").notNull(),
+    title: text("title"),
+    snippet: text("snippet"),
+    confidence: integer("confidence").notNull().default(0),
+    status: varchar("status").notNull().default("pending"),
+    source: varchar("source").notNull().default("resolver"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    unique("UQ_intel_public_link_candidate_url").on(table.listingId, table.candidateUrl),
+    index("IDX_intel_public_link_candidates_listing").on(table.listingId),
+    index("IDX_intel_public_link_candidates_status").on(table.status),
+  ],
+);
+
 export const intelIngestRuns = pgTable(
   "intel_ingest_runs",
   {

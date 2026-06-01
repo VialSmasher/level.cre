@@ -184,6 +184,61 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/intel/listings/:id/public-links", requireAuth, async (req, res) => {
+    try {
+      const candidates = await industrialIntelService.getPublicLinkCandidates(req.params.id);
+      res.json({ candidates });
+    } catch (error) {
+      console.error("Error fetching industrial intel public link candidates:", error);
+      res.status(500).json({ message: "Failed to fetch public link candidates" });
+    }
+  });
+
+  app.post("/api/intel/listings/:id/resolve-public-links", requireAuth, async (req, res) => {
+    try {
+      const result = await industrialIntelService.resolvePublicLinkCandidates(req.params.id);
+      if (!result) {
+        return res.status(404).json({ message: "Industrial intel listing not found" });
+      }
+      if (result.status === "not_configured") {
+        return res.json(result);
+      }
+      res.json(result);
+    } catch (error) {
+      console.error("Error resolving industrial intel public links:", error);
+      res.status(500).json({
+        message: "Resolver failed",
+        detail: String((error as Error)?.message || error || "Unknown resolver failure"),
+      });
+    }
+  });
+
+  app.post("/api/intel/listings/:id/public-links/:candidateId/approve", requireAuth, async (req, res) => {
+    try {
+      const candidate = await industrialIntelService.approvePublicLinkCandidate(req.params.id, req.params.candidateId);
+      if (!candidate) {
+        return res.status(404).json({ message: "Public link candidate not found" });
+      }
+      res.json(candidate);
+    } catch (error) {
+      console.error("Error approving industrial intel public link candidate:", error);
+      res.status(500).json({ message: "Failed to approve public link candidate" });
+    }
+  });
+
+  app.post("/api/intel/listings/:id/public-links/:candidateId/reject", requireAuth, async (req, res) => {
+    try {
+      const candidate = await industrialIntelService.rejectPublicLinkCandidate(req.params.id, req.params.candidateId);
+      if (!candidate) {
+        return res.status(404).json({ message: "Public link candidate not found" });
+      }
+      res.json(candidate);
+    } catch (error) {
+      console.error("Error rejecting industrial intel public link candidate:", error);
+      res.status(500).json({ message: "Failed to reject public link candidate" });
+    }
+  });
+
   app.post("/api/intel/sources/:slug/run", requireAuth, async (req, res) => {
     try {
       const result = await industrialIntelService.runSource(getUserId(req), req.params.slug);
