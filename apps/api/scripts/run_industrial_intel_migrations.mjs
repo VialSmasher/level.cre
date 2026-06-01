@@ -11,6 +11,7 @@ const MIGRATIONS = [
   '../../drizzle/0005_industrial_intel_land_fields.sql',
   '../../drizzle/0006_industrial_intel_map_fields.sql',
   '../../drizzle/0008_industrial_intel_shortlist_decisions.sql',
+  '../../drizzle/0009_industrial_intel_surveys.sql',
 ];
 
 async function main() {

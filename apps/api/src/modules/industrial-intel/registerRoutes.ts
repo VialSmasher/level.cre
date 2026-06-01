@@ -80,6 +80,28 @@ const intelArchiveDuplicatesSchema = z.object({
   duplicateIds: z.array(z.string().trim().min(1)).min(1).max(50),
 });
 
+const intelSurveySchema = z.object({
+  requirementId: z.string().trim().min(1).nullable().optional(),
+  title: z.string().trim().min(1),
+  clientName: z.string().trim().nullable().optional(),
+  status: z.enum(["draft", "shared", "archived"]).nullable().optional(),
+});
+
+const intelSurveyUpdateSchema = intelSurveySchema.partial().extend({
+  shareToken: z.string().trim().min(1).nullable().optional(),
+});
+
+const intelSurveyItemSchema = z.object({
+  listingId: z.string().trim().min(1),
+  sortOrder: z.number().int().nonnegative().nullable().optional(),
+  recommendationLabel: z.string().trim().nullable().optional(),
+  brokerNotes: z.string().trim().nullable().optional(),
+  clientNotes: z.string().trim().nullable().optional(),
+  hidden: z.boolean().nullable().optional(),
+});
+
+const intelSurveyItemUpdateSchema = intelSurveyItemSchema.omit({ listingId: true }).partial();
+
 export function registerIndustrialIntelRoutes(app: Express): void {
   app.get("/api/intel/summary", requireAuth, async (_req, res) => {
     try {
@@ -208,6 +230,119 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     } catch (error) {
       console.error("Error ingesting industrial intel listing upload:", error);
       res.status(500).json({ message: "Failed to ingest industrial intel listing upload" });
+    }
+  });
+
+  app.get("/api/intel/surveys", requireAuth, async (req, res) => {
+    try {
+      const surveys = await industrialIntelService.getSurveys(getUserId(req));
+      res.json(surveys);
+    } catch (error) {
+      console.error("Error fetching industrial intel surveys:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel surveys" });
+    }
+  });
+
+  app.post("/api/intel/surveys", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelSurveySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel survey", issues: parsed.error.flatten() });
+      }
+      const survey = await industrialIntelService.createSurvey(getUserId(req), parsed.data);
+      res.status(201).json(survey);
+    } catch (error: any) {
+      const code = String(error?.code || "");
+      if (code === "23503") {
+        return res.status(404).json({ message: "Industrial intel requirement not found" });
+      }
+      console.error("Error creating industrial intel survey:", error);
+      res.status(500).json({ message: "Failed to create industrial intel survey" });
+    }
+  });
+
+  app.get("/api/intel/surveys/:id", requireAuth, async (req, res) => {
+    try {
+      const survey = await industrialIntelService.getSurveyById(getUserId(req), req.params.id);
+      if (!survey) {
+        return res.status(404).json({ message: "Industrial intel survey not found" });
+      }
+      res.json(survey);
+    } catch (error) {
+      console.error("Error fetching industrial intel survey:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel survey" });
+    }
+  });
+
+  app.patch("/api/intel/surveys/:id", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelSurveyUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel survey update", issues: parsed.error.flatten() });
+      }
+      const survey = await industrialIntelService.updateSurvey(getUserId(req), req.params.id, parsed.data);
+      if (!survey) {
+        return res.status(404).json({ message: "Industrial intel survey not found" });
+      }
+      res.json(survey);
+    } catch (error: any) {
+      const code = String(error?.code || "");
+      if (code === "23503") {
+        return res.status(404).json({ message: "Industrial intel requirement not found" });
+      }
+      console.error("Error updating industrial intel survey:", error);
+      res.status(500).json({ message: "Failed to update industrial intel survey" });
+    }
+  });
+
+  app.post("/api/intel/surveys/:id/items", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelSurveyItemSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel survey item", issues: parsed.error.flatten() });
+      }
+      const survey = await industrialIntelService.addSurveyItem(getUserId(req), req.params.id, parsed.data);
+      if (!survey) {
+        return res.status(404).json({ message: "Industrial intel survey not found" });
+      }
+      res.status(201).json(survey);
+    } catch (error: any) {
+      const code = String(error?.code || "");
+      if (code === "23503") {
+        return res.status(404).json({ message: "Industrial intel listing not found" });
+      }
+      console.error("Error adding industrial intel survey item:", error);
+      res.status(500).json({ message: "Failed to add industrial intel survey item" });
+    }
+  });
+
+  app.patch("/api/intel/surveys/:id/items/:itemId", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelSurveyItemUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel survey item update", issues: parsed.error.flatten() });
+      }
+      const survey = await industrialIntelService.updateSurveyItem(getUserId(req), req.params.id, req.params.itemId, parsed.data);
+      if (!survey) {
+        return res.status(404).json({ message: "Industrial intel survey item not found" });
+      }
+      res.json(survey);
+    } catch (error) {
+      console.error("Error updating industrial intel survey item:", error);
+      res.status(500).json({ message: "Failed to update industrial intel survey item" });
+    }
+  });
+
+  app.delete("/api/intel/surveys/:id/items/:itemId", requireAuth, async (req, res) => {
+    try {
+      const survey = await industrialIntelService.deleteSurveyItem(getUserId(req), req.params.id, req.params.itemId);
+      if (!survey) {
+        return res.status(404).json({ message: "Industrial intel survey item not found" });
+      }
+      res.json(survey);
+    } catch (error) {
+      console.error("Error deleting industrial intel survey item:", error);
+      res.status(500).json({ message: "Failed to delete industrial intel survey item" });
     }
   });
 

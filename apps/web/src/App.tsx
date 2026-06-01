@@ -45,6 +45,9 @@ const IndustrialIntelInventoryPage = lazy(
 const IndustrialIntelRequirementsPage = lazy(
   () => import("./tools/industrial-intel/pages/IndustrialIntelRequirementsPage"),
 );
+const IndustrialIntelSurveysPage = lazy(
+  () => import("./tools/industrial-intel/pages/IndustrialIntelSurveysPage"),
+);
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
@@ -407,6 +410,18 @@ function Router() {
             <ToolLayout>
               <Suspense fallback={<Spinner />}>
                 <IndustrialIntelRequirementsPage />
+              </Suspense>
+            </ToolLayout>
+          </ProtectedRoute>
+        </Route>
+      )}
+
+      {INDUSTRIAL_INTEL_ENABLED && (
+        <Route path="/tools/industrial-intel/surveys">
+          <ProtectedRoute>
+            <ToolLayout>
+              <Suspense fallback={<Spinner />}>
+                <IndustrialIntelSurveysPage />
               </Suspense>
             </ToolLayout>
           </ProtectedRoute>

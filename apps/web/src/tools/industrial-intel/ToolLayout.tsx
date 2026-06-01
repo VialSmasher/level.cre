@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowUpRight, BarChart3, ClipboardList, Database, Home } from "lucide-react";
+import { ArrowUpRight, BarChart3, ClipboardList, Database, FileText, Home } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
 type ToolLayoutProps = {
@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: "/tools/industrial-intel", label: "Overview", icon: BarChart3 },
   { href: "/tools/industrial-intel/listings", label: "Listings", icon: Database },
   { href: "/tools/industrial-intel/requirements", label: "Requirements", icon: ClipboardList },
+  { href: "/tools/industrial-intel/surveys", label: "Surveys", icon: FileText },
 ] as const;
 
 export default function ToolLayout({ children }: ToolLayoutProps) {

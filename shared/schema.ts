@@ -797,6 +797,48 @@ export const intelRequirementListingDecisions = pgTable(
   ],
 );
 
+export const intelSurveys = pgTable(
+  "intel_surveys",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    requirementId: varchar("requirement_id").references(() => intelRequirements.id, { onDelete: "set null" }),
+    title: varchar("title").notNull(),
+    clientName: varchar("client_name"),
+    status: varchar("status").notNull().default("draft"), // draft | shared | archived
+    shareToken: varchar("share_token").unique(),
+    createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_intel_surveys_requirement").on(table.requirementId),
+    index("IDX_intel_surveys_created_by_user").on(table.createdByUserId),
+    index("IDX_intel_surveys_status").on(table.status),
+  ],
+);
+
+export const intelSurveyItems = pgTable(
+  "intel_survey_items",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    surveyId: varchar("survey_id").notNull().references(() => intelSurveys.id, { onDelete: "cascade" }),
+    listingId: varchar("listing_id").notNull().references(() => intelListings.id, { onDelete: "cascade" }),
+    sortOrder: integer("sort_order").notNull().default(0),
+    recommendationLabel: varchar("recommendation_label"),
+    brokerNotes: text("broker_notes"),
+    clientNotes: text("client_notes"),
+    hidden: boolean("hidden").notNull().default(false),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    unique("UQ_intel_survey_items_listing").on(table.surveyId, table.listingId),
+    index("IDX_intel_survey_items_survey").on(table.surveyId),
+    index("IDX_intel_survey_items_listing").on(table.listingId),
+    index("IDX_intel_survey_items_sort").on(table.surveyId, table.sortOrder),
+  ],
+);
+
 export type IntelSource = typeof intelSources.$inferSelect;
 export type InsertIntelSource = typeof intelSources.$inferInsert;
 export type IntelListing = typeof intelListings.$inferSelect;
@@ -811,3 +853,7 @@ export type IntelRequirementPreference = typeof intelRequirementPreferences.$inf
 export type InsertIntelRequirementPreference = typeof intelRequirementPreferences.$inferInsert;
 export type IntelRequirementListingDecision = typeof intelRequirementListingDecisions.$inferSelect;
 export type InsertIntelRequirementListingDecision = typeof intelRequirementListingDecisions.$inferInsert;
+export type IntelSurvey = typeof intelSurveys.$inferSelect;
+export type InsertIntelSurvey = typeof intelSurveys.$inferInsert;
+export type IntelSurveyItem = typeof intelSurveyItems.$inferSelect;
+export type InsertIntelSurveyItem = typeof intelSurveyItems.$inferInsert;

@@ -1,10 +1,14 @@
 import {
   type CreateIntelRequirementInput,
+  type CreateIntelSurveyInput,
+  type CreateIntelSurveyItemInput,
   type IntelChangeListItem,
   type IntelRequirementDetail,
   type IntelRequirementListItem,
   type IntelRequirementPreference,
   type IntelRequirementListingDecision,
+  type IntelSurveyDetail,
+  type IntelSurveyListItem,
   type UpsertIntelRequirementListingDecisionInput,
   industrialIntelRepository,
   type IntelListingListItem,
@@ -14,6 +18,8 @@ import {
   type IntelSummary,
   type ReplaceIntelRequirementPreferencesInput,
   type UpdateIntelRequirementInput,
+  type UpdateIntelSurveyInput,
+  type UpdateIntelSurveyItemInput,
 } from "./repo";
 import {
   ingestManualIntelListing,
@@ -95,6 +101,43 @@ export class IndustrialIntelService {
     input: UpsertIntelRequirementListingDecisionInput,
   ): Promise<IntelRequirementListingDecision | null> {
     return industrialIntelRepository.upsertRequirementListingDecision(userId, requirementId, listingId, input);
+  }
+
+  async getSurveys(userId: string): Promise<IntelSurveyListItem[]> {
+    return industrialIntelRepository.getSurveys(userId);
+  }
+
+  async getSurveyById(userId: string, id: string): Promise<IntelSurveyDetail | null> {
+    return industrialIntelRepository.getSurveyById(userId, id);
+  }
+
+  async createSurvey(userId: string, input: CreateIntelSurveyInput): Promise<IntelSurveyDetail> {
+    return industrialIntelRepository.createSurvey(userId, input);
+  }
+
+  async updateSurvey(userId: string, id: string, input: UpdateIntelSurveyInput): Promise<IntelSurveyDetail | null> {
+    return industrialIntelRepository.updateSurvey(userId, id, input);
+  }
+
+  async addSurveyItem(
+    userId: string,
+    surveyId: string,
+    input: CreateIntelSurveyItemInput,
+  ): Promise<IntelSurveyDetail | null> {
+    return industrialIntelRepository.addSurveyItem(userId, surveyId, input);
+  }
+
+  async updateSurveyItem(
+    userId: string,
+    surveyId: string,
+    itemId: string,
+    input: UpdateIntelSurveyItemInput,
+  ): Promise<IntelSurveyDetail | null> {
+    return industrialIntelRepository.updateSurveyItem(userId, surveyId, itemId, input);
+  }
+
+  async deleteSurveyItem(userId: string, surveyId: string, itemId: string): Promise<IntelSurveyDetail | null> {
+    return industrialIntelRepository.deleteSurveyItem(userId, surveyId, itemId);
   }
 
   async ingestManualListing(_userId: string, input: ManualIntelListingInput) {

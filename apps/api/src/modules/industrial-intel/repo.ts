@@ -177,6 +177,65 @@ export type UpsertIntelRequirementListingDecisionInput = {
   sortOrder?: number | null;
 };
 
+export type IntelSurveyStatus = "draft" | "shared" | "archived";
+
+export type IntelSurveyListItem = {
+  id: string;
+  requirementId: string | null;
+  requirementTitle: string | null;
+  title: string;
+  clientName: string | null;
+  status: IntelSurveyStatus;
+  shareToken: string | null;
+  itemCount: number;
+  visibleItemCount: number;
+  createdByUserId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type IntelSurveyListingBrief = IntelListingListItem;
+
+export type IntelSurveyItem = {
+  id: string;
+  surveyId: string;
+  listingId: string;
+  sortOrder: number;
+  recommendationLabel: string | null;
+  brokerNotes: string | null;
+  clientNotes: string | null;
+  hidden: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+  listing: IntelSurveyListingBrief;
+};
+
+export type IntelSurveyDetail = IntelSurveyListItem & {
+  items: IntelSurveyItem[];
+};
+
+export type CreateIntelSurveyInput = {
+  requirementId?: string | null;
+  title: string;
+  clientName?: string | null;
+  status?: IntelSurveyStatus | null;
+};
+
+export type UpdateIntelSurveyInput = Partial<CreateIntelSurveyInput> & {
+  shareToken?: string | null;
+};
+
+export type CreateIntelSurveyItemInput = {
+  listingId: string;
+  sortOrder?: number | null;
+  recommendationLabel?: string | null;
+  brokerNotes?: string | null;
+  clientNotes?: string | null;
+  hidden?: boolean | null;
+};
+
+export type UpdateIntelSurveyItemInput = Partial<Omit<CreateIntelSurveyItemInput, "listingId">>;
+
 const CORE_TABLES = [
   "intel_sources",
   "intel_listings",
@@ -193,6 +252,11 @@ const REQUIREMENT_TABLES = [
 const REQUIREMENT_DECISION_TABLES = [
   ...REQUIREMENT_TABLES,
   "intel_requirement_listing_decisions",
+] as const;
+
+const SURVEY_TABLES = [
+  "intel_surveys",
+  "intel_survey_items",
 ] as const;
 
 function isoOrNull(value: unknown): string | null {
@@ -280,6 +344,18 @@ export class IndustrialIntelRepository {
 
     const found = new Set(result.rows.map((row: { table_name: string }) => row.table_name));
     return REQUIREMENT_DECISION_TABLES.every((name) => found.has(name));
+  }
+
+  async hasSurveyTables(): Promise<boolean> {
+    const result = await pool.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('intel_surveys', 'intel_survey_items')
+    `);
+
+    const found = new Set(result.rows.map((row: { table_name: string }) => row.table_name));
+    return SURVEY_TABLES.every((name) => found.has(name));
   }
 
   async getSummary(): Promise<IntelSummary> {
@@ -1286,6 +1362,407 @@ export class IndustrialIntelRepository {
       createdAt: isoOrNull(row.created_at),
       updatedAt: isoOrNull(row.updated_at),
     };
+  }
+
+  async getSurveys(userId: string): Promise<IntelSurveyListItem[]> {
+    try {
+      if (!(await this.hasSurveyTables())) return [];
+
+      const result = await pool.query<{
+        id: string;
+        requirement_id: string | null;
+        requirement_title: string | null;
+        title: string;
+        client_name: string | null;
+        status: IntelSurveyStatus;
+        share_token: string | null;
+        item_count: string | number | null;
+        visible_item_count: string | number | null;
+        created_by_user_id: string | null;
+        created_at: Date | null;
+        updated_at: Date | null;
+      }>(
+        `
+          SELECT
+            surveys.id,
+            surveys.requirement_id,
+            requirements.title AS requirement_title,
+            surveys.title,
+            surveys.client_name,
+            surveys.status,
+            surveys.share_token,
+            COUNT(items.id)::int AS item_count,
+            COUNT(items.id) FILTER (WHERE items.hidden = false)::int AS visible_item_count,
+            surveys.created_by_user_id,
+            surveys.created_at,
+            surveys.updated_at
+          FROM public.intel_surveys surveys
+          LEFT JOIN public.intel_requirements requirements ON requirements.id = surveys.requirement_id
+          LEFT JOIN public.intel_survey_items items ON items.survey_id = surveys.id
+          WHERE surveys.created_by_user_id = $1
+          GROUP BY surveys.id, requirements.title
+          ORDER BY surveys.updated_at DESC NULLS LAST, surveys.created_at DESC NULLS LAST
+        `,
+        [userId],
+      );
+
+      return result.rows.map((row) => ({
+        id: row.id,
+        requirementId: row.requirement_id,
+        requirementTitle: row.requirement_title,
+        title: row.title,
+        clientName: row.client_name,
+        status: row.status,
+        shareToken: row.share_token,
+        itemCount: intOrZero(row.item_count),
+        visibleItemCount: intOrZero(row.visible_item_count),
+        createdByUserId: row.created_by_user_id,
+        createdAt: isoOrNull(row.created_at),
+        updatedAt: isoOrNull(row.updated_at),
+      }));
+    } catch (error) {
+      if (isRecoverableIntelSchemaError(error)) return [];
+      throw error;
+    }
+  }
+
+  async getSurveyById(userId: string, id: string): Promise<IntelSurveyDetail | null> {
+    try {
+      if (!(await this.hasSurveyTables())) return null;
+
+      const surveyResult = await pool.query<{
+        id: string;
+        requirement_id: string | null;
+        requirement_title: string | null;
+        title: string;
+        client_name: string | null;
+        status: IntelSurveyStatus;
+        share_token: string | null;
+        item_count: string | number | null;
+        visible_item_count: string | number | null;
+        created_by_user_id: string | null;
+        created_at: Date | null;
+        updated_at: Date | null;
+      }>(
+        `
+          SELECT
+            surveys.id,
+            surveys.requirement_id,
+            requirements.title AS requirement_title,
+            surveys.title,
+            surveys.client_name,
+            surveys.status,
+            surveys.share_token,
+            COUNT(items.id)::int AS item_count,
+            COUNT(items.id) FILTER (WHERE items.hidden = false)::int AS visible_item_count,
+            surveys.created_by_user_id,
+            surveys.created_at,
+            surveys.updated_at
+          FROM public.intel_surveys surveys
+          LEFT JOIN public.intel_requirements requirements ON requirements.id = surveys.requirement_id
+          LEFT JOIN public.intel_survey_items items ON items.survey_id = surveys.id
+          WHERE surveys.created_by_user_id = $1 AND surveys.id = $2
+          GROUP BY surveys.id, requirements.title
+          LIMIT 1
+        `,
+        [userId, id],
+      );
+
+      const survey = surveyResult.rows[0];
+      if (!survey) return null;
+
+      const itemResult = await pool.query<{
+        item_id: string;
+        survey_id: string;
+        listing_id: string;
+        sort_order: string | number | null;
+        recommendation_label: string | null;
+        broker_notes: string | null;
+        client_notes: string | null;
+        hidden: boolean;
+        item_created_at: Date | null;
+        item_updated_at: Date | null;
+        source_id: string;
+        source_name: string | null;
+        title: string;
+        address: string | null;
+        normalized_address: string | null;
+        market: string | null;
+        submarket: string | null;
+        status: string;
+        listing_type: string;
+        asset_type: string;
+        lat: string | null;
+        lng: string | null;
+        geocode_status: string | null;
+        geocode_confidence: string | null;
+        geocode_source: string | null;
+        data_quality_status: string | null;
+        available_sf: number | null;
+        land_acres: string | null;
+        total_price: string | null;
+        price_per_acre: string | null;
+        raw_payload: Record<string, unknown> | null;
+        brochure_url: string | null;
+        source_url: string | null;
+        last_seen_at: Date | null;
+        removed_at: Date | null;
+      }>(
+        `
+          SELECT
+            items.id AS item_id,
+            items.survey_id,
+            items.listing_id,
+            items.sort_order,
+            items.recommendation_label,
+            items.broker_notes,
+            items.client_notes,
+            items.hidden,
+            items.created_at AS item_created_at,
+            items.updated_at AS item_updated_at,
+            listings.source_id,
+            sources.name AS source_name,
+            listings.title,
+            listings.address,
+            COALESCE(listings.normalized_address, listings.address) AS normalized_address,
+            listings.market,
+            listings.submarket,
+            listings.status,
+            listings.listing_type,
+            listings.asset_type,
+            listings.lat,
+            listings.lng,
+            listings.geocode_status,
+            listings.geocode_confidence,
+            listings.geocode_source,
+            listings.data_quality_status,
+            listings.available_sf,
+            listings.land_acres,
+            listings.total_price,
+            listings.price_per_acre,
+            listings.raw_payload,
+            listings.brochure_url,
+            listings.source_url,
+            listings.last_seen_at,
+            listings.removed_at
+          FROM public.intel_survey_items items
+          INNER JOIN public.intel_listings listings ON listings.id = items.listing_id
+          LEFT JOIN public.intel_sources sources ON sources.id = listings.source_id
+          WHERE items.survey_id = $1
+          ORDER BY items.sort_order ASC, items.created_at ASC
+        `,
+        [id],
+      );
+
+      const items = itemResult.rows.map((row) => ({
+        id: row.item_id,
+        surveyId: row.survey_id,
+        listingId: row.listing_id,
+        sortOrder: intOrZero(row.sort_order),
+        recommendationLabel: row.recommendation_label,
+        brokerNotes: row.broker_notes,
+        clientNotes: row.client_notes,
+        hidden: Boolean(row.hidden),
+        createdAt: isoOrNull(row.item_created_at),
+        updatedAt: isoOrNull(row.item_updated_at),
+        listing: {
+          id: row.listing_id,
+          sourceId: row.source_id,
+          sourceName: row.source_name,
+          title: row.title,
+          address: row.address,
+          normalizedAddress: row.normalized_address,
+          market: row.market,
+          submarket: row.submarket,
+          status: row.status,
+          listingType: row.listing_type,
+          assetType: row.asset_type,
+          latitude: numOrNull(row.lat),
+          longitude: numOrNull(row.lng),
+          geocodeStatus: row.geocode_status,
+          geocodeConfidence: numOrNull(row.geocode_confidence),
+          geocodeSource: row.geocode_source,
+          dataQualityStatus: row.data_quality_status,
+          availableSf: intOrNull(row.available_sf),
+          landAcres: numOrNull(row.land_acres),
+          totalPrice: numOrNull(row.total_price),
+          pricePerAcre: numOrNull(row.price_per_acre),
+          leaseRatePsf: numOrNull(row.raw_payload?.leaseRatePsf),
+          brochureUrl: row.brochure_url,
+          sourceUrl: row.source_url,
+          lastSeenAt: isoOrNull(row.last_seen_at),
+          removedAt: isoOrNull(row.removed_at),
+        },
+      }));
+
+      return {
+        id: survey.id,
+        requirementId: survey.requirement_id,
+        requirementTitle: survey.requirement_title,
+        title: survey.title,
+        clientName: survey.client_name,
+        status: survey.status,
+        shareToken: survey.share_token,
+        itemCount: intOrZero(survey.item_count),
+        visibleItemCount: intOrZero(survey.visible_item_count),
+        createdByUserId: survey.created_by_user_id,
+        createdAt: isoOrNull(survey.created_at),
+        updatedAt: isoOrNull(survey.updated_at),
+        items,
+      };
+    } catch (error) {
+      if (isRecoverableIntelSchemaError(error)) return null;
+      throw error;
+    }
+  }
+
+  async createSurvey(userId: string, input: CreateIntelSurveyInput): Promise<IntelSurveyDetail> {
+    const result = await pool.query<{ id: string }>(
+      `
+        INSERT INTO public.intel_surveys (
+          requirement_id,
+          title,
+          client_name,
+          status,
+          created_by_user_id,
+          updated_at
+        ) VALUES ($1, $2, $3, COALESCE($4, 'draft'), $5, now())
+        RETURNING id
+      `,
+      [input.requirementId ?? null, input.title, input.clientName ?? null, input.status ?? null, userId],
+    );
+
+    const created = await this.getSurveyById(userId, result.rows[0]?.id);
+    if (!created) throw new Error("Failed to load created industrial intel survey");
+    return created;
+  }
+
+  async updateSurvey(userId: string, id: string, input: UpdateIntelSurveyInput): Promise<IntelSurveyDetail | null> {
+    const current = await this.getSurveyById(userId, id);
+    if (!current) return null;
+
+    await pool.query(
+      `
+        UPDATE public.intel_surveys
+        SET
+          requirement_id = $3,
+          title = $4,
+          client_name = $5,
+          status = $6,
+          share_token = $7,
+          updated_at = now()
+        WHERE created_by_user_id = $1 AND id = $2
+      `,
+      [
+        userId,
+        id,
+        input.requirementId === undefined ? current.requirementId : input.requirementId,
+        input.title ?? current.title,
+        input.clientName === undefined ? current.clientName : input.clientName,
+        input.status ?? current.status,
+        input.shareToken === undefined ? current.shareToken : input.shareToken,
+      ],
+    );
+
+    return this.getSurveyById(userId, id);
+  }
+
+  async addSurveyItem(
+    userId: string,
+    surveyId: string,
+    input: CreateIntelSurveyItemInput,
+  ): Promise<IntelSurveyDetail | null> {
+    const survey = await this.getSurveyById(userId, surveyId);
+    if (!survey) return null;
+
+    const nextSortOrder =
+      input.sortOrder ??
+      (survey.items.length > 0 ? Math.max(...survey.items.map((item) => item.sortOrder)) + 10 : 10);
+
+    await pool.query(
+      `
+        INSERT INTO public.intel_survey_items (
+          survey_id,
+          listing_id,
+          sort_order,
+          recommendation_label,
+          broker_notes,
+          client_notes,
+          hidden,
+          updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, false), now())
+        ON CONFLICT (survey_id, listing_id)
+        DO UPDATE SET
+          hidden = false,
+          sort_order = EXCLUDED.sort_order,
+          recommendation_label = COALESCE(EXCLUDED.recommendation_label, public.intel_survey_items.recommendation_label),
+          broker_notes = COALESCE(EXCLUDED.broker_notes, public.intel_survey_items.broker_notes),
+          client_notes = COALESCE(EXCLUDED.client_notes, public.intel_survey_items.client_notes),
+          updated_at = now()
+      `,
+      [
+        surveyId,
+        input.listingId,
+        nextSortOrder,
+        input.recommendationLabel ?? null,
+        input.brokerNotes ?? null,
+        input.clientNotes ?? null,
+        input.hidden ?? null,
+      ],
+    );
+
+    await pool.query(`UPDATE public.intel_surveys SET updated_at = now() WHERE id = $1`, [surveyId]);
+    return this.getSurveyById(userId, surveyId);
+  }
+
+  async updateSurveyItem(
+    userId: string,
+    surveyId: string,
+    itemId: string,
+    input: UpdateIntelSurveyItemInput,
+  ): Promise<IntelSurveyDetail | null> {
+    const survey = await this.getSurveyById(userId, surveyId);
+    if (!survey) return null;
+    const current = survey.items.find((item) => item.id === itemId);
+    if (!current) return null;
+
+    await pool.query(
+      `
+        UPDATE public.intel_survey_items
+        SET
+          sort_order = $3,
+          recommendation_label = $4,
+          broker_notes = $5,
+          client_notes = $6,
+          hidden = $7,
+          updated_at = now()
+        WHERE survey_id = $1 AND id = $2
+      `,
+      [
+        surveyId,
+        itemId,
+        input.sortOrder ?? current.sortOrder,
+        input.recommendationLabel === undefined ? current.recommendationLabel : input.recommendationLabel,
+        input.brokerNotes === undefined ? current.brokerNotes : input.brokerNotes,
+        input.clientNotes === undefined ? current.clientNotes : input.clientNotes,
+        input.hidden === undefined ? current.hidden : input.hidden,
+      ],
+    );
+
+    await pool.query(`UPDATE public.intel_surveys SET updated_at = now() WHERE id = $1`, [surveyId]);
+    return this.getSurveyById(userId, surveyId);
+  }
+
+  async deleteSurveyItem(userId: string, surveyId: string, itemId: string): Promise<IntelSurveyDetail | null> {
+    const survey = await this.getSurveyById(userId, surveyId);
+    if (!survey) return null;
+
+    await pool.query(
+      `DELETE FROM public.intel_survey_items WHERE survey_id = $1 AND id = $2`,
+      [surveyId, itemId],
+    );
+    await pool.query(`UPDATE public.intel_surveys SET updated_at = now() WHERE id = $1`, [surveyId]);
+    return this.getSurveyById(userId, surveyId);
   }
 }
 
