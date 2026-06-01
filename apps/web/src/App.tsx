@@ -15,6 +15,7 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 const Home = lazy(() => import("./pages/home"));
 const Knowledge = lazy(() => import("./pages/knowledge"));
 const FollowUp = lazy(() => import("./pages/followup"));
+const Inbox = lazy(() => import("./pages/inbox"));
 const Stats = lazy(() => import("./pages/stats"));
 const Requirements = lazy(() => import("./pages/requirements"));
 const MarketComps = lazy(() => import("./pages/market-comps"));
@@ -241,6 +242,18 @@ function Router() {
             <AppLayout>
               <Suspense fallback={<Spinner />}> 
                 <FollowUp />
+              </Suspense>
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/app/inbox">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <Suspense fallback={<Spinner />}>
+                <Inbox />
               </Suspense>
             </AppLayout>
           </OnboardingCheck>

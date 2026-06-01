@@ -6,7 +6,7 @@ import { ensureUser } from './ensureUser';
 import { getUserId, requireAuth, getUserFromBearerAuthHeader } from "./auth";
 import { z } from 'zod';
 import { ProspectGeometry, ProspectStatus, FollowUpTimeframe } from '@level-cre/shared/schema';
-import { randomUUID } from 'crypto';
+import { createCipheriv, createDecipheriv, createHmac, createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import * as demo from './demoStore';
 
 function isDemo(req: Request): boolean {
@@ -135,6 +135,245 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   await ensureListingInvitesTable();
+
+  async function ensureEmailIntegrationTables(): Promise<void> {
+    try {
+      const candidatePaths = [
+        path.resolve(process.cwd(), 'drizzle/0012_email_review_queue.sql'),
+        path.resolve(process.cwd(), '../../drizzle/0012_email_review_queue.sql'),
+      ];
+      const migrationPath = candidatePaths.find((candidate) => fs.existsSync(candidate));
+      if (!migrationPath) return;
+      await pool.query(fs.readFileSync(migrationPath, 'utf8'));
+    } catch (error: any) {
+      console.error('Failed to ensure email integration tables:', error?.message || error);
+    }
+  }
+
+  await ensureEmailIntegrationTables();
+
+  const OUTLOOK_SCOPES = ['offline_access', 'User.Read', 'Mail.Read'];
+
+  function getOutlookConfig(req?: Request) {
+    const tenantId = process.env.OUTLOOK_TENANT_ID || process.env.MICROSOFT_TENANT_ID || 'common';
+    const clientId = process.env.OUTLOOK_CLIENT_ID || process.env.MICROSOFT_CLIENT_ID || '';
+    const clientSecret = process.env.OUTLOOK_CLIENT_SECRET || process.env.MICROSOFT_CLIENT_SECRET || '';
+    const configured = Boolean(clientId && clientSecret);
+    const baseUrl =
+      process.env.OUTLOOK_REDIRECT_BASE_URL ||
+      process.env.EMAIL_OAUTH_REDIRECT_BASE_URL ||
+      process.env.PUBLIC_APP_URL ||
+      (req ? `${req.protocol}://${req.get('host')}` : '');
+    const redirectUri = `${String(baseUrl).replace(/\/$/, '')}/api/email/outlook/callback`;
+    return {
+      tenantId,
+      clientId,
+      clientSecret,
+      configured: configured && Boolean(baseUrl),
+      redirectUri,
+      authorizeUrl: `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize`,
+      tokenUrl: `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+    };
+  }
+
+  function getEmailTokenKey() {
+    const raw =
+      process.env.EMAIL_TOKEN_ENCRYPTION_KEY ||
+      process.env.ENCRYPTION_KEY ||
+      process.env.JWT_SECRET ||
+      process.env.SUPABASE_JWT_SECRET ||
+      '';
+    if (!raw) throw new Error('EMAIL_TOKEN_ENCRYPTION_KEY or JWT_SECRET must be set to store email tokens');
+    return createHash('sha256').update(raw).digest();
+  }
+
+  function encryptJson(payload: unknown): string {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', getEmailTokenKey(), iv);
+    const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return [iv.toString('base64url'), tag.toString('base64url'), encrypted.toString('base64url')].join('.');
+  }
+
+  function decryptJson<T = any>(ciphertext: string): T {
+    const [ivText, tagText, encryptedText] = String(ciphertext || '').split('.');
+    if (!ivText || !tagText || !encryptedText) throw new Error('Invalid encrypted token payload');
+    const decipher = createDecipheriv('aes-256-gcm', getEmailTokenKey(), Buffer.from(ivText, 'base64url'));
+    decipher.setAuthTag(Buffer.from(tagText, 'base64url'));
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(encryptedText, 'base64url')),
+      decipher.final(),
+    ]);
+    return JSON.parse(decrypted.toString('utf8')) as T;
+  }
+
+  function signEmailState(payload: Record<string, unknown>) {
+    const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const secret = process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET || 'dev_change_me';
+    const signature = createHmac('sha256', secret).update(body).digest('base64url');
+    return `${body}.${signature}`;
+  }
+
+  function verifyEmailState(state: unknown): any {
+    const [body, signature] = String(state || '').split('.');
+    if (!body || !signature) throw new Error('Invalid OAuth state');
+    const secret = process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET || 'dev_change_me';
+    const expected = createHmac('sha256', secret).update(body).digest('base64url');
+    const actualBuffer = Buffer.from(signature);
+    const expectedBuffer = Buffer.from(expected);
+    if (actualBuffer.length !== expectedBuffer.length || !timingSafeEqual(actualBuffer, expectedBuffer)) {
+      throw new Error('Invalid OAuth state signature');
+    }
+    const parsed = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (!parsed?.userId || !parsed?.iat || Date.now() - Number(parsed.iat) > 10 * 60 * 1000) {
+      throw new Error('Expired OAuth state');
+    }
+    return parsed;
+  }
+
+  async function exchangeOutlookCode(req: Request, code: string) {
+    const config = getOutlookConfig(req);
+    const body = new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      code,
+      redirect_uri: config.redirectUri,
+      grant_type: 'authorization_code',
+      scope: OUTLOOK_SCOPES.join(' '),
+    });
+    const response = await fetch(config.tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    const json = await response.json();
+    if (!response.ok) throw new Error(json.error_description || json.error || 'Outlook token exchange failed');
+    return json;
+  }
+
+  async function refreshOutlookToken(connectionId: string, userId: string) {
+    const { rows } = await pool.query(`
+      SELECT token_ciphertext FROM public.email_connections
+      WHERE id = $1 AND user_id = $2 AND provider = 'outlook'
+    `, [connectionId, userId]);
+    const connection = rows[0];
+    if (!connection?.token_ciphertext) throw new Error('Outlook connection has no stored token');
+    const tokens = decryptJson<any>(connection.token_ciphertext);
+    if (tokens.access_token && tokens.expires_at && Number(tokens.expires_at) - Date.now() > 60_000) {
+      return tokens.access_token as string;
+    }
+    if (!tokens.refresh_token) throw new Error('Outlook connection needs reauthorization');
+    const config = getOutlookConfig();
+    const body = new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      refresh_token: tokens.refresh_token,
+      grant_type: 'refresh_token',
+      scope: OUTLOOK_SCOPES.join(' '),
+    });
+    const response = await fetch(config.tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    const json = await response.json();
+    if (!response.ok) throw new Error(json.error_description || json.error || 'Outlook token refresh failed');
+    const nextTokens = {
+      ...tokens,
+      ...json,
+      refresh_token: json.refresh_token || tokens.refresh_token,
+      expires_at: Date.now() + Math.max(Number(json.expires_in || 3600) - 60, 60) * 1000,
+    };
+    await pool.query(`
+      UPDATE public.email_connections
+      SET token_ciphertext = $3, token_expires_at = $4, status = 'connected', error_message = NULL, updated_at = now()
+      WHERE id = $1 AND user_id = $2
+    `, [connectionId, userId, encryptJson(nextTokens), new Date(nextTokens.expires_at)]);
+    return nextTokens.access_token as string;
+  }
+
+  async function graphGet(accessToken: string, url: string) {
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const json = await response.json();
+    if (!response.ok) throw new Error(json.error?.message || json.error_description || 'Microsoft Graph request failed');
+    return json;
+  }
+
+  function normalizeMatchText(value: unknown) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/&/g, ' and ')
+      .replace(/\bnorthwest\b/g, 'nw')
+      .replace(/\bnortheast\b/g, 'ne')
+      .replace(/\bsouthwest\b/g, 'sw')
+      .replace(/\bsoutheast\b/g, 'se')
+      .replace(/\bstreet\b/g, 'st')
+      .replace(/\bavenue\b/g, 'ave')
+      .replace(/\broad\b/g, 'rd')
+      .replace(/\bdrive\b/g, 'dr')
+      .replace(/\bcrescent\b/g, 'cres')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function usefulTokens(value: unknown) {
+    return normalizeMatchText(value)
+      .split(' ')
+      .filter((token) => token.length > 2 && !['ltd', 'inc', 'corp', 'company', 'building', 'property'].includes(token));
+  }
+
+  function scoreEmailProspect(message: any, prospect: any) {
+    const messageText = normalizeMatchText([
+      message.subject,
+      message.snippet,
+      message.senderEmail,
+      message.senderName,
+      ...(message.recipientEmails || []),
+      ...(message.attachmentNames || []),
+    ].join(' '));
+    const prospectText = normalizeMatchText([
+      prospect.name,
+      prospect.address,
+      prospect.business_name,
+      prospect.contact_company,
+      prospect.contact_email,
+      prospect.contact_name,
+      prospect.notes,
+    ].join(' '));
+    let score = 0;
+    const reasons: string[] = [];
+    const prospectEmail = normalizeMatchText(prospect.contact_email);
+    if (prospectEmail && messageText.includes(prospectEmail)) {
+      score += 90;
+      reasons.push('contact email');
+    }
+    const address = normalizeMatchText(prospect.address);
+    if (address && messageText.includes(address)) {
+      score += 80;
+      reasons.push('address');
+    }
+    const nameTokens = usefulTokens([prospect.name, prospect.business_name, prospect.contact_company].join(' '));
+    const tokenHits = nameTokens.filter((token) => messageText.includes(token));
+    if (tokenHits.length) {
+      score += Math.min(45, tokenHits.length * 12);
+      reasons.push(`name/company tokens ${tokenHits.length}/${nameTokens.length}`);
+    }
+    const addressTokens = usefulTokens(prospect.address);
+    const addressHits = addressTokens.filter((token) => messageText.includes(token));
+    if (addressHits.length >= 2) {
+      score += Math.min(35, addressHits.length * 8);
+      reasons.push(`address tokens ${addressHits.length}/${addressTokens.length}`);
+    }
+    if (!score && prospectText) {
+      const senderDomain = String(message.senderEmail || '').split('@')[1]?.toLowerCase();
+      if (senderDomain && prospectText.includes(senderDomain.replace(/\..*$/, ''))) {
+        score += 25;
+        reasons.push('domain hint');
+      }
+    }
+    return { score: Math.min(score, 100), reason: reasons.join('; ') };
+  }
 
   function mapProspectRow(row: any) {
     const parsedSize = row.size !== null && row.size !== undefined && row.size !== ''
@@ -2588,6 +2827,569 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error deleting contact interaction:', error);
       res.status(500).json({ message: 'Failed to delete contact interaction' });
+    }
+  });
+
+  const EmailMatchStatusSchema = z.enum(['pending_review', 'auto_logged', 'approved', 'ignored', 'rejected']);
+
+  app.get('/api/email/outlook/config', requireAuth, async (req, res) => {
+    try {
+      const config = getOutlookConfig(req);
+      if (isDemo(req)) {
+        return res.json({ configured: false, connected: false, reason: 'demo_mode' });
+      }
+      const userId = getUserId(req);
+      const { rows } = await pool.query(`
+        SELECT id, email_address, display_name, status, last_synced_at, error_message
+        FROM public.email_connections
+        WHERE user_id = $1 AND provider = 'outlook'
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [userId]);
+      const connection = rows[0] || null;
+      res.json({
+        configured: config.configured,
+        connected: connection?.status === 'connected',
+        redirectUri: config.redirectUri,
+        scopes: OUTLOOK_SCOPES,
+        connection: connection ? {
+          id: connection.id,
+          emailAddress: connection.email_address,
+          displayName: connection.display_name,
+          status: connection.status,
+          lastSyncedAt: connection.last_synced_at ? new Date(connection.last_synced_at).toISOString() : null,
+          errorMessage: connection.error_message || null,
+        } : null,
+      });
+    } catch (error) {
+      console.error('Error fetching Outlook email config:', error);
+      res.status(500).json({ message: 'Failed to fetch Outlook email config' });
+    }
+  });
+
+  app.get('/api/email/outlook/connect', requireAuth, async (req, res) => {
+    try {
+      if (isDemo(req)) return res.status(400).json({ message: 'Email connection is disabled in demo mode' });
+      const config = getOutlookConfig(req);
+      if (!config.configured) {
+        return res.status(400).json({ message: 'Outlook OAuth is not configured', redirectUri: config.redirectUri });
+      }
+      const state = signEmailState({
+        provider: 'outlook',
+        userId: getUserId(req),
+        iat: Date.now(),
+        returnTo: typeof req.query.returnTo === 'string' ? req.query.returnTo : '/app/inbox',
+        nonce: randomUUID(),
+      });
+      const authorizeUrl = new URL(config.authorizeUrl);
+      authorizeUrl.searchParams.set('client_id', config.clientId);
+      authorizeUrl.searchParams.set('response_type', 'code');
+      authorizeUrl.searchParams.set('redirect_uri', config.redirectUri);
+      authorizeUrl.searchParams.set('response_mode', 'query');
+      authorizeUrl.searchParams.set('scope', OUTLOOK_SCOPES.join(' '));
+      authorizeUrl.searchParams.set('state', state);
+      authorizeUrl.searchParams.set('prompt', 'select_account');
+      res.redirect(authorizeUrl.toString());
+    } catch (error) {
+      console.error('Error starting Outlook OAuth:', error);
+      res.status(500).json({ message: 'Failed to start Outlook connection' });
+    }
+  });
+
+  app.get('/api/email/outlook/callback', async (req, res) => {
+    let returnTo = '/app/inbox';
+    try {
+      const state = verifyEmailState(req.query.state);
+      if (state.provider !== 'outlook') throw new Error('Invalid OAuth provider');
+      returnTo = typeof state.returnTo === 'string' ? state.returnTo : returnTo;
+      const code = typeof req.query.code === 'string' ? req.query.code : '';
+      if (!code) throw new Error(String(req.query.error_description || req.query.error || 'Missing authorization code'));
+      const token = await exchangeOutlookCode(req, code);
+      const expiresAt = Date.now() + Math.max(Number(token.expires_in || 3600) - 60, 60) * 1000;
+      const accessToken = token.access_token as string;
+      const profile = await graphGet(accessToken, 'https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName');
+      const emailAddress = profile.mail || profile.userPrincipalName || null;
+      const encrypted = encryptJson({ ...token, expires_at: expiresAt });
+      await pool.query(`
+        INSERT INTO public.email_connections (
+          user_id, provider, provider_account_id, email_address, display_name, status, scopes,
+          token_ciphertext, token_expires_at, error_message, updated_at
+        )
+        VALUES ($1, 'outlook', $2, $3, $4, 'connected', $5, $6, $7, NULL, now())
+        ON CONFLICT (user_id, provider, provider_account_id) WHERE provider_account_id IS NOT NULL
+        DO UPDATE SET
+          email_address = EXCLUDED.email_address,
+          display_name = EXCLUDED.display_name,
+          status = 'connected',
+          scopes = EXCLUDED.scopes,
+          token_ciphertext = EXCLUDED.token_ciphertext,
+          token_expires_at = EXCLUDED.token_expires_at,
+          error_message = NULL,
+          updated_at = now()
+      `, [
+        state.userId,
+        profile.id,
+        emailAddress,
+        profile.displayName || emailAddress || 'Outlook',
+        OUTLOOK_SCOPES,
+        encrypted,
+        new Date(expiresAt),
+      ]);
+      res.redirect(`${returnTo}?outlook=connected`);
+    } catch (error: any) {
+      console.error('Error completing Outlook OAuth:', error?.message || error);
+      res.redirect(`${returnTo}?outlook=error`);
+    }
+  });
+
+  async function syncOutlookMessagesForConnection(userId: string, connectionId: string, days: number) {
+    const accessToken = await refreshOutlookToken(connectionId, userId);
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const folders = [
+      { id: 'inbox', mailbox: 'inbox', direction: 'received', dateField: 'receivedDateTime' },
+      { id: 'sentitems', mailbox: 'sent', direction: 'sent', dateField: 'sentDateTime' },
+    ];
+    let messagesSeen = 0;
+    let messagesStored = 0;
+    let matchesCreated = 0;
+    const prospectsResult = await pool.query(`
+      SELECT id, name, status, notes, address, contact_name, contact_email, contact_company, business_name
+      FROM public.prospects
+      WHERE user_id = $1
+    `, [userId]);
+    const prospects = prospectsResult.rows;
+
+    for (const folder of folders) {
+      const url = new URL(`https://graph.microsoft.com/v1.0/me/mailFolders/${folder.id}/messages`);
+      url.searchParams.set('$top', '50');
+      url.searchParams.set('$orderby', `${folder.dateField} desc`);
+      url.searchParams.set('$filter', `${folder.dateField} ge ${cutoff}`);
+      url.searchParams.set('$select', [
+        'id',
+        'conversationId',
+        'subject',
+        'from',
+        'toRecipients',
+        'ccRecipients',
+        'sentDateTime',
+        'receivedDateTime',
+        'bodyPreview',
+        'webLink',
+        'hasAttachments',
+      ].join(','));
+      const data = await graphGet(accessToken, url.toString());
+      for (const message of data.value || []) {
+        messagesSeen += 1;
+        const sender = message.from?.emailAddress || {};
+        const recipients = (message.toRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
+        const ccRecipients = (message.ccRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
+        const messageData = {
+          provider: 'outlook',
+          providerMessageId: message.id,
+          providerThreadId: message.conversationId || null,
+          mailbox: folder.mailbox,
+          direction: folder.direction,
+          subject: message.subject || '',
+          senderEmail: sender.address || '',
+          senderName: sender.name || '',
+          recipientEmails: recipients,
+          ccEmails: ccRecipients,
+          sentAt: message.sentDateTime ? new Date(message.sentDateTime) : null,
+          receivedAt: message.receivedDateTime ? new Date(message.receivedDateTime) : null,
+          snippet: message.bodyPreview || '',
+          attachmentNames: [],
+          sourceUrl: message.webLink || '',
+        };
+        const inserted = await pool.query(`
+          INSERT INTO public.email_messages (
+            user_id, connection_id, provider, provider_message_id, provider_thread_id, mailbox, direction,
+            subject, sender_email, sender_name, recipient_emails, cc_emails, sent_at, received_at,
+            snippet, attachment_names, source_url, raw_metadata, updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now())
+          ON CONFLICT (user_id, provider, provider_message_id)
+          DO UPDATE SET
+            provider_thread_id = EXCLUDED.provider_thread_id,
+            mailbox = EXCLUDED.mailbox,
+            direction = EXCLUDED.direction,
+            subject = EXCLUDED.subject,
+            sender_email = EXCLUDED.sender_email,
+            sender_name = EXCLUDED.sender_name,
+            recipient_emails = EXCLUDED.recipient_emails,
+            cc_emails = EXCLUDED.cc_emails,
+            sent_at = EXCLUDED.sent_at,
+            received_at = EXCLUDED.received_at,
+            snippet = EXCLUDED.snippet,
+            source_url = EXCLUDED.source_url,
+            raw_metadata = EXCLUDED.raw_metadata,
+            updated_at = now()
+          RETURNING id, (xmax = 0) AS inserted
+        `, [
+          userId,
+          connectionId,
+          messageData.provider,
+          messageData.providerMessageId,
+          messageData.providerThreadId,
+          messageData.mailbox,
+          messageData.direction,
+          messageData.subject,
+          messageData.senderEmail,
+          messageData.senderName,
+          messageData.recipientEmails,
+          messageData.ccEmails,
+          messageData.sentAt,
+          messageData.receivedAt,
+          messageData.snippet,
+          messageData.attachmentNames,
+          messageData.sourceUrl,
+          JSON.stringify({ hasAttachments: Boolean(message.hasAttachments) }),
+        ]);
+        const emailMessageId = inserted.rows[0].id;
+        if (inserted.rows[0].inserted) messagesStored += 1;
+
+        const bestMatches = prospects
+          .map((prospect: any) => ({ prospect, ...scoreEmailProspect(messageData, prospect) }))
+          .filter((candidate: any) => candidate.score >= 45)
+          .sort((a: any, b: any) => b.score - a.score)
+          .slice(0, 3);
+        for (const candidate of bestMatches) {
+          const matchStatus = candidate.score >= 90 ? 'pending_review' : 'pending_review';
+          const result = await pool.query(`
+            INSERT INTO public.email_prospect_matches (
+              user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
+              suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, 'email', 'contacted', $7, now())
+            ON CONFLICT (email_message_id, prospect_id) WHERE prospect_id IS NOT NULL
+            DO UPDATE SET
+              confidence = GREATEST(public.email_prospect_matches.confidence, EXCLUDED.confidence),
+              match_reason = EXCLUDED.match_reason,
+              suggested_summary = COALESCE(public.email_prospect_matches.suggested_summary, EXCLUDED.suggested_summary),
+              updated_at = now()
+            RETURNING (xmax = 0) AS inserted
+          `, [
+            userId,
+            emailMessageId,
+            candidate.prospect.id,
+            candidate.score,
+            matchStatus,
+            candidate.reason,
+            [messageData.subject, messageData.snippet].filter(Boolean).join('\n').slice(0, 1000),
+          ]);
+          if (result.rows[0]?.inserted) matchesCreated += 1;
+        }
+      }
+    }
+    await pool.query(`
+      UPDATE public.email_connections
+      SET last_synced_at = now(), status = 'connected', error_message = NULL, updated_at = now()
+      WHERE id = $1 AND user_id = $2
+    `, [connectionId, userId]);
+    return { messagesSeen, messagesStored, matchesCreated };
+  }
+
+  app.post('/api/email/outlook/sync', requireAuth, async (req, res) => {
+    try {
+      if (isDemo(req)) return res.status(400).json({ message: 'Email sync is disabled in demo mode' });
+      const userId = getUserId(req);
+      const days = Math.min(Math.max(Number(req.body?.days || 30), 1), 90);
+      const connectionResult = await pool.query(`
+        SELECT id FROM public.email_connections
+        WHERE user_id = $1 AND provider = 'outlook' AND status = 'connected'
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [userId]);
+      const connectionId = connectionResult.rows[0]?.id;
+      if (!connectionId) return res.status(400).json({ message: 'Connect Outlook before syncing email' });
+      const run = await pool.query(`
+        INSERT INTO public.email_sync_runs (user_id, connection_id, provider, status, started_at)
+        VALUES ($1, $2, 'outlook', 'running', now())
+        RETURNING id
+      `, [userId, connectionId]);
+      const runId = run.rows[0].id;
+      try {
+        const result = await syncOutlookMessagesForConnection(userId, connectionId, days);
+        await pool.query(`
+          UPDATE public.email_sync_runs
+          SET status = 'completed', completed_at = now(), messages_seen = $3, messages_stored = $4, matches_created = $5
+          WHERE id = $1 AND user_id = $2
+        `, [runId, userId, result.messagesSeen, result.messagesStored, result.matchesCreated]);
+        res.json({ runId, ...result });
+      } catch (error: any) {
+        await pool.query(`
+          UPDATE public.email_sync_runs
+          SET status = 'failed', completed_at = now(), error_message = $3
+          WHERE id = $1 AND user_id = $2
+        `, [runId, userId, error?.message || String(error)]);
+        await pool.query(`
+          UPDATE public.email_connections
+          SET status = 'error', error_message = $3, updated_at = now()
+          WHERE id = $1 AND user_id = $2
+        `, [connectionId, userId, error?.message || String(error)]);
+        throw error;
+      }
+    } catch (error) {
+      console.error('Error syncing Outlook email:', error);
+      res.status(500).json({ message: 'Failed to sync Outlook email' });
+    }
+  });
+
+  function mapEmailReviewRow(row: any) {
+    return {
+      id: row.id,
+      matchStatus: row.match_status,
+      confidence: row.confidence,
+      matchReason: row.match_reason || '',
+      suggestedInteractionType: row.suggested_interaction_type || 'email',
+      suggestedOutcome: row.suggested_outcome || 'contacted',
+      suggestedSummary: row.suggested_summary || '',
+      suggestedNextFollowUp: row.suggested_next_follow_up ? new Date(row.suggested_next_follow_up).toISOString() : null,
+      reviewedAt: row.reviewed_at ? new Date(row.reviewed_at).toISOString() : null,
+      interactionId: row.interaction_id || null,
+      email: {
+        id: row.email_message_id,
+        provider: row.provider,
+        providerMessageId: row.provider_message_id,
+        providerThreadId: row.provider_thread_id,
+        mailbox: row.mailbox,
+        direction: row.direction,
+        subject: row.subject || '',
+        senderEmail: row.sender_email || '',
+        senderName: row.sender_name || '',
+        recipientEmails: row.recipient_emails || [],
+        ccEmails: row.cc_emails || [],
+        sentAt: row.sent_at ? new Date(row.sent_at).toISOString() : null,
+        receivedAt: row.received_at ? new Date(row.received_at).toISOString() : null,
+        snippet: row.snippet || '',
+        attachmentNames: row.attachment_names || [],
+        sourceUrl: row.source_url || '',
+      },
+      prospect: row.prospect_id ? {
+        id: row.prospect_id,
+        name: row.prospect_name || '',
+        address: row.prospect_address || '',
+        status: row.prospect_status || '',
+      } : null,
+      listing: row.listing_id ? {
+        id: row.listing_id,
+        title: row.listing_title || '',
+      } : null,
+    };
+  }
+
+  app.get('/api/email/review', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) return res.json([]);
+      const status = typeof req.query.status === 'string' ? req.query.status : 'pending_review';
+      const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 250);
+      const params: any[] = [userId, limit];
+      const statusFilter = status === 'all' ? '' : `AND epm.match_status = $${params.push(status)}`;
+      const result = await pool.query(`
+        SELECT
+          epm.*,
+          em.provider,
+          em.provider_message_id,
+          em.provider_thread_id,
+          em.mailbox,
+          em.direction,
+          em.subject,
+          em.sender_email,
+          em.sender_name,
+          em.recipient_emails,
+          em.cc_emails,
+          em.sent_at,
+          em.received_at,
+          em.snippet,
+          em.attachment_names,
+          em.source_url,
+          p.name AS prospect_name,
+          p.address AS prospect_address,
+          p.status AS prospect_status,
+          l.title AS listing_title
+        FROM public.email_prospect_matches epm
+        JOIN public.email_messages em ON em.id = epm.email_message_id
+        LEFT JOIN public.prospects p ON p.id = epm.prospect_id
+        LEFT JOIN public.listings l ON l.id = epm.listing_id
+        WHERE epm.user_id = $1
+          ${statusFilter}
+        ORDER BY COALESCE(em.sent_at, em.received_at, epm.created_at) DESC
+        LIMIT $2
+      `, params);
+      res.json(result.rows.map(mapEmailReviewRow));
+    } catch (error) {
+      console.error('Error fetching email review queue:', error);
+      res.status(500).json({ message: 'Failed to fetch email review queue' });
+    }
+  });
+
+  app.get('/api/email/review/counts', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) return res.json({ pendingReview: 0, approved: 0, autoLogged: 0, ignored: 0, rejected: 0 });
+      const result = await pool.query(`
+        SELECT match_status, COUNT(*)::int AS count
+        FROM public.email_prospect_matches
+        WHERE user_id = $1
+        GROUP BY match_status
+      `, [userId]);
+      const counts = Object.fromEntries(result.rows.map((row: any) => [row.match_status, row.count]));
+      res.json({
+        pendingReview: counts.pending_review || 0,
+        approved: counts.approved || 0,
+        autoLogged: counts.auto_logged || 0,
+        ignored: counts.ignored || 0,
+        rejected: counts.rejected || 0,
+      });
+    } catch (error) {
+      console.error('Error fetching email review counts:', error);
+      res.status(500).json({ message: 'Failed to fetch email review counts' });
+    }
+  });
+
+  app.patch('/api/email/review/:id', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) return res.status(404).json({ message: 'Email match not found' });
+      const UpdateSchema = z.object({
+        matchStatus: EmailMatchStatusSchema.optional(),
+        prospectId: z.string().nullable().optional(),
+        listingId: z.string().nullable().optional(),
+        suggestedSummary: z.string().optional(),
+        suggestedNextFollowUp: z.string().nullable().optional(),
+      });
+      const parsed = UpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid email review update', error: parsed.error.errors });
+      }
+      const update = parsed.data;
+      if (update.prospectId) {
+        const check = await pool.query('SELECT id FROM public.prospects WHERE id = $1 AND user_id = $2', [update.prospectId, userId]);
+        if (check.rowCount === 0) return res.status(400).json({ message: 'Prospect is not available to this user' });
+      }
+      if (update.listingId) {
+        await requireEditAccess(req, update.listingId);
+      }
+      const result = await pool.query(`
+        UPDATE public.email_prospect_matches
+        SET
+          match_status = COALESCE($3, match_status),
+          prospect_id = CASE WHEN $4::boolean THEN $5 ELSE prospect_id END,
+          listing_id = CASE WHEN $6::boolean THEN $7 ELSE listing_id END,
+          suggested_summary = COALESCE($8, suggested_summary),
+          suggested_next_follow_up = CASE WHEN $9::boolean THEN $10::timestamp ELSE suggested_next_follow_up END,
+          reviewed_at = CASE WHEN $3 IS NULL THEN reviewed_at ELSE now() END,
+          reviewed_by_user_id = CASE WHEN $3 IS NULL THEN reviewed_by_user_id ELSE $2 END,
+          updated_at = now()
+        WHERE id = $1 AND user_id = $2
+        RETURNING id
+      `, [
+        req.params.id,
+        userId,
+        update.matchStatus || null,
+        Object.prototype.hasOwnProperty.call(update, 'prospectId'),
+        update.prospectId || null,
+        Object.prototype.hasOwnProperty.call(update, 'listingId'),
+        update.listingId || null,
+        update.suggestedSummary || null,
+        Object.prototype.hasOwnProperty.call(update, 'suggestedNextFollowUp'),
+        update.suggestedNextFollowUp ? new Date(update.suggestedNextFollowUp) : null,
+      ]);
+      if (result.rowCount === 0) return res.status(404).json({ message: 'Email match not found' });
+      res.json({ id: req.params.id });
+    } catch (error) {
+      console.error('Error updating email review item:', error);
+      res.status(500).json({ message: 'Failed to update email review item' });
+    }
+  });
+
+  app.post('/api/email/review/:id/create-interaction', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) return res.status(404).json({ message: 'Email match not found' });
+      const { rows } = await pool.query(`
+        SELECT
+          epm.*,
+          em.provider,
+          em.provider_message_id,
+          em.provider_thread_id,
+          em.sent_at,
+          em.received_at,
+          em.subject,
+          em.snippet,
+          em.sender_email
+        FROM public.email_prospect_matches epm
+        JOIN public.email_messages em ON em.id = epm.email_message_id
+        WHERE epm.id = $1 AND epm.user_id = $2
+      `, [req.params.id, userId]);
+      const row = rows[0];
+      if (!row) return res.status(404).json({ message: 'Email match not found' });
+      if (!row.prospect_id) return res.status(400).json({ message: 'Choose a prospect before logging this email' });
+      if (row.listing_id) await requireEditAccess(req, row.listing_id);
+
+      const existing = await pool.query(`
+        SELECT id FROM public.contact_interactions
+        WHERE user_id = $1
+          AND source_provider = $2
+          AND source_message_id = $3
+          AND prospect_id = $4
+        LIMIT 1
+      `, [userId, row.provider, row.provider_message_id, row.prospect_id]);
+      if (existing.rows[0]) {
+        await pool.query(`
+          UPDATE public.email_prospect_matches
+          SET interaction_id = $3, match_status = 'auto_logged', reviewed_at = now(), reviewed_by_user_id = $2, updated_at = now()
+          WHERE id = $1 AND user_id = $2
+        `, [req.params.id, userId, existing.rows[0].id]);
+        return res.json({ interactionId: existing.rows[0].id, duplicate: true });
+      }
+
+      const interactionDate = row.sent_at || row.received_at || new Date();
+      const notes = row.suggested_summary || [
+        row.subject ? `Subject: ${row.subject}` : '',
+        row.snippet || '',
+        row.sender_email ? `From: ${row.sender_email}` : '',
+      ].filter(Boolean).join('\n');
+      const inserted = await pool.query(`
+        INSERT INTO public.contact_interactions (
+          user_id, prospect_id, listing_id, date, type, outcome, notes, next_follow_up,
+          source_provider, source_message_id, source_thread_id, source_email_message_id, source_metadata
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        RETURNING id
+      `, [
+        userId,
+        row.prospect_id,
+        row.listing_id || null,
+        new Date(interactionDate).toISOString(),
+        row.suggested_interaction_type || 'email',
+        row.suggested_outcome || 'contacted',
+        notes,
+        row.suggested_next_follow_up ? new Date(row.suggested_next_follow_up).toISOString() : null,
+        row.provider,
+        row.provider_message_id,
+        row.provider_thread_id || null,
+        row.email_message_id,
+        JSON.stringify({ emailReviewMatchId: req.params.id }),
+      ]);
+      const interactionId = inserted.rows[0].id;
+      await pool.query(`
+        UPDATE public.email_prospect_matches
+        SET interaction_id = $3, match_status = 'auto_logged', reviewed_at = now(), reviewed_by_user_id = $2, updated_at = now()
+        WHERE id = $1 AND user_id = $2
+      `, [req.params.id, userId, interactionId]);
+      await pool.query(`
+        UPDATE public.prospects
+        SET
+          last_contact_date = $3,
+          status = CASE WHEN status = 'prospect' THEN 'contacted' ELSE status END,
+          updated_at = now()
+        WHERE id = $1 AND user_id = $2
+      `, [row.prospect_id, userId, new Date(interactionDate).toISOString()]);
+      res.json({ interactionId, duplicate: false });
+    } catch (error) {
+      console.error('Error creating interaction from email review item:', error);
+      res.status(500).json({ message: 'Failed to create interaction from email' });
     }
   });
 

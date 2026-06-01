@@ -295,12 +295,18 @@ export const contactInteractions = pgTable(
     outcome: varchar("outcome").notNull(), // contacted, no_answer, left_message, scheduled_meeting, not_interested, follow_up_later
     notes: varchar("notes").default(""),
     nextFollowUp: varchar("next_follow_up"),
+    sourceProvider: varchar("source_provider"), // outlook | gmail | manual
+    sourceMessageId: varchar("source_message_id"),
+    sourceThreadId: varchar("source_thread_id"),
+    sourceEmailMessageId: varchar("source_email_message_id"),
+    sourceMetadata: jsonb("source_metadata").$type<Record<string, unknown>>().default({}),
     createdAt: timestamp("created_at").defaultNow(),
   },
   (table) => [
     index("IDX_interactions_user").on(table.userId),
     index("IDX_interactions_listing").on(table.listingId),
     index("IDX_interactions_prospect").on(table.prospectId),
+    index("IDX_interactions_source_message").on(table.userId, table.sourceProvider, table.sourceMessageId),
   ],
 );
 
@@ -355,6 +361,128 @@ export const listingProspects = pgTable(
 
 export type ListingProspect = typeof listingProspects.$inferSelect;
 export type InsertListingProspect = typeof listingProspects.$inferInsert;
+
+export const emailConnections = pgTable(
+  "email_connections",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    provider: varchar("provider").notNull(), // outlook | gmail
+    providerAccountId: varchar("provider_account_id"),
+    emailAddress: varchar("email_address"),
+    displayName: varchar("display_name"),
+    status: varchar("status").notNull().default("needs_connection"), // needs_connection | connected | error | disabled
+    scopes: varchar("scopes").array().default(sql`ARRAY[]::varchar[]`),
+    tokenCiphertext: text("token_ciphertext"),
+    tokenExpiresAt: timestamp("token_expires_at"),
+    syncSent: boolean("sync_sent").notNull().default(true),
+    syncReceived: boolean("sync_received").notNull().default(true),
+    lastSyncedAt: timestamp("last_synced_at"),
+    syncCursor: text("sync_cursor"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_email_connections_user").on(table.userId),
+    unique("UQ_email_connections_provider_account").on(table.userId, table.provider, table.providerAccountId),
+  ],
+);
+
+export const emailMessages = pgTable(
+  "email_messages",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    connectionId: varchar("connection_id").references(() => emailConnections.id, { onDelete: "set null" }),
+    provider: varchar("provider").notNull(),
+    providerMessageId: varchar("provider_message_id").notNull(),
+    providerThreadId: varchar("provider_thread_id"),
+    mailbox: varchar("mailbox").notNull().default("unknown"), // sent | inbox | archive | unknown
+    direction: varchar("direction").notNull().default("unknown"), // sent | received | unknown
+    subject: text("subject"),
+    senderEmail: varchar("sender_email"),
+    senderName: varchar("sender_name"),
+    recipientEmails: varchar("recipient_emails").array().default(sql`ARRAY[]::varchar[]`),
+    ccEmails: varchar("cc_emails").array().default(sql`ARRAY[]::varchar[]`),
+    sentAt: timestamp("sent_at"),
+    receivedAt: timestamp("received_at"),
+    snippet: text("snippet"),
+    bodyTextHash: varchar("body_text_hash"),
+    attachmentNames: varchar("attachment_names").array().default(sql`ARRAY[]::varchar[]`),
+    sourceUrl: text("source_url"),
+    rawMetadata: jsonb("raw_metadata").$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_email_messages_user").on(table.userId),
+    index("IDX_email_messages_thread").on(table.userId, table.provider, table.providerThreadId),
+    index("IDX_email_messages_sent_at").on(table.userId, table.sentAt),
+    unique("UQ_email_messages_provider_message").on(table.userId, table.provider, table.providerMessageId),
+  ],
+);
+
+export const emailProspectMatches = pgTable(
+  "email_prospect_matches",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    emailMessageId: varchar("email_message_id").notNull().references(() => emailMessages.id, { onDelete: "cascade" }),
+    prospectId: varchar("prospect_id").references(() => prospects.id, { onDelete: "set null" }),
+    listingId: varchar("listing_id").references(() => listings.id, { onDelete: "set null" }),
+    confidence: integer("confidence").notNull().default(0),
+    matchStatus: varchar("match_status").notNull().default("pending_review"), // pending_review | auto_logged | approved | ignored | rejected
+    matchReason: text("match_reason"),
+    suggestedInteractionType: varchar("suggested_interaction_type").notNull().default("email"),
+    suggestedOutcome: varchar("suggested_outcome").notNull().default("contacted"),
+    suggestedSummary: text("suggested_summary"),
+    suggestedNextFollowUp: timestamp("suggested_next_follow_up"),
+    interactionId: varchar("interaction_id").references(() => contactInteractions.id, { onDelete: "set null" }),
+    reviewedAt: timestamp("reviewed_at"),
+    reviewedByUserId: varchar("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_email_matches_user_status").on(table.userId, table.matchStatus),
+    index("IDX_email_matches_message").on(table.emailMessageId),
+    index("IDX_email_matches_prospect").on(table.prospectId),
+    unique("UQ_email_matches_message_prospect").on(table.emailMessageId, table.prospectId),
+  ],
+);
+
+export const emailSyncRuns = pgTable(
+  "email_sync_runs",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    connectionId: varchar("connection_id").references(() => emailConnections.id, { onDelete: "set null" }),
+    provider: varchar("provider").notNull(),
+    status: varchar("status").notNull().default("queued"), // queued | running | completed | failed
+    startedAt: timestamp("started_at").defaultNow(),
+    completedAt: timestamp("completed_at"),
+    messagesSeen: integer("messages_seen").notNull().default(0),
+    messagesStored: integer("messages_stored").notNull().default(0),
+    matchesCreated: integer("matches_created").notNull().default(0),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_email_sync_runs_user").on(table.userId),
+    index("IDX_email_sync_runs_connection").on(table.connectionId),
+    index("IDX_email_sync_runs_started").on(table.startedAt),
+  ],
+);
+
+export type EmailConnection = typeof emailConnections.$inferSelect;
+export type InsertEmailConnection = typeof emailConnections.$inferInsert;
+export type EmailMessage = typeof emailMessages.$inferSelect;
+export type InsertEmailMessage = typeof emailMessages.$inferInsert;
+export type EmailProspectMatch = typeof emailProspectMatches.$inferSelect;
+export type InsertEmailProspectMatch = typeof emailProspectMatches.$inferInsert;
+export type EmailSyncRun = typeof emailSyncRuns.$inferSelect;
+export type InsertEmailSyncRun = typeof emailSyncRuns.$inferInsert;
 
 // Submarkets table with user association
 export const submarkets = pgTable("submarkets", {

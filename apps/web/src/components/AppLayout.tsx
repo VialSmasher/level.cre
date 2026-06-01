@@ -24,7 +24,8 @@ import {
   X,
   ChartSpline,
   Bot,
-  Trophy
+  Trophy,
+  Mail
 } from 'lucide-react'
 import { Table } from 'lucide-react'
 import { Link, useLocation } from 'wouter'
@@ -75,6 +76,7 @@ export function AppLayout({ children }: AppLayoutProps) {
       { label: 'Map', href: '/app', icon: Map, active: isActive('/app') },
       { label: 'Workspaces', href: workspacesHref, icon: Briefcase, active: isActive('/app/workspaces') },
       { label: 'Follow-ups', href: '/app/followup', icon: RotateCcw, active: isActive('/app/followup') },
+      { label: 'Inbox', href: '/app/inbox', icon: Mail, active: isActive('/app/inbox') },
     ],
     [
       { label: 'Knowledge', href: '/app/knowledge', icon: Brain, active: isActive('/app/knowledge') },
@@ -299,6 +301,27 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </TooltipTrigger>
                 <TooltipContent side="right">
                   <p>Follow Up</p>
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link
+                    href="/app/inbox"
+                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
+                      isActive('/app/inbox')
+                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30'
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                    onClick={() => setMobileMenuOpen(false)}
+                    aria-label="Inbox"
+                  >
+                    <Mail size={20} />
+                    <span className="font-medium">Inbox</span>
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p>Inbox</p>
                 </TooltipContent>
               </Tooltip>
 
