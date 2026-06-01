@@ -2,71 +2,137 @@ import type { NormalizedIntelListingRecord } from '../types';
 
 const USER_AGENT = 'Mozilla/5.0 (compatible; VialIndustrialIntel/1.0)';
 const TIMEOUT_MS = 30000;
-const DISCOVER_URL = 'https://cwedm.com/';
-const PROPERTY_URL_PATTERN = /href=["'](https:\/\/cwedm\.com\/property\/[^"']+)["']/gi;
+const SEARCH_URL = 'https://cwedm.com/wp-json/wp/v2/search';
+const DETAIL_URL = 'https://cwedm.com/wp-json/wp/v2/properties';
+const INDUSTRIAL_SEARCH_TERMS = ['industrial', 'warehouse', 'shop', 'yard'];
 const CITY_LABELS = [
   'Fort Saskatchewan',
   'Sherwood Park',
   'Strathcona County',
+  'Sturgeon County',
+  'Leduc County',
+  'Grande Prairie',
+  'Fort McMurray',
+  'Red Deer',
   'Edmonton',
+  'Acheson',
   'Nisku',
   'Leduc',
-  'Leduc County',
+  'Edson',
+  'Barrhead',
+  'Morinville',
+  'Bonnyville',
+  'Warburg',
+  'High Prairie',
+  'Cold Lake',
+  'Camrose',
+  'Lloydminster',
 ] as const;
 
-function cleanText(text?: string | null): string {
+type CwedmSearchResult = {
+  id: number;
+  title: string;
+  url: string;
+  subtype: string;
+};
+
+type CwedmPropertyDetail = {
+  id: number;
+  date?: string;
+  modified?: string;
+  slug?: string;
+  link?: string;
+  title?: { rendered?: string };
+  content?: { rendered?: string };
+  excerpt?: { rendered?: string };
+  yoast_head_json?: {
+    og_description?: string;
+    canonical?: string;
+  };
+};
+
+function decodeHtml(text?: string | null): string {
   if (!text) return '';
   return text
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCharCode(parseInt(code, 16)))
     .replace(/&amp;/g, '&')
     .replace(/&nbsp;/g, ' ')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&rsquo;/g, "'")
+    .replace(/&lsquo;/g, "'")
+    .replace(/&rdquo;/g, '"')
+    .replace(/&ldquo;/g, '"')
+    .replace(/&ndash;/g, '-')
+    .replace(/&mdash;/g, '-');
+}
+
+function cleanText(text?: string | null): string {
+  return decodeHtml(text)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function extractFirst(pattern: RegExp, text: string): string {
-  const match = text.match(pattern);
-  return cleanText(match?.[1]);
+function parseNumber(value?: string | null): number | null {
+  if (!value) return null;
+  const num = Number(value.replace(/,/g, ''));
+  return Number.isFinite(num) ? num : null;
 }
 
-function normalizeSize(value: string): string {
-  return cleanText(value).replace(/sq\s*ft/gi, 'SF').replace(/ft²/gi, 'SF');
-}
+function parseAvailableSf(text: string): number | null {
+  const patterns = [
+    /available(?:\s+size|\s+sf|\s+\(sf\))?\s*[:\-]?\s*([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft)/i,
+    /building(?:\s+size|\s+total)?\s*[:\-]?\s*([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft)/i,
+    /features\s+([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft)/i,
+    /([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft)/i,
+  ];
 
-function parseAvailableSf(size: string): number | null {
-  const sfMatch = size.match(/([0-9][0-9,]*)\s*SF/i);
-  if (!sfMatch) return null;
-  const value = Number(sfMatch[1].replace(/,/g, ''));
-  return Number.isFinite(value) ? value : null;
-}
-
-function parseLandAcres(size: string): number | null {
-  const acresMatch = size.match(/([0-9]+(?:\.[0-9]+)?)\s*acres?/i);
-  if (!acresMatch) return null;
-  const value = Number(acresMatch[1]);
-  return Number.isFinite(value) ? value : null;
-}
-
-function inferAssetType(title: string, description: string): string {
-  const combined = `${title} ${description}`.toLowerCase();
-  const hasBuildingSignals = ['building', 'warehouse', 'shop', 'available sf', 'sf freestanding'].some((token) =>
-    combined.includes(token),
-  );
-  if (hasBuildingSignals) return 'building';
-  if (combined.includes('industrial land') || combined.includes('land for sale') || combined.includes('land for lease')) {
-    return 'land';
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const parsed = parseNumber(match?.[1]);
+    if (parsed) return parsed;
   }
-  if (combined.includes('yard')) return 'yard';
-  return 'building';
+  return null;
 }
 
-function inferCurrencyValue(text: string, pattern: RegExp): number | null {
-  const match = text.match(pattern);
-  if (!match) return null;
-  const value = Number(match[1].replace(/,/g, ''));
-  return Number.isFinite(value) ? value : null;
+function parseLandAcres(text: string): number | null {
+  const patterns = [
+    /land\s+size\s*\(?acres?\)?\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)/i,
+    /site\s+size\s*[:\-]?\s*([0-9]+(?:\.[0-9]+)?)\s*acres?/i,
+    /on\s+([0-9]+(?:\.[0-9]+)?)\s*acres?/i,
+    /([0-9]+(?:\.[0-9]+)?)\s*acres?/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const parsed = parseNumber(match?.[1]);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function parseCurrency(text: string): number | null {
+  const patterns = [
+    /price\s*[:\-]?\s*\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i,
+    /sale\s+price\s*[:\-]?\s*\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i,
+    /\$\s*([0-9][0-9,]{4,}(?:\.[0-9]{1,2})?)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const parsed = parseNumber(match?.[1]);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function parsePricePerAcre(text: string): number | null {
+  const match = text.match(/\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:\/|per\s+)acre/i);
+  return parseNumber(match?.[1]);
 }
 
 function inferCity(...parts: Array<string | null | undefined>): string | null {
@@ -79,128 +145,195 @@ function inferCity(...parts: Array<string | null | undefined>): string | null {
 
 function inferListingType(title: string, description: string): string {
   const combined = `${title} ${description}`.toLowerCase();
-  if (combined.includes('lease')) return 'lease';
+  if (combined.includes('sublease') || combined.includes('sub-lease')) return 'sublease';
+  if (combined.includes('lease') && combined.includes('sale')) return 'sale';
   if (combined.includes('sale')) return 'sale';
   return 'lease';
 }
 
+function inferStatus(title: string, description: string): string {
+  const combined = `${title} ${description}`.toLowerCase();
+  if (combined.includes('leased')) return 'leased';
+  if (combined.includes('sold')) return 'sold';
+  if (combined.includes('pending')) return 'pending';
+  return 'active';
+}
+
+function inferAssetType(title: string, description: string): string {
+  const combined = `${title} ${description}`.toLowerCase();
+  if (combined.includes('industrial land') || combined.includes('development land') || combined.includes('land for')) {
+    return 'land';
+  }
+  if (/\b(building|warehouse|bay|bays|shop|office)\b/.test(combined)) return 'building';
+  if (combined.includes('yard') && !combined.includes('building')) return 'yard';
+  return 'building';
+}
+
 function isIndustrial(title: string, description: string): boolean {
   const combined = `${title} ${description}`.toLowerCase();
-  return ['industrial', 'warehouse', 'yard', 'shop'].some((token) => combined.includes(token));
+  if (/\bindustrial\b/.test(combined)) return true;
+  return [/\bwarehouse\b/, /\byard\b/, /\bshop\b/, /\bmanufacturing\b/, /\bdistribution\b/].some((pattern) =>
+    pattern.test(combined),
+  );
 }
 
-function applyRecordOverrides(
-  url: string,
-  record: Omit<NormalizedIntelListingRecord, 'contentHash'>,
-): Omit<NormalizedIntelListingRecord, 'contentHash'> {
-  if (url.includes('/fort-saskatchewan-industrial-building-land/')) {
-    return {
-      ...record,
-      title: 'Industrial Building for Lease - 55017 RGE RD 230, Sturgeon County',
-      address: '55017 RGE RD 230, Sturgeon County, AB',
-      listingType: 'lease',
-      assetType: 'building',
-      availableSf: 12537,
-      landAcres: 73.28,
-      totalPrice: null,
-      brochureUrl: 'https://cwedm.com/wp-content/uploads/2023/05/55017RGE_230RD_WEB-2.pdf',
-      rawPayload: {
-        ...record.rawPayload,
-        overrideApplied: 'fort_saskatchewan_building_land',
-        availableSf: 12537,
-        landAcres: 73.28,
-      },
-    };
+function inferAddress(title: string, description: string, city: string | null): string | null {
+  const combined = `${title}. ${description}`;
+  const explicitAddress =
+    combined.match(/\bat\s+([0-9][A-Za-z0-9 .#'&/-]+?)\s+in\s+[A-Z][A-Za-z .'-]+/i)?.[1] ||
+    combined.match(/\b([0-9][A-Za-z0-9 .#'&/-]+?(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Drive|Dr\.?|Trail|Way|Crescent|Cres\.?|Boulevard|Blvd\.?|Range Road|RGE RD)[A-Za-z0-9 .#'&/-]*)\b/i)?.[1];
+
+  if (explicitAddress) {
+    const cleaned = cleanText(explicitAddress).replace(/[,.]$/, '');
+    if (cleaned.length > 80) return null;
+    return city && !cleaned.toLowerCase().includes(city.toLowerCase()) ? `${cleaned}, ${city}, AB` : cleaned;
   }
 
-  return record;
+  return null;
 }
 
-async function fetchText(url: string): Promise<string> {
+async function fetchJson<T>(url: string): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const response = await fetch(url, {
-      headers: { 'User-Agent': USER_AGENT },
+      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
       signal: controller.signal,
     });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status} for ${url}`);
     }
-    return await response.text();
+    return (await response.json()) as T;
   } finally {
     clearTimeout(timeout);
   }
 }
 
-export async function runCwedmSource(): Promise<Array<Omit<NormalizedIntelListingRecord, 'contentHash'>>> {
-  const homePage = await fetchText(DISCOVER_URL);
-  const urls = Array.from(homePage.matchAll(PROPERTY_URL_PATTERN)).map((match) => match[1]);
-  const uniqueUrls = Array.from(new Set(urls)).sort();
+async function discoverIndustrialProperties(): Promise<CwedmSearchResult[]> {
+  const byId = new Map<number, CwedmSearchResult>();
 
+  for (const term of INDUSTRIAL_SEARCH_TERMS) {
+    for (let page = 1; page <= 5; page += 1) {
+      const url = `${SEARCH_URL}?search=${encodeURIComponent(term)}&subtype=rem_property&per_page=100&page=${page}`;
+      let results: CwedmSearchResult[];
+      try {
+        results = await fetchJson<CwedmSearchResult[]>(url);
+      } catch (error) {
+        if (page > 1) break;
+        throw error;
+      }
+
+      for (const result of results) {
+        if (result.subtype === 'rem_property' && result.url?.includes('/property/')) {
+          byId.set(result.id, result);
+        }
+      }
+
+      if (results.length < 100) break;
+    }
+  }
+
+  return Array.from(byId.values()).sort((a, b) => b.id - a.id);
+}
+
+async function fetchPropertyDetail(id: number): Promise<CwedmPropertyDetail> {
+  return fetchJson<CwedmPropertyDetail>(`${DETAIL_URL}/${id}`);
+}
+
+function toRecord(detail: CwedmPropertyDetail, fallback: CwedmSearchResult): Omit<NormalizedIntelListingRecord, 'contentHash'> | null {
+  const title = cleanText(detail.title?.rendered || fallback.title);
+  const content = cleanText(detail.content?.rendered);
+  const excerpt = cleanText(detail.excerpt?.rendered);
+  const description = cleanText(detail.yoast_head_json?.og_description || content || excerpt);
+
+  if (!isIndustrial(title, description)) return null;
+
+  const city = inferCity(title) || inferCity(description);
+  const address = inferAddress(title, description, city);
+  const listingType = inferListingType(title, description);
+  const assetType = inferAssetType(title, description);
+  const availableSf = parseAvailableSf(description);
+  const landAcres = parseLandAcres(description);
+  const url = detail.link || detail.yoast_head_json?.canonical || fallback.url;
+
+  return {
+    sourceRecordKey: `wp:${detail.id || fallback.id}`,
+    externalId: String(detail.id || fallback.id),
+    status: inferStatus(title, description),
+    listingType,
+    assetType,
+    title: title || address || url,
+    address,
+    market: city,
+    submarket: city,
+    lat: null,
+    lng: null,
+    availableSf,
+    landAcres,
+    totalPrice: listingType === 'sale' ? parseCurrency(description) : null,
+    pricePerAcre: parsePricePerAcre(description),
+    minDivisibleSf: null,
+    clearHeightFt: null,
+    brochureUrl: null,
+    sourceUrl: url,
+    rawPayload: {
+      discovery: 'wp_rest_search',
+      wpId: detail.id || fallback.id,
+      date: detail.date ?? null,
+      modified: detail.modified ?? null,
+      slug: detail.slug ?? null,
+      title,
+      description,
+      address,
+      city,
+      availableSf,
+      landAcres,
+      listingType,
+      assetType,
+      status: inferStatus(title, description),
+    },
+  };
+}
+
+export async function runCwedmSource(): Promise<Array<Omit<NormalizedIntelListingRecord, 'contentHash'>>> {
+  const discovered = await discoverIndustrialProperties();
   const records: Array<Omit<NormalizedIntelListingRecord, 'contentHash'>> = [];
 
-  for (const url of uniqueUrls) {
-    const page = await fetchText(url);
-    const title =
-      extractFirst(/<meta property="og:title" content="([^"]+)"/i, page) ||
-      extractFirst(/<title>(.*?)<\/title>/i, page);
-    const description =
-      extractFirst(/<meta property="og:description" content="([^"]+)"/i, page) ||
-      extractFirst(/<meta name="description" content="([^"]+)"/i, page);
-    let address =
-      extractFirst(/property_address\s*:\s*"([^"]+)"/i, page) ||
-      extractFirst(/"address":"([^"]+)"/i, page);
-
-    if (!address) {
-      address = extractFirst(/<title>.*? ([0-9][^<]+?) - /i, page);
-    }
-
-    if (!isIndustrial(title, description)) {
-      continue;
-    }
-
-    const normalizedSize = normalizeSize(
-      extractFirst(/([0-9,]+\s*SF)/i, description) || extractFirst(/([0-9,.]+\s*acres?)/i, description),
-    );
-    const listingType = inferListingType(title, description);
-    const availableSf = parseAvailableSf(description) ?? parseAvailableSf(normalizedSize);
-    const landAcres = parseLandAcres(description) ?? parseLandAcres(normalizedSize);
-
-    records.push(
-      applyRecordOverrides(url, {
-        sourceRecordKey: url.replace(/^https?:\/\//i, '').replace(/\/$/, ''),
-        externalId: null,
-        status: 'active',
-        listingType,
-        assetType: inferAssetType(title, description),
-        title: title || address || url,
-        address: address || null,
-        market: inferCity(title, description, address),
-        submarket: null,
+  for (const result of discovered) {
+    try {
+      const detail = await fetchPropertyDetail(result.id);
+      const record = toRecord(detail, result);
+      if (record) records.push(record);
+    } catch {
+      const title = cleanText(result.title);
+      if (!isIndustrial(title, '')) continue;
+      records.push({
+        sourceRecordKey: `wp:${result.id}`,
+        externalId: String(result.id),
+        status: inferStatus(title, ''),
+        listingType: inferListingType(title, ''),
+        assetType: inferAssetType(title, ''),
+        title,
+        address: null,
+        market: inferCity(title),
+        submarket: inferCity(title),
         lat: null,
         lng: null,
-        availableSf,
-        landAcres,
-        totalPrice: listingType === 'sale' ? inferCurrencyValue(description, /\$\s*([0-9][0-9,]{4,}(?:\.[0-9]{1,2})?)/i) : null,
-        pricePerAcre: inferCurrencyValue(description, /\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:\/|per\s+)acre/i),
+        availableSf: null,
+        landAcres: null,
+        totalPrice: null,
+        pricePerAcre: null,
         minDivisibleSf: null,
         clearHeightFt: null,
         brochureUrl: null,
-        sourceUrl: url,
+        sourceUrl: result.url,
         rawPayload: {
-          discoverUrl: DISCOVER_URL,
+          discovery: 'wp_rest_search_fallback',
+          wpId: result.id,
           title,
-          description,
-          address,
-          assetType: inferAssetType(title, description),
-          size: normalizedSize || null,
-          availableSf,
-          landAcres,
-          listingType,
         },
-      }),
-    );
+      });
+    }
   }
 
   return records;
