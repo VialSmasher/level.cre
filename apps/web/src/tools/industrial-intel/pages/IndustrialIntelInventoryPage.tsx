@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import Papa from "papaparse";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -40,6 +41,22 @@ type MappableIntelListing = IntelListing & {
   longitude: number;
 };
 
+type UploadListingRecord = {
+  sourceUrl: string | null;
+  title: string;
+  brochureUrl: string | null;
+  address: string | null;
+  market: string | null;
+  submarket: string | null;
+  listingType: string | null;
+  assetType: string | null;
+  recordKeySuffix: string | null;
+  availableSf: number | null;
+  landAcres: number | null;
+  totalPrice: number | null;
+  pricePerAcre: number | null;
+};
+
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 const DEFAULT_MAP_CENTER = { lat: 53.5461, lng: -113.4938 };
 const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
@@ -77,6 +94,69 @@ function formatListingSize(listing: IntelListing) {
     return listing.landAcres ? `${listing.landAcres.toLocaleString()} ac` : "-";
   }
   return listing.availableSf?.toLocaleString() || "-";
+}
+
+function normalizeHeader(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function readUploadValue(row: Record<string, unknown>, aliases: string[]) {
+  const wanted = new Set(aliases.map(normalizeHeader));
+  const found = Object.entries(row).find(([key]) => wanted.has(normalizeHeader(key)));
+  const value = found?.[1];
+  return typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
+}
+
+function parseUploadNumber(value: string) {
+  const cleaned = value.replace(/[$,\s]/g, "");
+  if (!cleaned) return null;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function inferUploadListingType(rowText: string) {
+  const lower = rowText.toLowerCase();
+  if (lower.includes("sublease") || lower.includes("sub-lease")) return "sublease";
+  if (lower.includes("sale")) return "sale";
+  if (lower.includes("lease")) return "lease";
+  return "lease";
+}
+
+function inferUploadAssetType(rowText: string) {
+  const lower = rowText.toLowerCase();
+  if (lower.includes("land") || lower.includes("acre")) return "land";
+  if (lower.includes("yard")) return "yard";
+  return "building";
+}
+
+function buildUploadRecord(row: Record<string, unknown>, index: number): UploadListingRecord | null {
+  const title =
+    readUploadValue(row, ["title", "listing", "listing title", "property", "property name", "name"]) ||
+    readUploadValue(row, ["address", "street address", "property address"]);
+  const address = readUploadValue(row, ["address", "street address", "property address", "location"]);
+  const sourceUrl = readUploadValue(row, ["url", "source url", "listing url", "link", "loopnet url", "website"]);
+  const brochureUrl = readUploadValue(row, ["brochure", "brochure url", "flyer", "flyer url", "pdf"]);
+  const listingType = readUploadValue(row, ["listing type", "deal type", "type"]);
+  const assetType = readUploadValue(row, ["asset type", "property type"]);
+  const rowText = Object.values(row).join(" ");
+
+  if (!title && !address) return null;
+
+  return {
+    sourceUrl: sourceUrl || null,
+    title: title || `Uploaded listing ${index + 1}`,
+    brochureUrl: brochureUrl || null,
+    address: address || null,
+    market: readUploadValue(row, ["market", "city"]) || "Edmonton Metro",
+    submarket: readUploadValue(row, ["submarket", "area", "district"]) || null,
+    listingType: (listingType || inferUploadListingType(rowText)).toLowerCase(),
+    assetType: (assetType || inferUploadAssetType(rowText)).toLowerCase(),
+    recordKeySuffix: readUploadValue(row, ["id", "listing id", "mls", "record id"]) || null,
+    availableSf: parseUploadNumber(readUploadValue(row, ["available sf", "sf", "size", "building sf", "lease sf", "space available"])),
+    landAcres: parseUploadNumber(readUploadValue(row, ["land acres", "acres", "site acres", "land size"])),
+    totalPrice: parseUploadNumber(readUploadValue(row, ["price", "sale price", "asking price", "purchase price"])),
+    pricePerAcre: parseUploadNumber(readUploadValue(row, ["price per acre", "$/acre", "psa"])),
+  };
 }
 
 function hasListingQualityIssue(listing: IntelListing) {
@@ -246,6 +326,9 @@ export default function IndustrialIntelInventoryPage() {
     totalPrice: "",
     pricePerAcre: "",
   });
+  const [uploadSourceName, setUploadSourceName] = useState("LoopNet Weekly Export");
+  const [uploadRows, setUploadRows] = useState<UploadListingRecord[]>([]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const { data: listings = [], isLoading, isError, error } = useQuery<IntelListing[]>({
     queryKey: ["/api/intel/listings"],
@@ -317,6 +400,58 @@ export default function IndustrialIntelInventoryPage() {
       setShowManualIntake(false);
     },
   });
+
+  const uploadIngestMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/intel/manual-listings/upload", {
+        sourceName: uploadSourceName || "Spreadsheet Upload",
+        records: uploadRows,
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/listings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/runs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/changes"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/sources"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/summary"] });
+      setUploadRows([]);
+      setUploadError(null);
+      setShowManualIntake(false);
+    },
+  });
+
+  function handleUploadFile(file: File | null) {
+    if (!file) return;
+    setUploadError(null);
+    Papa.parse<Record<string, unknown>>(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (result) => {
+        const records = result.data
+          .map((row, index) => buildUploadRecord(row, index))
+          .filter((record): record is UploadListingRecord => Boolean(record));
+
+        if (result.errors.length > 0 && records.length === 0) {
+          setUploadRows([]);
+          setUploadError(result.errors[0]?.message || "Could not parse that CSV.");
+          return;
+        }
+
+        if (records.length === 0) {
+          setUploadRows([]);
+          setUploadError("No usable listing rows found. Make sure the file has a title or address column.");
+          return;
+        }
+
+        setUploadRows(records.slice(0, 500));
+      },
+      error: (error) => {
+        setUploadRows([]);
+        setUploadError(error.message || "Could not parse that CSV.");
+      },
+    });
+  }
 
   const submarketOptions = useMemo(() => {
     return Array.from(new Set(listings.map((listing) => listing.submarket || listing.market).filter(Boolean)))
@@ -550,14 +685,101 @@ export default function IndustrialIntelInventoryPage() {
       {showManualIntake && (
         <Card>
           <CardHeader>
-            <CardTitle>Manual URL Intake</CardTitle>
+            <CardTitle>Manual Intake</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-              Keep this for exceptions and review-only cases. The normal operating path should come from automated ingest or bot-driven intake.
+              Upload a weekly CSV export for bulk updates, or save a one-off URL when a listing needs manual handling.
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.45fr)]">
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="text-base font-semibold text-slate-950">Spreadsheet upload</h3>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Export Excel as CSV, then upload it here. Common columns like address, title, SF, acres, type, price, and URL are detected automatically.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.6fr)]">
+                    <div className="space-y-2">
+                      <Label htmlFor="uploadSourceName">Upload source</Label>
+                      <Input
+                        id="uploadSourceName"
+                        value={uploadSourceName}
+                        onChange={(event) => setUploadSourceName(event.target.value)}
+                        placeholder="LoopNet Weekly Export"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="listingCsv">CSV file</Label>
+                      <Input
+                        id="listingCsv"
+                        type="file"
+                        accept=".csv,text/csv"
+                        onChange={(event) => handleUploadFile(event.target.files?.[0] || null)}
+                      />
+                    </div>
+                  </div>
+                  {uploadError && <p className="text-sm text-rose-600">{uploadError}</p>}
+                  {uploadIngestMutation.isError && (
+                    <p className="text-sm text-rose-600">{(uploadIngestMutation.error as Error).message}</p>
+                  )}
+                  {uploadRows.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                        Ready to import <span className="font-semibold text-slate-900">{uploadRows.length}</span> rows. Preview the first few before saving.
+                      </div>
+                      <div className="max-h-64 overflow-auto rounded-2xl border border-slate-200">
+                        <table className="min-w-full divide-y divide-slate-200 text-sm">
+                          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                            <tr>
+                              <th className="px-3 py-2 font-semibold">Title</th>
+                              <th className="px-3 py-2 font-semibold">Address</th>
+                              <th className="px-3 py-2 font-semibold">Type</th>
+                              <th className="px-3 py-2 font-semibold">Size</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {uploadRows.slice(0, 8).map((row, index) => (
+                              <tr key={`${row.title}-${index}`}>
+                                <td className="max-w-[18rem] px-3 py-2 font-medium text-slate-900">{row.title}</td>
+                                <td className="max-w-[16rem] px-3 py-2 text-slate-600">{row.address || "Needs review"}</td>
+                                <td className="px-3 py-2 text-slate-600">{row.listingType || "lease"} / {row.assetType || "building"}</td>
+                                <td className="px-3 py-2 text-slate-600">
+                                  {row.availableSf ? row.availableSf.toLocaleString() : row.landAcres ? `${row.landAcres} ac` : "-"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Weekly importer</p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Imports update existing rows when the source URL or row identity matches. Missing rows are not removed yet, so this is safe for mixed exports.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => uploadIngestMutation.mutate()}
+                    disabled={uploadIngestMutation.isPending || uploadRows.length === 0}
+                    className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {uploadIngestMutation.isPending ? "Importing..." : `Import ${uploadRows.length || ""} rows`}
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <h3 className="text-base font-semibold text-slate-950">Single URL intake</h3>
+              </div>
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="sourceUrl">Listing URL</Label>
                 <Input id="sourceUrl" placeholder="https://..." value={form.sourceUrl} onChange={(event) => setForm({ ...form, sourceUrl: event.target.value })} />

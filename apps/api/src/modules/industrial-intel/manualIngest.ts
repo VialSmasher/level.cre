@@ -4,7 +4,7 @@ import { ensureContentHash } from './ingest/runSource';
 import type { IntelSourceAdapterSlug, NormalizedIntelListingRecord } from './ingest/types';
 
 export type ManualIntelListingInput = {
-  sourceUrl: string;
+  sourceUrl?: string | null;
   title: string;
   brochureUrl?: string | null;
   address?: string | null;
@@ -19,6 +19,11 @@ export type ManualIntelListingInput = {
   pricePerAcre?: number | null;
 };
 
+export type ManualIntelListingUploadInput = {
+  sourceName?: string | null;
+  records: ManualIntelListingInput[];
+};
+
 const MANUAL_SOURCE: { slug: IntelSourceAdapterSlug; name: string; kind: string; feedUrl: string | null } = {
   slug: 'manual_url',
   name: 'Manual URL Intake',
@@ -26,38 +31,52 @@ const MANUAL_SOURCE: { slug: IntelSourceAdapterSlug; name: string; kind: string;
   feedUrl: null,
 };
 
+const MANUAL_UPLOAD_SOURCE: { slug: IntelSourceAdapterSlug; name: string; kind: string; feedUrl: string | null } = {
+  slug: 'manual_upload',
+  name: 'Spreadsheet Upload Intake',
+  kind: 'manual_upload',
+  feedUrl: null,
+};
+
+function slugifySourceName(value?: string | null): string {
+  return String(value || 'spreadsheet-upload')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'spreadsheet-upload';
+}
+
+function uploadSourceFor(sourceName?: string | null): { slug: string; name: string; kind: string; feedUrl: string | null } {
+  const name = String(sourceName || '').trim() || MANUAL_UPLOAD_SOURCE.name;
+  return {
+    slug: `manual-upload-${slugifySourceName(name)}`,
+    name,
+    kind: MANUAL_UPLOAD_SOURCE.kind,
+    feedUrl: null,
+  };
+}
+
 function buildManualSourceRecordKey(sourceUrl: string, recordKeySuffix?: string | null): string {
   const base = sourceUrl.replace(/^https?:\/\//i, '').replace(/\/$/, '');
   const suffix = String(recordKeySuffix || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
   return suffix ? `${base}#${suffix}` : base;
 }
 
-async function ensureManualSource(): Promise<string> {
-  const existing = await pool.query<{ id: string }>(
-    'select id from public.intel_sources where slug = $1 limit 1',
-    [MANUAL_SOURCE.slug],
-  );
-  if (existing.rows[0]?.id) return existing.rows[0].id;
-
-  const inserted = await pool.query<{ id: string }>(
-    `
-      insert into public.intel_sources (name, slug, kind, feed_url, field_mapping, is_active)
-      values ($1, $2, $3, $4, '{}'::jsonb, true)
-      returning id
-    `,
-    [MANUAL_SOURCE.name, MANUAL_SOURCE.slug, MANUAL_SOURCE.kind, MANUAL_SOURCE.feedUrl],
-  );
-
-  return inserted.rows[0].id;
+function buildUploadRecordKey(input: ManualIntelListingInput, index: number): string {
+  if (input.sourceUrl) return buildManualSourceRecordKey(input.sourceUrl, input.recordKeySuffix);
+  const base = [input.address, input.title, input.listingType, input.availableSf]
+    .filter(Boolean)
+    .join('|')
+    .toLowerCase()
+    .replace(/[^a-z0-9|]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return base || `row-${index + 1}`;
 }
 
-export async function ingestManualIntelListing(
-  userId: string | null,
-  input: ManualIntelListingInput,
-): Promise<{ runId: string; recordsSeen: number; recordsNew: number; recordsUpdated: number; recordsRemoved: number }> {
-  const sourceId = await ensureManualSource();
-  const normalized: NormalizedIntelListingRecord = ensureContentHash({
-    sourceRecordKey: buildManualSourceRecordKey(input.sourceUrl, input.recordKeySuffix),
+function normalizeManualRecord(input: ManualIntelListingInput, sourceRecordKey: string, intakeMethod: string): NormalizedIntelListingRecord {
+  return ensureContentHash({
+    sourceRecordKey,
     externalId: null,
     status: 'active',
     listingType: input.listingType || 'lease',
@@ -75,11 +94,11 @@ export async function ingestManualIntelListing(
     minDivisibleSf: null,
     clearHeightFt: null,
     brochureUrl: input.brochureUrl ?? null,
-    sourceUrl: input.sourceUrl,
+    sourceUrl: input.sourceUrl ?? null,
     rawPayload: {
-      intakeMethod: 'manual_url',
+      intakeMethod,
       title: input.title,
-      sourceUrl: input.sourceUrl,
+      sourceUrl: input.sourceUrl ?? null,
       recordKeySuffix: input.recordKeySuffix ?? null,
       brochureUrl: input.brochureUrl ?? null,
       address: input.address ?? null,
@@ -93,6 +112,33 @@ export async function ingestManualIntelListing(
       pricePerAcre: input.pricePerAcre ?? null,
     },
   });
+}
+
+async function ensureManualSource(source: { slug: string; name: string; kind: string; feedUrl: string | null } = MANUAL_SOURCE): Promise<string> {
+  const existing = await pool.query<{ id: string }>(
+    'select id from public.intel_sources where slug = $1 limit 1',
+    [source.slug],
+  );
+  if (existing.rows[0]?.id) return existing.rows[0].id;
+
+  const inserted = await pool.query<{ id: string }>(
+    `
+      insert into public.intel_sources (name, slug, kind, feed_url, field_mapping, is_active)
+      values ($1, $2, $3, $4, '{}'::jsonb, true)
+      returning id
+    `,
+    [source.name, source.slug, source.kind, source.feedUrl],
+  );
+
+  return inserted.rows[0].id;
+}
+
+export async function ingestManualIntelListing(
+  userId: string | null,
+  input: ManualIntelListingInput,
+): Promise<{ runId: string; recordsSeen: number; recordsNew: number; recordsUpdated: number; recordsRemoved: number }> {
+  const sourceId = await ensureManualSource();
+  const normalized = normalizeManualRecord(input, buildManualSourceRecordKey(input.sourceUrl || input.title, input.recordKeySuffix), 'manual_url');
 
   return applyNormalizedRecords(
     {
@@ -105,6 +151,39 @@ export async function ingestManualIntelListing(
     {
       sourceSlug: MANUAL_SOURCE.slug,
       records: [normalized],
+    },
+  );
+}
+
+export async function ingestManualIntelListingUpload(
+  userId: string | null,
+  input: ManualIntelListingUploadInput,
+): Promise<{ runId: string; recordsSeen: number; recordsNew: number; recordsUpdated: number; recordsRemoved: number }> {
+  const uploadSource = uploadSourceFor(input.sourceName);
+  const sourceId = await ensureManualSource(uploadSource);
+  const normalized = input.records.map((record, index) => {
+    const normalizedRecord = normalizeManualRecord(record, buildUploadRecordKey(record, index), 'manual_upload');
+    return {
+      ...normalizedRecord,
+      rawPayload: {
+        ...normalizedRecord.rawPayload,
+        uploadSourceName: input.sourceName || null,
+        uploadRow: index + 1,
+      },
+    };
+  });
+
+  return applyNormalizedRecords(
+    {
+      sourceId,
+      sourceSlug: MANUAL_UPLOAD_SOURCE.slug,
+      triggerType: 'manual_upload',
+      initiatedByUserId: userId,
+      preserveMissing: true,
+    },
+    {
+      sourceSlug: MANUAL_UPLOAD_SOURCE.slug,
+      records: normalized,
     },
   );
 }

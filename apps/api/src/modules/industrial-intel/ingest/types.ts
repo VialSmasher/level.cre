@@ -5,7 +5,8 @@ export type IntelSourceAdapterSlug =
   | 'jll'
   | 'cbre'
   | 'colliers'
-  | 'manual_url';
+  | 'manual_url'
+  | 'manual_upload';
 
 export type NormalizedIntelListingRecord = {
   sourceRecordKey: string;

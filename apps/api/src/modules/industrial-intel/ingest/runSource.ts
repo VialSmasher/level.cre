@@ -28,6 +28,7 @@ export async function runSourceAdapter(
     case 'cbre':
     case 'colliers':
     case 'manual_url':
+    case 'manual_upload':
       throw new Error(`Source adapter not implemented yet for ${slug}`);
     default:
       throw new Error(`Unknown industrial intel source adapter: ${String(slug)}`);

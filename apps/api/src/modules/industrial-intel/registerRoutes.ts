@@ -53,6 +53,15 @@ const intelManualListingSchema = z.object({
   pricePerAcre: z.number().nonnegative().nullable().optional(),
 });
 
+const intelManualUploadListingSchema = intelManualListingSchema.extend({
+  sourceUrl: z.string().trim().url().nullable().optional(),
+});
+
+const intelManualUploadSchema = z.object({
+  sourceName: z.string().trim().min(1).nullable().optional(),
+  records: z.array(intelManualUploadListingSchema).min(1).max(500),
+});
+
 const intelManualListingPreviewSchema = z.object({
   sourceUrl: z.string().trim().url(),
 });
@@ -146,6 +155,20 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     } catch (error) {
       console.error("Error ingesting industrial intel manual listing:", error);
       res.status(500).json({ message: "Failed to ingest industrial intel manual listing" });
+    }
+  });
+
+  app.post("/api/intel/manual-listings/upload", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelManualUploadSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel listing upload", issues: parsed.error.flatten() });
+      }
+      const result = await industrialIntelService.ingestManualListingUpload(getUserId(req), parsed.data);
+      res.status(201).json(result);
+    } catch (error) {
+      console.error("Error ingesting industrial intel listing upload:", error);
+      res.status(500).json({ message: "Failed to ingest industrial intel listing upload" });
     }
   });
 

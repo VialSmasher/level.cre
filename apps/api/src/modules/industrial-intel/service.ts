@@ -12,7 +12,12 @@ import {
   type ReplaceIntelRequirementPreferencesInput,
   type UpdateIntelRequirementInput,
 } from "./repo";
-import { ingestManualIntelListing, type ManualIntelListingInput } from "./manualIngest";
+import {
+  ingestManualIntelListing,
+  ingestManualIntelListingUpload,
+  type ManualIntelListingInput,
+  type ManualIntelListingUploadInput,
+} from "./manualIngest";
 import { previewManualIntelListing } from "./manualPreview";
 import { runIndustrialIntelSource } from "./sourceRegistry";
 
@@ -67,6 +72,10 @@ export class IndustrialIntelService {
 
   async ingestManualListing(_userId: string, input: ManualIntelListingInput) {
     return ingestManualIntelListing(null, input);
+  }
+
+  async ingestManualListingUpload(_userId: string, input: ManualIntelListingUploadInput) {
+    return ingestManualIntelListingUpload(null, input);
   }
 
   async previewManualListing(sourceUrl: string) {
