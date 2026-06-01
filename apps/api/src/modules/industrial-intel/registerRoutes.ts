@@ -281,6 +281,16 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/intel/surveys/:id/events", requireAuth, async (req, res) => {
+    try {
+      const events = await industrialIntelService.getSurveyEvents(getUserId(req), req.params.id);
+      res.json(events);
+    } catch (error) {
+      console.error("Error fetching industrial intel survey events:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel survey events" });
+    }
+  });
+
   app.patch("/api/intel/surveys/:id", requireAuth, async (req, res) => {
     try {
       const parsed = intelSurveyUpdateSchema.safeParse(req.body);

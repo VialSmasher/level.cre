@@ -8,6 +8,7 @@ import {
   type IntelRequirementPreference,
   type IntelRequirementListingDecision,
   type IntelSurveyDetail,
+  type IntelSurveyEvent,
   type IntelSurveyListItem,
   type UpsertIntelRequirementListingDecisionInput,
   industrialIntelRepository,
@@ -109,6 +110,10 @@ export class IndustrialIntelService {
 
   async getSurveyById(userId: string, id: string): Promise<IntelSurveyDetail | null> {
     return industrialIntelRepository.getSurveyById(userId, id);
+  }
+
+  async getSurveyEvents(userId: string, surveyId: string): Promise<IntelSurveyEvent[]> {
+    return industrialIntelRepository.getSurveyEvents(userId, surveyId);
   }
 
   async createSurvey(userId: string, input: CreateIntelSurveyInput): Promise<IntelSurveyDetail> {

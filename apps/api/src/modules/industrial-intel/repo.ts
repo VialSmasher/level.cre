@@ -214,6 +214,28 @@ export type IntelSurveyDetail = IntelSurveyListItem & {
   items: IntelSurveyItem[];
 };
 
+export type IntelSurveyEventActorType = "user" | "agent" | "system";
+
+export type IntelSurveyEvent = {
+  id: string;
+  surveyId: string;
+  actorType: IntelSurveyEventActorType;
+  actorId: string | null;
+  action: string;
+  summary: string | null;
+  payload: Record<string, unknown>;
+  createdAt: string | null;
+};
+
+export type CreateIntelSurveyEventInput = {
+  surveyId: string;
+  actorType?: IntelSurveyEventActorType;
+  actorId?: string | null;
+  action: string;
+  summary?: string | null;
+  payload?: Record<string, unknown>;
+};
+
 export type CreateIntelSurveyInput = {
   requirementId?: string | null;
   title: string;
@@ -415,6 +437,34 @@ export class IndustrialIntelRepository {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_intel_survey_items_sort
         ON public.intel_survey_items (survey_id, sort_order)
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.intel_survey_events (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        survey_id varchar NOT NULL REFERENCES public.intel_surveys(id) ON DELETE CASCADE,
+        actor_type varchar NOT NULL DEFAULT 'user',
+        actor_id varchar REFERENCES public.users(id) ON DELETE SET NULL,
+        action varchar NOT NULL,
+        summary text,
+        payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+        created_at timestamp DEFAULT now(),
+        CONSTRAINT chk_intel_survey_events_actor_type
+          CHECK (actor_type IN ('user', 'agent', 'system'))
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_survey_events_survey
+        ON public.intel_survey_events (survey_id, created_at DESC)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_survey_events_actor
+        ON public.intel_survey_events (actor_type, actor_id)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_survey_events_action
+        ON public.intel_survey_events (action)
     `);
   }
 
@@ -1676,6 +1726,78 @@ export class IndustrialIntelRepository {
     }
   }
 
+  async getSurveyEvents(userId: string, surveyId: string, limit = 30): Promise<IntelSurveyEvent[]> {
+    try {
+      const survey = await this.getSurveyById(userId, surveyId);
+      if (!survey) return [];
+      await this.ensureSurveyTables();
+
+      const result = await pool.query<{
+        id: string;
+        survey_id: string;
+        actor_type: IntelSurveyEventActorType;
+        actor_id: string | null;
+        action: string;
+        summary: string | null;
+        payload: Record<string, unknown> | null;
+        created_at: Date | null;
+      }>(
+        `
+          SELECT id, survey_id, actor_type, actor_id, action, summary, payload, created_at
+          FROM public.intel_survey_events
+          WHERE survey_id = $1
+          ORDER BY created_at DESC NULLS LAST
+          LIMIT $2
+        `,
+        [surveyId, limit],
+      );
+
+      return result.rows.map((row) => ({
+        id: row.id,
+        surveyId: row.survey_id,
+        actorType: row.actor_type,
+        actorId: row.actor_id,
+        action: row.action,
+        summary: row.summary,
+        payload: row.payload || {},
+        createdAt: isoOrNull(row.created_at),
+      }));
+    } catch (error) {
+      if (isRecoverableIntelSchemaError(error)) return [];
+      throw error;
+    }
+  }
+
+  private async logSurveyEvent(input: CreateIntelSurveyEventInput): Promise<void> {
+    await pool.query(
+      `
+        INSERT INTO public.intel_survey_events (
+          survey_id,
+          actor_type,
+          actor_id,
+          action,
+          summary,
+          payload
+        ) VALUES (
+          $1,
+          COALESCE($2, 'user'),
+          (SELECT id FROM public.users WHERE id = $3 LIMIT 1),
+          $4,
+          $5,
+          COALESCE($6, '{}'::jsonb)
+        )
+      `,
+      [
+        input.surveyId,
+        input.actorType ?? "user",
+        input.actorId ?? null,
+        input.action,
+        input.summary ?? null,
+        JSON.stringify(input.payload || {}),
+      ],
+    );
+  }
+
   async createSurvey(userId: string, input: CreateIntelSurveyInput): Promise<IntelSurveyDetail> {
     await this.ensureSurveyTables();
 
@@ -1696,6 +1818,18 @@ export class IndustrialIntelRepository {
 
     const created = await this.getSurveyById(userId, result.rows[0]?.id);
     if (!created) throw new Error("Failed to load created industrial intel survey");
+    await this.logSurveyEvent({
+      surveyId: created.id,
+      actorId: userId,
+      action: "survey.created",
+      summary: `Created survey "${created.title}"`,
+      payload: {
+        requirementId: created.requirementId,
+        title: created.title,
+        clientName: created.clientName,
+        status: created.status,
+      },
+    });
     return created;
   }
 
@@ -1728,7 +1862,33 @@ export class IndustrialIntelRepository {
       ],
     );
 
-    return this.getSurveyById(userId, id);
+    const updated = await this.getSurveyById(userId, id);
+    if (updated) {
+      await this.logSurveyEvent({
+        surveyId: id,
+        actorId: userId,
+        action: "survey.updated",
+        summary: `Updated survey "${updated.title}"`,
+        payload: {
+          before: {
+            requirementId: current.requirementId,
+            title: current.title,
+            clientName: current.clientName,
+            status: current.status,
+            shareToken: current.shareToken,
+          },
+          after: {
+            requirementId: updated.requirementId,
+            title: updated.title,
+            clientName: updated.clientName,
+            status: updated.status,
+            shareToken: updated.shareToken,
+          },
+          patch: input,
+        },
+      });
+    }
+    return updated;
   }
 
   async addSurveyItem(
@@ -1778,7 +1938,21 @@ export class IndustrialIntelRepository {
     );
 
     await pool.query(`UPDATE public.intel_surveys SET updated_at = now() WHERE id = $1`, [surveyId]);
-    return this.getSurveyById(userId, surveyId);
+    const updated = await this.getSurveyById(userId, surveyId);
+    const addedItem = updated?.items.find((item) => item.listingId === input.listingId);
+    await this.logSurveyEvent({
+      surveyId,
+      actorId: userId,
+      action: "survey_item.added",
+      summary: addedItem ? `Added ${addedItem.listing.title}` : "Added listing to survey",
+      payload: {
+        listingId: input.listingId,
+        itemId: addedItem?.id || null,
+        sortOrder: addedItem?.sortOrder ?? nextSortOrder,
+        recommendationLabel: addedItem?.recommendationLabel ?? input.recommendationLabel ?? null,
+      },
+    });
+    return updated;
   }
 
   async updateSurveyItem(
@@ -1818,7 +1992,36 @@ export class IndustrialIntelRepository {
     );
 
     await pool.query(`UPDATE public.intel_surveys SET updated_at = now() WHERE id = $1`, [surveyId]);
-    return this.getSurveyById(userId, surveyId);
+    const updated = await this.getSurveyById(userId, surveyId);
+    const next = updated?.items.find((item) => item.id === itemId);
+    await this.logSurveyEvent({
+      surveyId,
+      actorId: userId,
+      action: "survey_item.updated",
+      summary: next ? `Updated ${next.listing.title}` : "Updated survey listing",
+      payload: {
+        itemId,
+        listingId: current.listingId,
+        before: {
+          sortOrder: current.sortOrder,
+          recommendationLabel: current.recommendationLabel,
+          brokerNotes: current.brokerNotes,
+          clientNotes: current.clientNotes,
+          hidden: current.hidden,
+        },
+        after: next
+          ? {
+              sortOrder: next.sortOrder,
+              recommendationLabel: next.recommendationLabel,
+              brokerNotes: next.brokerNotes,
+              clientNotes: next.clientNotes,
+              hidden: next.hidden,
+            }
+          : null,
+        patch: input,
+      },
+    });
+    return updated;
   }
 
   async deleteSurveyItem(userId: string, surveyId: string, itemId: string): Promise<IntelSurveyDetail | null> {
@@ -1826,13 +2029,26 @@ export class IndustrialIntelRepository {
 
     const survey = await this.getSurveyById(userId, surveyId);
     if (!survey) return null;
+    const removed = survey.items.find((item) => item.id === itemId);
 
     await pool.query(
       `DELETE FROM public.intel_survey_items WHERE survey_id = $1 AND id = $2`,
       [surveyId, itemId],
     );
     await pool.query(`UPDATE public.intel_surveys SET updated_at = now() WHERE id = $1`, [surveyId]);
-    return this.getSurveyById(userId, surveyId);
+    const updated = await this.getSurveyById(userId, surveyId);
+    await this.logSurveyEvent({
+      surveyId,
+      actorId: userId,
+      action: "survey_item.removed",
+      summary: removed ? `Removed ${removed.listing.title}` : "Removed listing from survey",
+      payload: {
+        itemId,
+        listingId: removed?.listingId || null,
+        title: removed?.listing.title || null,
+      },
+    });
+    return updated;
   }
 }
 

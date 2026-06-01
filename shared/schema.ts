@@ -839,6 +839,25 @@ export const intelSurveyItems = pgTable(
   ],
 );
 
+export const intelSurveyEvents = pgTable(
+  "intel_survey_events",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    surveyId: varchar("survey_id").notNull().references(() => intelSurveys.id, { onDelete: "cascade" }),
+    actorType: varchar("actor_type").notNull().default("user"), // user | agent | system
+    actorId: varchar("actor_id").references(() => users.id, { onDelete: "set null" }),
+    action: varchar("action").notNull(),
+    summary: text("summary"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_intel_survey_events_survey").on(table.surveyId, table.createdAt),
+    index("IDX_intel_survey_events_actor").on(table.actorType, table.actorId),
+    index("IDX_intel_survey_events_action").on(table.action),
+  ],
+);
+
 export type IntelSource = typeof intelSources.$inferSelect;
 export type InsertIntelSource = typeof intelSources.$inferInsert;
 export type IntelListing = typeof intelListings.$inferSelect;
@@ -857,3 +876,5 @@ export type IntelSurvey = typeof intelSurveys.$inferSelect;
 export type InsertIntelSurvey = typeof intelSurveys.$inferInsert;
 export type IntelSurveyItem = typeof intelSurveyItems.$inferSelect;
 export type InsertIntelSurveyItem = typeof intelSurveyItems.$inferInsert;
+export type IntelSurveyEvent = typeof intelSurveyEvents.$inferSelect;
+export type InsertIntelSurveyEvent = typeof intelSurveyEvents.$inferInsert;

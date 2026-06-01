@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ExternalLink, Eye, EyeOff, FileText, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, ExternalLink, Eye, EyeOff, FileText, Plus, Trash2 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -92,6 +92,17 @@ type IntelSurveyDetail = IntelSurveyListItem & {
   items: IntelSurveyItem[];
 };
 
+type IntelSurveyEvent = {
+  id: string;
+  surveyId: string;
+  actorType: "user" | "agent" | "system";
+  actorId: string | null;
+  action: string;
+  summary: string | null;
+  payload: Record<string, unknown>;
+  createdAt: string | null;
+};
+
 function formatNumber(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   return value.toLocaleString();
@@ -121,6 +132,19 @@ function listingArea(listing: IntelListing) {
 
 function firstLink(listing: IntelListing) {
   return listing.sourceUrl || listing.brochureUrl;
+}
+
+function formatRelativeTime(value: string | null | undefined) {
+  if (!value) return "Just now";
+  const date = new Date(value);
+  const diffMs = Date.now() - date.getTime();
+  if (!Number.isFinite(diffMs)) return "Just now";
+  const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
+  if (diffMinutes < 1) return "Just now";
+  if (diffMinutes < 60) return `${diffMinutes} min ago`;
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours} hr ago`;
+  return date.toLocaleDateString();
 }
 
 function itemPatch(item: IntelSurveyItem, patch: Partial<IntelSurveyItem>) {
@@ -167,6 +191,12 @@ export default function IndustrialIntelSurveysPage() {
   const surveyQueryKey = selectedSurveyId ? [`/api/intel/surveys/${selectedSurveyId}`] : ["/api/intel/surveys/_"];
   const { data: selectedSurvey, isLoading: selectedSurveyLoading } = useQuery<IntelSurveyDetail>({
     queryKey: surveyQueryKey,
+    enabled: Boolean(selectedSurveyId),
+  });
+
+  const eventsQueryKey = selectedSurveyId ? [`/api/intel/surveys/${selectedSurveyId}/events`] : ["/api/intel/surveys/_/events"];
+  const { data: surveyEvents = [] } = useQuery<IntelSurveyEvent[]>({
+    queryKey: eventsQueryKey,
     enabled: Boolean(selectedSurveyId),
   });
 
@@ -221,6 +251,7 @@ export default function IndustrialIntelSurveysPage() {
     onSuccess: (survey) => {
       queryClient.invalidateQueries({ queryKey: ["/api/intel/surveys"] });
       queryClient.setQueryData([`/api/intel/surveys/${survey.id}`], survey);
+      queryClient.invalidateQueries({ queryKey: [`/api/intel/surveys/${survey.id}/events`] });
       setSelectedSurveyId(survey.id);
       setCreateForm({ title: "", clientName: "", requirementId: "" });
       toast({ title: "Survey draft created" });
@@ -239,6 +270,7 @@ export default function IndustrialIntelSurveysPage() {
     onSuccess: (survey) => {
       queryClient.setQueryData([`/api/intel/surveys/${survey.id}`], survey);
       queryClient.invalidateQueries({ queryKey: ["/api/intel/surveys"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/intel/surveys/${survey.id}/events`] });
     },
     onError: (error: any) => {
       toast({ title: "Failed to update survey", description: error?.message || "Please try again.", variant: "destructive" });
@@ -254,6 +286,7 @@ export default function IndustrialIntelSurveysPage() {
     onSuccess: (survey) => {
       queryClient.setQueryData([`/api/intel/surveys/${survey.id}`], survey);
       queryClient.invalidateQueries({ queryKey: ["/api/intel/surveys"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/intel/surveys/${survey.id}/events`] });
     },
     onError: (error: any) => {
       toast({ title: "Failed to add listing", description: error?.message || "Please try again.", variant: "destructive" });
@@ -273,6 +306,7 @@ export default function IndustrialIntelSurveysPage() {
     onSuccess: (survey) => {
       queryClient.setQueryData([`/api/intel/surveys/${survey.id}`], survey);
       queryClient.invalidateQueries({ queryKey: ["/api/intel/surveys"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/intel/surveys/${survey.id}/events`] });
     },
     onError: (error: any) => {
       toast({ title: "Failed to update listing", description: error?.message || "Please try again.", variant: "destructive" });
@@ -288,6 +322,7 @@ export default function IndustrialIntelSurveysPage() {
     onSuccess: (survey) => {
       queryClient.setQueryData([`/api/intel/surveys/${survey.id}`], survey);
       queryClient.invalidateQueries({ queryKey: ["/api/intel/surveys"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/intel/surveys/${survey.id}/events`] });
     },
     onError: (error: any) => {
       toast({ title: "Failed to remove listing", description: error?.message || "Please try again.", variant: "destructive" });
@@ -696,6 +731,32 @@ export default function IndustrialIntelSurveysPage() {
                       )}
                     </div>
                   </div>
+
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center gap-2">
+                        <Bot className="h-4 w-4 text-blue-700" />
+                        <CardTitle>Action trail</CardTitle>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {surveyEvents.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-600">
+                          Survey actions will appear here for future assistant review.
+                        </div>
+                      ) : (
+                        surveyEvents.slice(0, 8).map((event) => (
+                          <div key={event.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            <div className="flex items-start justify-between gap-3">
+                              <p className="text-sm font-semibold text-slate-900">{event.summary || event.action}</p>
+                              <Badge variant="outline" className="bg-white">{event.actorType}</Badge>
+                            </div>
+                            <p className="mt-1 text-xs text-slate-500">{formatRelativeTime(event.createdAt)}</p>
+                          </div>
+                        ))
+                      )}
+                    </CardContent>
+                  </Card>
                 </aside>
               </section>
             </>
