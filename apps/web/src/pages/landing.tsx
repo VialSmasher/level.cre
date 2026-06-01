@@ -189,9 +189,9 @@ export default function Landing() {
   }
 
   return (
-    <div className="min-h-screen overflow-hidden bg-white bg-[linear-gradient(rgba(15,23,42,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.025)_1px,transparent_1px)] [background-size:28px_28px]">
+    <div className="min-h-screen overflow-hidden bg-[#f7f9fc] bg-[linear-gradient(rgba(15,23,42,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.035)_1px,transparent_1px)] [background-size:32px_32px]">
       <div className="container mx-auto px-4 md:px-6 lg:px-8 py-10 md:py-14">
-        <div className="grid min-h-[calc(100vh-7rem)] grid-cols-1 lg:grid-cols-[0.86fr_1.14fr] gap-10 lg:gap-14 items-center">
+        <div className="grid min-h-[calc(100vh-7rem)] grid-cols-1 lg:grid-cols-[0.78fr_1.22fr] gap-10 lg:gap-16 items-center">
           {/* Left column: Branding + Login */}
           <div className="flex flex-col gap-6">
             {/* Text logo */}
@@ -204,11 +204,18 @@ export default function Landing() {
 
             {/* Headline + Subheadline */}
             <div className="space-y-3">
-              <h1 className="max-w-2xl text-4xl md:text-5xl font-semibold tracking-tight text-slate-950">
-                Broker-grade mapping and deal flow for commercial real estate
+              <div className="inline-flex rounded-md border border-blue-100 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-blue-700 shadow-sm">
+                Built for CRE brokers
+              </div>
+              <h1 className="max-w-xl text-5xl font-semibold leading-[0.95] tracking-tight text-slate-950 md:text-6xl">
+                Map faster.
+                <br />
+                Track cleaner.
+                <br />
+                Win more.
               </h1>
-              <p className="text-base md:text-lg text-slate-600 leading-relaxed max-w-prose">
-                Build market coverage, manage requirements, and keep every site, owner, tenant, and follow-up tied to the map.
+              <p className="max-w-xl text-base leading-7 text-slate-600 md:text-lg">
+                Turn property coverage into client-ready surveys, live pipeline, and broker follow-up in one mapped workspace.
               </p>
             </div>
 
@@ -281,7 +288,7 @@ export default function Landing() {
                     </Button>
                   </div>
                   <p className="text-sm text-slate-600 mt-1 max-w-xl">
-                    Demo is free. Upgrade only when you are ready to save live data, invite your team, or unlock analytics.
+                    Explore the sandbox now. Upgrade when you are ready to save live data, share surveys, or add team seats.
                     <button
                       type="button"
                       onClick={() => setLocation('/pricing')}
@@ -295,22 +302,22 @@ export default function Landing() {
             </div>
 
             {/* Trust indicators */}
-            <div className="grid gap-3 pt-1 text-sm text-slate-600 sm:grid-cols-2">
+            <div className="grid gap-3 border-y border-slate-200 py-4 text-sm text-slate-600 sm:grid-cols-2">
               <div className="flex items-center gap-2">
-                <CheckCircle className="w-4 h-4 text-green-500" />
-                Demo workspace included
+                <CheckCircle className="w-4 h-4 text-emerald-500" />
+                Client survey workflow
               </div>
               <div className="flex items-center gap-2">
-                <CheckCircle className="w-4 h-4 text-green-500" />
-                Google sign-in
+                <CheckCircle className="w-4 h-4 text-emerald-500" />
+                Requirements and follow-ups
               </div>
               <div className="flex items-center gap-2">
-                <CheckCircle className="w-4 h-4 text-green-500" />
-                Live maps, pipeline, and analytics
+                <CheckCircle className="w-4 h-4 text-emerald-500" />
+                Live map coverage
               </div>
               <div className="flex items-center gap-2">
                 <CreditCard className="w-4 h-4 text-blue-500" />
-                Stripe checkout path
+                Paid workspace upgrade
               </div>
             </div>
 
