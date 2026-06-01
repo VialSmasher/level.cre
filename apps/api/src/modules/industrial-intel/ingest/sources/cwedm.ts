@@ -170,18 +170,57 @@ function inferAssetType(title: string, description: string): string {
 }
 
 function isIndustrial(title: string, description: string): boolean {
+  const normalizedTitle = title.toLowerCase();
   const combined = `${title} ${description}`.toLowerCase();
-  if (/\bindustrial\b/.test(combined)) return true;
-  return [/\bwarehouse\b/, /\byard\b/, /\bshop\b/, /\bmanufacturing\b/, /\bdistribution\b/].some((pattern) =>
-    pattern.test(combined),
+  const titleHasIndustrialSignal = [
+    /\bindustrial\b/,
+    /\bwarehouse\b/,
+    /\boffice\s*\/\s*warehouse\b/,
+    /\bshop\b/,
+    /\byard\b/,
+    /\bmanufacturing\b/,
+    /\bdistribution\b/,
+    /\blogistics\b/,
+  ].some((pattern) => pattern.test(normalizedTitle));
+  const hasSecondarySignal = [/\bfacility\b/, /\bbay\b/, /\bbays\b/, /\bflex\b/, /\bfreestanding\b/].some((pattern) =>
+    pattern.test(normalizedTitle),
   );
+  const descriptionHasIndustrialSignal = [
+    /\bindustrial\b/,
+    /\bwarehouse\b/,
+    /\bshop\b/,
+    /\byard\b/,
+    /\bmanufacturing\b/,
+    /\bdistribution\b/,
+  ].some((pattern) => pattern.test(combined));
+  const hasNonIndustrialTitleSignal = [
+    /\bretail\b/,
+    /\bmedical\b/,
+    /\brestaurant\b/,
+    /\bmultifamily\b/,
+    /\bmulti-family\b/,
+    /\bresidential\b/,
+    /\bapartment\b/,
+    /\bhotel\b/,
+    /\bmotel\b/,
+    /\bdaycare\b/,
+  ].some((pattern) => pattern.test(normalizedTitle));
+  const isOfficeOnlyTitle =
+    /\boffice\s+(?:space|condo|building|tower)\b/.test(normalizedTitle) &&
+    !/\b(warehouse|shop|bay|bays)\b/.test(normalizedTitle);
+
+  if (hasNonIndustrialTitleSignal && !titleHasIndustrialSignal) return false;
+  if (hasNonIndustrialTitleSignal || isOfficeOnlyTitle) return false;
+  return titleHasIndustrialSignal || (hasSecondarySignal && descriptionHasIndustrialSignal);
 }
 
 function inferAddress(title: string, description: string, city: string | null): string | null {
-  const combined = `${title}. ${description}`;
+  const streetPattern =
+    /\b([0-9][0-9A-Za-z /-]*\s+(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Drive|Dr\.?|Trail|Way|Crescent|Cres\.?|Boulevard|Blvd\.?|Close|Place|Lane|Range Road|RGE RD)(?:\s+(?:NW|NE|SW|SE|N|S|E|W))?)\b/i;
   const explicitAddress =
-    combined.match(/\bat\s+([0-9][A-Za-z0-9 .#'&/-]+?)\s+in\s+[A-Z][A-Za-z .'-]+/i)?.[1] ||
-    combined.match(/\b([0-9][A-Za-z0-9 .#'&/-]+?(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Drive|Dr\.?|Trail|Way|Crescent|Cres\.?|Boulevard|Blvd\.?|Range Road|RGE RD)[A-Za-z0-9 .#'&/-]*)\b/i)?.[1];
+    title.match(streetPattern)?.[1] ||
+    description.match(/\bat\s+([0-9][A-Za-z0-9 .#'&/-]+?)\s+in\s+[A-Z][A-Za-z .'-]+/i)?.[1] ||
+    description.match(streetPattern)?.[1];
 
   if (explicitAddress) {
     const cleaned = cleanText(explicitAddress).replace(/[,.]$/, '');
