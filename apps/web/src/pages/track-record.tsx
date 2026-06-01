@@ -36,7 +36,7 @@ type TrackDeal = {
   title: string
   address: string
   clientName?: string
-  dealType: 'lease' | 'sale' | 'renewal'
+  dealType: 'lease' | 'sale' | 'renewal' | 'unknown'
   role: 'tenant_rep' | 'landlord_rep' | 'buyer_rep' | 'seller_rep' | 'advisor'
   assetType: 'Industrial' | 'Office' | 'Retail' | 'Land' | 'Other'
   sizeSf?: string
@@ -115,6 +115,7 @@ function dealTypeLabel(dealType: TrackDeal['dealType']) {
     lease: 'Lease',
     sale: 'Sale',
     renewal: 'Renewal',
+    unknown: 'Needs Review',
   }[dealType]
 }
 
@@ -159,7 +160,8 @@ function inferDealType(rowText: string, sellingPrice?: string): TrackDeal['dealT
   const text = rowText.toLowerCase()
   if (text.includes('renew')) return 'renewal'
   if (parseNumber(sellingPrice) > 0 || text.includes('sale') || text.includes('selling price')) return 'sale'
-  return 'lease'
+  if (text.includes('lease')) return 'lease'
+  return 'unknown'
 }
 
 function inferRole(rowText: string): TrackDeal['role'] {
@@ -282,7 +284,16 @@ function normalizeStoredDeal(deal: TrackDeal): TrackDeal {
     !deal.leaseExpiryDate &&
     !deal.renewalNoticeDate
 
-  return looksLikeImportedSale ? { ...deal, dealType: 'sale' } : deal
+  const looksLikeImportedUnknown =
+    deal.sourceId?.startsWith('trade-') &&
+    deal.dealType === 'lease' &&
+    !deal.value &&
+    !deal.leaseExpiryDate &&
+    !deal.renewalNoticeDate
+
+  if (looksLikeImportedSale) return { ...deal, dealType: 'sale' }
+  if (looksLikeImportedUnknown) return { ...deal, dealType: 'unknown' }
+  return deal
 }
 
 function buildLinkedInSummary(dealCount: number, totalSf: number) {
@@ -320,8 +331,9 @@ export default function TrackRecordPage() {
     const leaseCount = deals.filter((deal) => deal.dealType === 'lease').length
     const saleCount = deals.filter((deal) => deal.dealType === 'sale').length
     const renewalCount = deals.filter((deal) => deal.dealType === 'renewal').length
+    const unknownCount = deals.filter((deal) => deal.dealType === 'unknown').length
     const expiries = deals.filter((deal) => dateSoon(deal.leaseExpiryDate) || dateSoon(deal.renewalNoticeDate)).length
-    return { totalSf, leaseCount, saleCount, renewalCount, expiries }
+    return { totalSf, leaseCount, saleCount, renewalCount, unknownCount, expiries }
   }, [deals])
 
   const filteredDeals = useMemo(() => {
@@ -521,7 +533,7 @@ export default function TrackRecordPage() {
               {mode === 'presentation' ? (
                 featuredDeals.length
               ) : (
-                <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="grid grid-cols-4 gap-2 text-center">
                   <div>
                     <div className="text-2xl font-semibold text-slate-950">{totals.saleCount}</div>
                     <div className="text-xs font-medium text-slate-500">Sales</div>
@@ -533,6 +545,10 @@ export default function TrackRecordPage() {
                   <div>
                     <div className="text-2xl font-semibold text-slate-950">{totals.renewalCount}</div>
                     <div className="text-xs font-medium text-slate-500">Renewals</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-semibold text-slate-950">{totals.unknownCount}</div>
+                    <div className="text-xs font-medium text-slate-500">Review</div>
                   </div>
                 </div>
               )}
@@ -582,6 +598,7 @@ export default function TrackRecordPage() {
                         <SelectItem value="lease">Lease</SelectItem>
                         <SelectItem value="sale">Sale</SelectItem>
                         <SelectItem value="renewal">Renewal</SelectItem>
+                        <SelectItem value="unknown">Needs Review</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
