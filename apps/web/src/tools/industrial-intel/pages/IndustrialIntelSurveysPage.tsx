@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, ExternalLink, Eye, EyeOff, FileText, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, ExternalLink, Eye, EyeOff, FileText, MapPin, Plus, Trash2 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { getGoogleMapsApiKey, GOOGLE_MAPS_API_KEY_HELP_TEXT } from "@/lib/googleMapsApiKey";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -88,6 +90,13 @@ type IntelSurveyItem = {
   listing: IntelListing;
 };
 
+type MappableSurveyItem = IntelSurveyItem & {
+  listing: IntelListing & {
+    latitude: number;
+    longitude: number;
+  };
+};
+
 type IntelSurveyDetail = IntelSurveyListItem & {
   items: IntelSurveyItem[];
 };
@@ -134,6 +143,19 @@ function firstLink(listing: IntelListing) {
   return listing.sourceUrl || listing.brochureUrl;
 }
 
+function isMappableListing(listing: IntelListing): listing is IntelListing & { latitude: number; longitude: number } {
+  return typeof listing.latitude === "number" && typeof listing.longitude === "number";
+}
+
+function buildGoogleMapsUrl(listing: IntelListing) {
+  if (isMappableListing(listing)) {
+    return `https://www.google.com/maps/search/?api=1&query=${listing.latitude},${listing.longitude}`;
+  }
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+    [listing.normalizedAddress || listing.address, listing.submarket || listing.market].filter(Boolean).join(" "),
+  )}`;
+}
+
 function formatRelativeTime(value: string | null | undefined) {
   if (!value) return "Just now";
   const date = new Date(value);
@@ -158,9 +180,14 @@ function itemPatch(item: IntelSurveyItem, patch: Partial<IntelSurveyItem>) {
   };
 }
 
+const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
+const DEFAULT_MAP_CENTER = { lat: 53.5461, lng: -113.4938 };
+const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
+
 export default function IndustrialIntelSurveysPage() {
   const { toast } = useToast();
   const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
+  const [selectedMapItemId, setSelectedMapItemId] = useState<string | null>(null);
   const [listingSearch, setListingSearch] = useState("");
   const [createForm, setCreateForm] = useState({
     title: "",
@@ -200,6 +227,11 @@ export default function IndustrialIntelSurveysPage() {
     enabled: Boolean(selectedSurveyId),
   });
 
+  const { isLoaded: isMapLoaded, loadError: mapLoadError } = useJsApiLoader({
+    id: "industrial-intel-survey-map",
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+  });
+
   const shortlistQueryKey = selectedSurvey?.requirementId
     ? [`/api/intel/requirements/${selectedSurvey.requirementId}/shortlist`]
     : ["/api/intel/requirements/_/shortlist"];
@@ -233,6 +265,25 @@ export default function IndustrialIntelSurveysPage() {
     () => (selectedSurvey?.items || []).filter((item) => !item.hidden).sort((a, b) => a.sortOrder - b.sortOrder),
     [selectedSurvey?.items],
   );
+
+  const mappableSurveyItems = useMemo(
+    () => visibleItems.filter((item): item is MappableSurveyItem => isMappableListing(item.listing)),
+    [visibleItems],
+  );
+
+  const selectedMapItem = useMemo(() => {
+    const explicit = mappableSurveyItems.find((item) => item.id === selectedMapItemId);
+    return explicit || mappableSurveyItems[0] || null;
+  }, [mappableSurveyItems, selectedMapItemId]);
+
+  const mapCenter = useMemo(() => {
+    if (selectedMapItem) {
+      return { lat: selectedMapItem.listing.latitude, lng: selectedMapItem.listing.longitude };
+    }
+    return DEFAULT_MAP_CENTER;
+  }, [selectedMapItem]);
+
+  const unmappedVisibleCount = visibleItems.length - mappableSurveyItems.length;
 
   const shortlistedListingIds = useMemo(
     () => shortlistDecisions.filter((decision) => decision.decision === "shortlist").map((decision) => decision.listingId),
@@ -519,7 +570,7 @@ export default function IndustrialIntelSurveysPage() {
                 </CardContent>
               </Card>
 
-              <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+              <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_460px]">
                 <div className="space-y-6">
                   <Card>
                     <CardHeader>
@@ -591,6 +642,16 @@ export default function IndustrialIntelSurveysPage() {
                                 <div className="flex flex-wrap items-center gap-2">
                                   <h3 className="text-lg font-semibold text-slate-950">{item.listing.title}</h3>
                                   {item.hidden && <Badge variant="outline">Hidden</Badge>}
+                                  {isMappableListing(item.listing) ? (
+                                    <Badge variant="outline" className="bg-emerald-50 text-emerald-800">Map ready</Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="bg-amber-50 text-amber-800">Needs coordinates</Badge>
+                                  )}
+                                  {firstLink(item.listing) ? (
+                                    <Badge variant="outline" className="bg-blue-50 text-blue-800">Flyer/link ready</Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="bg-slate-50 text-slate-700">No public link</Badge>
+                                  )}
                                 </div>
                                 <p className="mt-1 text-sm text-slate-600">{item.listing.normalizedAddress || item.listing.address || "Address pending"}</p>
                               </div>
@@ -607,7 +668,7 @@ export default function IndustrialIntelSurveysPage() {
                               </div>
                             </div>
 
-                            <div className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                               <Metric label="Building" value={formatListingSize(item.listing)} />
                               <Metric label="Land" value={item.listing.landAcres ? `${formatNumber(item.listing.landAcres)} ac` : "-"} />
                               <Metric label="Lease" value={formatLeaseRate(item.listing)} />
@@ -685,11 +746,90 @@ export default function IndustrialIntelSurveysPage() {
                   <div className="sticky top-28 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Client preview</p>
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Client map preview</p>
                         <h2 className="mt-2 text-xl font-semibold text-slate-950">{selectedSurvey.title}</h2>
                         <p className="mt-1 text-sm text-slate-600">{selectedSurvey.clientName || "Prepared client survey"}</p>
                       </div>
                       <Badge variant="outline" className="bg-slate-50">Private</Badge>
+                    </div>
+
+                    <div className="mt-5 overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <MapPin className="h-4 w-4 text-blue-700" />
+                          <p className="text-sm font-semibold text-slate-950">
+                            {mappableSurveyItems.length} mapped / {visibleItems.length} included
+                          </p>
+                        </div>
+                        {unmappedVisibleCount > 0 && (
+                          <Badge variant="outline" className="bg-amber-50 text-amber-800">
+                            {unmappedVisibleCount} need coordinates
+                          </Badge>
+                        )}
+                      </div>
+
+                      <div className="h-[360px]">
+                        {!GOOGLE_MAPS_API_KEY ? (
+                          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-slate-600">
+                            {GOOGLE_MAPS_API_KEY_HELP_TEXT}
+                          </div>
+                        ) : mapLoadError ? (
+                          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-rose-700">
+                            Google Maps failed to load.
+                          </div>
+                        ) : !isMapLoaded ? (
+                          <div className="flex h-full items-center justify-center text-sm text-slate-500">Loading map...</div>
+                        ) : mappableSurveyItems.length === 0 ? (
+                          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-slate-600">
+                            Add latitude and longitude to these listings before the client map can render pins.
+                          </div>
+                        ) : (
+                          <GoogleMap
+                            mapContainerStyle={MAP_CONTAINER_STYLE}
+                            center={mapCenter}
+                            zoom={mappableSurveyItems.length === 1 ? 13 : 10}
+                            options={{
+                              streetViewControl: false,
+                              mapTypeControl: false,
+                              fullscreenControl: true,
+                            }}
+                          >
+                            {mappableSurveyItems.map((item) => {
+                              const optionNumber = visibleItems.findIndex((visibleItem) => visibleItem.id === item.id) + 1;
+                              return (
+                                <MarkerF
+                                  key={item.id}
+                                  position={{ lat: item.listing.latitude, lng: item.listing.longitude }}
+                                  label={{ text: String(optionNumber), color: "#ffffff", fontWeight: "700" }}
+                                  onClick={() => setSelectedMapItemId(item.id)}
+                                />
+                              );
+                            })}
+                            {selectedMapItem && (
+                              <InfoWindowF
+                                position={{ lat: selectedMapItem.listing.latitude, lng: selectedMapItem.listing.longitude }}
+                                onCloseClick={() => setSelectedMapItemId(null)}
+                              >
+                                <div className="max-w-[15rem] space-y-2 p-1 text-sm text-slate-700">
+                                  <p className="font-semibold text-slate-950">{selectedMapItem.listing.title}</p>
+                                  <p>{selectedMapItem.listing.normalizedAddress || selectedMapItem.listing.address || "Address pending"}</p>
+                                  <p>{formatListingSize(selectedMapItem.listing)} - {listingArea(selectedMapItem.listing)}</p>
+                                  <div className="flex flex-wrap gap-3">
+                                    {firstLink(selectedMapItem.listing) && (
+                                      <a href={firstLink(selectedMapItem.listing) || undefined} target="_blank" rel="noreferrer" className="font-semibold text-blue-700">
+                                        Flyer/listing
+                                      </a>
+                                    )}
+                                    <a href={buildGoogleMapsUrl(selectedMapItem.listing)} target="_blank" rel="noreferrer" className="font-semibold text-blue-700">
+                                      Open maps
+                                    </a>
+                                  </div>
+                                </div>
+                              </InfoWindowF>
+                            )}
+                          </GoogleMap>
+                        )}
+                      </div>
                     </div>
 
                     <div className="mt-5 space-y-4">
