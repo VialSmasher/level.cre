@@ -129,6 +129,10 @@ function parseUploadNumber(value: string) {
 }
 
 function sourceNameFromFile(file: File) {
+  const normalized = file.name.toLowerCase();
+  if (normalized.includes("costar") && normalized.includes("sale")) return "CoStar Sale Export";
+  if (normalized.includes("costar") && normalized.includes("lease")) return "CoStar Lease Export";
+
   return file.name
     .replace(/\.(csv|xlsx|xls)$/i, "")
     .replace(/[_-]+/g, " ")
