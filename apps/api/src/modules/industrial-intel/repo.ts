@@ -431,7 +431,7 @@ export class IndustrialIntelRepository {
     }
   }
 
-  async getListings(limit = 100): Promise<IntelListingListItem[]> {
+  async getListings(limit = 500): Promise<IntelListingListItem[]> {
     try {
       if (!(await this.hasCoreTables())) {
         return SHOULD_USE_SAMPLE_FALLBACK ? getIndustrialIntelSeedPreview().listings.slice(0, limit) : [];

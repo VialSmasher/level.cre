@@ -641,15 +641,36 @@ export default function IndustrialIntelInventoryPage() {
   const removedCount = useMemo(() => listings.filter((listing) => Boolean(listing.removedAt)).length, [listings]);
   const queueOptions = useMemo(
     () => [
-      { id: "all", label: "All", count: listings.length },
-      { id: "needs_geocode", label: "Needs geocode", count: needsGeocodeCount },
-      { id: "needs_review", label: "Needs review", count: needsReviewCount },
-      { id: "mapped", label: "Mapped", count: mappedCount },
-      { id: "sale", label: "Sale", count: listings.filter((listing) => listing.listingType === "sale" && !listing.removedAt).length },
-      { id: "lease", label: "Lease", count: listings.filter((listing) => listing.listingType === "lease" && !listing.removedAt).length },
+      { id: "all", label: "All", count: listings.length, tone: "blue" },
+      { id: "needs_geocode", label: "Needs geocode", count: needsGeocodeCount, tone: "orange" },
+      { id: "needs_review", label: "Needs review", count: needsReviewCount, tone: "amber" },
+      { id: "mapped", label: "Mapped", count: mappedCount, tone: "sky" },
+      { id: "sale", label: "Sale", count: listings.filter((listing) => listing.listingType === "sale" && !listing.removedAt).length, tone: "emerald" },
+      { id: "lease", label: "Lease", count: listings.filter((listing) => listing.listingType === "lease" && !listing.removedAt).length, tone: "violet" },
     ],
     [listings, mappedCount, needsGeocodeCount, needsReviewCount],
   );
+
+  const statCards = [
+    { label: "Active", value: activeListings.length, caption: "not removed", tone: "blue", accent: "bg-blue-500" },
+    { label: "Mapped", value: mappedCount, caption: "ready for map", tone: "emerald", accent: "bg-emerald-500" },
+    { label: "Needs geocode", value: needsGeocodeCount, caption: "address cleanup", tone: "orange", accent: "bg-orange-500" },
+    { label: "Needs review", value: needsReviewCount, caption: "quality flags", tone: "amber", accent: "bg-amber-500" },
+    { label: "Removed", value: removedCount, caption: "source disappeared", tone: "rose", accent: "bg-rose-500" },
+  ];
+
+  const queueButtonClass = (option: { id: string; tone: string }) => {
+    if (queueFilter !== option.id) {
+      return "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:text-blue-700";
+    }
+
+    if (option.tone === "orange") return "border-orange-300 bg-orange-50 text-orange-800";
+    if (option.tone === "amber") return "border-amber-300 bg-amber-50 text-amber-800";
+    if (option.tone === "sky") return "border-sky-300 bg-sky-50 text-sky-800";
+    if (option.tone === "emerald") return "border-emerald-300 bg-emerald-50 text-emerald-800";
+    if (option.tone === "violet") return "border-violet-300 bg-violet-50 text-violet-800";
+    return "border-blue-300 bg-blue-50 text-blue-700";
+  };
 
   const mapCenter = useMemo(() => {
     if (selectedMappableListing) {
@@ -696,43 +717,52 @@ export default function IndustrialIntelInventoryPage() {
       </section>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        {[
-          { label: "Active", value: activeListings.length, caption: "not removed" },
-          { label: "Mapped", value: mappedCount, caption: "ready for map" },
-          { label: "Needs geocode", value: needsGeocodeCount, caption: "address cleanup" },
-          { label: "Needs review", value: needsReviewCount, caption: "quality flags" },
-          { label: "Removed", value: removedCount, caption: "source disappeared" },
-        ].map((item) => (
-          <Card key={item.label} className="border-slate-200 bg-white shadow-sm">
+        {statCards.map((item) => (
+          <Card key={item.label} className="overflow-hidden border-slate-200 bg-white shadow-sm">
+            <div className={`h-1 ${item.accent}`} />
             <CardContent className="p-4">
-              <p className="text-sm font-medium text-slate-600">{item.label}</p>
-              <p className="mt-1 text-3xl font-bold text-slate-950">{item.value}</p>
-              <p className="mt-1 text-xs text-slate-500">{item.caption}</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">{item.label}</p>
+                  <p className="mt-1 text-3xl font-bold text-slate-950">{item.value}</p>
+                  <p className="mt-1 text-xs text-slate-500">{item.caption}</p>
+                </div>
+                <span className={`mt-1 h-2.5 w-2.5 rounded-full ${item.accent}`} />
+              </div>
             </CardContent>
           </Card>
         ))}
       </section>
 
-      <Card className="border-slate-200 bg-white shadow-sm">
-        <CardContent className="space-y-4 p-4">
-          <div className="flex flex-wrap gap-2">
+      <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">
+        <CardContent className="space-y-4 p-0">
+          <div className="border-b border-slate-200 bg-slate-50/80 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-950">Inventory command bar</p>
+                <p className="text-xs text-slate-500">Filter the queue, map, and selected listing together.</p>
+              </div>
+              <p className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm">
+                {filteredListings.length} shown / {listings.length} loaded
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 px-4">
             {queueOptions.map((option) => (
               <button
                 key={option.id}
                 type="button"
                 onClick={() => setQueueFilter(option.id)}
-                className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
-                  queueFilter === option.id
-                    ? "border-blue-300 bg-blue-50 text-blue-700"
-                    : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:text-blue-700"
-                }`}
+                className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${queueButtonClass(option)}`}
               >
-                {option.label} <span className="ml-1 text-xs opacity-70">{option.count}</span>
+                {option.label} <span className="ml-1 rounded-full bg-white/70 px-1.5 py-0.5 text-xs">{option.count}</span>
               </button>
             ))}
           </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <div className="space-y-2 xl:col-span-2">
+
+          <div className="grid gap-3 px-4 md:grid-cols-2 xl:grid-cols-12">
+            <div className="space-y-2 xl:col-span-4">
               <Label htmlFor="searchListings">Search listings</Label>
               <Input
                 id="searchListings"
@@ -741,7 +771,7 @@ export default function IndustrialIntelInventoryPage() {
                 onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
               />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 xl:col-span-2">
               <Label htmlFor="submarketFilter">Submarket</Label>
               <select
                 id="submarketFilter"
@@ -755,7 +785,7 @@ export default function IndustrialIntelInventoryPage() {
                 ))}
               </select>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 xl:col-span-2">
               <Label htmlFor="typeFilter">Listing type</Label>
               <select
                 id="typeFilter"
@@ -769,7 +799,7 @@ export default function IndustrialIntelInventoryPage() {
                 <option value="sublease">Sublease</option>
               </select>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 xl:col-span-2">
               <Label htmlFor="sourceFilter">Source</Label>
               <select
                 id="sourceFilter"
@@ -783,7 +813,7 @@ export default function IndustrialIntelInventoryPage() {
                 ))}
               </select>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 xl:col-span-1">
               <Label htmlFor="statusFilter">Status</Label>
               <select
                 id="statusFilter"
@@ -796,7 +826,7 @@ export default function IndustrialIntelInventoryPage() {
                 <option value="removed">Removed only</option>
               </select>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 xl:col-span-1">
               <Label htmlFor="minSfFilter">Min SF</Label>
               <Input
                 id="minSfFilter"
@@ -806,7 +836,7 @@ export default function IndustrialIntelInventoryPage() {
                 onChange={(event) => setFilters((current) => ({ ...current, minSf: event.target.value }))}
               />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-2 xl:col-span-1">
               <Label htmlFor="maxSfFilter">Max SF</Label>
               <Input
                 id="maxSfFilter"
@@ -818,9 +848,9 @@ export default function IndustrialIntelInventoryPage() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="mx-4 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-gradient-to-r from-blue-50 via-white to-emerald-50 px-4 py-3">
             <p className="text-sm text-slate-600">
-              Showing <span className="font-semibold text-slate-900">{filteredListings.length}</span> of <span className="font-semibold text-slate-900">{listings.length}</span> listings.
+              Showing <span className="font-semibold text-slate-900">{filteredListings.length}</span> of <span className="font-semibold text-slate-900">{listings.length}</span> loaded listings.
             </p>
             <div className="flex flex-wrap gap-2">
               <button
