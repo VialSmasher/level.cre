@@ -99,6 +99,13 @@ function domainFromUrl(value: string, fallback?: string) {
   }
 }
 
+function cleanSnippet(value: string | null | undefined) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("```") || trimmed.startsWith("{") || trimmed.startsWith("[")) return null;
+  return trimmed.replace(/\s+/g, " ").slice(0, 260);
+}
+
 function addressTokens(address: string | null | undefined) {
   const normalized = normalizeText(address);
   if (!normalized) return [];
@@ -272,21 +279,57 @@ async function getVertexAccessToken() {
 
 function parseVertexJsonCandidates(text: string): GoogleSearchItem[] {
   const trimmed = text.trim();
-  const jsonText = trimmed.match(/```json\s*([\s\S]*?)```/i)?.[1] || trimmed.match(/```\s*([\s\S]*?)```/i)?.[1] || trimmed;
+  const fencedJson = trimmed.match(/```json\s*([\s\S]*?)```/i)?.[1] || trimmed.match(/```\s*([\s\S]*?)```/i)?.[1];
+  const looseJsonStart = trimmed.indexOf("{");
+  const looseJsonEnd = trimmed.lastIndexOf("}");
+  const looseJson = looseJsonStart >= 0 && looseJsonEnd > looseJsonStart
+    ? trimmed.slice(looseJsonStart, looseJsonEnd + 1)
+    : "";
+  const candidatesToParse = [fencedJson, looseJson, trimmed].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const jsonText of candidatesToParse) {
+    try {
+      const parsed = JSON.parse(jsonText) as {
+        candidates?: Array<{ url?: string; title?: string; snippet?: string }>;
+      };
+      return (parsed.candidates || [])
+        .filter((candidate) => candidate.url)
+        .map((candidate) => ({
+          link: candidate.url,
+          title: candidate.title,
+          snippet: candidate.snippet,
+          displayLink: candidate.url ? domainFromUrl(candidate.url) : undefined,
+        }));
+    } catch {
+      // Try the next extraction strategy.
+    }
+  }
+
   try {
-    const parsed = JSON.parse(jsonText) as {
-      candidates?: Array<{ url?: string; title?: string; snippet?: string }>;
-    };
-    return (parsed.candidates || [])
-      .filter((candidate) => candidate.url)
-      .map((candidate) => ({
-        link: candidate.url,
-        title: candidate.title,
-        snippet: candidate.snippet,
-        displayLink: candidate.url ? domainFromUrl(candidate.url) : undefined,
-      }));
+    const urlMatches = Array.from(trimmed.matchAll(/https?:\/\/[^\s"',)]+/g));
+    return urlMatches.map((match) => ({
+      link: match[0],
+      title: domainFromUrl(match[0]),
+      snippet: null,
+      displayLink: domainFromUrl(match[0]),
+    }));
   } catch {
     return [];
+  }
+}
+
+async function resolveVertexRedirectUrl(url: string): Promise<string> {
+  if (!domainFromUrl(url).endsWith("vertexaisearch.cloud.google.com")) return url;
+
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+    });
+    const resolved = normalizeUrl(response.url || url);
+    return domainFromUrl(resolved).endsWith("vertexaisearch.cloud.google.com") ? url : resolved;
+  } catch {
+    return url;
   }
 }
 
@@ -330,15 +373,24 @@ async function runVertexGroundedSearch(listing: IntelListingListItem): Promise<G
   for (const candidate of data.candidates || []) {
     const text = candidate.content?.parts?.map((part) => part.text || "").join("\n") || "";
     for (const item of parseVertexJsonCandidates(text)) {
-      if (item.link) byUrl.set(normalizeUrl(item.link), item);
+      if (!item.link) continue;
+      const resolvedUrl = await resolveVertexRedirectUrl(normalizeUrl(item.link));
+      if (domainFromUrl(resolvedUrl).endsWith("vertexaisearch.cloud.google.com")) continue;
+      byUrl.set(resolvedUrl, {
+        ...item,
+        link: resolvedUrl,
+        snippet: cleanSnippet(item.snippet),
+        displayLink: domainFromUrl(resolvedUrl, item.displayLink),
+      });
     }
     for (const chunk of candidate.groundingMetadata?.groundingChunks || []) {
       if (!chunk.web?.uri) continue;
-      const url = normalizeUrl(chunk.web.uri);
+      const url = await resolveVertexRedirectUrl(normalizeUrl(chunk.web.uri));
+      if (domainFromUrl(url).endsWith("vertexaisearch.cloud.google.com")) continue;
       byUrl.set(url, {
         link: url,
         title: chunk.web.title,
-        snippet: text.slice(0, 260),
+        snippet: cleanSnippet(text),
         displayLink: domainFromUrl(url),
       });
     }
@@ -378,7 +430,7 @@ function toCandidateMap(listing: IntelListingListItem, items: GoogleSearchItem[]
       candidateUrl,
       domain: domainFromUrl(candidateUrl, item.displayLink),
       title: item.title || null,
-      snippet: item.snippet || null,
+      snippet: cleanSnippet(item.snippet),
       confidence,
       source: "resolver" as const,
     };
