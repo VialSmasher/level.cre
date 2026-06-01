@@ -173,7 +173,7 @@ function buildUploadRecord(row: Record<string, unknown>, index: number): UploadL
       "max building contiguous space",
     ])),
     landAcres: parseUploadNumber(readUploadValue(row, ["land acres", "acres", "site acres", "land size"])),
-    totalPrice: parseUploadNumber(readUploadValue(row, ["price", "sale price", "asking price", "purchase price"])),
+    totalPrice: parseUploadNumber(readUploadValue(row, ["price", "sale price", "asking price", "purchase price", "for sale price"])),
     pricePerAcre: parseUploadNumber(readUploadValue(row, ["price per acre", "$/acre", "psa"])),
   };
 }
