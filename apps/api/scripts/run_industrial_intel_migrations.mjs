@@ -14,6 +14,7 @@ const MIGRATIONS = [
   '../../drizzle/0009_industrial_intel_surveys.sql',
   '../../drizzle/0010_industrial_intel_public_links.sql',
   '../../drizzle/0011_industrial_intel_survey_events.sql',
+  '../../drizzle/0012_industrial_intel_listing_assets.sql',
 ];
 
 async function main() {
