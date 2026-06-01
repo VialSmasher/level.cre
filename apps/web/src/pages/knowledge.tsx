@@ -16,7 +16,7 @@ import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospectDisplay';
 import { apiRequest } from '@/lib/queryClient';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
-import { readTrackRecordMetrics, TRACK_RECORD_STORAGE_KEY } from '@/lib/trackRecordMetrics';
+import { getLifetimeProductionBadge, readTrackRecordMetrics, TRACK_RECORD_STORAGE_KEY } from '@/lib/trackRecordMetrics';
 
 function getInteractionDate(interaction: any) {
   const parsed = new Date(interaction?.date || interaction?.createdAt || '');
@@ -358,6 +358,7 @@ export default function Knowledge() {
   const selectedInteractions = selectedProspect
     ? analytics.interactionsByProspectId.get(selectedProspect.id) ?? []
     : [];
+  const lifetimeProductionBadge = getLifetimeProductionBadge(trackRecordMetrics);
   const selectedLatestInteraction = getLatestInteractionDate(selectedInteractions);
   const drawerMode: FocusQueue = selectedProspect
     ? analytics.newProspects.some((prospect) => prospect.id === selectedProspect.id)
@@ -616,6 +617,9 @@ export default function Knowledge() {
               <p className="mt-1 text-sm text-slate-500">
                 leased / renewed SF from {trackRecordMetrics.leasedDeals + trackRecordMetrics.renewalDeals} deals
               </p>
+              <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+                {lifetimeProductionBadge.tier}: {lifetimeProductionBadge.label}
+              </div>
               <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
                 <span>{formatCompactNumber(trackRecordMetrics.totalSf)} total SF</span>
                 <button type="button" className="font-semibold text-emerald-700 hover:text-emerald-800" onClick={() => setLocation('/track-record')}>

@@ -17,6 +17,21 @@ export type TrackRecordMetrics = {
   reviewDeals: number
 }
 
+export type ProductionBadge = {
+  label: string
+  tier: string
+  description: string
+  nextTargetSf?: number
+}
+
+const lifetimeSfBadges = [
+  { sf: 100000, label: '100K SF Club', tier: 'Bronze' },
+  { sf: 500000, label: 'Market Mover', tier: 'Silver' },
+  { sf: 1000000, label: 'Million SF Broker', tier: 'Gold' },
+  { sf: 2500000, label: 'Deal Volume Pro', tier: 'Platinum' },
+  { sf: 5000000, label: 'Market Maker', tier: 'Diamond' },
+]
+
 export function parseTrackRecordNumber(value?: string | number) {
   const n = Number(String(value || '').replace(/[$,\s]/g, ''))
   return Number.isFinite(n) ? n : 0
@@ -58,6 +73,27 @@ export function calculateTrackRecordMetrics(deals: TrackRecordMetricDeal[]): Tra
 
     return metrics
   }, emptyTrackRecordMetrics())
+}
+
+export function getLifetimeProductionBadge(metrics: TrackRecordMetrics): ProductionBadge {
+  const earned = [...lifetimeSfBadges].reverse().find((badge) => metrics.totalSf >= badge.sf)
+  const next = lifetimeSfBadges.find((badge) => metrics.totalSf < badge.sf)
+
+  if (!earned) {
+    return {
+      label: 'First 100K SF',
+      tier: 'Starter',
+      description: 'Keep building the track record.',
+      nextTargetSf: next?.sf,
+    }
+  }
+
+  return {
+    label: earned.label,
+    tier: earned.tier,
+    description: `${earned.sf.toLocaleString()}+ lifetime SF recorded.`,
+    nextTargetSf: next?.sf,
+  }
 }
 
 export function readTrackRecordMetrics(): TrackRecordMetrics {

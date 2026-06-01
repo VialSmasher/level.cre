@@ -289,19 +289,21 @@ function readImageDataUrls(files: FileList | File[], limit = 4): Promise<string[
 }
 
 function normalizeStoredDeal(deal: TrackDeal): TrackDeal {
+  const isImportedReportDeal = deal.sourceId?.startsWith('trade-')
+  const hasLeaseTiming = Boolean(deal.leaseExpiryDate || deal.renewalNoticeDate)
+  const dealValue = parseNumber(deal.value)
+
   const looksLikeImportedSale =
-    deal.sourceId?.startsWith('trade-') &&
+    isImportedReportDeal &&
     deal.dealType === 'lease' &&
-    parseNumber(deal.value) > 0 &&
-    !deal.leaseExpiryDate &&
-    !deal.renewalNoticeDate
+    dealValue > 0 &&
+    !hasLeaseTiming
 
   const looksLikeImportedUnknown =
-    deal.sourceId?.startsWith('trade-') &&
+    isImportedReportDeal &&
     deal.dealType === 'lease' &&
-    !deal.value &&
-    !deal.leaseExpiryDate &&
-    !deal.renewalNoticeDate
+    dealValue <= 0 &&
+    !hasLeaseTiming
 
   if (looksLikeImportedSale) return { ...deal, dealType: 'sale' }
   if (looksLikeImportedUnknown) return { ...deal, dealType: 'unknown' }
