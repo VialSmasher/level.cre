@@ -132,6 +132,30 @@ type IntelListingAsset = {
   updatedAt: string | null;
 };
 
+type PublicLinkCandidate = {
+  id: string;
+  listingId: string;
+  candidateUrl: string;
+  domain: string;
+  title: string | null;
+  snippet: string | null;
+  confidence: number;
+  status: "pending" | "approved" | "rejected";
+  source: "resolver" | "manual";
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+type PublicLinksResponse = {
+  candidates: PublicLinkCandidate[];
+};
+
+type ResolvePublicLinksResponse = {
+  status: "resolved" | "not_configured";
+  message: string;
+  persistedCandidates?: PublicLinkCandidate[];
+};
+
 function formatNumber(value: number | null | undefined) {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   return value.toLocaleString();
@@ -315,6 +339,21 @@ export default function IndustrialIntelSurveysPage() {
       (!asset.surveyItemId && asset.listingId === selectedDetailItem.listingId)
     ));
   }, [selectedDetailItem, surveyAssets]);
+
+  const publicLinksQueryKey = selectedDetailItem
+    ? [`/api/intel/listings/${selectedDetailItem.listingId}/public-links`]
+    : ["/api/intel/listings/no-selection/public-links"];
+  const {
+    data: publicLinksData,
+    isLoading: isLoadingPublicLinks,
+    isError: isPublicLinksError,
+    error: publicLinksError,
+  } = useQuery<PublicLinksResponse>({
+    queryKey: publicLinksQueryKey,
+    enabled: Boolean(selectedDetailItem),
+  });
+  const publicLinkCandidates = publicLinksData?.candidates || [];
+  const approvedPublicLink = publicLinkCandidates.find((candidate) => candidate.status === "approved") || null;
 
   const mapCenter = useMemo(() => {
     if (selectedMapItem) {
@@ -502,6 +541,49 @@ export default function IndustrialIntelSurveysPage() {
     },
     onError: (error: any) => {
       toast({ title: "Upload failed", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
+  const resolvePublicLinksMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedDetailItem) throw new Error("Select a survey property before searching.");
+      const response = await apiRequest("POST", `/api/intel/listings/${selectedDetailItem.listingId}/resolve-public-links`);
+      return response.json() as Promise<ResolvePublicLinksResponse>;
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: publicLinksQueryKey });
+      if (result.status === "not_configured") {
+        toast({
+          title: "Search provider not configured",
+          description: result.message,
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: (result.persistedCandidates?.length || 0) > 0 ? "Public link candidates ready" : "No public links found",
+        description: result.message,
+      });
+    },
+    onError: (error: any) => {
+      toast({ title: "Public link search failed", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
+  const updatePublicLinkMutation = useMutation({
+    mutationFn: async ({ candidateId, action }: { candidateId: string; action: "approve" | "reject" }) => {
+      if (!selectedDetailItem) throw new Error("Select a survey property before updating a public link.");
+      const response = await apiRequest(
+        "POST",
+        `/api/intel/listings/${selectedDetailItem.listingId}/public-links/${candidateId}/${action}`,
+      );
+      return response.json() as Promise<PublicLinkCandidate>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: publicLinksQueryKey });
+    },
+    onError: (error: any) => {
+      toast({ title: "Public link update failed", description: error?.message || "Please try again.", variant: "destructive" });
     },
   });
 
@@ -933,6 +1015,118 @@ export default function IndustrialIntelSurveysPage() {
                             )}
                           </div>
 
+                          <div className="rounded-lg border border-slate-200 bg-white p-4">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-slate-950">Find public flyer</p>
+                                <p className="mt-1 text-xs leading-5 text-slate-500">
+                                  Use the configured Google or Vertex resolver to find broker and landlord listing pages.
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {approvedPublicLink && (
+                                  <a
+                                    href={approvedPublicLink.candidateUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex h-9 items-center rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white"
+                                  >
+                                    Open link
+                                  </a>
+                                )}
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => resolvePublicLinksMutation.mutate()}
+                                  disabled={resolvePublicLinksMutation.isPending}
+                                >
+                                  {resolvePublicLinksMutation.isPending ? "Searching..." : "Find link"}
+                                </Button>
+                              </div>
+                            </div>
+
+                            {resolvePublicLinksMutation.data?.status === "not_configured" && (
+                              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+                                {resolvePublicLinksMutation.data.message}
+                              </div>
+                            )}
+                            {resolvePublicLinksMutation.isError && (
+                              <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs leading-5 text-rose-700">
+                                Resolver failed. {(resolvePublicLinksMutation.error as Error)?.message || "Please try again."}
+                              </div>
+                            )}
+                            {isPublicLinksError && (
+                              <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs leading-5 text-rose-700">
+                                Public links failed to load. {(publicLinksError as Error)?.message || "Please try again."}
+                              </div>
+                            )}
+
+                            {isLoadingPublicLinks ? (
+                              <p className="mt-3 text-xs text-slate-500">Loading public link candidates...</p>
+                            ) : publicLinkCandidates.length > 0 ? (
+                              <div className="mt-3 space-y-2">
+                                {publicLinkCandidates.map((candidate) => (
+                                  <div key={candidate.id} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                                            {candidate.domain}
+                                          </span>
+                                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                            candidate.status === "approved"
+                                              ? "bg-emerald-100 text-emerald-700"
+                                              : candidate.status === "rejected"
+                                                ? "bg-rose-100 text-rose-700"
+                                                : "bg-blue-100 text-blue-700"
+                                          }`}>
+                                            {candidate.status}
+                                          </span>
+                                          <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                                            {candidate.confidence}%
+                                          </span>
+                                        </div>
+                                        <a
+                                          href={candidate.candidateUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="mt-2 line-clamp-2 block text-sm font-semibold text-slate-950 hover:text-blue-700"
+                                        >
+                                          {candidate.title || candidate.candidateUrl}
+                                        </a>
+                                        {candidate.snippet && <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">{candidate.snippet}</p>}
+                                      </div>
+                                      <div className="flex shrink-0 gap-2">
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          className="h-8 px-2 text-xs"
+                                          onClick={() => updatePublicLinkMutation.mutate({ candidateId: candidate.id, action: "approve" })}
+                                          disabled={updatePublicLinkMutation.isPending || candidate.status === "approved"}
+                                        >
+                                          Approve
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-8 px-2 text-xs"
+                                          onClick={() => updatePublicLinkMutation.mutate({ candidateId: candidate.id, action: "reject" })}
+                                          disabled={updatePublicLinkMutation.isPending || candidate.status === "rejected"}
+                                        >
+                                          Reject
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="mt-3 text-xs text-slate-500">No public link candidates saved yet.</p>
+                            )}
+                          </div>
+
                           <div className="space-y-2">
                             <Label htmlFor={`selected-label-${selectedDetailItem.id}`}>Recommendation</Label>
                             <Input
@@ -968,14 +1162,14 @@ export default function IndustrialIntelSurveysPage() {
 
                           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
                             <div className="flex flex-wrap gap-3">
-                              {firstLink(selectedDetailItem.listing) ? (
+                              {approvedPublicLink || firstLink(selectedDetailItem.listing) ? (
                                 <a
-                                  href={firstLink(selectedDetailItem.listing) || undefined}
+                                  href={approvedPublicLink?.candidateUrl || firstLink(selectedDetailItem.listing) || undefined}
                                   target="_blank"
                                   rel="noreferrer"
                                   className="inline-flex items-center gap-1 text-sm font-semibold text-blue-700 hover:text-blue-900"
                                 >
-                                  View listing
+                                  {approvedPublicLink ? "View public link" : "View listing"}
                                   <ExternalLink className="h-3.5 w-3.5" />
                                 </a>
                               ) : (
