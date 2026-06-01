@@ -154,11 +154,11 @@ function toIsoDate(value: string) {
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : ''
 }
 
-function inferDealType(rowText: string, sellingPrice?: string): TrackDeal['dealType'] {
+function inferDealType(rowText: string): TrackDeal['dealType'] {
   const text = rowText.toLowerCase()
-  if (text.includes('renew')) return 'renewal'
-  if (parseNumber(sellingPrice) > 0 || text.includes('sale') || text.includes('selling price')) return 'sale'
-  if (text.includes('lease')) return 'lease'
+  if (text.includes('renew') || text.includes('extension')) return 'renewal'
+  if (text.includes('sublease') || text.includes('sub-lease') || text.includes('lease')) return 'lease'
+  if (text.includes('sale') || text.includes('sold') || text.includes('purchase') || text.includes('acquisition') || text.includes('disposition')) return 'sale'
   return 'unknown'
 }
 
@@ -219,7 +219,7 @@ function parseTrackRecordRows(rows: unknown[][]): DealImportResult {
       title,
       address,
       clientName: dealName && lotPlan ? dealName.replace(/^PL\s*-\s*/i, '') : '',
-      dealType: inferDealType(rowText, sellingPrice),
+      dealType: inferDealType(rowText),
       role: inferRole(rowText),
       assetType: inferAssetType(propertyType || division),
       sizeSf: squareFeet,
@@ -292,12 +292,11 @@ function normalizeStoredDeal(deal: TrackDeal): TrackDeal {
   const isImportedReportDeal = deal.sourceId?.startsWith('trade-')
   const hasLeaseTiming = Boolean(deal.leaseExpiryDate || deal.renewalNoticeDate)
   const dealValue = parseNumber(deal.value)
-
-  const looksLikeImportedSale =
-    isImportedReportDeal &&
-    deal.dealType === 'lease' &&
-    dealValue > 0 &&
-    !hasLeaseTiming
+  const looksManuallyReviewed = Boolean(deal.updatedAt && deal.createdAt && deal.updatedAt !== deal.createdAt)
+  const textEvidence = [deal.title, deal.address, deal.summary].join(' ').toLowerCase()
+  const hasLeaseEvidence = textEvidence.includes('lease') || textEvidence.includes('sublease') || textEvidence.includes('sub-lease')
+  const hasRenewalEvidence = textEvidence.includes('renew') || textEvidence.includes('extension')
+  const hasSaleEvidence = ['sale', 'sold', 'purchase', 'acquisition', 'disposition'].some((value) => textEvidence.includes(value))
 
   const looksLikeImportedUnknown =
     isImportedReportDeal &&
@@ -305,8 +304,27 @@ function normalizeStoredDeal(deal: TrackDeal): TrackDeal {
     dealValue <= 0 &&
     !hasLeaseTiming
 
-  if (looksLikeImportedSale) return { ...deal, dealType: 'sale' }
+  const looksLikeLegacyValueBasedLease =
+    isImportedReportDeal &&
+    deal.dealType === 'lease' &&
+    !hasLeaseTiming &&
+    !hasLeaseEvidence &&
+    !looksManuallyReviewed
+
+  const looksLikeLegacyValueBasedSale =
+    isImportedReportDeal &&
+    deal.dealType === 'sale' &&
+    !hasSaleEvidence &&
+    !hasLeaseEvidence &&
+    !hasRenewalEvidence &&
+    !hasLeaseTiming &&
+    !looksManuallyReviewed
+
+  if (isImportedReportDeal && deal.dealType === 'sale' && hasLeaseEvidence && !looksManuallyReviewed) return { ...deal, dealType: 'lease' }
+  if (isImportedReportDeal && hasRenewalEvidence && !looksManuallyReviewed) return { ...deal, dealType: 'renewal' }
   if (looksLikeImportedUnknown) return { ...deal, dealType: 'unknown' }
+  if (looksLikeLegacyValueBasedLease) return { ...deal, dealType: 'unknown' }
+  if (looksLikeLegacyValueBasedSale) return { ...deal, dealType: 'unknown' }
   return deal
 }
 
@@ -382,6 +400,18 @@ export default function TrackRecordPage() {
     if (confirm('Delete this track record deal?')) {
       setDeals((current) => current.filter((deal) => deal.id !== id))
       if (editingId === id) reset()
+    }
+  }
+
+  const clearImportedDeals = () => {
+    const importedCount = deals.filter((deal) => deal.sourceId?.startsWith('trade-')).length
+    if (!importedCount) {
+      setImportMessage('No imported report deals to clear.')
+      return
+    }
+    if (confirm(`Remove ${importedCount} imported report deals? Manually added deals will stay.`)) {
+      setDeals((current) => current.filter((deal) => !deal.sourceId?.startsWith('trade-')))
+      setImportMessage(`Removed ${importedCount} imported report deals. You can re-upload the workbook now.`)
     }
   }
 
@@ -751,14 +781,20 @@ export default function TrackRecordPage() {
                   <div>
                     <p className="font-semibold">Import a deal report</p>
                     <p className="mt-1 text-emerald-800">
-                      Drag and drop a CSV or Excel workbook anywhere on this page, or choose an exported report with columns like Deal Name, Lot & Plan, City, Close Date, Selling Price, Square Feet, Acres, and Property Type.
+                      Drag and drop a CSV or Excel workbook anywhere on this page. Rows without a clear sale, lease, sublease, renewal, or extension clue land in Needs Review instead of being guessed.
                     </p>
                     {importMessage && <p className="mt-2 font-medium">{importMessage}</p>}
                   </div>
-                  <Button variant="outline" className="border-emerald-300 bg-white" onClick={() => csvInputRef.current?.click()}>
-                    <FileSpreadsheet className="mr-2 h-4 w-4" />
-                    Import File
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" className="border-emerald-300 bg-white" onClick={() => csvInputRef.current?.click()}>
+                      <FileSpreadsheet className="mr-2 h-4 w-4" />
+                      Import File
+                    </Button>
+                    <Button variant="outline" className="border-red-200 bg-white text-red-700 hover:bg-red-50 hover:text-red-800" onClick={clearImportedDeals}>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Clear Imported
+                    </Button>
+                  </div>
                 </div>
               </div>
               <div className="relative">
