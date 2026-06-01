@@ -13,13 +13,17 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import {
   Building2,
   CalendarClock,
+  Copy,
   Download,
+  EyeOff,
   FileSpreadsheet,
   ImagePlus,
+  Linkedin,
   Plus,
   Printer,
   Search,
   Share2,
+  ShieldCheck,
   SquarePen,
   Trash2,
   Trophy,
@@ -104,6 +108,14 @@ function dateSoon(value?: string) {
   if (!Number.isFinite(time)) return false
   const diffDays = (time - Date.now()) / 86400000
   return diffDays >= 0 && diffDays <= 180
+}
+
+function dealTypeLabel(dealType: TrackDeal['dealType']) {
+  return {
+    lease: 'Lease',
+    sale: 'Sale',
+    renewal: 'Renewal',
+  }[dealType]
 }
 
 function clean(value: unknown) {
@@ -261,6 +273,10 @@ function isImportableDealFile(file: File) {
   return name.endsWith('.csv') || name.endsWith('.xlsx') || name.endsWith('.xls')
 }
 
+function buildLinkedInSummary(dealCount: number, totalSf: number) {
+  return `Representative industrial transaction experience: ${dealCount} completed assignments totaling ${formatNumber(totalSf)} SF across sale, lease, and renewal mandates.`
+}
+
 export default function TrackRecordPage() {
   const [deals, setDeals] = useState<TrackDeal[]>([])
   const [form, setForm] = useState<TrackDeal>(() => emptyDeal())
@@ -269,6 +285,8 @@ export default function TrackRecordPage() {
   const [mode, setMode] = useState<'manage' | 'presentation'>('manage')
   const [importMessage, setImportMessage] = useState('')
   const [isImportDragging, setIsImportDragging] = useState(false)
+  const [showClientNames, setShowClientNames] = useState(false)
+  const [showDealValues, setShowDealValues] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const csvInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -298,6 +316,8 @@ export default function TrackRecordPage() {
       .filter((deal) => !q || [deal.title, deal.address, deal.clientName, deal.submarket, deal.summary].some((value) => String(value || '').toLowerCase().includes(q)))
       .sort((a, b) => Number(b.isFeatured) - Number(a.isFeatured) || String(b.closedDate || '').localeCompare(String(a.closedDate || '')))
   }, [deals, query])
+
+  const featuredDeals = useMemo(() => filteredDeals.filter((deal) => deal.isFeatured), [filteredDeals])
 
   const reset = () => {
     setForm(emptyDeal())
@@ -375,12 +395,18 @@ export default function TrackRecordPage() {
   }
 
   const share = async () => {
-    const text = `Track record: ${deals.length} deals, ${formatNumber(totals.totalSf)} SF tracked.`
+    const text = buildLinkedInSummary(featuredDeals.length || deals.length, totals.totalSf)
     if (navigator.share) {
       await navigator.share({ title: 'Broker Track Record', text })
     } else {
       await navigator.clipboard?.writeText(text)
+      setImportMessage('Client-safe summary copied.')
     }
+  }
+
+  const copyLinkedInSummary = async () => {
+    await navigator.clipboard?.writeText(buildLinkedInSummary(featuredDeals.length || deals.length, totals.totalSf))
+    setImportMessage('LinkedIn-ready summary copied.')
   }
 
   return (
@@ -413,14 +439,29 @@ export default function TrackRecordPage() {
       <div className="mx-auto flex max-w-7xl flex-col gap-5">
         <div className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
-              <Trophy className="h-4 w-4" />
-              Tool C
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Broker Track Record</h1>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
-              Capture closed deals, track lease expiries, and keep a client-facing brag sheet ready.
-            </p>
+            {mode === 'presentation' ? (
+              <>
+                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                  <ShieldCheck className="h-4 w-4" />
+                  Client-safe portfolio
+                </p>
+                <h1 className="mt-2 text-4xl font-semibold tracking-tight text-slate-950">Representative Industrial Track Record</h1>
+                <p className="mt-2 max-w-3xl text-base leading-7 text-slate-600">
+                  A curated view of completed assignments, market coverage, and transaction experience for client conversations and public profile updates.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
+                  <Trophy className="h-4 w-4" />
+                  Private deal ledger
+                </p>
+                <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Broker Track Record</h1>
+                <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
+                  Capture closed deals, track lease expiries, and decide what is polished enough for a client-facing brag sheet.
+                </p>
+              </>
+            )}
           </div>
           <div className="flex flex-wrap gap-2 print:hidden">
             <input ref={csvInputRef} type="file" accept=".csv,text/csv,.xlsx,.xls" className="hidden" onChange={(e) => importDealFile(e.target.files?.[0])} />
@@ -433,8 +474,8 @@ export default function TrackRecordPage() {
               <TooltipContent>Import CSV</TooltipContent>
             </Tooltip>
             <ToggleGroup type="single" value={mode} onValueChange={(value) => value && setMode(value as 'manage' | 'presentation')}>
-              <ToggleGroupItem value="manage" className="h-9 px-3 text-xs">Manage</ToggleGroupItem>
-              <ToggleGroupItem value="presentation" className="h-9 px-3 text-xs">Presentation</ToggleGroupItem>
+              <ToggleGroupItem value="manage" className="h-9 px-3 text-xs">Private Ledger</ToggleGroupItem>
+              <ToggleGroupItem value="presentation" className="h-9 px-3 text-xs">Client Sheet</ToggleGroupItem>
             </ToggleGroup>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -456,19 +497,19 @@ export default function TrackRecordPage() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-500">Total SF</CardTitle></CardHeader>
+          <Card className={mode === 'presentation' ? 'border-emerald-200 bg-white' : ''}>
+            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-500">{mode === 'presentation' ? 'SF Represented' : 'Total SF'}</CardTitle></CardHeader>
             <CardContent className="text-3xl font-semibold text-slate-950">{formatNumber(totals.totalSf)}</CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-500">Lease Deals</CardTitle></CardHeader>
-            <CardContent className="text-3xl font-semibold text-slate-950">{totals.leaseCount}</CardContent>
+          <Card className={mode === 'presentation' ? 'border-emerald-200 bg-white' : ''}>
+            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-500">{mode === 'presentation' ? 'Representative Deals' : 'Lease Deals'}</CardTitle></CardHeader>
+            <CardContent className="text-3xl font-semibold text-slate-950">{mode === 'presentation' ? featuredDeals.length : totals.leaseCount}</CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-500">Expiry Watch</CardTitle></CardHeader>
+          <Card className={mode === 'presentation' ? 'border-emerald-200 bg-white' : ''}>
+            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-500">{mode === 'presentation' ? 'Markets Covered' : 'Expiry Watch'}</CardTitle></CardHeader>
             <CardContent className="flex items-center gap-2 text-3xl font-semibold text-slate-950">
-              {totals.expiries}
-              <CalendarClock className="h-5 w-5 text-amber-600" />
+              {mode === 'presentation' ? new Set(featuredDeals.map((deal) => deal.submarket).filter(Boolean)).size : totals.expiries}
+              {mode === 'presentation' ? <Building2 className="h-5 w-5 text-emerald-600" /> : <CalendarClock className="h-5 w-5 text-amber-600" />}
             </CardContent>
           </Card>
         </div>
@@ -653,16 +694,37 @@ export default function TrackRecordPage() {
 
         {mode === 'presentation' && (
           <section className="space-y-4">
-            <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm print:border-0 print:p-0 print:shadow-none">
-              <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div className="rounded-lg border border-emerald-200 bg-white p-6 shadow-sm print:border-0 print:p-0 print:shadow-none">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div>
                   <h2 className="text-2xl font-semibold text-slate-950">Selected Track Record</h2>
-                  <p className="text-sm text-slate-600">A concise client-facing view of representative deal experience.</p>
+                  <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+                    Featured deals only. Confidential details are hidden by default, so this is closer to what you would share with a client or adapt for LinkedIn.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2 text-xs font-medium text-slate-600">
+                    {!showClientNames && <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1"><EyeOff className="h-3.5 w-3.5" />Client names hidden</span>}
+                    {!showDealValues && <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1"><EyeOff className="h-3.5 w-3.5" />Deal values hidden</span>}
+                  </div>
                 </div>
-                <div className="text-sm font-semibold text-slate-700">{formatNumber(totals.totalSf)} SF represented</div>
+                <div className="flex flex-wrap gap-2 print:hidden">
+                  <Button variant="outline" size="sm" onClick={() => setShowClientNames((value) => !value)}>
+                    {showClientNames ? 'Hide Clients' : 'Show Clients'}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setShowDealValues((value) => !value)}>
+                    {showDealValues ? 'Hide Values' : 'Show Values'}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={copyLinkedInSummary}>
+                    <Linkedin className="mr-2 h-4 w-4" />
+                    LinkedIn Copy
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={copyLinkedInSummary}>
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy Summary
+                  </Button>
+                </div>
               </div>
             </div>
-            <DealGrid deals={filteredDeals.filter((deal) => deal.isFeatured)} presentation />
+            <DealGrid deals={featuredDeals} presentation showClientNames={showClientNames} showDealValues={showDealValues} />
           </section>
         )}
       </div>
@@ -675,31 +737,35 @@ function DealGrid({
   onEdit,
   onDelete,
   presentation = false,
+  showClientNames = true,
+  showDealValues = true,
 }: {
   deals: TrackDeal[]
   onEdit?: (deal: TrackDeal) => void
   onDelete?: (id: string) => void
   presentation?: boolean
+  showClientNames?: boolean
+  showDealValues?: boolean
 }) {
   if (deals.length === 0) {
     return <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">No track record deals yet.</div>
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div className={presentation ? 'grid gap-5 md:grid-cols-2 xl:grid-cols-3' : 'grid gap-4 md:grid-cols-2 xl:grid-cols-3'}>
       {deals.map((deal) => (
-        <Card key={deal.id} className="overflow-hidden">
+        <Card key={deal.id} className={presentation ? 'overflow-hidden border-emerald-100 bg-white shadow-sm' : 'overflow-hidden'}>
           {deal.imageUrls[0] ? (
-            <img src={deal.imageUrls[0]} alt="" className="h-44 w-full object-cover" />
+            <img src={deal.imageUrls[0]} alt="" className={presentation ? 'h-52 w-full object-cover' : 'h-44 w-full object-cover'} />
           ) : (
-            <div className="flex h-44 items-center justify-center bg-slate-200 text-slate-500">
+            <div className={presentation ? 'flex h-52 items-center justify-center bg-emerald-50 text-emerald-700' : 'flex h-44 items-center justify-center bg-slate-200 text-slate-500'}>
               <Building2 className="h-10 w-10" />
             </div>
           )}
           <CardHeader className="pb-3">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <CardTitle className="text-lg leading-tight">{deal.title}</CardTitle>
+                <CardTitle className={presentation ? 'text-xl leading-tight text-slate-950' : 'text-lg leading-tight'}>{deal.title}</CardTitle>
                 <p className="mt-1 text-sm text-slate-500">{deal.address}</p>
               </div>
               {!presentation && (
@@ -710,20 +776,21 @@ function DealGrid({
               )}
             </div>
             <div className="flex flex-wrap gap-2">
-              <Badge variant="secondary">{deal.dealType}</Badge>
+              <Badge variant="secondary">{dealTypeLabel(deal.dealType)}</Badge>
               <Badge variant="outline">{roleLabel(deal.role)}</Badge>
               <Badge variant="outline">{deal.assetType}</Badge>
               {deal.isFeatured && <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">Featured</Badge>}
             </div>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm text-slate-700">
+          <CardContent className="space-y-3 text-sm text-slate-700">
             <div className="grid grid-cols-2 gap-2">
               <div><span className="text-slate-500">Size</span><br />{formatNumber(deal.sizeSf)} SF</div>
               <div><span className="text-slate-500">Closed</span><br />{deal.closedDate || 'TBD'}</div>
             </div>
-            {deal.clientName && <div><span className="text-slate-500">Client</span><br />{deal.clientName}</div>}
-            {deal.value && <div><span className="text-slate-500">Value</span><br />{deal.value}</div>}
-            {(deal.leaseExpiryDate || deal.renewalNoticeDate) && (
+            {deal.clientName && showClientNames && <div><span className="text-slate-500">Client</span><br />{deal.clientName}</div>}
+            {deal.value && showDealValues && <div><span className="text-slate-500">Value</span><br />{deal.value}</div>}
+            {!showClientNames && presentation && <div className="rounded-md bg-slate-50 p-2 text-slate-500">Client confidential</div>}
+            {presentation ? null : (deal.leaseExpiryDate || deal.renewalNoticeDate) && (
               <div className={dateSoon(deal.leaseExpiryDate) || dateSoon(deal.renewalNoticeDate) ? 'rounded-md bg-amber-50 p-2 text-amber-900' : ''}>
                 Expiry: {deal.leaseExpiryDate || 'n/a'}{deal.renewalNoticeDate ? ` | Notice: ${deal.renewalNoticeDate}` : ''}
               </div>
