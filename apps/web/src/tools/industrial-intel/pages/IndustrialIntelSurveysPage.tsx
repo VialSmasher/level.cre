@@ -429,8 +429,8 @@ export default function IndustrialIntelSurveysPage() {
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <div className="space-y-6">
+      <section className="space-y-6">
+        <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
           <Card>
             <CardHeader>
               <CardTitle>Create survey</CardTitle>
@@ -489,7 +489,7 @@ export default function IndustrialIntelSurveysPage() {
             <CardHeader>
               <CardTitle>Survey list</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent>
               {surveysLoading ? (
                 <p className="text-sm text-slate-500">Loading surveys...</p>
               ) : surveys.length === 0 ? (
@@ -497,29 +497,31 @@ export default function IndustrialIntelSurveysPage() {
                   Create the first internal survey draft to start arranging listings.
                 </div>
               ) : (
-                surveys.map((survey) => (
-                  <button
-                    key={survey.id}
-                    type="button"
-                    onClick={() => setSelectedSurveyId(survey.id)}
-                    className={`w-full rounded-lg border p-3 text-left transition ${
-                      selectedSurveyId === survey.id
-                        ? "border-blue-300 bg-blue-50 shadow-sm"
-                        : "border-slate-200 bg-white hover:border-blue-200"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold text-slate-950">{survey.title}</p>
-                        <p className="mt-1 text-xs text-slate-500">{survey.clientName || "No client named"}</p>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {surveys.map((survey) => (
+                    <button
+                      key={survey.id}
+                      type="button"
+                      onClick={() => setSelectedSurveyId(survey.id)}
+                      className={`rounded-lg border p-3 text-left transition ${
+                        selectedSurveyId === survey.id
+                          ? "border-blue-300 bg-blue-50 shadow-sm"
+                          : "border-slate-200 bg-white hover:border-blue-200"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-slate-950">{survey.title}</p>
+                          <p className="mt-1 text-xs text-slate-500">{survey.clientName || "No client named"}</p>
+                        </div>
+                        <Badge variant="outline" className="bg-white">{survey.status}</Badge>
                       </div>
-                      <Badge variant="outline" className="bg-white">{survey.status}</Badge>
-                    </div>
-                    <p className="mt-3 text-xs font-medium text-slate-600">
-                      {survey.visibleItemCount} visible / {survey.itemCount} total
-                    </p>
-                  </button>
-                ))
+                      <p className="mt-3 text-xs font-medium text-slate-600">
+                        {survey.visibleItemCount} visible / {survey.itemCount} total
+                      </p>
+                    </button>
+                  ))}
+                </div>
               )}
             </CardContent>
           </Card>
@@ -587,7 +589,7 @@ export default function IndustrialIntelSurveysPage() {
               </Card>
 
               <section className="space-y-6">
-                <div ref={previewRef} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <div ref={previewRef} className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_360px]">
                   <Card className="overflow-hidden">
                     <CardHeader className="border-b border-slate-100 bg-white">
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -610,7 +612,7 @@ export default function IndustrialIntelSurveysPage() {
                       </div>
                     </CardHeader>
                     <CardContent className="p-0">
-                      <div className="h-[620px] bg-slate-100">
+                      <div className="h-[680px] bg-slate-100">
                         {!GOOGLE_MAPS_API_KEY ? (
                           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-slate-600">
                             {GOOGLE_MAPS_API_KEY_HELP_TEXT}
@@ -783,7 +785,7 @@ export default function IndustrialIntelSurveysPage() {
                   </Card>
                 </div>
 
-                <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+                <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
                   <Card>
                     <CardHeader>
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -808,7 +810,7 @@ export default function IndustrialIntelSurveysPage() {
                         onChange={(event) => setListingSearch(event.target.value)}
                         placeholder="Search inventory by title, address, submarket, source"
                       />
-                      <div className="grid gap-3 md:grid-cols-2">
+                      <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
                         {filteredListings.map((listing) => (
                           <div key={listing.id} className="rounded-lg border border-slate-200 bg-white p-3">
                             <div className="flex items-start justify-between gap-3">
