@@ -7,6 +7,7 @@ import {
   type IntelRequirementListItem,
   type IntelRequirementPreference,
   type IntelRequirementListingDecision,
+  type IntelPublicLinkCandidate,
   type IntelSurveyDetail,
   type IntelSurveyListItem,
   type UpsertIntelRequirementListingDecisionInput,
@@ -28,6 +29,7 @@ import {
   type ManualIntelListingUploadInput,
 } from "./manualIngest";
 import { previewManualIntelListing } from "./manualPreview";
+import { resolvePublicLinkCandidates } from "./publicLinkResolver";
 import { runIndustrialIntelSource } from "./sourceRegistry";
 
 export class IndustrialIntelService {
@@ -53,6 +55,37 @@ export class IndustrialIntelService {
 
   async archiveDuplicateListings(keepId: string, duplicateIds: string[]) {
     return industrialIntelRepository.archiveDuplicateListings(keepId, duplicateIds);
+  }
+
+  async getPublicLinkCandidates(listingId: string): Promise<IntelPublicLinkCandidate[]> {
+    return industrialIntelRepository.getPublicLinkCandidates(listingId);
+  }
+
+  async resolvePublicLinkCandidates(listingId: string) {
+    const listing = await industrialIntelRepository.getListingById(listingId);
+    if (!listing) return null;
+
+    const result = await resolvePublicLinkCandidates(listing);
+    if (result.status === "not_configured") {
+      return {
+        ...result,
+        persistedCandidates: await industrialIntelRepository.getPublicLinkCandidates(listingId),
+      };
+    }
+
+    const persistedCandidates = await industrialIntelRepository.upsertPublicLinkCandidates(listingId, result.candidates);
+    return {
+      ...result,
+      persistedCandidates,
+    };
+  }
+
+  async approvePublicLinkCandidate(listingId: string, candidateId: string): Promise<IntelPublicLinkCandidate | null> {
+    return industrialIntelRepository.updatePublicLinkCandidateStatus(listingId, candidateId, "approved");
+  }
+
+  async rejectPublicLinkCandidate(listingId: string, candidateId: string): Promise<IntelPublicLinkCandidate | null> {
+    return industrialIntelRepository.updatePublicLinkCandidateStatus(listingId, candidateId, "rejected");
   }
 
   async getRecentChanges(): Promise<IntelChangeListItem[]> {

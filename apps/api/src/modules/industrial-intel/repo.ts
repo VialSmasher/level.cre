@@ -75,6 +75,32 @@ export type IntelDuplicateGroup = {
   listings: IntelDuplicateListingItem[];
 };
 
+export type IntelPublicLinkStatus = "pending" | "approved" | "rejected";
+export type IntelPublicLinkSource = "resolver" | "manual";
+
+export type IntelPublicLinkCandidate = {
+  id: string;
+  listingId: string;
+  candidateUrl: string;
+  domain: string;
+  title: string | null;
+  snippet: string | null;
+  confidence: number;
+  status: IntelPublicLinkStatus;
+  source: IntelPublicLinkSource;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type UpsertIntelPublicLinkCandidateInput = {
+  candidateUrl: string;
+  domain: string;
+  title?: string | null;
+  snippet?: string | null;
+  confidence: number;
+  source?: IntelPublicLinkSource;
+};
+
 export type IntelChangeListItem = {
   id: string;
   listingId: string;
@@ -259,6 +285,10 @@ const SURVEY_TABLES = [
   "intel_survey_items",
 ] as const;
 
+const PUBLIC_LINK_TABLES = [
+  "intel_listing_public_link_candidates",
+] as const;
+
 function isoOrNull(value: unknown): string | null {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(String(value));
@@ -356,6 +386,53 @@ export class IndustrialIntelRepository {
 
     const found = new Set(result.rows.map((row: { table_name: string }) => row.table_name));
     return SURVEY_TABLES.every((name) => found.has(name));
+  }
+
+  async hasPublicLinkTables(): Promise<boolean> {
+    const result = await pool.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('intel_listing_public_link_candidates')
+    `);
+
+    const found = new Set(result.rows.map((row: { table_name: string }) => row.table_name));
+    return PUBLIC_LINK_TABLES.every((name) => found.has(name));
+  }
+
+  async ensurePublicLinkTables(): Promise<void> {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.intel_listing_public_link_candidates (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        listing_id varchar NOT NULL REFERENCES public.intel_listings(id) ON DELETE CASCADE,
+        candidate_url text NOT NULL,
+        domain varchar NOT NULL,
+        title text,
+        snippet text,
+        confidence integer NOT NULL DEFAULT 0,
+        status varchar NOT NULL DEFAULT 'pending',
+        source varchar NOT NULL DEFAULT 'resolver',
+        created_at timestamp DEFAULT now(),
+        updated_at timestamp DEFAULT now(),
+        CONSTRAINT chk_intel_public_link_candidate_status
+          CHECK (status IN ('pending', 'approved', 'rejected')),
+        CONSTRAINT chk_intel_public_link_candidate_source
+          CHECK (source IN ('resolver', 'manual'))
+      )
+    `);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_intel_public_link_candidate_url
+        ON public.intel_listing_public_link_candidates (listing_id, candidate_url)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_public_link_candidates_listing
+        ON public.intel_listing_public_link_candidates (listing_id)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_public_link_candidates_status
+        ON public.intel_listing_public_link_candidates (status)
+    `);
   }
 
   async ensureSurveyTables(): Promise<void> {
@@ -745,6 +822,267 @@ export class IndustrialIntelRepository {
       }
       throw error;
     }
+  }
+
+  async getListingById(id: string): Promise<IntelListingListItem | null> {
+    if (!(await this.hasCoreTables())) return null;
+
+    const result = await pool.query<{
+      id: string;
+      source_id: string;
+      source_name: string | null;
+      title: string;
+      address: string | null;
+      normalized_address: string | null;
+      market: string | null;
+      submarket: string | null;
+      status: string;
+      listing_type: string;
+      asset_type: string;
+      lat: string | null;
+      lng: string | null;
+      geocode_status: string | null;
+      geocode_confidence: string | null;
+      geocode_source: string | null;
+      data_quality_status: string | null;
+      available_sf: number | null;
+      land_acres: string | null;
+      total_price: string | null;
+      price_per_acre: string | null;
+      raw_payload: Record<string, unknown> | null;
+      brochure_url: string | null;
+      source_url: string | null;
+      last_seen_at: Date | null;
+      removed_at: Date | null;
+    }>(
+      `
+        SELECT
+          listings.id,
+          listings.source_id,
+          sources.name AS source_name,
+          listings.title,
+          listings.address,
+          COALESCE(listings.normalized_address, listings.address) AS normalized_address,
+          listings.market,
+          listings.submarket,
+          listings.status,
+          listings.listing_type,
+          listings.asset_type,
+          listings.lat,
+          listings.lng,
+          listings.geocode_status,
+          listings.geocode_confidence,
+          listings.geocode_source,
+          listings.data_quality_status,
+          listings.available_sf,
+          listings.land_acres,
+          listings.total_price,
+          listings.price_per_acre,
+          listings.raw_payload,
+          listings.brochure_url,
+          listings.source_url,
+          listings.last_seen_at,
+          listings.removed_at
+        FROM public.intel_listings listings
+        LEFT JOIN public.intel_sources sources ON sources.id = listings.source_id
+        WHERE listings.id = $1
+        LIMIT 1
+      `,
+      [id],
+    );
+
+    const row = result.rows[0];
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      sourceId: row.source_id,
+      sourceName: row.source_name,
+      title: row.title,
+      address: row.address,
+      normalizedAddress: row.normalized_address,
+      market: row.market,
+      submarket: row.submarket,
+      status: row.status,
+      listingType: row.listing_type,
+      assetType: row.asset_type,
+      latitude: numOrNull(row.lat),
+      longitude: numOrNull(row.lng),
+      geocodeStatus: row.geocode_status,
+      geocodeConfidence: numOrNull(row.geocode_confidence),
+      geocodeSource: row.geocode_source,
+      dataQualityStatus: row.data_quality_status,
+      availableSf: intOrNull(row.available_sf),
+      landAcres: numOrNull(row.land_acres),
+      totalPrice: numOrNull(row.total_price),
+      pricePerAcre: numOrNull(row.price_per_acre),
+      leaseRatePsf: numOrNull(row.raw_payload?.leaseRatePsf),
+      brochureUrl: row.brochure_url,
+      sourceUrl: row.source_url,
+      lastSeenAt: isoOrNull(row.last_seen_at),
+      removedAt: isoOrNull(row.removed_at),
+    };
+  }
+
+  async getPublicLinkCandidates(listingId: string): Promise<IntelPublicLinkCandidate[]> {
+    if (!(await this.hasCoreTables())) return [];
+    await this.ensurePublicLinkTables();
+
+    const result = await pool.query<{
+      id: string;
+      listing_id: string;
+      candidate_url: string;
+      domain: string;
+      title: string | null;
+      snippet: string | null;
+      confidence: number | string;
+      status: IntelPublicLinkStatus;
+      source: IntelPublicLinkSource;
+      created_at: Date | null;
+      updated_at: Date | null;
+    }>(
+      `
+        SELECT
+          id,
+          listing_id,
+          candidate_url,
+          domain,
+          title,
+          snippet,
+          confidence,
+          status,
+          source,
+          created_at,
+          updated_at
+        FROM public.intel_listing_public_link_candidates
+        WHERE listing_id = $1
+        ORDER BY
+          CASE status WHEN 'approved' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
+          confidence DESC,
+          updated_at DESC NULLS LAST
+      `,
+      [listingId],
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      listingId: row.listing_id,
+      candidateUrl: row.candidate_url,
+      domain: row.domain,
+      title: row.title,
+      snippet: row.snippet,
+      confidence: intOrZero(row.confidence),
+      status: row.status,
+      source: row.source,
+      createdAt: isoOrNull(row.created_at),
+      updatedAt: isoOrNull(row.updated_at),
+    }));
+  }
+
+  async upsertPublicLinkCandidates(
+    listingId: string,
+    candidates: UpsertIntelPublicLinkCandidateInput[],
+  ): Promise<IntelPublicLinkCandidate[]> {
+    if (!(await this.hasCoreTables())) return [];
+    await this.ensurePublicLinkTables();
+
+    for (const candidate of candidates) {
+      await pool.query(
+        `
+          INSERT INTO public.intel_listing_public_link_candidates (
+            listing_id,
+            candidate_url,
+            domain,
+            title,
+            snippet,
+            confidence,
+            source
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          ON CONFLICT (listing_id, candidate_url)
+          DO UPDATE SET
+            domain = EXCLUDED.domain,
+            title = EXCLUDED.title,
+            snippet = EXCLUDED.snippet,
+            confidence = GREATEST(public.intel_listing_public_link_candidates.confidence, EXCLUDED.confidence),
+            source = CASE
+              WHEN public.intel_listing_public_link_candidates.source = 'manual' THEN 'manual'
+              ELSE EXCLUDED.source
+            END,
+            updated_at = now()
+        `,
+        [
+          listingId,
+          candidate.candidateUrl,
+          candidate.domain,
+          candidate.title || null,
+          candidate.snippet || null,
+          Math.max(0, Math.min(100, Math.round(candidate.confidence))),
+          candidate.source || "resolver",
+        ],
+      );
+    }
+
+    return this.getPublicLinkCandidates(listingId);
+  }
+
+  async updatePublicLinkCandidateStatus(
+    listingId: string,
+    candidateId: string,
+    status: IntelPublicLinkStatus,
+  ): Promise<IntelPublicLinkCandidate | null> {
+    if (!(await this.hasCoreTables())) return null;
+    await this.ensurePublicLinkTables();
+
+    const result = await pool.query<{
+      id: string;
+      listing_id: string;
+      candidate_url: string;
+      domain: string;
+      title: string | null;
+      snippet: string | null;
+      confidence: number | string;
+      status: IntelPublicLinkStatus;
+      source: IntelPublicLinkSource;
+      created_at: Date | null;
+      updated_at: Date | null;
+    }>(
+      `
+        UPDATE public.intel_listing_public_link_candidates
+        SET status = $3, updated_at = now()
+        WHERE listing_id = $1 AND id = $2
+        RETURNING
+          id,
+          listing_id,
+          candidate_url,
+          domain,
+          title,
+          snippet,
+          confidence,
+          status,
+          source,
+          created_at,
+          updated_at
+      `,
+      [listingId, candidateId, status],
+    );
+
+    const row = result.rows[0];
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      listingId: row.listing_id,
+      candidateUrl: row.candidate_url,
+      domain: row.domain,
+      title: row.title,
+      snippet: row.snippet,
+      confidence: intOrZero(row.confidence),
+      status: row.status,
+      source: row.source,
+      createdAt: isoOrNull(row.created_at),
+      updatedAt: isoOrNull(row.updated_at),
+    };
   }
 
   async getListingDuplicates(limit = 50): Promise<IntelDuplicateGroup[]> {
