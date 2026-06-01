@@ -9,11 +9,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/primitives/Modal';
-import { Calendar, MapPin, Phone, Mail, Building2, Clock, Filter, Plus, MessageSquare, X, PhoneCall, Zap, CheckCircle, Undo2, Users } from 'lucide-react';
+import { ArrowRight, Calendar, MapPin, Phone, Mail, Building2, Clock, Filter, Plus, MessageSquare, X, PhoneCall, Zap, CheckCircle, Undo2, Users } from 'lucide-react';
 import { Prospect, ProspectStatusType, FollowUpTimeframeType, Submarket, ContactInteractionType, ContactInteractionRow } from '@level-cre/shared/schema';
 import { apiRequest } from '@/lib/queryClient';
 import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospectDisplay';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
+import { logBrokerActivity, type BrokerActivityOutcome } from '@/lib/brokerActions';
 
 const STATUS_COLORS: Record<ProspectStatusType, string> = {
   prospect: '#FBBF24',
@@ -76,6 +77,26 @@ function toNoonUtcIso(date: Date) {
 
 function addDaysIsoFromNow(days: number) {
   return toNoonUtcIso(addDays(new Date(), days));
+}
+
+function appendTranscript(existing: string, text: string) {
+  return existing ? `${existing.trimEnd()} ${text}` : text;
+}
+
+function latestInteractionDate(interactions: ContactInteractionRow[]) {
+  const timestamps = interactions
+    .map((interaction) => new Date(interaction.date || interaction.createdAt || '').getTime())
+    .filter((timestamp) => Number.isFinite(timestamp));
+  if (timestamps.length === 0) return null;
+  return new Date(Math.max(...timestamps));
+}
+
+function formatLastTouch(date: Date | null) {
+  if (!date) return 'No activity';
+  const days = daysBetweenCalendarDates(date, new Date());
+  if (days <= 0) return 'Touched today';
+  if (days === 1) return 'Last touch yesterday';
+  return `Last touch ${days}d ago`;
 }
 
 // Contact Interaction Modal Component
@@ -560,6 +581,254 @@ function SnoozeButtons({ prospect }: { prospect: Prospect }) {
   );
 }
 
+type SmartCallCandidate = {
+  prospect: Prospect;
+  score: number;
+  reasons: string[];
+  interactions: ContactInteractionRow[];
+  dueDate: Date | null;
+  dueStatus: 'overdue' | 'today' | 'soon' | 'future' | null;
+  latestTouch: Date | null;
+};
+
+function SmartCallQueue({
+  candidates,
+  selectedSubmarketLabel,
+}: {
+  candidates: SmartCallCandidate[];
+  selectedSubmarketLabel: string | null;
+}) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [outcome, setOutcome] = useState<BrokerActivityOutcome>('contacted');
+  const [nextStep, setNextStep] = useState<NextStepKey>('1w');
+  const [customDate, setCustomDate] = useState('');
+  const [notes, setNotes] = useState('');
+  const [lastSaved, setLastSaved] = useState('');
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    setActiveIndex((index) => Math.min(index, Math.max(candidates.length - 1, 0)));
+  }, [candidates.length]);
+
+  const active = candidates[activeIndex] ?? null;
+  const prospect = active?.prospect ?? null;
+
+  const callMutation = useMutation({
+    mutationFn: async () => {
+      if (!prospect) return null;
+      const nextFollowUpIso = nextStepToIso(nextStep, customDate);
+      const result = await logBrokerActivity({
+        prospect,
+        type: 'call',
+        outcome,
+        notes: notes.trim() || `Smart queue call: ${QUICK_OUTCOMES.find(item => item.value === outcome)?.label ?? outcome}`,
+        nextFollowUp: nextFollowUpIso,
+      });
+      return { ...result, nextFollowUpIso };
+    },
+    onSuccess: async () => {
+      if (!prospect) return;
+      setLastSaved(`${getProspectDisplayName(prospect)} logged`);
+      setNotes('');
+      setOutcome('contacted');
+      setNextStep('1w');
+      setCustomDate('');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['/api/prospects'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/interactions'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/skills'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/skill-activities'] }),
+        queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] }),
+      ]);
+      setActiveIndex((index) => Math.min(index + 1, Math.max(candidates.length - 1, 0)));
+      window.setTimeout(() => setLastSaved(''), 2800);
+    },
+  });
+
+  const skip = () => {
+    setNotes('');
+    setActiveIndex((index) => Math.min(index + 1, Math.max(candidates.length - 1, 0)));
+  };
+
+  const previous = () => {
+    setActiveIndex((index) => Math.max(index - 1, 0));
+  };
+
+  if (!active || !prospect) {
+    return (
+      <section className="mb-5 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <PhoneCall className="h-4 w-4 text-blue-600" />
+          Smart Call Queue
+        </div>
+        <p className="mt-2 text-sm text-slate-500">No callable prospects match the current filters.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mb-5 rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="grid gap-0 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="p-5">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <Badge variant="outline" className="mb-2 gap-2 rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
+                <PhoneCall className="h-3.5 w-3.5" />
+                Smart Call Queue
+              </Badge>
+              <h2 className="text-xl font-bold text-slate-950">{getProspectDisplayName(prospect)}</h2>
+              {getProspectSecondaryName(prospect) && (
+                <p className="mt-1 text-sm text-slate-500">{getProspectSecondaryName(prospect)}</p>
+              )}
+            </div>
+            <div className="text-sm font-medium text-slate-500">
+              {activeIndex + 1} / {candidates.length}
+              {selectedSubmarketLabel ? ` in ${selectedSubmarketLabel}` : ''}
+            </div>
+          </div>
+
+          <div className="mb-4 flex flex-wrap gap-2">
+            {active.reasons.map((reason) => (
+              <Badge key={reason} variant="outline" className="bg-slate-50 text-slate-700">{reason}</Badge>
+            ))}
+            <Badge variant="outline" className="bg-white text-slate-600">{active.interactions.length} touches</Badge>
+            <Badge variant="outline" className="bg-white text-slate-600">{formatLastTouch(active.latestTouch)}</Badge>
+          </div>
+
+          <div className="mb-4 grid gap-3 text-sm sm:grid-cols-2">
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs font-semibold uppercase text-slate-500">Contact</div>
+              <div className="mt-1 font-medium text-slate-900">{prospect.contactName || prospect.contactCompany || 'Missing contact'}</div>
+              <div className="mt-2 flex flex-wrap gap-3">
+                {prospect.contactPhone ? (
+                  <a className="inline-flex items-center gap-1 text-blue-600 hover:underline" href={`tel:${prospect.contactPhone}`}>
+                    <Phone className="h-3.5 w-3.5" />
+                    {prospect.contactPhone}
+                  </a>
+                ) : <span className="text-slate-500">No phone</span>}
+                {prospect.contactEmail ? (
+                  <a className="inline-flex items-center gap-1 text-blue-600 hover:underline" href={`mailto:${prospect.contactEmail}`}>
+                    <Mail className="h-3.5 w-3.5" />
+                    Email
+                  </a>
+                ) : <span className="text-slate-500">No email</span>}
+              </div>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs font-semibold uppercase text-slate-500">Asset</div>
+              <div className="mt-1 font-medium text-slate-900">{prospect.contactCompany || prospect.businessName || prospect.status.replace('_', ' ')}</div>
+              <div className="mt-2 text-slate-600">
+                {active.dueDate ? formatDueBadgeLabel(active.dueDate) : 'No scheduled follow-up'}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)]">
+            <div>
+              <Label className="text-xs font-medium text-slate-700">Outcome</Label>
+              <Select value={outcome} onValueChange={(value) => setOutcome(value as BrokerActivityOutcome)}>
+                <SelectTrigger className="mt-1 h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {QUICK_OUTCOMES.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <Label className="text-xs font-medium text-slate-700">Call note</Label>
+                <VoiceDictationButton
+                  className="h-8 w-8 p-0"
+                  disabled={callMutation.isPending}
+                  onTranscript={(text) => setNotes((prev) => appendTranscript(prev, text))}
+                />
+              </div>
+              <Textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                rows={3}
+                placeholder="Dictate or type the useful bit from the call..."
+                className="resize-none"
+              />
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap gap-1">
+              {NEXT_STEPS.map((item) => (
+                <Button
+                  key={item.value}
+                  type="button"
+                  size="sm"
+                  variant={nextStep === item.value ? 'default' : 'outline'}
+                  className="h-8 px-2 text-xs"
+                  onClick={() => setNextStep(item.value)}
+                >
+                  {item.label}
+                </Button>
+              ))}
+              {nextStep === 'custom' && (
+                <Input
+                  type="date"
+                  value={customDate}
+                  onChange={(event) => setCustomDate(event.target.value)}
+                  className="h-8 w-[150px] text-xs"
+                />
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={previous} disabled={activeIndex === 0 || callMutation.isPending}>
+                Previous
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={skip} disabled={activeIndex >= candidates.length - 1 || callMutation.isPending}>
+                Skip
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={callMutation.isPending || (nextStep === 'custom' && !customDate)}
+                onClick={() => callMutation.mutate()}
+              >
+                {callMutation.isPending ? 'Saving...' : 'Log call + next'}
+              </Button>
+            </div>
+          </div>
+          {lastSaved && (
+            <div className="mt-3 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs font-medium text-green-800">
+              <CheckCircle className="mr-1 inline h-3.5 w-3.5" />
+              {lastSaved}
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-slate-200 bg-slate-50 p-3 lg:border-l lg:border-t-0">
+          <div className="mb-2 px-1 text-xs font-semibold uppercase text-slate-500">Next up</div>
+          <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
+            {candidates.slice(0, 8).map((candidate, index) => (
+              <button
+                key={candidate.prospect.id}
+                type="button"
+                onClick={() => setActiveIndex(index)}
+                className={`w-full rounded-md border p-3 text-left transition-colors ${index === activeIndex ? 'border-blue-300 bg-white shadow-sm' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-semibold text-slate-950">{getProspectDisplayName(candidate.prospect)}</span>
+                  <span className="shrink-0 text-xs font-medium text-blue-600">{candidate.score}</span>
+                </div>
+                <div className="mt-1 truncate text-xs text-slate-500">{candidate.reasons.slice(0, 2).join(' • ')}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function FollowUpPage() {
   const [selectedSubmarket, setSelectedSubmarket] = useState<string>('all');
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
@@ -710,6 +979,98 @@ export default function FollowUpPage() {
     if (selectedSubmarket === 'none') return 'no submarket';
     return resolveSubmarketName(selectedSubmarket) ?? selectedSubmarket;
   })();
+
+  const smartCallCandidates = useMemo<SmartCallCandidate[]>(() => {
+    const submarketScopedProspects = safeProspects.filter((prospect) => {
+      if (prospect.status === 'no_go') return false;
+      if (selectedSubmarket === 'all') return true;
+      const prospectSubmarketId = prospect.submarketId ? String(prospect.submarketId) : null;
+      if (selectedSubmarket === 'none') return prospectSubmarketId === null;
+      if (!prospectSubmarketId) return false;
+
+      const normalizedProspect = normalizeSubmarketValue(prospectSubmarketId);
+      const normalizedSelectedId = normalizeSubmarketValue(selectedSubmarket);
+      const resolvedSelectedName = resolveSubmarketName(selectedSubmarket);
+      const normalizedSelectedName = resolvedSelectedName ? normalizeSubmarketValue(resolvedSelectedName) : null;
+
+      return normalizedProspect === normalizedSelectedId || Boolean(normalizedSelectedName && normalizedProspect === normalizedSelectedName);
+    });
+
+    return submarketScopedProspects
+      .map((prospect) => {
+        const interactions = interactionsByProspectId.get(prospect.id) ?? [];
+        const dueDate = getDueDate(prospect);
+        const dueStatus = getDueStatus(prospect);
+        const latestTouch = latestInteractionDate(interactions);
+        const reasons: string[] = [];
+        let score = 0;
+
+        if (dueStatus === 'overdue') {
+          score += 80;
+          reasons.push('Overdue');
+        } else if (dueStatus === 'today') {
+          score += 70;
+          reasons.push('Due today');
+        } else if (dueStatus === 'soon') {
+          score += 40;
+          reasons.push('Due soon');
+        } else if (!dueDate) {
+          score += 18;
+          reasons.push('No schedule');
+        }
+
+        if (interactions.length === 0) {
+          score += 35;
+          reasons.push('No activity');
+        } else if (latestTouch) {
+          const daysSinceTouch = daysBetweenCalendarDates(latestTouch, now);
+          if (daysSinceTouch >= 60) {
+            score += 28;
+            reasons.push('Stale');
+          } else if (daysSinceTouch >= 30) {
+            score += 16;
+            reasons.push('Aging');
+          }
+        }
+
+        if (!prospect.contactPhone) {
+          score += 8;
+          reasons.push('Needs phone');
+        }
+        if (!hasContact(prospect)) {
+          score += 12;
+          reasons.push('Missing contact');
+        }
+        if (prospect.status === 'listing') {
+          score += 20;
+          reasons.push('Listing');
+        } else if (prospect.status === 'contacted') {
+          score += 14;
+          reasons.push('Warm');
+        } else if (prospect.status === 'prospect') {
+          score += 10;
+          reasons.push('Prospect');
+        }
+
+        return {
+          prospect,
+          score,
+          reasons: reasons.length ? reasons : ['Review'],
+          interactions,
+          dueDate,
+          dueStatus,
+          latestTouch,
+        };
+      })
+      .filter((candidate) => candidate.score > 0)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const ad = a.dueDate?.getTime() ?? Number.POSITIVE_INFINITY;
+        const bd = b.dueDate?.getTime() ?? Number.POSITIVE_INFINITY;
+        if (ad !== bd) return ad - bd;
+        return getProspectDisplayName(a.prospect).localeCompare(getProspectDisplayName(b.prospect));
+      });
+  }, [safeProspects, selectedSubmarket, interactionsByProspectId, dueSoonDays, submarkets]);
 
   // Sort by due date (soonest first)
   const sortedProspects = [...filteredProspects].sort((a, b) => {
@@ -879,6 +1240,8 @@ export default function FollowUpPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-6">
+        <SmartCallQueue candidates={smartCallCandidates} selectedSubmarketLabel={selectedSubmarketLabel} />
+
         <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-5">
           {[
             { key: 'overdue' as const, label: 'Overdue', count: queueCounts.overdue, tone: 'red' },
