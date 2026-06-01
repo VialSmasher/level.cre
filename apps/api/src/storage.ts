@@ -62,7 +62,8 @@ export interface IStorage {
   updateProspect(
     id: string,
     userId: string,
-    prospect: ProspectUpdateInput
+    prospect: ProspectUpdateInput,
+    options?: { skipXp?: boolean }
   ): Promise<{ prospect: Prospect; newXpGained: number } | undefined>;
   deleteProspect(id: string, userId: string): Promise<boolean>;
   
@@ -887,7 +888,8 @@ export class DatabaseStorage implements IStorage {
   async updateProspect(
     id: string,
     userId: string,
-    updates: ProspectUpdateInput
+    updates: ProspectUpdateInput,
+    options: { skipXp?: boolean } = {}
   ): Promise<{ prospect: Prospect; newXpGained: number } | undefined> {
     // Common SET payload for both owner and shared edits
     const setPayload: any = {
@@ -1016,6 +1018,10 @@ export class DatabaseStorage implements IStorage {
     };
 
     let newXpGained = 0;
+    if (options.skipXp) {
+      return { prospect, newXpGained };
+    }
+
     const activityWrites: Array<Promise<SkillActivityRow>> = [];
     const hasStatusUpdate = updates.status !== undefined;
     const hasFollowUpUpdate = updates.followUpTimeframe !== undefined || updates.followUpDueDate !== undefined;

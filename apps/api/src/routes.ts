@@ -2591,6 +2591,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post('/api/broker-actions/log-activity', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
+
+      const BrokerActionSchema = z.object({
+        prospectId: z.string().min(1),
+        listingId: z.string().min(1).nullable().optional(),
+        date: z.string().optional(),
+        type: z.enum(['call', 'email', 'meeting', 'note']),
+        outcome: z.enum(['contacted', 'no_answer', 'left_message', 'scheduled_meeting', 'not_interested', 'follow_up_later']).default('contacted'),
+        notes: z.string().optional().default(''),
+        nextFollowUp: z.string().nullable().optional(),
+      });
+
+      const parsed = BrokerActionSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid broker action data', error: parsed.error.errors });
+      }
+
+      const action = parsed.data;
+      if (action.listingId) {
+        await requireEditAccess(req, action.listingId);
+      } else if (isDemo(req)) {
+        const existing = await demo.getProspectAny(action.prospectId);
+        if (!existing) {
+          return res.status(404).json({ message: 'Prospect not found' });
+        }
+      } else {
+        const existing = await storage.getProspect(action.prospectId, userId);
+        if (!existing) {
+          return res.status(404).json({ message: 'Prospect not found' });
+        }
+      }
+
+      const interactionData = {
+        userId,
+        prospectId: action.prospectId,
+        listingId: action.listingId || null,
+        date: action.date || new Date().toISOString(),
+        type: action.type,
+        outcome: action.outcome,
+        notes: action.notes || '',
+        nextFollowUp: action.nextFollowUp || null,
+      };
+
+      if (isDemo(req)) {
+        const created = { id: randomUUID(), ...interactionData, createdAt: new Date().toISOString() };
+        await demo.addInteraction(userId, created);
+        const prospectPatch: Record<string, any> = {
+          lastContactDate: interactionData.date,
+        };
+        if (action.nextFollowUp !== undefined) {
+          prospectPatch.followUpDueDate = action.nextFollowUp;
+        }
+        if (action.type !== 'note') {
+          const existing = await demo.getProspectAny(action.prospectId);
+          if (existing?.status === 'prospect') {
+            prospectPatch.status = 'contacted';
+          }
+        }
+        const updated = await demo.updateProspect(userId, action.prospectId, prospectPatch);
+        return res.json({
+          interaction: created,
+          prospect: updated,
+          newXpGained: xpForInteractionType(action.type),
+        });
+      }
+
+      const interaction = await storage.createContactInteraction(interactionData);
+      const prospectPatch: Record<string, any> = {
+        lastContactDate: interactionData.date,
+      };
+      if (action.nextFollowUp !== undefined) {
+        prospectPatch.followUpDueDate = action.nextFollowUp;
+      }
+      if (action.type !== 'note') {
+        const existing = await storage.getProspect(action.prospectId, userId);
+        if (existing?.status === 'prospect') {
+          prospectPatch.status = 'contacted';
+        }
+      }
+
+      const updateResult = await storage.updateProspect(action.prospectId, userId, prospectPatch, { skipXp: true });
+      res.json({
+        interaction,
+        prospect: updateResult?.prospect,
+        newXpGained: xpForInteractionType(action.type),
+      });
+    } catch (error) {
+      console.error('Error logging broker action:', error);
+      res.status(500).json({ message: 'Failed to log broker action' });
+    }
+  });
+
   app.get('/api/tool-a/review/followups', requireAuth, async (req, res) => {
     try {
       const listingId = typeof req.query.listingId === 'string' ? req.query.listingId : undefined;

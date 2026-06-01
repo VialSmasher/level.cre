@@ -38,6 +38,7 @@ import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 import { getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
 import { getProspectDisplayName } from '@/lib/prospectDisplay';
 import { quickLogSpecFor, type QuickLogType } from '@/lib/gamificationUi';
+import { logBrokerActivity } from '@/lib/brokerActions';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { queryClient, apiRequest } from '@/lib/queryClient';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -1711,13 +1712,14 @@ export default function HomePage() {
     if (!selectedProspect || quickLogPendingType) return;
 
     const spec = quickLogSpecFor(type);
-    const baseNote = spec.note;
-    const mergedNote = selectedProspect.notes?.trim()
-      ? `${selectedProspect.notes.trim()}\n${baseNote}`
-      : baseNote;
     const due = addDaysIsoFromNow(spec.followUpDays);
     const expectedXp = spec.xp;
-    const optimistic = { ...selectedProspect, notes: mergedNote, followUpDueDate: due, lastContactDate: new Date().toISOString() } as Prospect;
+    const optimistic = {
+      ...selectedProspect,
+      followUpDueDate: due,
+      lastContactDate: new Date().toISOString(),
+      status: selectedProspect.status === 'prospect' ? 'contacted' : selectedProspect.status,
+    } as Prospect;
 
     setQuickLogPendingType(type);
 
@@ -1732,16 +1734,20 @@ export default function HomePage() {
     triggerXpFeedback(expectedXp, spec.toastLabel);
 
     try {
-      const response = await apiRequest('PATCH', `/api/prospects/${selectedProspect.id}`, {
-        notes: mergedNote,
-        followUpDueDate: due,
-        lastContactDate: new Date().toISOString(),
+      const result = await logBrokerActivity({
+        prospect: selectedProspect,
+        type,
+        notes: spec.note,
+        nextFollowUp: due,
       });
-      const payload = await response.json();
-      const { prospect: saved, newXpGained } = parseProspectPatchResponse(payload);
+      const saved = result.prospect || optimistic;
+      const newXpGained = Number(result.newXpGained || 0);
       setProspects(prev => prev.map(p => p.id === saved.id ? saved : p));
       setSelectedProspect(saved);
       upsertProspectInCache(saved);
+      queryClient.invalidateQueries({ queryKey: ['/api/interactions'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/skill-activities'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] });
 
       const delta = newXpGained - expectedXp;
       if (delta !== 0) {
