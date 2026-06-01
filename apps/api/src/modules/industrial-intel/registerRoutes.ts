@@ -1,6 +1,7 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import { z } from "zod";
 import { getUserId, requireAuth } from "../../auth";
+import { ensureUser } from "../../ensureUser";
 import { industrialIntelService } from "./service";
 
 const intelRequirementSchema = z.object({
@@ -101,6 +102,11 @@ const intelSurveyItemSchema = z.object({
 });
 
 const intelSurveyItemUpdateSchema = intelSurveyItemSchema.omit({ listingId: true }).partial();
+
+async function ensureIntelActor(req: Request) {
+  if (req.headers["x-demo-mode"] === "true") return;
+  await ensureUser(getUserId(req), (req as any)?.user?.email || null);
+}
 
 export function registerIndustrialIntelRoutes(app: Express): void {
   app.get("/api/intel/summary", requireAuth, async (_req, res) => {
@@ -249,6 +255,7 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid industrial intel survey", issues: parsed.error.flatten() });
       }
+      await ensureIntelActor(req);
       const survey = await industrialIntelService.createSurvey(getUserId(req), parsed.data);
       res.status(201).json(survey);
     } catch (error: any) {
@@ -280,6 +287,7 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid industrial intel survey update", issues: parsed.error.flatten() });
       }
+      await ensureIntelActor(req);
       const survey = await industrialIntelService.updateSurvey(getUserId(req), req.params.id, parsed.data);
       if (!survey) {
         return res.status(404).json({ message: "Industrial intel survey not found" });
@@ -301,6 +309,7 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid industrial intel survey item", issues: parsed.error.flatten() });
       }
+      await ensureIntelActor(req);
       const survey = await industrialIntelService.addSurveyItem(getUserId(req), req.params.id, parsed.data);
       if (!survey) {
         return res.status(404).json({ message: "Industrial intel survey not found" });
@@ -322,6 +331,7 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       if (!parsed.success) {
         return res.status(400).json({ message: "Invalid industrial intel survey item update", issues: parsed.error.flatten() });
       }
+      await ensureIntelActor(req);
       const survey = await industrialIntelService.updateSurveyItem(getUserId(req), req.params.id, req.params.itemId, parsed.data);
       if (!survey) {
         return res.status(404).json({ message: "Industrial intel survey item not found" });
@@ -335,6 +345,7 @@ export function registerIndustrialIntelRoutes(app: Express): void {
 
   app.delete("/api/intel/surveys/:id/items/:itemId", requireAuth, async (req, res) => {
     try {
+      await ensureIntelActor(req);
       const survey = await industrialIntelService.deleteSurveyItem(getUserId(req), req.params.id, req.params.itemId);
       if (!survey) {
         return res.status(404).json({ message: "Industrial intel survey item not found" });
