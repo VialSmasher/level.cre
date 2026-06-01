@@ -276,6 +276,20 @@ function isImportableDealFile(file: File) {
   return name.endsWith('.csv') || name.endsWith('.xlsx') || name.endsWith('.xls')
 }
 
+function readImageDataUrls(files: FileList | File[], limit = 4): Promise<string[]> {
+  return Promise.all(
+    Array.from(files)
+      .filter((file) => file.type.startsWith('image/'))
+      .slice(0, limit)
+      .map((file) => new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })),
+  )
+}
+
 function normalizeStoredDeal(deal: TrackDeal): TrackDeal {
   const looksLikeImportedSale =
     deal.sourceId?.startsWith('trade-') &&
@@ -373,14 +387,28 @@ export default function TrackRecordPage() {
 
   const addImages = async (files: FileList | null) => {
     if (!files?.length) return
-    const readers = Array.from(files).slice(0, 4).map((file) => new Promise<string>((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result))
-      reader.onerror = reject
-      reader.readAsDataURL(file)
-    }))
-    const urls = await Promise.all(readers)
+    const urls = await readImageDataUrls(files)
     setForm((current) => ({ ...current, imageUrls: [...current.imageUrls, ...urls].slice(0, 8) }))
+  }
+
+  const addImagesToDeal = async (dealId: string, files: FileList | null) => {
+    if (!files?.length) return
+    const urls = await readImageDataUrls(files)
+    if (!urls.length) return
+    setDeals((current) => current.map((deal) => (
+      deal.id === dealId
+        ? { ...deal, imageUrls: [...deal.imageUrls, ...urls].slice(0, 8), updatedAt: new Date().toISOString() }
+        : deal
+    )))
+    setImportMessage(`Added ${urls.length} photo${urls.length === 1 ? '' : 's'} to the deal.`)
+  }
+
+  const removeDealImage = (dealId: string, imageIndex: number) => {
+    setDeals((current) => current.map((deal) => (
+      deal.id === dealId
+        ? { ...deal, imageUrls: deal.imageUrls.filter((_, index) => index !== imageIndex), updatedAt: new Date().toISOString() }
+        : deal
+    )))
   }
 
   const importDealFile = async (file: File | undefined) => {
@@ -737,7 +765,7 @@ export default function TrackRecordPage() {
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input className="pl-9" placeholder="Search track record" value={query} onChange={(e) => setQuery(e.target.value)} />
               </div>
-              <DealGrid deals={filteredDeals} onEdit={edit} onDelete={remove} />
+              <DealGrid deals={filteredDeals} onEdit={edit} onDelete={remove} onAddImages={addImagesToDeal} onRemoveImage={removeDealImage} />
             </div>
           </section>
         )}
@@ -786,6 +814,8 @@ function DealGrid({
   deals,
   onEdit,
   onDelete,
+  onAddImages,
+  onRemoveImage,
   presentation = false,
   showClientNames = true,
   showDealValues = true,
@@ -793,6 +823,8 @@ function DealGrid({
   deals: TrackDeal[]
   onEdit?: (deal: TrackDeal) => void
   onDelete?: (id: string) => void
+  onAddImages?: (id: string, files: FileList | null) => void
+  onRemoveImage?: (id: string, imageIndex: number) => void
   presentation?: boolean
   showClientNames?: boolean
   showDealValues?: boolean
@@ -803,14 +835,52 @@ function DealGrid({
 
   return (
     <div className={presentation ? 'grid gap-5 md:grid-cols-2 xl:grid-cols-3' : 'grid gap-4 md:grid-cols-2 xl:grid-cols-3'}>
-      {deals.map((deal) => (
-        <Card key={deal.id} className={presentation ? 'overflow-hidden border-emerald-100 bg-white shadow-sm' : 'overflow-hidden'}>
+      {deals.map((deal) => {
+        const imageInputId = `deal-images-${deal.id}`
+
+        return (
+        <Card
+          key={deal.id}
+          className={presentation ? 'overflow-hidden border-emerald-100 bg-white shadow-sm' : 'overflow-hidden transition-colors hover:border-emerald-200'}
+          onDragOver={(event) => {
+            if (presentation || !onAddImages) return
+            event.preventDefault()
+            event.stopPropagation()
+            event.dataTransfer.dropEffect = 'copy'
+          }}
+          onDrop={(event) => {
+            if (presentation || !onAddImages) return
+            event.preventDefault()
+            event.stopPropagation()
+            onAddImages(deal.id, event.dataTransfer.files)
+          }}
+        >
           {deal.imageUrls[0] ? (
-            <img src={deal.imageUrls[0]} alt="" className={presentation ? 'h-52 w-full object-cover' : 'h-44 w-full object-cover'} />
-          ) : (
-            <div className={presentation ? 'flex h-52 items-center justify-center bg-emerald-50 text-emerald-700' : 'flex h-44 items-center justify-center bg-slate-200 text-slate-500'}>
-              <Building2 className="h-10 w-10" />
+            <div className="relative">
+              <img src={deal.imageUrls[0]} alt="" className={presentation ? 'h-52 w-full object-cover' : 'h-44 w-full object-cover'} />
+              {!presentation && onAddImages && (
+                <label htmlFor={imageInputId} className="absolute bottom-3 right-3 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-white/70 bg-white/95 text-slate-700 shadow-sm hover:bg-emerald-50" aria-label="Add deal photos">
+                  <ImagePlus className="h-4 w-4" />
+                </label>
+              )}
             </div>
+          ) : (
+            <div className={presentation ? 'flex h-52 items-center justify-center bg-emerald-50 text-emerald-700' : 'flex h-44 flex-col items-center justify-center gap-2 border-b border-dashed border-slate-300 bg-slate-50 text-slate-500'}>
+              {presentation ? (
+                <Building2 className="h-10 w-10" />
+              ) : (
+                <>
+                  <ImagePlus className="h-8 w-8" />
+                  <label htmlFor={imageInputId} className="cursor-pointer text-sm font-medium text-slate-700 hover:text-emerald-700">Drop photos or click to add</label>
+                </>
+              )}
+            </div>
+          )}
+          {!presentation && onAddImages && (
+            <input id={imageInputId} type="file" accept="image/*" multiple className="hidden" onChange={(event) => {
+              onAddImages(deal.id, event.target.files)
+              event.currentTarget.value = ''
+            }} />
           )}
           <CardHeader className="pb-3">
             <div className="flex items-start justify-between gap-3">
@@ -833,6 +903,21 @@ function DealGrid({
             </div>
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-slate-700">
+            {!presentation && deal.imageUrls.length > 1 && (
+              <div className="grid grid-cols-5 gap-1.5">
+                {deal.imageUrls.slice(1).map((url, index) => (
+                  <button
+                    key={`${url}-${index}`}
+                    type="button"
+                    className="aspect-square overflow-hidden rounded border border-slate-200 hover:border-red-300"
+                    title="Remove photo"
+                    onClick={() => onRemoveImage?.(deal.id, index + 1)}
+                  >
+                    <img src={url} alt="" className="h-full w-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2">
               <div><span className="text-slate-500">Size</span><br />{formatNumber(deal.sizeSf)} SF</div>
               <div><span className="text-slate-500">Closed</span><br />{deal.closedDate || 'TBD'}</div>
@@ -848,7 +933,8 @@ function DealGrid({
             {deal.summary && <p className="leading-6 text-slate-600">{deal.summary}</p>}
           </CardContent>
         </Card>
-      ))}
+        )
+      })}
     </div>
   )
 }
