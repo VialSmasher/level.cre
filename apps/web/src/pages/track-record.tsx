@@ -240,6 +240,7 @@ export default function TrackRecordPage() {
   const [query, setQuery] = useState('')
   const [mode, setMode] = useState<'manage' | 'presentation'>('manage')
   const [importMessage, setImportMessage] = useState('')
+  const [isCsvDragging, setIsCsvDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const csvInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -335,6 +336,11 @@ export default function TrackRecordPage() {
     } finally {
       if (csvInputRef.current) csvInputRef.current.value = ''
     }
+  }
+
+  const importDroppedCsv = (files: FileList) => {
+    const file = Array.from(files).find((item) => item.name.toLowerCase().endsWith('.csv')) || files[0]
+    importCsv(file)
   }
 
   const share = async () => {
@@ -536,12 +542,37 @@ export default function TrackRecordPage() {
             </Card>
 
             <div className="space-y-4">
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
+              <div
+                className={`rounded-lg border border-dashed p-4 text-sm transition-colors ${
+                  isCsvDragging
+                    ? 'border-emerald-500 bg-emerald-100 text-emerald-950'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-950'
+                }`}
+                onDragEnter={(event) => {
+                  event.preventDefault()
+                  setIsCsvDragging(true)
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'copy'
+                  setIsCsvDragging(true)
+                }}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                    setIsCsvDragging(false)
+                  }
+                }}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  setIsCsvDragging(false)
+                  importDroppedCsv(event.dataTransfer.files)
+                }}
+              >
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>
                     <p className="font-semibold">Import a deal CSV</p>
                     <p className="mt-1 text-emerald-800">
-                      Supports exported reports with columns like Deal Name, Lot & Plan, City, Close Date, Selling Price, Square Feet, Acres, and Property Type.
+                      Drag and drop a CSV here, or choose an exported report with columns like Deal Name, Lot & Plan, City, Close Date, Selling Price, Square Feet, Acres, and Property Type.
                     </p>
                     {importMessage && <p className="mt-2 font-medium">{importMessage}</p>}
                   </div>
