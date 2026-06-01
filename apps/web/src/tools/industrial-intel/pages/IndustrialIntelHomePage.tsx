@@ -1,5 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { apiRequest } from "@/lib/queryClient";
 
 type IntelSummary = {
   activeListings: number;
@@ -59,7 +60,15 @@ function formatSourceKind(value: string) {
   return value.replace(/_/g, " ").toLowerCase();
 }
 
+function statusClassName(value: string) {
+  const normalized = value.toLowerCase();
+  if (normalized === "failed") return "bg-rose-100 text-rose-700";
+  if (normalized === "running") return "bg-blue-100 text-blue-700";
+  return "bg-emerald-100 text-emerald-700";
+}
+
 export default function IndustrialIntelHomePage() {
+  const queryClient = useQueryClient();
   const { data: summary, isLoading: summaryLoading } = useQuery<IntelSummary>({
     queryKey: ["/api/intel/summary"],
   });
@@ -72,6 +81,19 @@ export default function IndustrialIntelHomePage() {
   const { data: changes = [], isLoading: changesLoading } = useQuery<IntelChange[]>({
     queryKey: ["/api/intel/changes"],
   });
+  const runSourceMutation = useMutation({
+    mutationFn: async (slug: string) => {
+      const response = await apiRequest("POST", `/api/intel/sources/${slug}/run`, {});
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/summary"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/sources"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/runs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/changes"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/listings"] });
+    },
+  });
 
   const cards = [
     { label: "Active Listings", value: summary?.activeListings ?? 0 },
@@ -82,13 +104,29 @@ export default function IndustrialIntelHomePage() {
 
   return (
     <div className="space-y-6">
-      <section>
-        <h2 className="text-4xl font-semibold tracking-tight text-slate-950">Overview</h2>
-        <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          Track external inventory, monitor source runs, and review fresh listing changes without
-          touching the live Tool A workflow.
-        </p>
+      <section className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h2 className="text-4xl font-semibold tracking-tight text-slate-950">Overview</h2>
+          <p className="mt-2 max-w-3xl text-sm text-slate-600">
+            Track external inventory, monitor source runs, and review fresh listing changes without
+            touching the live Tool A workflow.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => runSourceMutation.mutate("cwedm")}
+          disabled={runSourceMutation.isPending}
+          className="w-fit rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {runSourceMutation.isPending ? "Refreshing..." : "Refresh CW EDM"}
+        </button>
       </section>
+
+      {runSourceMutation.isError && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          Source refresh failed. The failed run is logged so it can be reviewed.
+        </div>
+      )}
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => (
@@ -133,7 +171,7 @@ export default function IndustrialIntelHomePage() {
                           <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-700">
                             {run.triggerType}
                           </span>
-                          <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                          <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusClassName(run.status)}`}>
                             {formatRunStatus(run.status)}
                           </span>
                         </div>
@@ -141,9 +179,14 @@ export default function IndustrialIntelHomePage() {
                       <p className="text-xs text-slate-500">{formatDateTime(run.completedAt || run.startedAt)}</p>
                     </div>
                     <p className="mt-2 text-sm text-slate-600">
-                      Seen {run.recordsSeen} · New {run.recordsNew} · Updated {run.recordsUpdated} · Removed{" "}
+                      Seen {run.recordsSeen} - New {run.recordsNew} - Updated {run.recordsUpdated} - Removed{" "}
                       {run.recordsRemoved}
                     </p>
+                    {run.errorMessage && (
+                      <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                        {run.errorMessage}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -167,7 +210,7 @@ export default function IndustrialIntelHomePage() {
               <p className="text-sm text-slate-500">Loading sources...</p>
             ) : sources.length === 0 ? (
               <p className="text-sm text-slate-500">
-                No sources configured yet. Manual intake and automated feeds will appear here once they are active.
+                No sources configured yet. Use Refresh CW EDM to create the first source and run the first ingest.
               </p>
             ) : (
               <div className="space-y-3">
@@ -180,18 +223,34 @@ export default function IndustrialIntelHomePage() {
                       <div>
                         <p className="font-medium text-slate-900">{source.name}</p>
                         <p className="text-xs uppercase tracking-wide text-slate-500">
-                          {formatSourceKind(source.kind)} · {source.slug}
+                          {formatSourceKind(source.kind)} - {source.slug}
                         </p>
                       </div>
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                          source.isActive
-                            ? "bg-emerald-100 text-emerald-700"
-                            : "bg-slate-200 text-slate-600"
-                        }`}
-                      >
-                        {source.isActive ? "Active" : "Inactive"}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            source.isActive
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-slate-200 text-slate-600"
+                          }`}
+                        >
+                          {source.isActive ? "Active" : "Inactive"}
+                        </span>
+                        {source.slug === "cwedm" ? (
+                          <button
+                            type="button"
+                            onClick={() => runSourceMutation.mutate(source.slug)}
+                            disabled={runSourceMutation.isPending}
+                            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-blue-200 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            Run
+                          </button>
+                        ) : (
+                          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                            Adapter pending
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -224,7 +283,7 @@ export default function IndustrialIntelHomePage() {
                       <div>
                         <p className="font-medium text-slate-900">{change.listingTitle}</p>
                         <p className="text-xs uppercase tracking-wide text-slate-500">
-                          {change.sourceName || "Unknown source"} · {change.changeType}
+                          {change.sourceName || "Unknown source"} - {change.changeType}
                         </p>
                       </div>
                       <p className="text-xs text-slate-500">{formatDateTime(change.observedAt)}</p>

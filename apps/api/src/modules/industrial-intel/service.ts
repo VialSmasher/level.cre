@@ -14,6 +14,7 @@ import {
 } from "./repo";
 import { ingestManualIntelListing, type ManualIntelListingInput } from "./manualIngest";
 import { previewManualIntelListing } from "./manualPreview";
+import { runIndustrialIntelSource } from "./sourceRegistry";
 
 export class IndustrialIntelService {
   async getSummary(): Promise<IntelSummary> {
@@ -70,6 +71,13 @@ export class IndustrialIntelService {
 
   async previewManualListing(sourceUrl: string) {
     return previewManualIntelListing(sourceUrl);
+  }
+
+  async runSource(userId: string, sourceSlug: string) {
+    return runIndustrialIntelSource(sourceSlug, {
+      triggerType: "manual_ui",
+      initiatedByUserId: userId,
+    });
   }
 }
 

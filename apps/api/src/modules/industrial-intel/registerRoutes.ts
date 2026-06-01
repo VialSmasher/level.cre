@@ -108,6 +108,16 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     }
   });
 
+  app.post("/api/intel/sources/:slug/run", requireAuth, async (req, res) => {
+    try {
+      const result = await industrialIntelService.runSource(getUserId(req), req.params.slug);
+      res.status(202).json(result);
+    } catch (error) {
+      console.error("Error running industrial intel source:", error);
+      res.status(500).json({ message: "Failed to run industrial intel source" });
+    }
+  });
+
   app.post("/api/intel/manual-listings/preview", requireAuth, async (req, res) => {
     try {
       const parsed = intelManualListingPreviewSchema.safeParse(req.body);
