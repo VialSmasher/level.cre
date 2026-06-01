@@ -98,6 +98,17 @@ function formatListingSize(listing: IntelListing) {
   return listing.availableSf?.toLocaleString() || "-";
 }
 
+function formatMoney(value: number | null) {
+  if (!value) return null;
+  return new Intl.NumberFormat(undefined, { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(value);
+}
+
+function formatListingValue(listing: IntelListing) {
+  if (listing.totalPrice) return formatMoney(listing.totalPrice);
+  if (listing.pricePerAcre) return `${formatMoney(listing.pricePerAcre)} / ac`;
+  return null;
+}
+
 function normalizeHeader(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -339,6 +350,7 @@ export default function IndustrialIntelInventoryPage() {
   const queryClient = useQueryClient();
   const [showManualIntake, setShowManualIntake] = useState(false);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
+  const [queueFilter, setQueueFilter] = useState("all");
   const [filters, setFilters] = useState({
     query: "",
     submarket: "all",
@@ -519,6 +531,11 @@ export default function IndustrialIntelInventoryPage() {
       if (filters.submarket !== "all" && listingSubmarket !== filters.submarket) return false;
       if (filters.listingType !== "all" && listing.listingType !== filters.listingType) return false;
       if (filters.source !== "all" && (listing.sourceName || "") !== filters.source) return false;
+      if (queueFilter === "needs_geocode" && (isRemoved || isMappableListing(listing))) return false;
+      if (queueFilter === "needs_review" && (isRemoved || !hasListingQualityIssue(listing))) return false;
+      if (queueFilter === "mapped" && !isMappableListing(listing)) return false;
+      if (queueFilter === "sale" && listing.listingType !== "sale") return false;
+      if (queueFilter === "lease" && listing.listingType !== "lease") return false;
       if (minSf !== null && (listing.availableSf ?? 0) < minSf) return false;
       if (maxSf !== null && (listing.availableSf ?? Number.POSITIVE_INFINITY) > maxSf) return false;
       if (query) {
@@ -530,7 +547,7 @@ export default function IndustrialIntelInventoryPage() {
       }
       return true;
     });
-  }, [filters, listings]);
+  }, [filters, listings, queueFilter]);
 
   const mappableListings = useMemo(
     () => filteredListings.filter(isMappableListing),
@@ -555,6 +572,17 @@ export default function IndustrialIntelInventoryPage() {
     [listings],
   );
   const removedCount = useMemo(() => listings.filter((listing) => Boolean(listing.removedAt)).length, [listings]);
+  const queueOptions = useMemo(
+    () => [
+      { id: "all", label: "All", count: listings.length },
+      { id: "needs_geocode", label: "Needs geocode", count: needsGeocodeCount },
+      { id: "needs_review", label: "Needs review", count: needsReviewCount },
+      { id: "mapped", label: "Mapped", count: mappedCount },
+      { id: "sale", label: "Sale", count: listings.filter((listing) => listing.listingType === "sale" && !listing.removedAt).length },
+      { id: "lease", label: "Lease", count: listings.filter((listing) => listing.listingType === "lease" && !listing.removedAt).length },
+    ],
+    [listings, mappedCount, needsGeocodeCount, needsReviewCount],
+  );
 
   const mapCenter = useMemo(() => {
     if (selectedMappableListing) {
@@ -620,6 +648,22 @@ export default function IndustrialIntelInventoryPage() {
 
       <Card className="border-slate-200 bg-white shadow-sm">
         <CardContent className="space-y-4 p-4">
+          <div className="flex flex-wrap gap-2">
+            {queueOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setQueueFilter(option.id)}
+                className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${
+                  queueFilter === option.id
+                    ? "border-blue-300 bg-blue-50 text-blue-700"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:text-blue-700"
+                }`}
+              >
+                {option.label} <span className="ml-1 text-xs opacity-70">{option.count}</span>
+              </button>
+            ))}
+          </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <div className="space-y-2 xl:col-span-2">
               <Label htmlFor="searchListings">Search listings</Label>
@@ -714,7 +758,10 @@ export default function IndustrialIntelInventoryPage() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setFilters({ query: "", submarket: "all", listingType: "all", source: "all", status: "active", minSf: "", maxSf: "" })}
+                onClick={() => {
+                  setFilters({ query: "", submarket: "all", listingType: "all", source: "all", status: "active", minSf: "", maxSf: "" });
+                  setQueueFilter("all");
+                }}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
               >
                 Clear filters
@@ -922,164 +969,207 @@ export default function IndustrialIntelInventoryPage() {
         </Card>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.9fr)]">
-        {GOOGLE_MAPS_API_KEY ? (
-          <IndustrialIntelListingMap
-            filteredListings={filteredListings}
-            mappableListings={mappableListings}
-            selectedListing={selectedListing}
-            selectedMappableListing={selectedMappableListing}
-            mapCenter={mapCenter}
-            onSelectListing={setSelectedListingId}
-          />
-        ) : (
-          <MapUnavailableCard />
-        )}
-
-        <Card className="xl:order-1">
+      <div className="grid gap-6 xl:grid-cols-[minmax(360px,0.95fr)_minmax(420px,1.05fr)]">
+        <Card>
           <CardHeader>
-            <CardTitle>Listings</CardTitle>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <CardTitle>Inventory queue</CardTitle>
+                <p className="mt-1 text-sm text-slate-500">
+                  {filteredListings.length} of {listings.length} listings in this view.
+                </p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                {queueOptions.find((option) => option.id === queueFilter)?.label || "All"}
+              </span>
+            </div>
           </CardHeader>
           <CardContent>
-          {isLoading ? (
-            <p className="text-sm text-slate-500">Loading listings...</p>
-          ) : isError ? (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-6 py-10 text-center">
-              <p className="text-base font-medium text-rose-900">Listings failed to load</p>
-              <p className="mt-2 text-sm text-rose-700">{(error as Error)?.message || "The API returned an unexpected error."}</p>
-            </div>
-          ) : listings.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
-              <p className="text-base font-medium text-slate-900">No external inventory yet</p>
-              <p className="mt-2 text-sm text-slate-600">
-                Listings will appear here as source runs and manual intake save new records.
-              </p>
-            </div>
-          ) : filteredListings.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
-              <p className="text-base font-medium text-slate-900">No listings match the current filters</p>
-              <p className="mt-2 text-sm text-slate-600">
-                Clear or loosen the filters to bring more listings back into view.
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
-                <thead>
-                  <tr className="text-left text-slate-500">
-                    <th className="py-3 pr-4 font-medium">Listing</th>
-                    <th className="py-3 pr-4 font-medium">Source</th>
-                    <th className="py-3 pr-4 font-medium">Status</th>
-                    <th className="py-3 pr-4 font-medium">Type</th>
-                    <th className="py-3 pr-4 font-medium">Asset</th>
-                    <th className="py-3 pr-4 font-medium">Submarket</th>
-                    <th className="py-3 pr-4 font-medium">Size</th>
-                    <th className="py-3 pr-4 font-medium">Last Seen</th>
-                    <th className="py-3 pr-4 font-medium">Links</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredListings.map((listing) => (
-                    <tr
+            {isLoading ? (
+              <p className="text-sm text-slate-500">Loading listings...</p>
+            ) : isError ? (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-6 py-10 text-center">
+                <p className="text-base font-medium text-rose-900">Listings failed to load</p>
+                <p className="mt-2 text-sm text-rose-700">{(error as Error)?.message || "The API returned an unexpected error."}</p>
+              </div>
+            ) : listings.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
+                <p className="text-base font-medium text-slate-900">No external inventory yet</p>
+                <p className="mt-2 text-sm text-slate-600">
+                  Listings will appear here as source runs and manual intake save new records.
+                </p>
+              </div>
+            ) : filteredListings.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
+                <p className="text-base font-medium text-slate-900">No listings match the current filters</p>
+                <p className="mt-2 text-sm text-slate-600">
+                  Clear or loosen the filters to bring more listings back into view.
+                </p>
+              </div>
+            ) : (
+              <div className="max-h-[760px] space-y-3 overflow-y-auto pr-1">
+                {filteredListings.map((listing) => {
+                  const listingValue = formatListingValue(listing);
+                  const isSelected = selectedListing?.id === listing.id;
+                  return (
+                    <button
                       key={listing.id}
-                      className={`align-top ${selectedListing?.id === listing.id ? "bg-sky-50/80" : ""}`}
+                      type="button"
+                      onClick={() => setSelectedListingId(listing.id)}
+                      className={`w-full rounded-2xl border p-4 text-left transition ${
+                        isSelected
+                          ? "border-blue-300 bg-blue-50/70 shadow-sm"
+                          : "border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50"
+                      }`}
                     >
-                      <td className="max-w-[28rem] py-4 pr-4">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedListingId(listing.id)}
-                          className="w-full text-left"
-                        >
-                          <div className="space-y-1.5">
-                          <p className="line-clamp-2 font-medium text-slate-900">{listing.title}</p>
-                          <p className="text-slate-500">{listing.address || "Address still needs review"}</p>
-                          <div className="flex flex-wrap items-center gap-2">
-                            {isMappableListing(listing) ? (
-                              <span className="inline-flex rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-700">
-                                Mapped
-                              </span>
-                            ) : (
-                              <span className="inline-flex rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-700">
-                                Needs geocode
-                              </span>
-                            )}
-                            {hasListingQualityIssue(listing) && (
-                              <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
-                                Needs review
-                              </span>
-                            )}
-                          </div>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="line-clamp-2 font-semibold text-slate-950">{listing.title}</p>
+                          <p className="mt-1 line-clamp-2 text-sm text-slate-600">
+                            {listing.address || "Address still needs review"}
+                          </p>
                         </div>
-                        </button>
-                      </td>
-                      <td className="py-4 pr-4 text-slate-700">
-                        <div className="max-w-[11rem]">
-                          <p className="font-medium text-slate-900">{listing.sourceName || "Unknown source"}</p>
+                        <div className="shrink-0 text-right">
+                          <p className="text-sm font-semibold text-slate-950">{formatListingSize(listing)}</p>
+                          {listingValue && <p className="mt-1 text-xs text-slate-500">{listingValue}</p>}
                         </div>
-                      </td>
-                      <td className="py-4 pr-4">
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            listing.removedAt
-                              ? "bg-rose-100 text-rose-700"
-                              : "bg-emerald-100 text-emerald-700"
-                          }`}
-                        >
-                          {listing.removedAt ? "Removed" : formatStatus(listing.status)}
-                        </span>
-                      </td>
-                      <td className="py-4 pr-4">
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
                         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
                           {formatListingType(listing.listingType)}
                         </span>
-                      </td>
-                      <td className="py-4 pr-4">
                         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
                           {formatAssetType(listing.assetType)}
                         </span>
-                      </td>
-                      <td className="py-4 pr-4 text-slate-700">
-                        {listing.submarket || listing.market || "Unassigned"}
-                      </td>
-                      <td className="py-4 pr-4 text-slate-700">
-                        {formatListingSize(listing)}
-                      </td>
-                      <td className="py-4 pr-4 text-slate-700">{formatDateTime(listing.lastSeenAt)}</td>
-                      <td className="py-4 pr-4">
-                        <div className="flex flex-col gap-1">
-                          {listing.brochureUrl && (
-                            <a
-                              href={listing.brochureUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-sky-700 hover:text-sky-900"
-                            >
-                              Brochure
-                            </a>
-                          )}
-                          {listing.sourceUrl && (
-                            <a
-                              href={listing.sourceUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-sky-700 hover:text-sky-900"
-                            >
-                              Source
-                            </a>
-                          )}
-                          {!listing.brochureUrl && !listing.sourceUrl && (
-                            <span className="text-slate-400">-</span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                          {listing.submarket || listing.market || "Unassigned"}
+                        </span>
+                        {isMappableListing(listing) ? (
+                          <span className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-700">Mapped</span>
+                        ) : (
+                          <span className="rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-700">Needs geocode</span>
+                        )}
+                        {hasListingQualityIssue(listing) && (
+                          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">Needs review</span>
+                        )}
+                      </div>
+                      <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-500">
+                        <span className="line-clamp-1">{listing.sourceName || "Unknown source"}</span>
+                        <span>{formatDateTime(listing.lastSeenAt)}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
         </Card>
+
+        <div className="space-y-6">
+          {GOOGLE_MAPS_API_KEY ? (
+            <IndustrialIntelListingMap
+              filteredListings={filteredListings}
+              mappableListings={mappableListings}
+              selectedListing={selectedListing}
+              selectedMappableListing={selectedMappableListing}
+              mapCenter={mapCenter}
+              onSelectListing={setSelectedListingId}
+            />
+          ) : (
+            <MapUnavailableCard />
+          )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Selected listing</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {!selectedListing ? (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
+                  <p className="text-base font-medium text-slate-900">Pick a listing</p>
+                  <p className="mt-2 text-sm text-slate-600">Select a record from the queue to review details and links.</p>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <div>
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                        selectedListing.removedAt ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
+                      }`}>
+                        {selectedListing.removedAt ? "Removed" : formatStatus(selectedListing.status)}
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                        {formatListingType(selectedListing.listingType)}
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                        {formatAssetType(selectedListing.assetType)}
+                      </span>
+                    </div>
+                    <h3 className="text-2xl font-semibold leading-tight text-slate-950">{selectedListing.title}</h3>
+                    <p className="mt-2 text-sm text-slate-600">{selectedListing.address || "Address still needs review"}</p>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {[
+                      { label: "Size", value: formatListingSize(selectedListing) },
+                      { label: "Price", value: formatListingValue(selectedListing) || "-" },
+                      { label: "Submarket", value: selectedListing.submarket || selectedListing.market || "Unassigned" },
+                      { label: "Source", value: selectedListing.sourceName || "Unknown" },
+                      { label: "Geocode", value: selectedListing.geocodeStatus || (isMappableListing(selectedListing) ? "success" : "pending") },
+                      { label: "Last seen", value: formatDateTime(selectedListing.lastSeenAt) },
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{item.label}</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-950">{item.value}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="rounded-2xl border border-slate-200 p-4">
+                    <p className="text-sm font-semibold text-slate-950">Review notes</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {!isMappableListing(selectedListing) && (
+                        <span className="rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-700">Needs coordinates</span>
+                      )}
+                      {hasListingQualityIssue(selectedListing) && (
+                        <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">Needs data cleanup</span>
+                      )}
+                      {!selectedListing.sourceUrl && !selectedListing.brochureUrl && (
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">No source links</span>
+                      )}
+                      {isMappableListing(selectedListing) && !hasListingQualityIssue(selectedListing) && (
+                        <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">Ready for matching</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    {selectedListing.sourceUrl && (
+                      <a
+                        href={selectedListing.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+                      >
+                        Open source
+                      </a>
+                    )}
+                    {selectedListing.brochureUrl && (
+                      <a
+                        href={selectedListing.brochureUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800"
+                      >
+                        Open brochure
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );
