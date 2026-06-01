@@ -119,6 +119,13 @@ function inferUploadListingType(rowText: string) {
   if (lower.includes("sublease") || lower.includes("sub-lease")) return "sublease";
   if (lower.includes("sale")) return "sale";
   if (lower.includes("lease")) return "lease";
+  return null;
+}
+
+function inferUploadSourceListingType(sourceName: string) {
+  const lower = sourceName.toLowerCase();
+  if (lower.includes("sublease") || lower.includes("sub-lease")) return "sublease";
+  if (lower.includes("sale")) return "sale";
   return "lease";
 }
 
@@ -149,7 +156,7 @@ function buildUploadRecord(row: Record<string, unknown>, index: number): UploadL
     address: address || null,
     market: readUploadValue(row, ["market", "city", "region name"]) || "Edmonton Metro",
     submarket: readUploadValue(row, ["submarket", "submarket name", "submarket cluster", "area", "district"]) || null,
-    listingType: (listingType || inferUploadListingType(rowText)).toLowerCase(),
+    listingType: (listingType || inferUploadListingType(rowText))?.toLowerCase() || null,
     assetType: (assetType || inferUploadAssetType(rowText)).toLowerCase(),
     recordKeySuffix: readUploadValue(row, ["id", "listing id", "mls", "record id", "propertyid", "property id"]) || null,
     availableSf: parseUploadNumber(readUploadValue(row, [
@@ -417,7 +424,10 @@ export default function IndustrialIntelInventoryPage() {
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/intel/manual-listings/upload", {
         sourceName: uploadSourceName || "Spreadsheet Upload",
-        records: uploadRows,
+        records: uploadRows.map((row) => ({
+          ...row,
+          listingType: row.listingType || inferUploadSourceListingType(uploadSourceName),
+        })),
       });
       return response.json();
     },
@@ -757,7 +767,7 @@ export default function IndustrialIntelInventoryPage() {
                               <tr key={`${row.title}-${index}`}>
                                 <td className="max-w-[18rem] px-3 py-2 font-medium text-slate-900">{row.title}</td>
                                 <td className="max-w-[16rem] px-3 py-2 text-slate-600">{row.address || "Needs review"}</td>
-                                <td className="px-3 py-2 text-slate-600">{row.listingType || "lease"} / {row.assetType || "building"}</td>
+                                <td className="px-3 py-2 text-slate-600">{row.listingType || inferUploadSourceListingType(uploadSourceName)} / {row.assetType || "building"}</td>
                                 <td className="px-3 py-2 text-slate-600">
                                   {row.availableSf ? row.availableSf.toLocaleString() : row.landAcres ? `${row.landAcres} ac` : "-"}
                                 </td>
