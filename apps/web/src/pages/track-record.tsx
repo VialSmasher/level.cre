@@ -117,6 +117,8 @@ function dealTypeLabel(dealType: TrackDeal['dealType']) {
   }[dealType]
 }
 
+const quickDealTypes: TrackDeal['dealType'][] = ['sale', 'lease', 'renewal', 'unknown']
+
 function clean(value: unknown) {
   return String(value ?? '').trim()
 }
@@ -437,6 +439,14 @@ export default function TrackRecordPage() {
     setDeals((current) => current.map((deal) => (
       deal.id === dealId
         ? { ...deal, imageUrls: deal.imageUrls.filter((_, index) => index !== imageIndex), updatedAt: new Date().toISOString() }
+        : deal
+    )))
+  }
+
+  const setDealType = (dealId: string, dealType: TrackDeal['dealType']) => {
+    setDeals((current) => current.map((deal) => (
+      deal.id === dealId
+        ? { ...deal, dealType, updatedAt: new Date().toISOString() }
         : deal
     )))
   }
@@ -801,7 +811,7 @@ export default function TrackRecordPage() {
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input className="pl-9" placeholder="Search track record" value={query} onChange={(e) => setQuery(e.target.value)} />
               </div>
-              <DealGrid deals={filteredDeals} onEdit={edit} onDelete={remove} onAddImages={addImagesToDeal} onRemoveImage={removeDealImage} />
+              <DealGrid deals={filteredDeals} onEdit={edit} onDelete={remove} onAddImages={addImagesToDeal} onRemoveImage={removeDealImage} onSetDealType={setDealType} />
             </div>
           </section>
         )}
@@ -852,6 +862,7 @@ function DealGrid({
   onDelete,
   onAddImages,
   onRemoveImage,
+  onSetDealType,
   presentation = false,
   showClientNames = true,
   showDealValues = true,
@@ -861,6 +872,7 @@ function DealGrid({
   onDelete?: (id: string) => void
   onAddImages?: (id: string, files: FileList | null) => void
   onRemoveImage?: (id: string, imageIndex: number) => void
+  onSetDealType?: (id: string, dealType: TrackDeal['dealType']) => void
   presentation?: boolean
   showClientNames?: boolean
   showDealValues?: boolean
@@ -937,6 +949,27 @@ function DealGrid({
               <Badge variant="outline">{deal.assetType}</Badge>
               {deal.isFeatured && <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">Featured</Badge>}
             </div>
+            {!presentation && onSetDealType && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {quickDealTypes.map((dealType) => {
+                  const isActive = deal.dealType === dealType
+                  return (
+                    <button
+                      key={dealType}
+                      type="button"
+                      className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                        isActive
+                          ? 'border-slate-950 bg-slate-950 text-white'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700'
+                      }`}
+                      onClick={() => onSetDealType(deal.id, dealType)}
+                    >
+                      {dealTypeLabel(dealType)}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-slate-700">
             {!presentation && deal.imageUrls.length > 1 && (
