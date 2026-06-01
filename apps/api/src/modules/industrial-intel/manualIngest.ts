@@ -19,6 +19,7 @@ export type ManualIntelListingInput = {
   landAcres?: number | null;
   totalPrice?: number | null;
   pricePerAcre?: number | null;
+  leaseRatePsf?: number | null;
 };
 
 export type ManualIntelListingUploadInput = {
@@ -123,6 +124,7 @@ function normalizeManualRecord(input: ManualIntelListingInput, sourceRecordKey: 
       landAcres: input.landAcres ?? null,
       totalPrice: input.totalPrice ?? null,
       pricePerAcre: input.pricePerAcre ?? null,
+      leaseRatePsf: input.leaseRatePsf ?? null,
     },
   });
 }

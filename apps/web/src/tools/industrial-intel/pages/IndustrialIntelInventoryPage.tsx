@@ -25,6 +25,7 @@ type IntelListing = {
   landAcres: number | null;
   totalPrice: number | null;
   pricePerAcre: number | null;
+  leaseRatePsf: number | null;
   brochureUrl: string | null;
   sourceUrl: string | null;
   lastSeenAt: string | null;
@@ -58,6 +59,7 @@ type UploadListingRecord = {
   landAcres: number | null;
   totalPrice: number | null;
   pricePerAcre: number | null;
+  leaseRatePsf: number | null;
 };
 
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
@@ -105,9 +107,24 @@ function formatMoney(value: number | null) {
 }
 
 function formatListingValue(listing: IntelListing) {
+  if (listing.listingType === "lease" || listing.listingType === "sublease") {
+    return listing.leaseRatePsf ? `${formatMoney(listing.leaseRatePsf)} / SF` : null;
+  }
   if (listing.totalPrice) return formatMoney(listing.totalPrice);
   if (listing.pricePerAcre) return `${formatMoney(listing.pricePerAcre)} / ac`;
   return null;
+}
+
+function formatLeaseRate(listing: IntelListing) {
+  return listing.leaseRatePsf ? `${formatMoney(listing.leaseRatePsf)} / SF` : "-";
+}
+
+function buildGoogleMapsUrl(listing: IntelListing) {
+  if (typeof listing.latitude === "number" && typeof listing.longitude === "number") {
+    return `https://www.google.com/maps/search/?api=1&query=${listing.latitude},${listing.longitude}`;
+  }
+  const query = listing.normalizedAddress || listing.address || listing.title;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
 function normalizeHeader(value: string) {
@@ -203,6 +220,16 @@ function buildUploadRecord(row: Record<string, unknown>, index: number): UploadL
     landAcres: parseUploadNumber(readUploadValue(row, ["land acres", "acres", "site acres", "land size"])),
     totalPrice: parseUploadNumber(readUploadValue(row, ["price", "sale price", "asking price", "purchase price", "for sale price"])),
     pricePerAcre: parseUploadNumber(readUploadValue(row, ["price per acre", "$/acre", "psa"])),
+    leaseRatePsf: parseUploadNumber(readUploadValue(row, [
+      "rent/sf/yr",
+      "rent sf yr",
+      "rent",
+      "lease rate",
+      "net rent",
+      "average weighted rent",
+      "avg rent-direct (industrial)",
+      "avg rent-sublet (industrial)",
+    ])),
   };
 }
 
@@ -1144,34 +1171,61 @@ export default function IndustrialIntelInventoryPage() {
                 </div>
               ) : (
                 <div className="space-y-5">
-                  <div>
-                    <div className="mb-3 flex flex-wrap gap-2">
-                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        selectedListing.removedAt ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
-                      }`}>
-                        {selectedListing.removedAt ? "Removed" : formatStatus(selectedListing.status)}
-                      </span>
-                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                        {formatListingType(selectedListing.listingType)}
-                      </span>
-                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
-                        {formatAssetType(selectedListing.assetType)}
-                      </span>
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="mb-3 flex flex-wrap gap-2">
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          selectedListing.removedAt ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
+                        }`}>
+                          {selectedListing.removedAt ? "Removed" : formatStatus(selectedListing.status)}
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                          {formatListingType(selectedListing.listingType)}
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                          {formatAssetType(selectedListing.assetType)}
+                        </span>
+                      </div>
+                      <h3 className="text-2xl font-semibold leading-tight text-slate-950">{selectedListing.title}</h3>
+                      <p className="mt-2 text-sm text-slate-600">{selectedListing.normalizedAddress || selectedListing.address || "Address still needs review"}</p>
                     </div>
-                    <h3 className="text-2xl font-semibold leading-tight text-slate-950">{selectedListing.title}</h3>
-                    <p className="mt-2 text-sm text-slate-600">{selectedListing.address || "Address still needs review"}</p>
+                    <a
+                      href={buildGoogleMapsUrl(selectedListing)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+                    >
+                      Open in Google Maps
+                    </a>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Building size</p>
+                      <p className="mt-2 text-2xl font-semibold text-slate-950">{selectedListing.availableSf ? `${selectedListing.availableSf.toLocaleString()} SF` : "-"}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Land size</p>
+                      <p className="mt-2 text-2xl font-semibold text-slate-950">{selectedListing.landAcres ? `${selectedListing.landAcres.toLocaleString()} ac` : "-"}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Lease rate</p>
+                      <p className="mt-2 text-2xl font-semibold text-slate-950">{formatLeaseRate(selectedListing)}</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Sale price</p>
+                      <p className="mt-2 text-2xl font-semibold text-slate-950">{selectedListing.totalPrice ? formatMoney(selectedListing.totalPrice) : "-"}</p>
+                    </div>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
                     {[
-                      { label: "Size", value: formatListingSize(selectedListing) },
-                      { label: "Price", value: formatListingValue(selectedListing) || "-" },
                       { label: "Submarket", value: selectedListing.submarket || selectedListing.market || "Unassigned" },
                       { label: "Source", value: selectedListing.sourceName || "Unknown" },
                       { label: "Geocode", value: selectedListing.geocodeStatus || (isMappableListing(selectedListing) ? "success" : "pending") },
                       { label: "Last seen", value: formatDateTime(selectedListing.lastSeenAt) },
                     ].map((item) => (
-                      <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <div key={item.label} className="rounded-2xl border border-slate-200 bg-white p-3">
                         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{item.label}</p>
                         <p className="mt-1 text-sm font-semibold text-slate-950">{item.value}</p>
                       </div>
@@ -1179,7 +1233,7 @@ export default function IndustrialIntelInventoryPage() {
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 p-4">
-                    <p className="text-sm font-semibold text-slate-950">Review notes</p>
+                    <p className="text-sm font-semibold text-slate-950">Broker read</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {!isMappableListing(selectedListing) && (
                         <span className="rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-700">Needs coordinates</span>
@@ -1202,7 +1256,7 @@ export default function IndustrialIntelInventoryPage() {
                         href={selectedListing.sourceUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+                        className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800"
                       >
                         Open source
                       </a>

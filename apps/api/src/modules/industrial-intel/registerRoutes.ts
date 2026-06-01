@@ -53,6 +53,7 @@ const intelManualListingSchema = z.object({
   landAcres: z.number().nonnegative().nullable().optional(),
   totalPrice: z.number().nonnegative().nullable().optional(),
   pricePerAcre: z.number().nonnegative().nullable().optional(),
+  leaseRatePsf: z.number().nonnegative().nullable().optional(),
 });
 
 const intelManualUploadListingSchema = intelManualListingSchema.extend({

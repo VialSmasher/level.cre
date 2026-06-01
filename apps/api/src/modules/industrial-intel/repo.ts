@@ -56,6 +56,7 @@ export type IntelListingListItem = {
   landAcres: number | null;
   totalPrice: number | null;
   pricePerAcre: number | null;
+  leaseRatePsf: number | null;
   brochureUrl: string | null;
   sourceUrl: string | null;
   lastSeenAt: string | null;
@@ -458,6 +459,7 @@ export class IndustrialIntelRepository {
         land_acres: string | null;
         total_price: string | null;
         price_per_acre: string | null;
+        raw_payload: Record<string, unknown> | null;
         brochure_url: string | null;
         source_url: string | null;
         last_seen_at: Date | null;
@@ -486,6 +488,7 @@ export class IndustrialIntelRepository {
             listings.land_acres,
             listings.total_price,
             listings.price_per_acre,
+            listings.raw_payload,
             listings.brochure_url,
             listings.source_url,
             listings.last_seen_at,
@@ -520,6 +523,7 @@ export class IndustrialIntelRepository {
         land_acres: string | null;
         total_price: string | null;
         price_per_acre: string | null;
+        raw_payload: Record<string, unknown> | null;
         brochure_url: string | null;
         source_url: string | null;
         last_seen_at: Date | null;
@@ -546,6 +550,7 @@ export class IndustrialIntelRepository {
         landAcres: numOrNull(row.land_acres),
         totalPrice: numOrNull(row.total_price),
         pricePerAcre: numOrNull(row.price_per_acre),
+        leaseRatePsf: numOrNull(row.raw_payload?.leaseRatePsf),
         brochureUrl: row.brochure_url,
         sourceUrl: row.source_url,
         lastSeenAt: isoOrNull(row.last_seen_at),
