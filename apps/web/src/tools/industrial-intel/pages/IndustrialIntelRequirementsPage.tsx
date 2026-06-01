@@ -50,6 +50,7 @@ type IntelListing = {
   landAcres: number | null;
   totalPrice: number | null;
   pricePerAcre: number | null;
+  leaseRatePsf: number | null;
   brochureUrl: string | null;
   sourceUrl: string | null;
   removedAt: string | null;
@@ -65,6 +66,18 @@ type RequirementMatch = {
   tier: "strong" | "adjacent" | "review";
   reasons: string[];
   warnings: string[];
+};
+
+type DecisionValue = "shortlist" | "maybe" | "rejected";
+
+type IntelRequirementListingDecision = {
+  requirementId: string;
+  listingId: string;
+  decision: DecisionValue;
+  notes: string | null;
+  sortOrder: number;
+  createdAt: string | null;
+  updatedAt: string | null;
 };
 
 type RequirementFormState = {
@@ -140,6 +153,17 @@ function formatNumber(value: number | null | undefined) {
 function formatMoney(value: number | null | undefined) {
   if (!value) return null;
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(value);
+}
+
+function formatPsf(value: number | null | undefined) {
+  if (!value) return "-";
+  return `${new Intl.NumberFormat(undefined, { style: "currency", currency: "CAD", maximumFractionDigits: 2 }).format(value)} / SF`;
+}
+
+function formatMapReadiness(listing: IntelListing) {
+  if (listing.latitude && listing.longitude) return "Map ready";
+  if (listing.geocodeStatus === "pending") return "Pending geocode";
+  return "Needs coordinates";
 }
 
 function formatListingSize(listing: IntelListing) {
@@ -370,14 +394,95 @@ function parseRequirementTranscript(transcript: string): Partial<RequirementForm
   return parsed;
 }
 
+function SurveyDraftPanel({
+  requirement,
+  matches,
+  decisionsByListingId,
+}: {
+  requirement: IntelRequirement | null;
+  matches: RequirementMatch[];
+  decisionsByListingId: Record<string, IntelRequirementListingDecision>;
+}) {
+  const shortlistedMatches = matches
+    .filter((match) => decisionsByListingId[match.listing.id]?.decision === "shortlist")
+    .sort((left, right) => {
+      const leftDecision = decisionsByListingId[left.listing.id];
+      const rightDecision = decisionsByListingId[right.listing.id];
+      if (leftDecision.sortOrder !== rightDecision.sortOrder) {
+        return leftDecision.sortOrder - rightDecision.sortOrder;
+      }
+      return right.score - left.score;
+    });
+
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Survey draft</p>
+          <h3 className="mt-1 text-2xl font-semibold text-slate-950">
+            {requirement ? `${requirement.title} preview` : "Select a requirement"}
+          </h3>
+          <p className="mt-1 text-sm text-slate-600">
+            Internal client-facing draft built from shortlisted listings only.
+          </p>
+        </div>
+        <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-700">
+          {shortlistedMatches.length} shortlisted
+        </span>
+      </div>
+
+      {shortlistedMatches.length === 0 ? (
+        <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-8 text-center text-sm text-slate-600">
+          Shortlist matches above to build the first survey draft.
+        </div>
+      ) : (
+        <div className="mt-5 overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <thead>
+              <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <th className="px-3 py-2">Listing</th>
+                <th className="px-3 py-2">Building SF</th>
+                <th className="px-3 py-2">Land</th>
+                <th className="px-3 py-2">Lease rate</th>
+                <th className="px-3 py-2">Sale price</th>
+                <th className="px-3 py-2">Submarket</th>
+                <th className="px-3 py-2">Source</th>
+                <th className="px-3 py-2">Map</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {shortlistedMatches.map((match) => (
+                <tr key={match.listing.id} className="align-top">
+                  <td className="px-3 py-3">
+                    <p className="font-semibold text-slate-950">{match.listing.title}</p>
+                    <p className="mt-1 text-slate-600">{match.listing.address || "Address still needs review"}</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">Score {match.score}</p>
+                  </td>
+                  <td className="px-3 py-3 text-slate-700">{formatNumber(match.listing.availableSf)}</td>
+                  <td className="px-3 py-3 text-slate-700">{match.listing.landAcres ? `${match.listing.landAcres.toLocaleString()} ac` : "-"}</td>
+                  <td className="px-3 py-3 text-slate-700">{formatPsf(match.listing.leaseRatePsf)}</td>
+                  <td className="px-3 py-3 text-slate-700">{formatMoney(match.listing.totalPrice) || "-"}</td>
+                  <td className="px-3 py-3 text-slate-700">{match.listing.submarket || match.listing.market || "-"}</td>
+                  <td className="px-3 py-3 text-slate-700">{match.listing.sourceName || "Manual"}</td>
+                  <td className="px-3 py-3 text-slate-700">{formatMapReadiness(match.listing)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MatchCard({
   match,
   decision,
   onDecision,
 }: {
   match: RequirementMatch;
-  decision?: "shortlist" | "maybe" | "reject";
-  onDecision: (decision: "shortlist" | "maybe" | "reject") => void;
+  decision?: DecisionValue;
+  onDecision: (decision: DecisionValue) => void;
 }) {
   const listingValue = formatListingValue(match.listing);
   return (
@@ -454,7 +559,7 @@ function MatchCard({
         <Button type="button" size="sm" variant="outline" onClick={() => onDecision("maybe")}>
           Maybe
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={() => onDecision("reject")}>
+        <Button type="button" size="sm" variant="outline" onClick={() => onDecision("rejected")}>
           Reject
         </Button>
         {match.listing.sourceUrl && (
@@ -480,7 +585,6 @@ export default function IndustrialIntelRequirementsPage() {
   const [isListening, setIsListening] = useState(false);
   const [recognition, setRecognition] = useState<InstanceType<SpeechRecognitionCtor> | null>(null);
   const [selectedRequirementId, setSelectedRequirementId] = useState<string | null>(null);
-  const [reviewDecisions, setReviewDecisions] = useState<Record<string, "shortlist" | "maybe" | "reject">>({});
 
   const { data: requirements = [], isLoading } = useQuery<IntelRequirement[]>({
     queryKey: ["/api/intel/requirements"],
@@ -491,21 +595,66 @@ export default function IndustrialIntelRequirementsPage() {
   });
 
   const selectedRequirement = requirements.find((requirement) => requirement.id === selectedRequirementId) || requirements[0] || null;
+  const decisionQueryKey = selectedRequirement
+    ? [`/api/intel/requirements/${selectedRequirement.id}/shortlist`]
+    : ["/api/intel/requirements/_/shortlist"];
 
-  const matches = useMemo(() => {
+  const { data: requirementDecisions = [] } = useQuery<IntelRequirementListingDecision[]>({
+    queryKey: decisionQueryKey,
+    enabled: Boolean(selectedRequirement?.id),
+  });
+
+  const decisionsByListingId = useMemo(() => Object.fromEntries(
+    requirementDecisions.map((decision) => [decision.listingId, decision]),
+  ) as Record<string, IntelRequirementListingDecision>, [requirementDecisions]);
+
+  const scoredMatches = useMemo(() => {
     if (!selectedRequirement) return [];
     return listings
       .filter((listing) => !listing.removedAt && listing.status !== "removed")
       .map((listing) => scoreListingForRequirement(selectedRequirement, listing))
-      .sort((left, right) => right.score - left.score)
-      .slice(0, 24);
+      .sort((left, right) => right.score - left.score);
   }, [listings, selectedRequirement]);
+
+  const matches = useMemo(() => scoredMatches.slice(0, 24), [scoredMatches]);
 
   const matchGroups = useMemo(() => ({
     strong: matches.filter((match) => match.tier === "strong"),
     adjacent: matches.filter((match) => match.tier === "adjacent"),
     review: matches.filter((match) => match.tier === "review"),
   }), [matches]);
+
+  const saveDecisionMutation = useMutation({
+    mutationFn: async ({ requirementId, match, decision }: { requirementId: string; match: RequirementMatch; decision: DecisionValue }) => {
+      const response = await apiRequest("PUT", `/api/intel/requirements/${requirementId}/shortlist/${match.listing.id}`, {
+        decision,
+        notes: null,
+        sortOrder: Math.max(0, 100 - match.score),
+      });
+      return response.json() as Promise<IntelRequirementListingDecision>;
+    },
+    onSuccess: (decision) => {
+      queryClient.setQueryData<IntelRequirementListingDecision[]>([`/api/intel/requirements/${decision.requirementId}/shortlist`], (current = []) => {
+        const withoutCurrent = current.filter((item) => item.listingId !== decision.listingId);
+        return [...withoutCurrent, decision];
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to save decision",
+        description: error?.message || "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleMatchDecision = (match: RequirementMatch, decision: DecisionValue) => {
+    if (!selectedRequirement) {
+      toast({ title: "Select a requirement before saving a decision", variant: "destructive" });
+      return;
+    }
+    saveDecisionMutation.mutate({ requirementId: selectedRequirement.id, match, decision });
+  };
 
   const createRequirementMutation = useMutation({
     mutationFn: async () => {
@@ -930,18 +1079,19 @@ export default function IndustrialIntelRequirementsPage() {
                         <MatchCard
                           key={match.listing.id}
                           match={match}
-                          decision={reviewDecisions[`${selectedRequirement.id}:${match.listing.id}`]}
-                          onDecision={(decision) =>
-                            setReviewDecisions((current) => ({
-                              ...current,
-                              [`${selectedRequirement.id}:${match.listing.id}`]: decision,
-                            }))
-                          }
+                          decision={decisionsByListingId[match.listing.id]?.decision}
+                          onDecision={(decision) => handleMatchDecision(match, decision)}
                         />
                       ))}
                     </div>
                   )}
                 </div>
+
+                <SurveyDraftPanel
+                  requirement={selectedRequirement}
+                  matches={scoredMatches}
+                  decisionsByListingId={decisionsByListingId}
+                />
               </div>
             )}
           </CardContent>

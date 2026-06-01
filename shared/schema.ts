@@ -773,6 +773,30 @@ export const intelRequirementPreferences = pgTable(
   ],
 );
 
+
+export const intelRequirementListingDecisions = pgTable(
+  "intel_requirement_listing_decisions",
+  {
+    requirementId: varchar("requirement_id").notNull().references(() => intelRequirements.id, { onDelete: "cascade" }),
+    listingId: varchar("listing_id").notNull().references(() => intelListings.id, { onDelete: "cascade" }),
+    decision: varchar("decision").notNull(), // shortlist | maybe | rejected
+    notes: text("notes"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.requirementId, table.listingId],
+      name: "PK_intel_requirement_listing_decisions",
+    }),
+    index("IDX_intel_requirement_listing_decisions_requirement").on(table.requirementId),
+    index("IDX_intel_requirement_listing_decisions_listing").on(table.listingId),
+    index("IDX_intel_requirement_listing_decisions_decision").on(table.requirementId, table.decision),
+    index("IDX_intel_requirement_listing_decisions_sort").on(table.requirementId, table.decision, table.sortOrder),
+  ],
+);
+
 export type IntelSource = typeof intelSources.$inferSelect;
 export type InsertIntelSource = typeof intelSources.$inferInsert;
 export type IntelListing = typeof intelListings.$inferSelect;
@@ -785,3 +809,5 @@ export type IntelRequirement = typeof intelRequirements.$inferSelect;
 export type InsertIntelRequirement = typeof intelRequirements.$inferInsert;
 export type IntelRequirementPreference = typeof intelRequirementPreferences.$inferSelect;
 export type InsertIntelRequirementPreference = typeof intelRequirementPreferences.$inferInsert;
+export type IntelRequirementListingDecision = typeof intelRequirementListingDecisions.$inferSelect;
+export type InsertIntelRequirementListingDecision = typeof intelRequirementListingDecisions.$inferInsert;

@@ -53,6 +53,7 @@ export type IndustrialIntelSeedPreview = {
     landAcres: number | null;
     totalPrice: number | null;
     pricePerAcre: number | null;
+    leaseRatePsf: number | null;
     brochureUrl: string | null;
     sourceUrl: string | null;
     lastSeenAt: string | null;
@@ -438,6 +439,12 @@ function isoOrNull(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null;
 }
 
+function numberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function getIndustrialIntelSeedPreview(): IndustrialIntelSeedPreview {
   const { sources, runs, listings, changes } = buildSeedData();
   const sourceNameById = new Map(sources.map((source) => [source.id, source.name]));
@@ -502,6 +509,7 @@ export function getIndustrialIntelSeedPreview(): IndustrialIntelSeedPreview {
         landAcres: listing.landAcres ?? null,
         totalPrice: listing.totalPrice ?? null,
         pricePerAcre: listing.pricePerAcre ?? null,
+        leaseRatePsf: numberOrNull(listing.rawPayload?.leaseRatePsf ?? listing.rawPayload?.askingNet),
         brochureUrl: listing.brochureUrl,
         sourceUrl: listing.sourceUrl,
         lastSeenAt: isoOrNull(listing.lastSeenAt),

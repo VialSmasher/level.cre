@@ -37,6 +37,12 @@ const intelRequirementPreferenceSchema = z.object({
 
 const intelRequirementPreferencesSchema = z.array(intelRequirementPreferenceSchema);
 
+const intelRequirementListingDecisionSchema = z.object({
+  decision: z.enum(["shortlist", "maybe", "rejected"]),
+  notes: z.string().trim().nullable().optional(),
+  sortOrder: z.number().int().nonnegative().nullable().optional(),
+});
+
 const intelManualListingSchema = z.object({
   sourceUrl: z.string().trim().url(),
   title: z.string().trim().min(1),
@@ -289,4 +295,46 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       res.status(500).json({ message: "Failed to replace industrial intel requirement preferences" });
     }
   });
+
+  app.get("/api/intel/requirements/:id/shortlist", requireAuth, async (req, res) => {
+    try {
+      const requirement = await industrialIntelService.getRequirementById(getUserId(req), req.params.id);
+      if (!requirement) {
+        return res.status(404).json({ message: "Industrial intel requirement not found" });
+      }
+      const decisions = await industrialIntelService.getRequirementListingDecisions(getUserId(req), req.params.id);
+      res.json(decisions);
+    } catch (error) {
+      console.error("Error fetching industrial intel requirement shortlist:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel requirement shortlist" });
+    }
+  });
+
+  app.put("/api/intel/requirements/:id/shortlist/:listingId", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelRequirementListingDecisionSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel shortlist decision", issues: parsed.error.flatten() });
+      }
+
+      const decision = await industrialIntelService.upsertRequirementListingDecision(
+        getUserId(req),
+        req.params.id,
+        req.params.listingId,
+        parsed.data,
+      );
+      if (!decision) {
+        return res.status(404).json({ message: "Industrial intel requirement not found" });
+      }
+      res.json(decision);
+    } catch (error: any) {
+      const code = String(error?.code || "");
+      if (code === "23503") {
+        return res.status(404).json({ message: "Industrial intel listing not found" });
+      }
+      console.error("Error updating industrial intel shortlist decision:", error);
+      res.status(500).json({ message: "Failed to update industrial intel shortlist decision" });
+    }
+  });
+
 }

@@ -4,6 +4,8 @@ import {
   type IntelRequirementDetail,
   type IntelRequirementListItem,
   type IntelRequirementPreference,
+  type IntelRequirementListingDecision,
+  type UpsertIntelRequirementListingDecisionInput,
   industrialIntelRepository,
   type IntelListingListItem,
   type IntelDuplicateGroup,
@@ -77,6 +79,22 @@ export class IndustrialIntelService {
     input: ReplaceIntelRequirementPreferencesInput,
   ): Promise<IntelRequirementPreference[] | null> {
     return industrialIntelRepository.replaceRequirementPreferences(userId, requirementId, input);
+  }
+
+  async getRequirementListingDecisions(
+    userId: string,
+    requirementId: string,
+  ): Promise<IntelRequirementListingDecision[]> {
+    return industrialIntelRepository.getRequirementListingDecisions(userId, requirementId);
+  }
+
+  async upsertRequirementListingDecision(
+    userId: string,
+    requirementId: string,
+    listingId: string,
+    input: UpsertIntelRequirementListingDecisionInput,
+  ): Promise<IntelRequirementListingDecision | null> {
+    return industrialIntelRepository.upsertRequirementListingDecision(userId, requirementId, listingId, input);
   }
 
   async ingestManualListing(_userId: string, input: ManualIntelListingInput) {

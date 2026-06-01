@@ -159,6 +159,24 @@ export type ReplaceIntelRequirementPreferencesInput = Array<{
   weight?: number | null;
 }>;
 
+export type IntelRequirementListingDecisionValue = "shortlist" | "maybe" | "rejected";
+
+export type IntelRequirementListingDecision = {
+  requirementId: string;
+  listingId: string;
+  decision: IntelRequirementListingDecisionValue;
+  notes: string | null;
+  sortOrder: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type UpsertIntelRequirementListingDecisionInput = {
+  decision: IntelRequirementListingDecisionValue;
+  notes?: string | null;
+  sortOrder?: number | null;
+};
+
 const CORE_TABLES = [
   "intel_sources",
   "intel_listings",
@@ -170,6 +188,11 @@ const SHOULD_USE_SAMPLE_FALLBACK = process.env.NODE_ENV !== "production";
 const REQUIREMENT_TABLES = [
   "intel_requirements",
   "intel_requirement_preferences",
+] as const;
+
+const REQUIREMENT_DECISION_TABLES = [
+  ...REQUIREMENT_TABLES,
+  "intel_requirement_listing_decisions",
 ] as const;
 
 function isoOrNull(value: unknown): string | null {
@@ -245,6 +268,18 @@ export class IndustrialIntelRepository {
 
     const found = new Set(result.rows.map((row: { table_name: string }) => row.table_name));
     return REQUIREMENT_TABLES.every((name) => found.has(name));
+  }
+
+  async hasRequirementDecisionTables(): Promise<boolean> {
+    const result = await pool.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('intel_requirements', 'intel_requirement_preferences', 'intel_requirement_listing_decisions')
+    `);
+
+    const found = new Set(result.rows.map((row: { table_name: string }) => row.table_name));
+    return REQUIREMENT_DECISION_TABLES.every((name) => found.has(name));
   }
 
   async getSummary(): Promise<IntelSummary> {
@@ -1143,6 +1178,114 @@ export class IndustrialIntelRepository {
     }
 
     return this.getRequirementPreferences(userId, requirementId);
+  }
+
+  async getRequirementListingDecisions(
+    userId: string,
+    requirementId: string,
+  ): Promise<IntelRequirementListingDecision[]> {
+    try {
+      if (!(await this.hasRequirementDecisionTables())) {
+        return [];
+      }
+
+      const ownership = await pool.query<{ id: string }>(
+        `SELECT id FROM public.intel_requirements WHERE created_by_user_id = $1 AND id = $2 LIMIT 1`,
+        [userId, requirementId],
+      );
+      if (!ownership.rows[0]) return [];
+
+      const result = await pool.query<{
+        requirement_id: string;
+        listing_id: string;
+        decision: IntelRequirementListingDecisionValue;
+        notes: string | null;
+        sort_order: string | number | null;
+        created_at: Date | null;
+        updated_at: Date | null;
+      }>(
+        `
+          SELECT requirement_id, listing_id, decision, notes, sort_order, created_at, updated_at
+          FROM public.intel_requirement_listing_decisions
+          WHERE requirement_id = $1
+          ORDER BY
+            CASE decision
+              WHEN 'shortlist' THEN 1
+              WHEN 'maybe' THEN 2
+              ELSE 3
+            END,
+            sort_order ASC,
+            updated_at DESC NULLS LAST
+        `,
+        [requirementId],
+      );
+
+      return result.rows.map((row) => ({
+        requirementId: row.requirement_id,
+        listingId: row.listing_id,
+        decision: row.decision,
+        notes: row.notes,
+        sortOrder: intOrZero(row.sort_order),
+        createdAt: isoOrNull(row.created_at),
+        updatedAt: isoOrNull(row.updated_at),
+      }));
+    } catch (error) {
+      if (isRecoverableIntelSchemaError(error)) {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  async upsertRequirementListingDecision(
+    userId: string,
+    requirementId: string,
+    listingId: string,
+    input: UpsertIntelRequirementListingDecisionInput,
+  ): Promise<IntelRequirementListingDecision | null> {
+    const requirement = await this.getRequirementById(userId, requirementId);
+    if (!requirement) return null;
+
+    const result = await pool.query<{
+      requirement_id: string;
+      listing_id: string;
+      decision: IntelRequirementListingDecisionValue;
+      notes: string | null;
+      sort_order: string | number | null;
+      created_at: Date | null;
+      updated_at: Date | null;
+    }>(
+      `
+        INSERT INTO public.intel_requirement_listing_decisions (
+          requirement_id,
+          listing_id,
+          decision,
+          notes,
+          sort_order,
+          updated_at
+        ) VALUES ($1, $2, $3, $4, COALESCE($5, 0), now())
+        ON CONFLICT (requirement_id, listing_id)
+        DO UPDATE SET
+          decision = EXCLUDED.decision,
+          notes = EXCLUDED.notes,
+          sort_order = EXCLUDED.sort_order,
+          updated_at = now()
+        RETURNING requirement_id, listing_id, decision, notes, sort_order, created_at, updated_at
+      `,
+      [requirementId, listingId, input.decision, input.notes ?? null, input.sortOrder ?? null],
+    );
+
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      requirementId: row.requirement_id,
+      listingId: row.listing_id,
+      decision: row.decision,
+      notes: row.notes,
+      sortOrder: intOrZero(row.sort_order),
+      createdAt: isoOrNull(row.created_at),
+      updatedAt: isoOrNull(row.updated_at),
+    };
   }
 }
 
