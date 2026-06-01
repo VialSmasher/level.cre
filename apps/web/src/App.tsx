@@ -31,6 +31,7 @@ const AuthCallback = lazy(() => import("./pages/AuthCallback"));
 const Launcher = lazy(() => import("./pages/launcher"));
 const Terms = lazy(() => import("./pages/terms"));
 const Privacy = lazy(() => import("./pages/privacy"));
+const Pricing = lazy(() => import("./pages/pricing"));
 const AdminDiag = lazy(() => import("./pages/admin-diag"));
 const BrokerStats = lazy(() => import("./pages/broker-stats"));
 const Leaderboard = lazy(() => import("./pages/leaderboard"));
@@ -123,6 +124,12 @@ function Router() {
       <Route path="/privacy" component={() => (
         <Suspense fallback={<Spinner />}> 
           <Privacy />
+        </Suspense>
+      )} />
+
+      <Route path="/pricing" component={() => (
+        <Suspense fallback={<Spinner />}> 
+          <Pricing />
         </Suspense>
       )} />
       

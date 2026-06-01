@@ -4,7 +4,7 @@ import { getOAuthCallbackPath } from '@/lib/authUtils'
 import { supabase } from '@/lib/supabase'
 import { useLocation } from 'wouter'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { Loader2, ArrowRight, CheckCircle, ChartSpline } from 'lucide-react'
+import { Loader2, ArrowRight, CheckCircle, ChartSpline, CreditCard } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import {
   clearStoredPostAuthRedirect,
@@ -189,13 +189,13 @@ export default function Landing() {
   }
 
   return (
-    <div className="min-h-screen bg-white bg-[radial-gradient(circle_at_1px_1px,_rgba(0,0,0,0.04)_1px,_transparent_1px)] [background-size:24px_24px]">
-      <div className="container mx-auto px-4 md:px-6 lg:px-8 py-12 md:py-20">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-start">
+    <div className="min-h-screen overflow-hidden bg-white bg-[linear-gradient(rgba(15,23,42,0.025)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.025)_1px,transparent_1px)] [background-size:28px_28px]">
+      <div className="container mx-auto px-4 md:px-6 lg:px-8 py-10 md:py-14">
+        <div className="grid min-h-[calc(100vh-7rem)] grid-cols-1 lg:grid-cols-[0.86fr_1.14fr] gap-10 lg:gap-14 items-center">
           {/* Left column: Branding + Login */}
-          <div className="flex flex-col gap-6 lg:pt-6">
+          <div className="flex flex-col gap-6">
             {/* Text logo */}
-            <div className="text-3xl md:text-4xl font-black tracking-tight text-slate-900">
+            <div className="text-3xl md:text-4xl font-black tracking-tight text-slate-950">
               <span className="inline-flex items-center gap-1">
                 level CRE
                 <ChartSpline className="-mt-px" size={22} />
@@ -204,11 +204,11 @@ export default function Landing() {
 
             {/* Headline + Subheadline */}
             <div className="space-y-3">
-              <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-slate-900">
-                Map your next opportunity and level up your broker game
+              <h1 className="max-w-2xl text-4xl md:text-5xl font-semibold tracking-tight text-slate-950">
+                Commercial real estate mapping, pipeline, and market analytics in one workspace
               </h1>
               <p className="text-base md:text-lg text-slate-600 leading-relaxed max-w-prose">
-                Visualize, track, and manage commercial real estate with powerful mapping, analytics, and pipeline tools.
+                Find sites, track owner and tenant conversations, and turn market coverage into saved deal flow.
               </p>
             </div>
 
@@ -230,13 +230,13 @@ export default function Landing() {
                 </>
               ) : (
                 <>
-                  <div className="flex flex-wrap gap-3 items-center justify-center">
+                  <div className="flex flex-wrap gap-3 items-center">
                     {ENABLE_GOOGLE && (
                       <Button
                         onMouseEnter={prefetchApp}
                         onClick={handleGoogle}
                         disabled={isSigningIn || isDemoMode}
-                        className="group px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-sm disabled:opacity-50 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 w-auto"
+                        className="group h-11 px-5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md disabled:opacity-50 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 w-full sm:w-auto"
                         aria-label="Continue with Google"
                       >
                         {isSigningIn ? (
@@ -262,7 +262,8 @@ export default function Landing() {
                       onMouseEnter={prefetchApp}
                       onClick={handleDemoMode}
                       disabled={isSigningIn || isDemoMode}
-                      className="group px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-sm disabled:opacity-50 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 w-auto"
+                      variant="outline"
+                      className="group h-11 px-5 border-slate-300 bg-white text-slate-900 hover:bg-slate-50 hover:text-slate-950 text-sm font-medium rounded-md disabled:opacity-50 focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 w-full sm:w-auto"
                       aria-label="Try Level CRE Demo"
                       title="Open the Level CRE demo"
                     >
@@ -273,32 +274,43 @@ export default function Landing() {
                         </>
                       ) : (
                         <>
-                          Try Level CRE Demo
+                          Explore demo
                           <ArrowRight className="w-3 h-3 ml-2 group-hover:translate-x-1 transition-transform" />
                         </>
                       )}
                     </Button>
                   </div>
-                  <p className="text-xs text-slate-600 mt-2 text-center">
-                    Demo opens the Level CRE CRM sandbox. Use Google sign-in for the full broker toolbox.
+                  <p className="text-sm text-slate-600 mt-1 max-w-xl">
+                    Demo is free. Upgrade only when you are ready to save live data, invite your team, or unlock analytics.
+                    <button
+                      type="button"
+                      onClick={() => setLocation('/pricing')}
+                      className="ml-2 font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900"
+                    >
+                      View paid plans
+                    </button>
                   </p>
                 </>
               )}
             </div>
 
             {/* Trust indicators */}
-            <div className="flex flex-wrap items-center gap-4 pt-2 text-sm text-slate-600">
+            <div className="grid gap-3 pt-1 text-sm text-slate-600 sm:grid-cols-2">
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-green-500" />
-                Secure sign-in via Google
+                Built for broker workflows
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-green-500" />
-                You can revoke access anytime
+                Track sites, tenants, tours, and follow-ups
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-green-500" />
-                Demo is a Level CRE sandbox
+                Google Maps-powered property intelligence
+              </div>
+              <div className="flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-blue-500" />
+                Stripe-ready upgrade path
               </div>
             </div>
 
@@ -312,8 +324,8 @@ export default function Landing() {
             </div>
           </div>
 
-          {/* Right column: Feature list */}
-          <div className="lg:pt-6">
+          {/* Right column: Product preview */}
+          <div>
             <Suspense fallback={<div className="h-40" />}> 
               <FeatureCards />
             </Suspense>
