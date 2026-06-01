@@ -9,6 +9,7 @@ import { queryClient } from "./lib/queryClient";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/AppLayout";
+import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 // Use explicit relative paths for lazy-loaded pages to ensure Vite
 // rewrites dynamic imports correctly in all environments.
 const Home = lazy(() => import("./pages/home"));
@@ -184,9 +185,11 @@ function Router() {
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Suspense fallback={<Spinner />}> 
-                <Home />
-              </Suspense>
+              <RouteErrorBoundary>
+                <Suspense fallback={<Spinner />}>
+                  <Home />
+                </Suspense>
+              </RouteErrorBoundary>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
