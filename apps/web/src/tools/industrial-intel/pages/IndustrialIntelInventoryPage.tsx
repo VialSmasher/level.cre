@@ -44,6 +44,15 @@ const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 const DEFAULT_MAP_CENTER = { lat: 53.5461, lng: -113.4938 };
 const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
 
+type IntelListingMapProps = {
+  filteredListings: IntelListing[];
+  mappableListings: MappableIntelListing[];
+  selectedListing: IntelListing | null;
+  selectedMappableListing: MappableIntelListing | null;
+  mapCenter: { lat: number; lng: number };
+  onSelectListing: (id: string | null) => void;
+};
+
 function formatDateTime(value: string | null) {
   if (!value) return "Never";
   const date = new Date(value);
@@ -85,6 +94,130 @@ function isMappableListing(listing: IntelListing): listing is MappableIntelListi
   return typeof listing.latitude === "number" && typeof listing.longitude === "number";
 }
 
+function IndustrialIntelListingMap({
+  filteredListings,
+  mappableListings,
+  selectedListing,
+  selectedMappableListing,
+  mapCenter,
+  onSelectListing,
+}: IntelListingMapProps) {
+  const { isLoaded: isMapLoaded, loadError: mapLoadError } = useJsApiLoader({
+    id: "industrial-intel-map",
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+  });
+
+  return (
+    <Card className="xl:order-2">
+      <CardHeader>
+        <CardTitle>Map</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          <p>
+            Showing <span className="font-semibold text-slate-900">{mappableListings.length}</span> mapped listings from the current filtered set.
+          </p>
+          <p>
+            {filteredListings.length - mappableListings.length} still need geocodes or address cleanup.
+          </p>
+        </div>
+
+        {mapLoadError ? (
+          <div className="rounded-2xl border border-dashed border-rose-300 bg-rose-50 px-6 py-10 text-center">
+            <p className="text-base font-medium text-rose-900">Map failed to load</p>
+            <p className="mt-2 text-sm text-rose-700">Check the shared Google Maps key configuration and allowed referrers.</p>
+          </div>
+        ) : !isMapLoaded ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-sm text-slate-600">
+            Loading map...
+          </div>
+        ) : mappableListings.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
+            <p className="text-base font-medium text-slate-900">No mapped listings yet</p>
+            <p className="mt-2 text-sm text-slate-600">
+              This first slice is wired. As soon as listing records expose latitude and longitude, filtered listings will render here automatically.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="h-[420px] overflow-hidden rounded-2xl border border-slate-200">
+              <GoogleMap
+                mapContainerStyle={MAP_CONTAINER_STYLE}
+                center={mapCenter}
+                zoom={selectedMappableListing ? 13 : 10}
+                options={{
+                  streetViewControl: false,
+                  mapTypeControl: false,
+                  fullscreenControl: true,
+                  gestureHandling: "greedy",
+                }}
+              >
+                {mappableListings.map((listing) => (
+                  <MarkerF
+                    key={listing.id}
+                    position={{ lat: listing.latitude, lng: listing.longitude }}
+                    onClick={() => onSelectListing(listing.id)}
+                  />
+                ))}
+                {selectedMappableListing && (
+                  <InfoWindowF
+                    position={{ lat: selectedMappableListing.latitude, lng: selectedMappableListing.longitude }}
+                    onCloseClick={() => onSelectListing(null)}
+                  >
+                    <div className="max-w-[16rem] space-y-2 p-1 text-sm text-slate-700">
+                      <p className="font-semibold text-slate-900">{selectedMappableListing.title}</p>
+                      <p>{selectedMappableListing.normalizedAddress || selectedMappableListing.address || "Address needs review"}</p>
+                      <p>
+                        {formatListingType(selectedMappableListing.listingType)} - {formatListingSize(selectedMappableListing)}
+                      </p>
+                      <p>{selectedMappableListing.sourceName || "Unknown source"}</p>
+                      <div className="flex flex-wrap gap-3">
+                        {selectedMappableListing.brochureUrl && (
+                          <a href={selectedMappableListing.brochureUrl} target="_blank" rel="noreferrer" className="text-sky-700 hover:text-sky-900">
+                            Brochure
+                          </a>
+                        )}
+                        {selectedMappableListing.sourceUrl && (
+                          <a href={selectedMappableListing.sourceUrl} target="_blank" rel="noreferrer" className="text-sky-700 hover:text-sky-900">
+                            Source
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </InfoWindowF>
+                )}
+              </GoogleMap>
+            </div>
+            {selectedListing && !selectedMappableListing && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <span className="font-medium text-amber-900">Selected listing is not mappable yet.</span> It still needs geocoding or address cleanup before it can render on the map.
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MapUnavailableCard() {
+  return (
+    <Card className="xl:order-2">
+      <CardHeader>
+        <CardTitle>Map</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 px-6 py-10 text-center">
+          <p className="text-base font-medium text-amber-900">Google Maps key is not available in this environment</p>
+          <p className="mt-2 text-sm text-amber-800">
+            Listings still load below. Once the shared key is present at runtime, mapped records will render here.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function IndustrialIntelInventoryPage() {
   const queryClient = useQueryClient();
   const [showManualIntake, setShowManualIntake] = useState(false);
@@ -114,13 +247,8 @@ export default function IndustrialIntelInventoryPage() {
     pricePerAcre: "",
   });
 
-  const { data: listings = [], isLoading } = useQuery<IntelListing[]>({
+  const { data: listings = [], isLoading, isError, error } = useQuery<IntelListing[]>({
     queryKey: ["/api/intel/listings"],
-  });
-
-  const { isLoaded: isMapLoaded, loadError: mapLoadError } = useJsApiLoader({
-    id: "industrial-intel-map",
-    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
   });
 
   const previewMutation = useMutation({
@@ -531,102 +659,18 @@ export default function IndustrialIntelInventoryPage() {
       )}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.9fr)]">
-        <Card className="xl:order-2">
-          <CardHeader>
-            <CardTitle>Map</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-              <p>
-                Showing <span className="font-semibold text-slate-900">{mappableListings.length}</span> mapped listings from the current filtered set.
-              </p>
-              <p>
-                {filteredListings.length - mappableListings.length} still need geocodes or address cleanup.
-              </p>
-            </div>
-
-            {!GOOGLE_MAPS_API_KEY ? (
-              <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 px-6 py-10 text-center">
-                <p className="text-base font-medium text-amber-900">Google Maps key is not available in this environment</p>
-                <p className="mt-2 text-sm text-amber-800">
-                  The page is wired to the shared key helper. Once the key is present at runtime, this map will load without a separate Tool B key path.
-                </p>
-              </div>
-            ) : mapLoadError ? (
-              <div className="rounded-2xl border border-dashed border-rose-300 bg-rose-50 px-6 py-10 text-center">
-                <p className="text-base font-medium text-rose-900">Map failed to load</p>
-                <p className="mt-2 text-sm text-rose-700">Check the shared Google Maps key configuration and allowed referrers.</p>
-              </div>
-            ) : !isMapLoaded ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-sm text-slate-600">
-                Loading map...
-              </div>
-            ) : mappableListings.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
-                <p className="text-base font-medium text-slate-900">No mapped listings yet</p>
-                <p className="mt-2 text-sm text-slate-600">
-                  This first slice is wired. As soon as listing records expose latitude and longitude, filtered listings will render here automatically.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="h-[420px] overflow-hidden rounded-2xl border border-slate-200">
-                  <GoogleMap
-                    mapContainerStyle={MAP_CONTAINER_STYLE}
-                    center={mapCenter}
-                    zoom={selectedMappableListing ? 13 : 10}
-                    options={{
-                      streetViewControl: false,
-                      mapTypeControl: false,
-                      fullscreenControl: true,
-                      gestureHandling: "greedy",
-                    }}
-                  >
-                    {mappableListings.map((listing) => (
-                      <MarkerF
-                        key={listing.id}
-                        position={{ lat: listing.latitude, lng: listing.longitude }}
-                        onClick={() => setSelectedListingId(listing.id)}
-                      />
-                    ))}
-                    {selectedMappableListing && (
-                      <InfoWindowF
-                        position={{ lat: selectedMappableListing.latitude, lng: selectedMappableListing.longitude }}
-                        onCloseClick={() => setSelectedListingId(null)}
-                      >
-                        <div className="max-w-[16rem] space-y-2 p-1 text-sm text-slate-700">
-                          <p className="font-semibold text-slate-900">{selectedMappableListing.title}</p>
-                          <p>{selectedMappableListing.normalizedAddress || selectedMappableListing.address || "Address needs review"}</p>
-                          <p>
-                            {formatListingType(selectedMappableListing.listingType)} - {formatListingSize(selectedMappableListing)}
-                          </p>
-                          <p>{selectedMappableListing.sourceName || "Unknown source"}</p>
-                          <div className="flex flex-wrap gap-3">
-                            {selectedMappableListing.brochureUrl && (
-                              <a href={selectedMappableListing.brochureUrl} target="_blank" rel="noreferrer" className="text-sky-700 hover:text-sky-900">
-                                Brochure
-                              </a>
-                            )}
-                            {selectedMappableListing.sourceUrl && (
-                              <a href={selectedMappableListing.sourceUrl} target="_blank" rel="noreferrer" className="text-sky-700 hover:text-sky-900">
-                                Source
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      </InfoWindowF>
-                    )}
-                  </GoogleMap>
-                </div>
-                {selectedListing && !selectedMappableListing && (
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                    <span className="font-medium text-amber-900">Selected listing is not mappable yet.</span> It still needs geocoding or address cleanup before it can render on the map.
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {GOOGLE_MAPS_API_KEY ? (
+          <IndustrialIntelListingMap
+            filteredListings={filteredListings}
+            mappableListings={mappableListings}
+            selectedListing={selectedListing}
+            selectedMappableListing={selectedMappableListing}
+            mapCenter={mapCenter}
+            onSelectListing={setSelectedListingId}
+          />
+        ) : (
+          <MapUnavailableCard />
+        )}
 
         <Card className="xl:order-1">
           <CardHeader>
@@ -635,6 +679,11 @@ export default function IndustrialIntelInventoryPage() {
           <CardContent>
           {isLoading ? (
             <p className="text-sm text-slate-500">Loading listings...</p>
+          ) : isError ? (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-6 py-10 text-center">
+              <p className="text-base font-medium text-rose-900">Listings failed to load</p>
+              <p className="mt-2 text-sm text-rose-700">{(error as Error)?.message || "The API returned an unexpected error."}</p>
+            </div>
           ) : listings.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
               <p className="text-base font-medium text-slate-900">No external inventory yet</p>
