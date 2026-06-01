@@ -155,10 +155,11 @@ function toIsoDate(value: string) {
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : ''
 }
 
-function inferDealType(rowText: string): TrackDeal['dealType'] {
+function inferDealType(rowText: string, sellingPrice?: string): TrackDeal['dealType'] {
   const text = rowText.toLowerCase()
   if (text.includes('renew')) return 'renewal'
-  return text.includes('sale') || text.includes('selling price') ? 'sale' : 'lease'
+  if (parseNumber(sellingPrice) > 0 || text.includes('sale') || text.includes('selling price')) return 'sale'
+  return 'lease'
 }
 
 function inferRole(rowText: string): TrackDeal['role'] {
@@ -218,7 +219,7 @@ function parseTrackRecordRows(rows: unknown[][]): DealImportResult {
       title,
       address,
       clientName: dealName && lotPlan ? dealName.replace(/^PL\s*-\s*/i, '') : '',
-      dealType: inferDealType(`${rowText} ${sellingPrice}`),
+      dealType: inferDealType(rowText, sellingPrice),
       role: inferRole(rowText),
       assetType: inferAssetType(propertyType || division),
       sizeSf: squareFeet,
@@ -273,6 +274,17 @@ function isImportableDealFile(file: File) {
   return name.endsWith('.csv') || name.endsWith('.xlsx') || name.endsWith('.xls')
 }
 
+function normalizeStoredDeal(deal: TrackDeal): TrackDeal {
+  const looksLikeImportedSale =
+    deal.sourceId?.startsWith('trade-') &&
+    deal.dealType === 'lease' &&
+    parseNumber(deal.value) > 0 &&
+    !deal.leaseExpiryDate &&
+    !deal.renewalNoticeDate
+
+  return looksLikeImportedSale ? { ...deal, dealType: 'sale' } : deal
+}
+
 function buildLinkedInSummary(dealCount: number, totalSf: number) {
   return `Representative industrial transaction experience: ${dealCount} completed assignments totaling ${formatNumber(totalSf)} SF across sale, lease, and renewal mandates.`
 }
@@ -293,7 +305,7 @@ export default function TrackRecordPage() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
-      if (raw) setDeals(JSON.parse(raw))
+      if (raw) setDeals((JSON.parse(raw) as TrackDeal[]).map(normalizeStoredDeal))
     } catch {
       setDeals([])
     }
@@ -305,9 +317,11 @@ export default function TrackRecordPage() {
 
   const totals = useMemo(() => {
     const totalSf = deals.reduce((sum, deal) => sum + parseNumber(deal.sizeSf), 0)
-    const leaseCount = deals.filter((deal) => deal.dealType === 'lease' || deal.dealType === 'renewal').length
+    const leaseCount = deals.filter((deal) => deal.dealType === 'lease').length
+    const saleCount = deals.filter((deal) => deal.dealType === 'sale').length
+    const renewalCount = deals.filter((deal) => deal.dealType === 'renewal').length
     const expiries = deals.filter((deal) => dateSoon(deal.leaseExpiryDate) || dateSoon(deal.renewalNoticeDate)).length
-    return { totalSf, leaseCount, expiries }
+    return { totalSf, leaseCount, saleCount, renewalCount, expiries }
   }, [deals])
 
   const filteredDeals = useMemo(() => {
@@ -502,8 +516,27 @@ export default function TrackRecordPage() {
             <CardContent className="text-3xl font-semibold text-slate-950">{formatNumber(totals.totalSf)}</CardContent>
           </Card>
           <Card className={mode === 'presentation' ? 'border-emerald-200 bg-white' : ''}>
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-500">{mode === 'presentation' ? 'Representative Deals' : 'Lease Deals'}</CardTitle></CardHeader>
-            <CardContent className="text-3xl font-semibold text-slate-950">{mode === 'presentation' ? featuredDeals.length : totals.leaseCount}</CardContent>
+            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-500">{mode === 'presentation' ? 'Representative Deals' : 'Deal Mix'}</CardTitle></CardHeader>
+            <CardContent className={mode === 'presentation' ? 'text-3xl font-semibold text-slate-950' : 'space-y-2'}>
+              {mode === 'presentation' ? (
+                featuredDeals.length
+              ) : (
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div>
+                    <div className="text-2xl font-semibold text-slate-950">{totals.saleCount}</div>
+                    <div className="text-xs font-medium text-slate-500">Sales</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-semibold text-slate-950">{totals.leaseCount}</div>
+                    <div className="text-xs font-medium text-slate-500">Leases</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-semibold text-slate-950">{totals.renewalCount}</div>
+                    <div className="text-xs font-medium text-slate-500">Renewals</div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
           </Card>
           <Card className={mode === 'presentation' ? 'border-emerald-200 bg-white' : ''}>
             <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-500">{mode === 'presentation' ? 'Markets Covered' : 'Expiry Watch'}</CardTitle></CardHeader>
