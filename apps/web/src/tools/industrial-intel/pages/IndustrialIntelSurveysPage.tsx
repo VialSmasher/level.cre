@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Bot, ExternalLink, Eye, EyeOff, FileText, MapPin, Plus, Trash2 } from "lucide-react";
@@ -189,6 +189,7 @@ export default function IndustrialIntelSurveysPage() {
   const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
   const [selectedMapItemId, setSelectedMapItemId] = useState<string | null>(null);
   const [listingSearch, setListingSearch] = useState("");
+  const previewRef = useRef<HTMLDivElement | null>(null);
   const [createForm, setCreateForm] = useState({
     title: "",
     clientName: "",
@@ -284,6 +285,10 @@ export default function IndustrialIntelSurveysPage() {
   }, [selectedMapItem]);
 
   const unmappedVisibleCount = visibleItems.length - mappableSurveyItems.length;
+
+  const focusPreview = () => {
+    previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   const shortlistedListingIds = useMemo(
     () => shortlistDecisions.filter((decision) => decision.decision === "shortlist").map((decision) => decision.listingId),
@@ -538,7 +543,13 @@ export default function IndustrialIntelSurveysPage() {
                         {selectedSurvey.requirementTitle ? ` - ${selectedSurvey.requirementTitle}` : ""}
                       </p>
                     </div>
-                    <Badge className="bg-slate-950 text-white">{selectedSurvey.status}</Badge>
+                    <div className="flex items-center gap-2">
+                      <Button type="button" variant="outline" size="sm" className="gap-2" onClick={focusPreview}>
+                        <MapPin className="h-4 w-4" />
+                        Preview map
+                      </Button>
+                      <Badge className="bg-slate-950 text-white">{selectedSurvey.status}</Badge>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="grid gap-4 md:grid-cols-2">
@@ -743,7 +754,7 @@ export default function IndustrialIntelSurveysPage() {
                 </div>
 
                 <aside className="space-y-4">
-                  <div className="sticky top-28 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <div ref={previewRef} className="sticky top-28 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Client map preview</p>
