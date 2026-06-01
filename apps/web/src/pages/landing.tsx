@@ -205,10 +205,10 @@ export default function Landing() {
             {/* Headline + Subheadline */}
             <div className="space-y-3">
               <h1 className="max-w-2xl text-4xl md:text-5xl font-semibold tracking-tight text-slate-950">
-                Commercial real estate mapping, pipeline, and market analytics in one workspace
+                Broker-grade mapping and deal flow for commercial real estate
               </h1>
               <p className="text-base md:text-lg text-slate-600 leading-relaxed max-w-prose">
-                Find sites, track owner and tenant conversations, and turn market coverage into saved deal flow.
+                Build market coverage, manage requirements, and keep every site, owner, tenant, and follow-up tied to the map.
               </p>
             </div>
 
@@ -298,19 +298,19 @@ export default function Landing() {
             <div className="grid gap-3 pt-1 text-sm text-slate-600 sm:grid-cols-2">
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-green-500" />
-                Built for broker workflows
+                Demo workspace included
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-green-500" />
-                Track sites, tenants, tours, and follow-ups
+                Google sign-in
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-green-500" />
-                Google Maps-powered property intelligence
+                Live maps, pipeline, and analytics
               </div>
               <div className="flex items-center gap-2">
                 <CreditCard className="w-4 h-4 text-blue-500" />
-                Stripe-ready upgrade path
+                Stripe checkout path
               </div>
             </div>
 
