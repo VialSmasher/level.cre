@@ -1,4 +1,5 @@
 import type { Express, Request } from "express";
+import { randomBytes } from "crypto";
 import { z } from "zod";
 import { getUserId, requireAuth } from "../../auth";
 import { ensureUser } from "../../ensureUser";
@@ -320,6 +321,58 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       }
       console.error("Error creating industrial intel survey:", error);
       res.status(500).json({ message: "Failed to create industrial intel survey" });
+    }
+  });
+
+  app.get("/api/intel/surveys/share/:token", async (req, res) => {
+    try {
+      const token = String(req.params.token || "").trim();
+      if (!token) {
+        return res.status(400).json({ message: "Missing survey share token" });
+      }
+      const survey = await industrialIntelService.getSurveyByShareToken(token);
+      if (!survey) {
+        return res.status(404).json({ message: "Industrial intel shared survey not found" });
+      }
+      res.json(survey);
+    } catch (error) {
+      console.error("Error fetching shared industrial intel survey:", error);
+      res.status(500).json({ message: "Failed to fetch shared industrial intel survey" });
+    }
+  });
+
+  app.post("/api/intel/surveys/:id/share", requireAuth, async (req, res) => {
+    try {
+      await ensureIntelActor(req);
+      const token = randomBytes(18).toString("base64url");
+      const survey = await industrialIntelService.updateSurvey(getUserId(req), req.params.id, {
+        status: "shared",
+        shareToken: token,
+      });
+      if (!survey) {
+        return res.status(404).json({ message: "Industrial intel survey not found" });
+      }
+      res.json(survey);
+    } catch (error) {
+      console.error("Error sharing industrial intel survey:", error);
+      res.status(500).json({ message: "Failed to share industrial intel survey" });
+    }
+  });
+
+  app.delete("/api/intel/surveys/:id/share", requireAuth, async (req, res) => {
+    try {
+      await ensureIntelActor(req);
+      const survey = await industrialIntelService.updateSurvey(getUserId(req), req.params.id, {
+        status: "draft",
+        shareToken: null,
+      });
+      if (!survey) {
+        return res.status(404).json({ message: "Industrial intel survey not found" });
+      }
+      res.json(survey);
+    } catch (error) {
+      console.error("Error disabling industrial intel survey share:", error);
+      res.status(500).json({ message: "Failed to disable industrial intel survey share" });
     }
   });
 

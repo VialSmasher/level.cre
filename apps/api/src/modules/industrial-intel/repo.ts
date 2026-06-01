@@ -2064,6 +2064,46 @@ export class IndustrialIntelRepository {
     }
   }
 
+  async getSurveyByShareToken(token: string): Promise<IntelSurveyDetail | null> {
+    try {
+      if (!(await this.hasSurveyTables())) return null;
+
+      const result = await pool.query<{
+        id: string;
+        created_by_user_id: string | null;
+      }>(
+        `
+          SELECT id, created_by_user_id
+          FROM public.intel_surveys
+          WHERE share_token = $1
+            AND status = 'shared'
+          LIMIT 1
+        `,
+        [token],
+      );
+
+      const row = result.rows[0];
+      if (!row?.created_by_user_id) return null;
+
+      const survey = await this.getSurveyById(row.created_by_user_id, row.id);
+      if (!survey) return null;
+
+      return {
+        ...survey,
+        items: survey.items
+          .filter((item) => !item.hidden)
+          .map((item) => ({
+            ...item,
+            brokerNotes: null,
+            hidden: false,
+          })),
+      };
+    } catch (error) {
+      if (isRecoverableIntelSchemaError(error)) return null;
+      throw error;
+    }
+  }
+
   async getSurveyEvents(userId: string, surveyId: string, limit = 30): Promise<IntelSurveyEvent[]> {
     try {
       const survey = await this.getSurveyById(userId, surveyId);

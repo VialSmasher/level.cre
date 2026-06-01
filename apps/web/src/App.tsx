@@ -48,6 +48,9 @@ const IndustrialIntelRequirementsPage = lazy(
 const IndustrialIntelSurveysPage = lazy(
   () => import("./tools/industrial-intel/pages/IndustrialIntelSurveysPage"),
 );
+const IndustrialIntelSurveyClientPage = lazy(
+  () => import("./tools/industrial-intel/pages/IndustrialIntelSurveyClientPage"),
+);
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
@@ -413,6 +416,14 @@ function Router() {
               </Suspense>
             </ToolLayout>
           </ProtectedRoute>
+        </Route>
+      )}
+
+      {INDUSTRIAL_INTEL_ENABLED && (
+        <Route path="/tools/industrial-intel/surveys/share/:token">
+          <Suspense fallback={<Spinner />}>
+            <IndustrialIntelSurveyClientPage />
+          </Suspense>
         </Route>
       )}
 

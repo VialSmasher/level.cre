@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, ExternalLink, Eye, EyeOff, FileText, MapPin, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, Copy, ExternalLink, Eye, EyeOff, FileText, MapPin, Plus, Share2, Trash2 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { getGoogleMapsApiKey, GOOGLE_MAPS_API_KEY_HELP_TEXT } from "@/lib/googleMapsApiKey";
 import { useToast } from "@/hooks/use-toast";
@@ -390,6 +390,40 @@ export default function IndustrialIntelSurveysPage() {
     },
   });
 
+  const shareSurveyMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedSurveyId) throw new Error("No survey selected");
+      const response = await apiRequest("POST", `/api/intel/surveys/${selectedSurveyId}/share`);
+      return response.json() as Promise<IntelSurveyDetail>;
+    },
+    onSuccess: (survey) => {
+      queryClient.setQueryData([`/api/intel/surveys/${survey.id}`], survey);
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/surveys"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/intel/surveys/${survey.id}/events`] });
+      toast({ title: "Client survey link created" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to create share link", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
+  const disableShareMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedSurveyId) throw new Error("No survey selected");
+      const response = await apiRequest("DELETE", `/api/intel/surveys/${selectedSurveyId}/share`);
+      return response.json() as Promise<IntelSurveyDetail>;
+    },
+    onSuccess: (survey) => {
+      queryClient.setQueryData([`/api/intel/surveys/${survey.id}`], survey);
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/surveys"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/intel/surveys/${survey.id}/events`] });
+      toast({ title: "Client survey link disabled" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to disable share link", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
   const addShortlist = () => {
     const missing = shortlistedListingIds.filter((listingId) => !selectedListingIds.has(listingId));
     if (missing.length === 0) {
@@ -412,6 +446,20 @@ export default function IndustrialIntelSurveysPage() {
   };
 
   const canCreateSurvey = createForm.title.trim().length > 0 && !createSurveyMutation.isPending;
+
+  const shareUrl = selectedSurvey?.shareToken
+    ? `${window.location.origin}/tools/industrial-intel/surveys/share/${selectedSurvey.shareToken}`
+    : null;
+
+  const copyShareUrl = async () => {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      toast({ title: "Client survey link copied" });
+    } catch {
+      toast({ title: "Copy failed", description: shareUrl, variant: "destructive" });
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -550,11 +598,49 @@ export default function IndustrialIntelSurveysPage() {
                         {selectedSurvey.requirementTitle ? ` - ${selectedSurvey.requirementTitle}` : ""}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Button type="button" variant="outline" size="sm" className="gap-2" onClick={focusPreview}>
                         <MapPin className="h-4 w-4" />
                         Preview map
                       </Button>
+                      {shareUrl ? (
+                        <>
+                          <Button type="button" variant="outline" size="sm" className="gap-2" onClick={copyShareUrl}>
+                            <Copy className="h-4 w-4" />
+                            Copy link
+                          </Button>
+                          <a
+                            href={shareUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-50"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                            Open client view
+                          </a>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => disableShareMutation.mutate()}
+                            disabled={disableShareMutation.isPending}
+                          >
+                            Disable link
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="gap-2"
+                          onClick={() => shareSurveyMutation.mutate()}
+                          disabled={shareSurveyMutation.isPending || visibleItems.length === 0}
+                        >
+                          <Share2 className="h-4 w-4" />
+                          Create client link
+                        </Button>
+                      )}
                       <Badge className="bg-slate-950 text-white">{selectedSurvey.status}</Badge>
                     </div>
                   </div>

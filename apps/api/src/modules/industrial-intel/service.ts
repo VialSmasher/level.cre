@@ -145,6 +145,10 @@ export class IndustrialIntelService {
     return industrialIntelRepository.getSurveyById(userId, id);
   }
 
+  async getSurveyByShareToken(token: string): Promise<IntelSurveyDetail | null> {
+    return industrialIntelRepository.getSurveyByShareToken(token);
+  }
+
   async getSurveyEvents(userId: string, surveyId: string): Promise<IntelSurveyEvent[]> {
     return industrialIntelRepository.getSurveyEvents(userId, surveyId);
   }
