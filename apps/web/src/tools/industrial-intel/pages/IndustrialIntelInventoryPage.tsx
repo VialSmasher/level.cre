@@ -51,6 +51,8 @@ type UploadListingRecord = {
   listingType: string | null;
   assetType: string | null;
   recordKeySuffix: string | null;
+  lat: number | null;
+  lng: number | null;
   availableSf: number | null;
   landAcres: number | null;
   totalPrice: number | null;
@@ -159,6 +161,8 @@ function buildUploadRecord(row: Record<string, unknown>, index: number): UploadL
     listingType: (listingType || inferUploadListingType(rowText))?.toLowerCase() || null,
     assetType: (assetType || inferUploadAssetType(rowText)).toLowerCase(),
     recordKeySuffix: readUploadValue(row, ["id", "listing id", "mls", "record id", "propertyid", "property id"]) || null,
+    lat: parseUploadNumber(readUploadValue(row, ["lat", "latitude", "y", "map latitude"])),
+    lng: parseUploadNumber(readUploadValue(row, ["lng", "lon", "long", "longitude", "x", "map longitude"])),
     availableSf: parseUploadNumber(readUploadValue(row, [
       "available sf",
       "sf",
@@ -231,11 +235,25 @@ function IndustrialIntelListingMap({
             Loading map...
           </div>
         ) : mappableListings.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
-            <p className="text-base font-medium text-slate-900">No mapped listings yet</p>
-            <p className="mt-2 text-sm text-slate-600">
-              This first slice is wired. As soon as listing records expose latitude and longitude, filtered listings will render here automatically.
-            </p>
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-8 text-center">
+              <p className="text-base font-medium text-slate-900">Coordinates needed</p>
+              <p className="mt-2 text-sm text-slate-600">
+                Import latitude and longitude columns, or run geocoding later, and these listings will render here automatically.
+              </p>
+            </div>
+            {selectedListing && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Selected listing</p>
+                <p className="mt-2 font-semibold text-slate-950">{selectedListing.title}</p>
+                <p className="mt-1 text-sm text-slate-600">{selectedListing.address || "Address still needs review"}</p>
+                <div className="mt-3 grid gap-2 text-sm text-slate-600">
+                  <p><span className="font-medium text-slate-900">Source:</span> {selectedListing.sourceName || "Unknown"}</p>
+                  <p><span className="font-medium text-slate-900">Area:</span> {selectedListing.submarket || selectedListing.market || "Unassigned"}</p>
+                  <p><span className="font-medium text-slate-900">Size:</span> {formatListingSize(selectedListing)}</p>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-4">
@@ -394,6 +412,8 @@ export default function IndustrialIntelInventoryPage() {
         landAcres: form.landAcres ? Number(form.landAcres) : null,
         totalPrice: form.totalPrice ? Number(form.totalPrice) : null,
         pricePerAcre: form.pricePerAcre ? Number(form.pricePerAcre) : null,
+        lat: null,
+        lng: null,
       });
       return response.json();
     },

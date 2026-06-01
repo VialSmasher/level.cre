@@ -129,14 +129,6 @@ export default function IndustrialIntelHomePage() {
             touching the live Tool A workflow.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => runSourceMutation.mutate("cwedm")}
-          disabled={runSourceMutation.isPending}
-          className="w-fit rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {runSourceMutation.isPending ? "Refreshing..." : "Refresh CW EDM"}
-        </button>
       </section>
 
       {runSourceMutation.isError && (
@@ -227,7 +219,7 @@ export default function IndustrialIntelHomePage() {
               <p className="text-sm text-slate-500">Loading sources...</p>
             ) : sources.length === 0 ? (
               <p className="text-sm text-slate-500">
-                No sources configured yet. Use Refresh CW EDM to create the first source and run the first ingest.
+                No sources configured yet. Add an intake source or run an available adapter to start tracking inventory.
               </p>
             ) : (
               <div className="space-y-3">

@@ -47,6 +47,8 @@ const intelManualListingSchema = z.object({
   listingType: z.string().trim().min(1).nullable().optional(),
   assetType: z.string().trim().min(1).nullable().optional(),
   recordKeySuffix: z.string().trim().min(1).nullable().optional(),
+  lat: z.number().min(-90).max(90).nullable().optional(),
+  lng: z.number().min(-180).max(180).nullable().optional(),
   availableSf: z.number().int().nonnegative().nullable().optional(),
   landAcres: z.number().nonnegative().nullable().optional(),
   totalPrice: z.number().nonnegative().nullable().optional(),

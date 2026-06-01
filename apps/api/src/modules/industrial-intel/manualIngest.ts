@@ -13,6 +13,8 @@ export type ManualIntelListingInput = {
   listingType?: string | null;
   assetType?: string | null;
   recordKeySuffix?: string | null;
+  lat?: number | null;
+  lng?: number | null;
   availableSf?: number | null;
   landAcres?: number | null;
   totalPrice?: number | null;
@@ -85,8 +87,8 @@ function normalizeManualRecord(input: ManualIntelListingInput, sourceRecordKey: 
     address: input.address ?? null,
     market: input.market ?? null,
     submarket: input.submarket ?? null,
-    lat: null,
-    lng: null,
+    lat: input.lat ?? null,
+    lng: input.lng ?? null,
     availableSf: input.availableSf ?? null,
     landAcres: input.landAcres ?? null,
     totalPrice: input.totalPrice ?? null,
@@ -104,6 +106,8 @@ function normalizeManualRecord(input: ManualIntelListingInput, sourceRecordKey: 
       address: input.address ?? null,
       market: input.market ?? null,
       submarket: input.submarket ?? null,
+      lat: input.lat ?? null,
+      lng: input.lng ?? null,
       listingType: input.listingType || 'lease',
       assetType: input.assetType || 'building',
       availableSf: input.availableSf ?? null,
