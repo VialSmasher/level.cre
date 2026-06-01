@@ -360,8 +360,8 @@ export default function WorkspacesIndex() {
             <Briefcase className="h-3.5 w-3.5" />
             Workspace library
           </Badge>
-          <h1 className="text-3xl font-bold text-slate-950">Workspaces</h1>
-          <p className="mt-1 text-sm text-slate-600">Organize pursuit maps, shared prospect sets, and client-specific canvassing work.</p>
+          <h1 className="text-4xl font-bold tracking-tight text-slate-950">Workspace command center</h1>
+          <p className="mt-2 max-w-2xl text-sm text-slate-600">Organize pursuit maps, shared prospect sets, and client-specific canvassing work.</p>
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -380,7 +380,7 @@ export default function WorkspacesIndex() {
         <Card className="border-slate-200 bg-white shadow-sm">
           <CardContent className="flex items-center justify-between p-5">
             <div>
-              <p className="text-sm font-medium text-slate-600">Owned workspaces</p>
+              <p className="text-sm font-medium text-slate-600">My workspaces</p>
               <p className="mt-1 text-3xl font-bold text-slate-950">{listings.length}</p>
             </div>
             <div className="rounded-xl bg-blue-50 p-2 text-blue-600">
@@ -391,7 +391,7 @@ export default function WorkspacesIndex() {
         <Card className="border-slate-200 bg-white shadow-sm">
           <CardContent className="flex items-center justify-between p-5">
             <div>
-              <p className="text-sm font-medium text-slate-600">Owned prospects</p>
+              <p className="text-sm font-medium text-slate-600">My prospects</p>
               <p className="mt-1 text-3xl font-bold text-slate-950">{totalOwnedProspects}</p>
             </div>
             <div className="rounded-xl bg-emerald-50 p-2 text-emerald-600">
@@ -424,7 +424,7 @@ export default function WorkspacesIndex() {
           <div className="flex items-end justify-between">
             <div>
               <h2 className="text-xl font-bold text-slate-950">My workspaces</h2>
-              <p className="text-sm text-slate-600">Client maps and prospecting boards you own.</p>
+              <p className="text-sm text-slate-600">Client maps and prospecting boards ready to work.</p>
             </div>
             <Badge variant="outline" className="rounded-full bg-white">{listings.length}</Badge>
           </div>
@@ -435,7 +435,7 @@ export default function WorkspacesIndex() {
                 <CardTitle>No workspaces yet</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-slate-600">Create your first workspace to start scoping prospects.</p>
+                <p className="text-sm text-slate-600">Create a workspace for a pursuit, client, territory, or listing assignment.</p>
               </CardContent>
             </Card>
           )}
@@ -462,7 +462,7 @@ export default function WorkspacesIndex() {
           <div className="flex items-end justify-between">
             <div>
               <h2 className="text-xl font-bold text-slate-950">Shared with me</h2>
-              <p className="text-sm text-slate-600">Workspaces where you have collaborator access.</p>
+              <p className="text-sm text-slate-600">Pursuits and prospect boards other brokers have shared with you.</p>
             </div>
             <Badge variant="outline" className="rounded-full bg-white">{shared.length}</Badge>
           </div>

@@ -185,7 +185,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 <DropdownMenuItem asChild>
                   <Link href="/launcher" className="w-full">
                     <Layers className="mr-2 h-4 w-4" />
-                    Switch Tools
+                    Broker tools
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>

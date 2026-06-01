@@ -149,7 +149,7 @@ export default function IndustrialIntelHomePage() {
           </span>
           <h2 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">Industrial inventory pulse</h2>
           <p className="mt-2 max-w-3xl text-sm text-slate-600">
-            Watch broker and landlord inventory, review source health, and route clean listings into matching without touching live Tool A records.
+            Watch broker and landlord inventory, review source health, and route clean listings into matching without touching live CRM records.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

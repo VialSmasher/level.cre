@@ -24,7 +24,7 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
               <Database className="h-5 w-5" />
             </span>
             <span>
-              <span className="block text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Tool B</span>
+              <span className="block text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Inventory intelligence</span>
               <span className="block text-lg font-semibold leading-tight text-slate-950 group-hover:text-blue-700">Industrial Intel</span>
             </span>
           </Link>
@@ -59,13 +59,13 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
               className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:border-blue-200 hover:text-blue-700"
             >
               <Home className="h-4 w-4" />
-              Launcher
+              Tools
             </Link>
             <Link
               href="/app"
               className="inline-flex h-10 items-center gap-2 rounded-full bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
             >
-              Tool A
+              Level CRE
               <ArrowUpRight className="h-4 w-4" />
             </Link>
           </div>

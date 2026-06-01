@@ -165,7 +165,7 @@ export default function IndustrialIntelRequirementsPage() {
           </span>
           <h2 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">Requirements workbench</h2>
           <p className="mt-2 max-w-3xl text-sm text-slate-600">
-            Capture clean tenant and buyer demand so Tool B can score inventory, flag gaps, and prepare client-ready shortlists.
+            Capture clean tenant and buyer demand so Industrial Intel can score inventory, flag gaps, and prepare client-ready shortlists.
           </p>
         </div>
         <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600 shadow-sm">
@@ -325,7 +325,7 @@ export default function IndustrialIntelRequirementsPage() {
               <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
                 <p className="text-base font-medium text-slate-900">No saved requirements yet</p>
                 <p className="mt-2 text-sm text-slate-600">
-                  Your saved requirements will appear here. Start with one clear requirement, then the next Tool B slice can score listings against it.
+                  Your saved requirements will appear here. Start with one clear requirement, then Industrial Intel can score listings against it.
                 </p>
               </div>
             ) : (

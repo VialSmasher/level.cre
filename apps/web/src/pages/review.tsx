@@ -262,14 +262,14 @@ export default function ReviewPage() {
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
               <Bot className="h-3.5 w-3.5" />
-              Tool A Review Console
+              Level CRE Review Console
             </div>
             <div className="space-y-2">
               <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
                 See what a clawbot would flag before it touches anything
               </h1>
               <p className="max-w-3xl text-sm leading-6 text-slate-600">
-                This is a read-only review surface over Tool A. It uses the same deterministic follow-up and data-quality
+                This is a read-only review surface over Level CRE. It uses the same deterministic follow-up and data-quality
                 logic your bots can call, so we can validate the signal before we automate any edits.
               </p>
             </div>

@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Edit, Trash2, Tag, Building, Users, Clock, MapPin } from "lucide-react";
+import { Plus, Edit, Trash2, Tag, Building, Users, Clock, MapPin, ClipboardList, Search, Sparkles } from "lucide-react";
 import { Requirement, InsertRequirement, Submarket } from "@level-cre/shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import { uniqueSubmarketNames } from "@/lib/submarkets";
@@ -281,22 +281,30 @@ export default function RequirementsPage() {
   });
 
   const uniqueSources = Array.from(new Set(requirements.map(req => req.source).filter(Boolean)));
+  const activeCount = requirements.filter(req => req.status === 'active').length;
+  const fulfilledCount = requirements.filter(req => req.status === 'fulfilled').length;
+  const sourceCount = uniqueSources.length;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
+    <div className="min-h-screen bg-slate-50 px-6 py-8 dark:bg-gray-900">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Requirements</h1>
-            <p className="text-gray-600 dark:text-gray-300 mt-2">
-              Track market intelligence from brokerages and direct clients
+            <Badge variant="outline" className="mb-2 gap-2 rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
+              <ClipboardList className="h-3.5 w-3.5" />
+              Tenant and buyer demand
+            </Badge>
+            <h1 className="text-4xl font-bold tracking-tight text-slate-950 dark:text-white">Requirements board</h1>
+            <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-gray-300">
+              Track active needs, source relationships, and structured search criteria for future matching.
             </p>
           </div>
           
           <Modal open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <ModalTrigger asChild>
-              <Button onClick={resetForm} size="icon" aria-label="Add Requirement" title="Add Requirement">
-                <Plus className="h-4 w-4" />
+              <Button onClick={resetForm} className="h-10 rounded-full px-4" aria-label="Add Requirement" title="Add Requirement">
+                <Plus className="mr-2 h-4 w-4" />
+                New requirement
               </Button>
             </ModalTrigger>
             <ModalContent className="max-w-md">
@@ -444,53 +452,106 @@ export default function RequirementsPage() {
           </Modal>
         </div>
 
-        {/* Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <Input
-            placeholder="Search requirements..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-          
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="fulfilled">Fulfilled</SelectItem>
-              <SelectItem value="expired">Expired</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Select value={filterSource} onValueChange={setFilterSource}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Sources</SelectItem>
-              {uniqueSources.map(source => (
-                <SelectItem key={source} value={source!}>{source}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card className="border-slate-200 bg-white shadow-sm">
+            <CardContent className="flex items-center justify-between p-5">
+              <div>
+                <p className="text-sm font-medium text-slate-600">Total requirements</p>
+                <p className="mt-1 text-3xl font-bold text-slate-950">{requirements.length}</p>
+              </div>
+              <div className="rounded-xl bg-blue-50 p-2 text-blue-600">
+                <ClipboardList className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-slate-200 bg-white shadow-sm">
+            <CardContent className="flex items-center justify-between p-5">
+              <div>
+                <p className="text-sm font-medium text-slate-600">Active</p>
+                <p className="mt-1 text-3xl font-bold text-slate-950">{activeCount}</p>
+              </div>
+              <div className="rounded-xl bg-emerald-50 p-2 text-emerald-600">
+                <Sparkles className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-slate-200 bg-white shadow-sm">
+            <CardContent className="flex items-center justify-between p-5">
+              <div>
+                <p className="text-sm font-medium text-slate-600">Fulfilled</p>
+                <p className="mt-1 text-3xl font-bold text-slate-950">{fulfilledCount}</p>
+              </div>
+              <div className="rounded-xl bg-violet-50 p-2 text-violet-600">
+                <Building className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-slate-200 bg-white shadow-sm">
+            <CardContent className="flex items-center justify-between p-5">
+              <div>
+                <p className="text-sm font-medium text-slate-600">Sources</p>
+                <p className="mt-1 text-3xl font-bold text-slate-950">{sourceCount}</p>
+              </div>
+              <div className="rounded-xl bg-amber-50 p-2 text-amber-600">
+                <Users className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
+        {/* Filters */}
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardContent className="grid gap-3 p-4 md:grid-cols-[minmax(260px,1fr)_220px_220px]">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                className="pl-9"
+                placeholder="Search requirements, contacts, or submarkets"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+          
+            <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="fulfilled">Fulfilled</SelectItem>
+                <SelectItem value="expired">Expired</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={filterSource} onValueChange={setFilterSource}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All sources</SelectItem>
+                {uniqueSources.map(source => (
+                  <SelectItem key={source} value={source!}>{source}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </CardContent>
+        </Card>
+
         {/* Requirements List */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {isLoading ? (
-            <div className="col-span-full text-center py-8">Loading requirements...</div>
+            <div className="col-span-full rounded-2xl bg-white p-8 text-center text-sm text-slate-500 shadow-sm">Loading requirements...</div>
           ) : filteredRequirements.length === 0 ? (
-            <div className="col-span-full text-center py-8 text-gray-500 dark:text-gray-400">
-              No requirements found. Add your first requirement to get started.
+            <div className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+              No requirements found. Add a requirement or loosen the filters.
             </div>
           ) : (
             filteredRequirements.map((requirement) => (
-              <Card key={requirement.id} className="hover:shadow-lg transition-shadow">
+              <Card key={requirement.id} className="border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md">
                 <CardHeader className="pb-3">
                   <div className="flex justify-between items-start">
-                    <CardTitle className="text-lg">{requirement.title}</CardTitle>
+                    <CardTitle className="text-lg leading-tight text-slate-950">{requirement.title}</CardTitle>
                     <div className="flex gap-1">
                       <Button
                         variant="ghost"

@@ -947,7 +947,7 @@ export default function IndustrialIntelInventoryPage() {
                 disabled={manualIngestMutation.isPending || !form.sourceUrl || !form.title}
                 className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {manualIngestMutation.isPending ? "Saving..." : "Save to Tool B"}
+              {manualIngestMutation.isPending ? "Saving..." : "Save listing"}
               </button>
               <p className="text-sm text-slate-500">
                 Review any autofilled values before saving. Use the record key suffix when one source URL intentionally needs separate sale and lease entries.

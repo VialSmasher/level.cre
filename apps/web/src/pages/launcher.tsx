@@ -1,5 +1,5 @@
 import { Link } from 'wouter'
-import { ArrowRight, ChartSpline, Lock, Map, Search } from 'lucide-react'
+import { ArrowRight, BriefcaseBusiness, ChartSpline, Lock, Map, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -13,29 +13,35 @@ export default function LauncherPage() {
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="mx-auto flex max-w-6xl flex-col gap-8 px-6 py-10">
-        <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-            Launcher
-          </p>
-          <div className="flex items-center gap-2 text-3xl font-black tracking-tight text-slate-950">
-            <span>level CRE</span>
-            <ChartSpline size={24} className="-mt-px" />
-          </div>
-          <div className="max-w-2xl space-y-2">
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-              Choose your workspace
-            </h1>
-            <p className="text-base text-slate-600">
-              Keep Tool A as the main operating system, and open Industrial Intel when you want market inventory and change tracking.
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div className="space-y-3">
+            <p className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">
+              <BriefcaseBusiness className="h-3.5 w-3.5" />
+              Broker tools
             </p>
+            <div className="flex items-center gap-2 text-3xl font-black tracking-tight text-slate-950">
+              <span>level CRE</span>
+              <ChartSpline size={24} className="-mt-px" />
+            </div>
+            <div className="max-w-2xl space-y-2">
+              <h1 className="text-4xl font-semibold tracking-tight text-slate-950">
+                Choose the broker workflow you need.
+              </h1>
+              <p className="text-base text-slate-600">
+                Level CRE is the live CRM and map operating system. Industrial Intel tracks outside inventory and listing movement for matching.
+              </p>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600 shadow-sm">
+            Built to grow into a toolbox for broker workflows.
           </div>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <section className="rounded-3xl border border-blue-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Tool A</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-600">CRM + map OS</p>
                 <h2 className="mt-2 text-2xl font-semibold text-slate-950">Level CRE</h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
                   CRM, map, workspace, follow-up, requirements, and broker workflow.
@@ -46,9 +52,9 @@ export default function LauncherPage() {
               </div>
             </div>
             <ul className="mb-6 space-y-2 text-sm text-slate-600">
-              <li>• Map-driven prospecting and market workflow</li>
-              <li>• Existing day-to-day operating flow</li>
-              <li>• Stable default experience</li>
+              <li>Map-driven prospecting and market workflow</li>
+              <li>Daily follow-up, activity, and workspace execution</li>
+              <li>Best place to move active relationships forward</li>
             </ul>
             <Button asChild className="bg-blue-600 text-white hover:bg-blue-700">
               <Link href="/app">
@@ -61,7 +67,7 @@ export default function LauncherPage() {
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Tool B</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Inventory intelligence</p>
                 <h2 className="mt-2 text-2xl font-semibold text-slate-950">Industrial Intel</h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
                   External inventory, listing changes, and the foundation for matching and shortlist workflows.
@@ -84,7 +90,7 @@ export default function LauncherPage() {
                     <div>
                       <p className="font-medium">Industrial Intel is not available in demo mode.</p>
                       <p className="mt-1 text-amber-800">
-                        Use Google sign-in for the real Tool B flow. Demo remains a safe Tool A sandbox.
+                        Use Google sign-in for the real Industrial Intel flow. Demo remains a safe Level CRE sandbox.
                       </p>
                     </div>
                   </div>
@@ -96,9 +102,9 @@ export default function LauncherPage() {
             ) : (
               <div className="space-y-4">
                 <ul className="space-y-2 text-sm text-slate-600">
-                  <li>• Listing summary, runs, and changes</li>
-                  <li>• Read-only inventory slice today</li>
-                  <li>• Ready to grow into requirements and shortlist workflows</li>
+                  <li>Listing summary, source runs, and changes</li>
+                  <li>CSV intake for CoStar-style exports</li>
+                  <li>Ready to grow into surveys and shortlist workflows</li>
                 </ul>
                 <div className="flex flex-wrap gap-3">
                   <Button asChild className="bg-slate-950 text-white hover:bg-slate-800">

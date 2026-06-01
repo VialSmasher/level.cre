@@ -221,9 +221,9 @@ export default function Landing() {
                     onMouseEnter={prefetchApp}
                     onClick={() => setLocation('/launcher')}
                     className="group h-8 px-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-sm focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 w-auto self-start"
-                    aria-label="Continue to launcher"
+                    aria-label="Continue to broker tools"
                   >
-                    Continue to Launcher
+                    Continue to broker tools
                     <ArrowRight className="w-3 h-3 ml-2 group-hover:translate-x-1 transition-transform" />
                   </Button>
                   <div className="text-xs text-slate-600">Signed in as {user.email}</div>
@@ -264,7 +264,7 @@ export default function Landing() {
                       disabled={isSigningIn || isDemoMode}
                       className="group px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-sm disabled:opacity-50 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 w-auto"
                       aria-label="Try Level CRE Demo"
-                      title="Open the Tool A demo"
+                      title="Open the Level CRE demo"
                     >
                       {isDemoMode ? (
                         <>
@@ -280,7 +280,7 @@ export default function Landing() {
                     </Button>
                   </div>
                   <p className="text-xs text-slate-600 mt-2 text-center">
-                    Demo is for Level CRE only. Use Google sign-in for Industrial Intel.
+                    Demo opens the Level CRE CRM sandbox. Use Google sign-in for the full broker toolbox.
                   </p>
                 </>
               )}
@@ -298,7 +298,7 @@ export default function Landing() {
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-green-500" />
-                Demo is a Tool A sandbox
+                Demo is a Level CRE sandbox
               </div>
             </div>
 
