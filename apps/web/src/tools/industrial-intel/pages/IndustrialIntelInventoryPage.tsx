@@ -758,6 +758,7 @@ export default function IndustrialIntelInventoryPage() {
       if (selectedListing) {
         queryClient.invalidateQueries({ queryKey: [`/api/intel/listings/${selectedListing.id}/public-links`] });
       }
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/listings"] });
     },
     onError: (error: any) => {
       toast({

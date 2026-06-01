@@ -1263,6 +1263,35 @@ export class IndustrialIntelRepository {
     const row = result.rows[0];
     if (!row) return null;
 
+    if (status === "approved") {
+      await pool.query(
+        `
+          UPDATE public.intel_listing_public_link_candidates
+          SET status = 'pending', updated_at = now()
+          WHERE listing_id = $1
+            AND id <> $2
+            AND status = 'approved'
+        `,
+        [listingId, candidateId],
+      );
+
+      await pool.query(
+        `
+          UPDATE public.intel_listings
+          SET
+            source_url = $2,
+            brochure_url = CASE
+              WHEN lower($2::text) LIKE '%.pdf%' OR lower($2::text) LIKE '%brochure%' OR lower($2::text) LIKE '%flyer%'
+                THEN $2
+              ELSE brochure_url
+            END,
+            updated_at = now()
+          WHERE id = $1
+        `,
+        [listingId, row.candidate_url],
+      );
+    }
+
     return {
       id: row.id,
       listingId: row.listing_id,

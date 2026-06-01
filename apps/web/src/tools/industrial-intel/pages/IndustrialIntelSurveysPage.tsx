@@ -581,6 +581,10 @@ export default function IndustrialIntelSurveysPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: publicLinksQueryKey });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/listings"] });
+      if (selectedSurveyId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/intel/surveys/${selectedSurveyId}`] });
+      }
     },
     onError: (error: any) => {
       toast({ title: "Public link update failed", description: error?.message || "Please try again.", variant: "destructive" });
