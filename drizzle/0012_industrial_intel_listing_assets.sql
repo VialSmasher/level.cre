@@ -34,3 +34,5 @@ CREATE INDEX IF NOT EXISTS idx_intel_listing_assets_survey_item
 
 CREATE INDEX IF NOT EXISTS idx_intel_listing_assets_status
   ON public.intel_listing_assets (status);
+
+ALTER TABLE public.intel_listing_assets ENABLE ROW LEVEL SECURITY;
