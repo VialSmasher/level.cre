@@ -76,7 +76,9 @@ export class IndustrialIntelService {
   async runSource(userId: string, sourceSlug: string) {
     return runIndustrialIntelSource(sourceSlug, {
       triggerType: "manual_ui",
-      initiatedByUserId: userId,
+      // Supabase auth users are not guaranteed to exist in public.users yet.
+      // Keep source refreshes reliable until we add a proper Tool B audit actor model.
+      initiatedByUserId: null,
     });
   }
 }

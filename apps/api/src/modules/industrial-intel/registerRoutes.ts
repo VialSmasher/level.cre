@@ -114,7 +114,10 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       res.status(202).json(result);
     } catch (error) {
       console.error("Error running industrial intel source:", error);
-      res.status(500).json({ message: "Failed to run industrial intel source" });
+      res.status(500).json({
+        message: "Failed to run industrial intel source",
+        detail: String((error as Error)?.message || error || "Unknown source run failure"),
+      });
     }
   });
 

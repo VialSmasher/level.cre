@@ -67,6 +67,20 @@ function statusClassName(value: string) {
   return "bg-emerald-100 text-emerald-700";
 }
 
+function formatMutationError(error: unknown) {
+  const raw = String((error as Error)?.message || error || "Unknown source refresh error");
+  const jsonStart = raw.indexOf("{");
+  if (jsonStart >= 0) {
+    try {
+      const parsed = JSON.parse(raw.slice(jsonStart));
+      return parsed.detail || parsed.message || raw;
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
 export default function IndustrialIntelHomePage() {
   const queryClient = useQueryClient();
   const { data: summary, isLoading: summaryLoading } = useQuery<IntelSummary>({
@@ -92,6 +106,9 @@ export default function IndustrialIntelHomePage() {
       queryClient.invalidateQueries({ queryKey: ["/api/intel/runs"] });
       queryClient.invalidateQueries({ queryKey: ["/api/intel/changes"] });
       queryClient.invalidateQueries({ queryKey: ["/api/intel/listings"] });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/runs"] });
     },
   });
 
@@ -124,7 +141,7 @@ export default function IndustrialIntelHomePage() {
 
       {runSourceMutation.isError && (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          Source refresh failed. The failed run is logged so it can be reviewed.
+          Source refresh failed: {formatMutationError(runSourceMutation.error)}
         </div>
       )}
 
