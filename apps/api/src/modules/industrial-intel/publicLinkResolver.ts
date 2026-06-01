@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import jwt from "jsonwebtoken";
 import type { IntelListingListItem, UpsertIntelPublicLinkCandidateInput } from "./repo";
 
 const TRUSTED_DOMAINS = [
@@ -19,6 +21,40 @@ type GoogleSearchItem = {
 
 type GoogleSearchResponse = {
   items?: GoogleSearchItem[];
+  error?: {
+    message?: string;
+  };
+};
+
+type ResolverProviderName = "vertex" | "google";
+
+type VertexServiceAccount = {
+  client_email?: string;
+  private_key?: string;
+};
+
+type VertexTokenResponse = {
+  access_token?: string;
+  error?: string;
+  error_description?: string;
+};
+
+type VertexGroundingChunk = {
+  web?: {
+    uri?: string;
+    title?: string;
+  };
+};
+
+type VertexGenerateContentResponse = {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{ text?: string }>;
+    };
+    groundingMetadata?: {
+      groundingChunks?: VertexGroundingChunk[];
+    };
+  }>;
   error?: {
     message?: string;
   };
@@ -116,6 +152,28 @@ function buildQueries(listing: IntelListingListItem) {
   return Array.from(new Set(queries.map((query) => query.trim()).filter(Boolean))).slice(0, 10);
 }
 
+function buildVertexPrompt(listing: IntelListingListItem) {
+  const address = listing.normalizedAddress || listing.address || "";
+  const city = inferCity(listing);
+  const trustedDomains = TRUSTED_DOMAINS.join(", ");
+  return [
+    "Find public commercial real estate listing URLs for this imported industrial listing.",
+    "Prioritize broker or landlord public listing pages, flyer pages, and brochure landing pages.",
+    "Return only valid URLs from likely public sources. Do not include generic home pages, map links, or unrelated listings.",
+    `Trusted domains: ${trustedDomains}. LoopNet is acceptable only when the listing match is straightforward.`,
+    "Respond as JSON only with this shape:",
+    '{"candidates":[{"url":"https://...","title":"...","snippet":"why this appears to match"}]}',
+    "",
+    `Listing title: ${listing.title}`,
+    `Address: ${address || "unknown"}`,
+    `City/market: ${city || listing.market || "unknown"}`,
+    `Submarket: ${listing.submarket || "unknown"}`,
+    `Listing type: ${listing.listingType}`,
+    `Asset type: ${listing.assetType}`,
+    `Size: ${listing.availableSf ? `${listing.availableSf} SF` : listing.landAcres ? `${listing.landAcres} acres` : "unknown"}`,
+  ].join("\n");
+}
+
 function scoreCandidate(listing: IntelListingListItem, candidate: GoogleSearchItem) {
   const url = normalizeUrl(candidate.link || "");
   const domain = domainFromUrl(url, candidate.displayLink);
@@ -151,50 +209,239 @@ async function runGoogleSearch(query: string, apiKey: string, cx: string): Promi
   return data.items || [];
 }
 
+function getVertexServiceAccount(): VertexServiceAccount | null {
+  const rawJson = process.env.VERTEX_AI_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+  if (rawJson) {
+    return JSON.parse(rawJson) as VertexServiceAccount;
+  }
+
+  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (credentialsPath) {
+    return JSON.parse(readFileSync(credentialsPath, "utf8")) as VertexServiceAccount;
+  }
+
+  return null;
+}
+
+function isVertexConfigured() {
+  if (process.env.VERTEX_AI_ACCESS_TOKEN) return true;
+  if (!(process.env.GOOGLE_CLOUD_PROJECT || process.env.VERTEX_AI_PROJECT_ID)) return false;
+  try {
+    return Boolean(getVertexServiceAccount());
+  } catch {
+    return false;
+  }
+}
+
+async function getVertexAccessToken() {
+  if (process.env.VERTEX_AI_ACCESS_TOKEN) return process.env.VERTEX_AI_ACCESS_TOKEN;
+
+  const serviceAccount = getVertexServiceAccount();
+  if (!serviceAccount?.client_email || !serviceAccount.private_key) {
+    throw new Error("Vertex AI resolver requires VERTEX_AI_ACCESS_TOKEN, GOOGLE_APPLICATION_CREDENTIALS, or VERTEX_AI_SERVICE_ACCOUNT_JSON.");
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const assertion = jwt.sign(
+    {
+      iss: serviceAccount.client_email,
+      scope: "https://www.googleapis.com/auth/cloud-platform",
+      aud: "https://oauth2.googleapis.com/token",
+      iat: now,
+      exp: now + 3600,
+    },
+    serviceAccount.private_key,
+    { algorithm: "RS256" },
+  );
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion,
+    }),
+  });
+  const data = (await response.json()) as VertexTokenResponse;
+  if (!response.ok || !data.access_token) {
+    throw new Error(data.error_description || data.error || `Vertex token request failed with ${response.status}`);
+  }
+
+  return data.access_token;
+}
+
+function parseVertexJsonCandidates(text: string): GoogleSearchItem[] {
+  const trimmed = text.trim();
+  const jsonText = trimmed.match(/```json\s*([\s\S]*?)```/i)?.[1] || trimmed.match(/```\s*([\s\S]*?)```/i)?.[1] || trimmed;
+  try {
+    const parsed = JSON.parse(jsonText) as {
+      candidates?: Array<{ url?: string; title?: string; snippet?: string }>;
+    };
+    return (parsed.candidates || [])
+      .filter((candidate) => candidate.url)
+      .map((candidate) => ({
+        link: candidate.url,
+        title: candidate.title,
+        snippet: candidate.snippet,
+        displayLink: candidate.url ? domainFromUrl(candidate.url) : undefined,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+async function runVertexGroundedSearch(listing: IntelListingListItem): Promise<GoogleSearchItem[]> {
+  const project = process.env.GOOGLE_CLOUD_PROJECT || process.env.VERTEX_AI_PROJECT_ID;
+  const location = process.env.GOOGLE_CLOUD_LOCATION || process.env.VERTEX_AI_LOCATION || "global";
+  const model = process.env.VERTEX_AI_MODEL || "gemini-2.5-flash";
+  if (!project) {
+    throw new Error("Vertex AI resolver requires GOOGLE_CLOUD_PROJECT or VERTEX_AI_PROJECT_ID.");
+  }
+
+  const accessToken = await getVertexAccessToken();
+  const endpointLocation = location === "global" ? "aiplatform.googleapis.com" : `${location}-aiplatform.googleapis.com`;
+  const endpoint = `https://${endpointLocation}/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:generateContent`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: buildVertexPrompt(listing) }],
+        },
+      ],
+      tools: [{ googleSearch: {} }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 1600,
+      },
+    }),
+  });
+  const data = (await response.json()) as VertexGenerateContentResponse;
+  if (!response.ok) {
+    throw new Error(data.error?.message || `Vertex grounded search failed with ${response.status}`);
+  }
+
+  const byUrl = new Map<string, GoogleSearchItem>();
+  for (const candidate of data.candidates || []) {
+    const text = candidate.content?.parts?.map((part) => part.text || "").join("\n") || "";
+    for (const item of parseVertexJsonCandidates(text)) {
+      if (item.link) byUrl.set(normalizeUrl(item.link), item);
+    }
+    for (const chunk of candidate.groundingMetadata?.groundingChunks || []) {
+      if (!chunk.web?.uri) continue;
+      const url = normalizeUrl(chunk.web.uri);
+      byUrl.set(url, {
+        link: url,
+        title: chunk.web.title,
+        snippet: text.slice(0, 260),
+        displayLink: domainFromUrl(url),
+      });
+    }
+  }
+
+  return Array.from(byUrl.values());
+}
+
+function getConfiguredProviders(): ResolverProviderName[] {
+  const preferred = (process.env.PUBLIC_LINK_RESOLVER_PROVIDER || "auto").toLowerCase();
+  const providers: ResolverProviderName[] = [];
+  const vertexConfigured = isVertexConfigured();
+  const googleConfigured = Boolean(process.env.GOOGLE_SEARCH_API_KEY && process.env.GOOGLE_SEARCH_CX);
+
+  if (preferred === "vertex") {
+    if (vertexConfigured) providers.push("vertex");
+    return providers;
+  }
+  if (preferred === "google") {
+    if (googleConfigured) providers.push("google");
+    return providers;
+  }
+
+  if (vertexConfigured) providers.push("vertex");
+  if (googleConfigured) providers.push("google");
+  return providers;
+}
+
+function toCandidateMap(listing: IntelListingListItem, items: GoogleSearchItem[]) {
+  const byUrl = new Map<string, UpsertIntelPublicLinkCandidateInput>();
+  for (const item of items) {
+    if (!item.link) continue;
+    const candidateUrl = normalizeUrl(item.link);
+    const confidence = scoreCandidate(listing, item);
+    if (confidence < 20) continue;
+    const candidate = {
+      candidateUrl,
+      domain: domainFromUrl(candidateUrl, item.displayLink),
+      title: item.title || null,
+      snippet: item.snippet || null,
+      confidence,
+      source: "resolver" as const,
+    };
+    const existing = byUrl.get(candidateUrl);
+    if (!existing || candidate.confidence > existing.confidence) {
+      byUrl.set(candidateUrl, candidate);
+    }
+  }
+  return byUrl;
+}
+
 export async function resolvePublicLinkCandidates(listing: IntelListingListItem): Promise<PublicLinkResolverResult> {
-  const apiKey = process.env.GOOGLE_SEARCH_API_KEY;
-  const cx = process.env.GOOGLE_SEARCH_CX;
-  if (!apiKey || !cx) {
+  const providers = getConfiguredProviders();
+  if (providers.length === 0) {
     return {
       status: "not_configured",
-      message: "Search provider not configured. Set GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_CX to enable public listing resolution.",
+      message:
+        "Search provider not configured. Set Vertex AI credentials or GOOGLE_SEARCH_API_KEY and GOOGLE_SEARCH_CX to enable public listing resolution.",
       candidates: [],
     };
   }
 
   const queries = buildQueries(listing);
-  const byUrl = new Map<string, UpsertIntelPublicLinkCandidateInput>();
+  const errors: string[] = [];
 
-  for (const query of queries) {
-    const items = await runGoogleSearch(query, apiKey, cx);
-    for (const item of items) {
-      if (!item.link) continue;
-      const candidateUrl = normalizeUrl(item.link);
-      const confidence = scoreCandidate(listing, item);
-      if (confidence < 20) continue;
-      const existing = byUrl.get(candidateUrl);
-      const candidate = {
-        candidateUrl,
-        domain: domainFromUrl(candidateUrl, item.displayLink),
-        title: item.title || null,
-        snippet: item.snippet || null,
-        confidence,
-        source: "resolver" as const,
-      };
-      if (!existing || candidate.confidence > existing.confidence) {
-        byUrl.set(candidateUrl, candidate);
+  for (const provider of providers) {
+    try {
+      const byUrl = new Map<string, UpsertIntelPublicLinkCandidateInput>();
+      if (provider === "vertex") {
+        for (const [url, candidate] of toCandidateMap(listing, await runVertexGroundedSearch(listing))) {
+          byUrl.set(url, candidate);
+        }
+      } else {
+        const apiKey = process.env.GOOGLE_SEARCH_API_KEY;
+        const cx = process.env.GOOGLE_SEARCH_CX;
+        if (!apiKey || !cx) continue;
+        for (const query of queries) {
+          for (const [url, candidate] of toCandidateMap(listing, await runGoogleSearch(query, apiKey, cx))) {
+            const existing = byUrl.get(url);
+            if (!existing || candidate.confidence > existing.confidence) {
+              byUrl.set(url, candidate);
+            }
+          }
+        }
       }
+
+      const candidates = Array.from(byUrl.values())
+        .sort((left, right) => right.confidence - left.confidence)
+        .slice(0, 8);
+
+      return {
+        status: "resolved",
+        message:
+          candidates.length > 0
+            ? `Public link candidates resolved with ${provider}.`
+            : `No candidates found with ${provider}.`,
+        candidates,
+        queries: provider === "google" ? queries : [buildVertexPrompt(listing)],
+      };
+    } catch (error) {
+      errors.push(`${provider}: ${(error as Error)?.message || String(error)}`);
     }
   }
 
-  const candidates = Array.from(byUrl.values())
-    .sort((left, right) => right.confidence - left.confidence)
-    .slice(0, 8);
-
-  return {
-    status: "resolved",
-    message: candidates.length > 0 ? "Public link candidates resolved." : "No candidates found.",
-    candidates,
-    queries,
-  };
+  throw new Error(`Public link resolver failed. ${errors.join(" | ")}`);
 }
