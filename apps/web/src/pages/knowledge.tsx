@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowRight, Building2, Calendar, CheckCircle2, Clock, Mail, MapPin, MessageSquare, Phone, Target, Users, Wrench } from 'lucide-react';
+import { ArrowRight, Building2, Calendar, CheckCircle2, Clock, Mail, MapPin, MessageSquare, Phone, Target, Trophy, Users, Wrench } from 'lucide-react';
 import { Prospect, Submarket } from '@level-cre/shared/schema';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
@@ -16,6 +16,7 @@ import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospectDisplay';
 import { apiRequest } from '@/lib/queryClient';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
+import { readTrackRecordMetrics, TRACK_RECORD_STORAGE_KEY } from '@/lib/trackRecordMetrics';
 
 function getInteractionDate(interaction: any) {
   const parsed = new Date(interaction?.date || interaction?.createdAt || '');
@@ -95,6 +96,10 @@ function optionalNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function formatCompactNumber(value: number) {
+  return Number(value || 0).toLocaleString();
+}
+
 export default function Knowledge() {
   const { user } = useAuth();
   const { profile } = useProfile();
@@ -141,8 +146,25 @@ export default function Knowledge() {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [quickNote, setQuickNote] = useState('');
   const [drawerForm, setDrawerForm] = useState<DrawerForm>(EMPTY_DRAWER_FORM);
+  const [trackRecordMetrics, setTrackRecordMetrics] = useState(() => readTrackRecordMetrics());
   const phoneInputRef = useRef<HTMLInputElement | null>(null);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const refreshTrackRecordMetrics = () => setTrackRecordMetrics(readTrackRecordMetrics());
+    refreshTrackRecordMetrics();
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === TRACK_RECORD_STORAGE_KEY) refreshTrackRecordMetrics();
+    };
+
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('focus', refreshTrackRecordMetrics);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('focus', refreshTrackRecordMetrics);
+    };
+  }, []);
 
   const safeProspects = useMemo(() => Array.isArray(prospects) ? prospects : [], [prospects]);
   const safeInteractions = useMemo(() => Array.isArray(interactions) ? interactions : [], [interactions]);
@@ -542,7 +564,7 @@ export default function Knowledge() {
           })}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Card className="border-slate-200 bg-white shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium text-slate-600">Assets Tracked</CardTitle>
@@ -581,6 +603,25 @@ export default function Knowledge() {
                 <p className="mt-1 text-sm text-slate-500">touched in 60 days</p>
               </div>
               <ProgressRing progress={analytics.freshnessPercent} />
+            </CardContent>
+          </Card>
+
+          <Card className="border-emerald-200 bg-white shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium text-slate-600">Production Pulse</CardTitle>
+              <Trophy className="h-4 w-4 text-emerald-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-slate-950">{formatCompactNumber(trackRecordMetrics.leasedSf)}</div>
+              <p className="mt-1 text-sm text-slate-500">
+                leased / renewed SF from {trackRecordMetrics.leasedDeals + trackRecordMetrics.renewalDeals} deals
+              </p>
+              <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
+                <span>{formatCompactNumber(trackRecordMetrics.totalSf)} total SF</span>
+                <button type="button" className="font-semibold text-emerald-700 hover:text-emerald-800" onClick={() => setLocation('/track-record')}>
+                  Track record
+                </button>
+              </div>
             </CardContent>
           </Card>
         </div>

@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { TRACK_RECORD_STORAGE_KEY, parseTrackRecordNumber } from '@/lib/trackRecordMetrics'
 import {
   Building2,
   CalendarClock,
@@ -53,8 +54,6 @@ type TrackDeal = {
   updatedAt: string
 }
 
-const STORAGE_KEY = 'level-cre.track-record.v1'
-
 type DealImportResult = {
   deals: TrackDeal[]
   skippedRows: number
@@ -83,8 +82,7 @@ const emptyDeal = (): TrackDeal => ({
 })
 
 function parseNumber(value?: string) {
-  const n = Number(String(value || '').replace(/[$,\s]/g, ''))
-  return Number.isFinite(n) ? n : 0
+  return parseTrackRecordNumber(value)
 }
 
 function formatNumber(value?: string | number) {
@@ -329,7 +327,7 @@ export default function TrackRecordPage() {
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY)
+      const raw = localStorage.getItem(TRACK_RECORD_STORAGE_KEY)
       if (raw) setDeals((JSON.parse(raw) as TrackDeal[]).map(normalizeStoredDeal))
     } catch {
       setDeals([])
@@ -337,7 +335,7 @@ export default function TrackRecordPage() {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(deals))
+    localStorage.setItem(TRACK_RECORD_STORAGE_KEY, JSON.stringify(deals))
   }, [deals])
 
   const totals = useMemo(() => {
