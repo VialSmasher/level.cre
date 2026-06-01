@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Papa from 'papaparse'
+import * as XLSX from 'xlsx'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -50,7 +51,7 @@ type TrackDeal = {
 
 const STORAGE_KEY = 'level-cre.track-record.v1'
 
-type CsvImportResult = {
+type DealImportResult = {
   deals: TrackDeal[]
   skippedRows: number
 }
@@ -166,71 +167,98 @@ function inferAssetType(value: string): TrackDeal['assetType'] {
   return 'Other'
 }
 
-function parseTrackRecordCsv(file: File): Promise<CsvImportResult> {
+function parseTrackRecordRows(rows: unknown[][]): DealImportResult {
+  const rawRows = rows.filter((row) => Array.isArray(row) && row.some((cell) => clean(cell)))
+  const headerRowIndex = findHeaderRow(rawRows)
+  if (headerRowIndex < 0) {
+    throw new Error('Could not find a header row. Expected columns like Deal Name, Lot & Plan, Square Feet, or Close Date.')
+  }
+
+  const headers = normalizeCsvRow(rawRows[headerRowIndex]).map(normalizeHeader)
+  const dataRows = rawRows.slice(headerRowIndex + 1).map(normalizeCsvRow)
+  const now = new Date().toISOString()
+  let skippedRows = 0
+
+  const deals = dataRows.flatMap((row) => {
+    const tradeNumber = fieldValue(row, headers, ['Trade #', 'Trade Number', 'Deal #', 'Transaction ID'])
+    const dealName = fieldValue(row, headers, ['Deal Name', 'Name', 'Project', 'Client'])
+    const lotPlan = fieldValue(row, headers, ['Lot & Plan', 'Address', 'Property', 'Property Address', 'Location'])
+    const city = fieldValue(row, headers, ['City', 'Municipality', 'Market'])
+    const closeDate = toIsoDate(fieldValue(row, headers, ['Close Date', 'Closed Date', 'Date', 'Completion Date']))
+    const sellingPrice = fieldValue(row, headers, ['Selling Price', 'Sale Price', 'Price', 'Value', 'Deal Value'])
+    const squareFeet = fieldValue(row, headers, ['Square Feet', 'Square Footage', 'SF', 'Size SF', 'Size'])
+    const acres = fieldValue(row, headers, ['Acres', 'Land Acres'])
+    const propertyType = fieldValue(row, headers, ['Property Type', 'Asset Type', 'Type'])
+    const division = fieldValue(row, headers, ['Division Report', 'Division', 'Report'])
+    const rowText = row.join(' ')
+    const title = dealName || lotPlan
+    const address = [lotPlan, city].filter(Boolean).join(', ')
+
+    if (!title || !address) {
+      skippedRows += 1
+      return []
+    }
+
+    return [{
+      ...emptyDeal(),
+      id: crypto.randomUUID(),
+      sourceId: tradeNumber ? `trade-${tradeNumber}` : undefined,
+      title,
+      address,
+      clientName: dealName && lotPlan ? dealName.replace(/^PL\s*-\s*/i, '') : '',
+      dealType: inferDealType(`${rowText} ${sellingPrice}`),
+      role: inferRole(rowText),
+      assetType: inferAssetType(propertyType || division),
+      sizeSf: squareFeet,
+      acres,
+      submarket: city,
+      closedDate: closeDate,
+      value: sellingPrice ? `$${formatNumber(sellingPrice)}` : '',
+      summary: propertyType ? `${propertyType.trim()} transaction${city ? ` in ${city}` : ''}.` : '',
+      imageUrls: [],
+      isFeatured: true,
+      createdAt: now,
+      updatedAt: now,
+    } satisfies TrackDeal]
+  })
+
+  return { deals, skippedRows }
+}
+
+function parseTrackRecordCsv(file: File): Promise<DealImportResult> {
   return new Promise((resolve, reject) => {
     Papa.parse<string[]>(file, {
       skipEmptyLines: 'greedy',
       complete: (result) => {
-        const rawRows = (result.data || []).filter((row) => Array.isArray(row) && row.some((cell) => clean(cell)))
-        const headerRowIndex = findHeaderRow(rawRows)
-        if (headerRowIndex < 0) {
-          reject(new Error('Could not find a header row. Expected columns like Deal Name, Lot & Plan, Square Feet, or Close Date.'))
-          return
+        try {
+          resolve(parseTrackRecordRows(result.data || []))
+        } catch (error) {
+          reject(error)
         }
-
-        const headers = normalizeCsvRow(rawRows[headerRowIndex]).map(normalizeHeader)
-        const dataRows = rawRows.slice(headerRowIndex + 1).map(normalizeCsvRow)
-        const now = new Date().toISOString()
-        let skippedRows = 0
-
-        const deals = dataRows.flatMap((row) => {
-          const tradeNumber = fieldValue(row, headers, ['Trade #', 'Trade Number', 'Deal #', 'Transaction ID'])
-          const dealName = fieldValue(row, headers, ['Deal Name', 'Name', 'Project', 'Client'])
-          const lotPlan = fieldValue(row, headers, ['Lot & Plan', 'Address', 'Property', 'Property Address', 'Location'])
-          const city = fieldValue(row, headers, ['City', 'Municipality', 'Market'])
-          const closeDate = toIsoDate(fieldValue(row, headers, ['Close Date', 'Closed Date', 'Date', 'Completion Date']))
-          const sellingPrice = fieldValue(row, headers, ['Selling Price', 'Sale Price', 'Price', 'Value', 'Deal Value'])
-          const squareFeet = fieldValue(row, headers, ['Square Feet', 'Square Footage', 'SF', 'Size SF', 'Size'])
-          const acres = fieldValue(row, headers, ['Acres', 'Land Acres'])
-          const propertyType = fieldValue(row, headers, ['Property Type', 'Asset Type', 'Type'])
-          const division = fieldValue(row, headers, ['Division Report', 'Division', 'Report'])
-          const rowText = row.join(' ')
-          const title = dealName || lotPlan
-          const address = [lotPlan, city].filter(Boolean).join(', ')
-
-          if (!title || !address) {
-            skippedRows += 1
-            return []
-          }
-
-          return [{
-            ...emptyDeal(),
-            id: crypto.randomUUID(),
-            sourceId: tradeNumber ? `trade-${tradeNumber}` : undefined,
-            title,
-            address,
-            clientName: dealName && lotPlan ? dealName.replace(/^PL\s*-\s*/i, '') : '',
-            dealType: inferDealType(`${rowText} ${sellingPrice}`),
-            role: inferRole(rowText),
-            assetType: inferAssetType(propertyType || division),
-            sizeSf: squareFeet,
-            acres,
-            submarket: city,
-            closedDate: closeDate,
-            value: sellingPrice ? `$${formatNumber(sellingPrice)}` : '',
-            summary: propertyType ? `${propertyType.trim()} transaction${city ? ` in ${city}` : ''}.` : '',
-            imageUrls: [],
-            isFeatured: true,
-            createdAt: now,
-            updatedAt: now,
-          } satisfies TrackDeal]
-        })
-
-        resolve({ deals, skippedRows })
       },
       error: (error) => reject(error),
     })
   })
+}
+
+async function parseTrackRecordWorkbook(file: File): Promise<DealImportResult> {
+  const data = await file.arrayBuffer()
+  const workbook = XLSX.read(data, { type: 'array', cellDates: true })
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName]
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: '' })
+    if (findHeaderRow(rows) >= 0) {
+      return parseTrackRecordRows(rows)
+    }
+  }
+
+  throw new Error('Could not find a usable deal sheet in this workbook.')
+}
+
+function isImportableDealFile(file: File) {
+  const name = file.name.toLowerCase()
+  return name.endsWith('.csv') || name.endsWith('.xlsx') || name.endsWith('.xls')
 }
 
 export default function TrackRecordPage() {
@@ -240,7 +268,7 @@ export default function TrackRecordPage() {
   const [query, setQuery] = useState('')
   const [mode, setMode] = useState<'manage' | 'presentation'>('manage')
   const [importMessage, setImportMessage] = useState('')
-  const [isCsvDragging, setIsCsvDragging] = useState(false)
+  const [isImportDragging, setIsImportDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const csvInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -309,15 +337,18 @@ export default function TrackRecordPage() {
     setForm((current) => ({ ...current, imageUrls: [...current.imageUrls, ...urls].slice(0, 8) }))
   }
 
-  const importCsv = async (file: File | undefined) => {
+  const importDealFile = async (file: File | undefined) => {
     if (!file) return
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      setImportMessage('Please export the Excel report as CSV before importing.')
+    if (!isImportableDealFile(file)) {
+      setImportMessage('Drop a CSV or Excel workbook exported from your deal report.')
       return
     }
 
     try {
-      const result = await parseTrackRecordCsv(file)
+      const fileName = file.name.toLowerCase()
+      const result = fileName.endsWith('.csv')
+        ? await parseTrackRecordCsv(file)
+        : await parseTrackRecordWorkbook(file)
       let duplicateCount = 0
       const seen = new Set(deals.map((deal) => deal.sourceId || `${deal.title}|${deal.address}|${deal.closedDate}`.toLowerCase()))
       const newDeals = result.deals.filter((deal) => {
@@ -338,9 +369,9 @@ export default function TrackRecordPage() {
     }
   }
 
-  const importDroppedCsv = (files: FileList) => {
-    const file = Array.from(files).find((item) => item.name.toLowerCase().endsWith('.csv')) || files[0]
-    importCsv(file)
+  const importDroppedDealFile = (files: FileList) => {
+    const file = Array.from(files).find(isImportableDealFile) || files[0]
+    importDealFile(file)
   }
 
   const share = async () => {
@@ -353,7 +384,32 @@ export default function TrackRecordPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 px-4 py-6 print:bg-white">
+    <div
+      className="min-h-screen bg-slate-100 px-4 py-6 print:bg-white"
+      onDragEnter={(event) => {
+        if (Array.from(event.dataTransfer.items || []).some((item) => item.kind === 'file')) {
+          event.preventDefault()
+          setIsImportDragging(true)
+        }
+      }}
+      onDragOver={(event) => {
+        if (Array.from(event.dataTransfer.items || []).some((item) => item.kind === 'file')) {
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+          setIsImportDragging(true)
+        }
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setIsImportDragging(false)
+        }
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        setIsImportDragging(false)
+        importDroppedDealFile(event.dataTransfer.files)
+      }}
+    >
       <div className="mx-auto flex max-w-7xl flex-col gap-5">
         <div className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm print:border-0 print:shadow-none md:flex-row md:items-end md:justify-between">
           <div>
@@ -367,7 +423,7 @@ export default function TrackRecordPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2 print:hidden">
-            <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => importCsv(e.target.files?.[0])} />
+            <input ref={csvInputRef} type="file" accept=".csv,text/csv,.xlsx,.xls" className="hidden" onChange={(e) => importDealFile(e.target.files?.[0])} />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button size="icon" variant="outline" onClick={() => csvInputRef.current?.click()} aria-label="Import CSV">
@@ -508,9 +564,13 @@ export default function TrackRecordPage() {
                 </div>
                 <div
                   className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center"
-                  onDragOver={(e) => e.preventDefault()}
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                  }}
                   onDrop={(e) => {
                     e.preventDefault()
+                    e.stopPropagation()
                     addImages(e.dataTransfer.files)
                   }}
                 >
@@ -544,41 +604,41 @@ export default function TrackRecordPage() {
             <div className="space-y-4">
               <div
                 className={`rounded-lg border border-dashed p-4 text-sm transition-colors ${
-                  isCsvDragging
+                  isImportDragging
                     ? 'border-emerald-500 bg-emerald-100 text-emerald-950'
                     : 'border-emerald-200 bg-emerald-50 text-emerald-950'
                 }`}
                 onDragEnter={(event) => {
                   event.preventDefault()
-                  setIsCsvDragging(true)
+                  setIsImportDragging(true)
                 }}
                 onDragOver={(event) => {
                   event.preventDefault()
                   event.dataTransfer.dropEffect = 'copy'
-                  setIsCsvDragging(true)
+                  setIsImportDragging(true)
                 }}
                 onDragLeave={(event) => {
                   if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                    setIsCsvDragging(false)
+                    setIsImportDragging(false)
                   }
                 }}
                 onDrop={(event) => {
                   event.preventDefault()
-                  setIsCsvDragging(false)
-                  importDroppedCsv(event.dataTransfer.files)
+                  setIsImportDragging(false)
+                  importDroppedDealFile(event.dataTransfer.files)
                 }}
               >
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <p className="font-semibold">Import a deal CSV</p>
+                    <p className="font-semibold">Import a deal report</p>
                     <p className="mt-1 text-emerald-800">
-                      Drag and drop a CSV here, or choose an exported report with columns like Deal Name, Lot & Plan, City, Close Date, Selling Price, Square Feet, Acres, and Property Type.
+                      Drag and drop a CSV or Excel workbook anywhere on this page, or choose an exported report with columns like Deal Name, Lot & Plan, City, Close Date, Selling Price, Square Feet, Acres, and Property Type.
                     </p>
                     {importMessage && <p className="mt-2 font-medium">{importMessage}</p>}
                   </div>
                   <Button variant="outline" className="border-emerald-300 bg-white" onClick={() => csvInputRef.current?.click()}>
                     <FileSpreadsheet className="mr-2 h-4 w-4" />
-                    Import CSV
+                    Import File
                   </Button>
                 </div>
               </div>
