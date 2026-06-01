@@ -573,7 +573,7 @@ export default function IndustrialIntelRequirementsPage() {
     toast({ title: "Requirement draft filled", description: "Review the fields, then save when ready." });
   };
 
-  const toggleDictation = () => {
+  const toggleDictation = async () => {
     if (isListening) {
       recognition?.stop();
       setIsListening(false);
@@ -585,6 +585,29 @@ export default function IndustrialIntelRequirementsPage() {
       toast({
         title: "Voice dictation unavailable",
         description: "Paste dictated notes into the transcript box and use Fill form instead.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!window.isSecureContext) {
+      toast({
+        title: "Voice dictation needs a secure page",
+        description: "Open the app over HTTPS, or paste dictated notes into the transcript box and use Fill form.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+      }
+    } catch {
+      toast({
+        title: "Microphone permission is blocked",
+        description: "Allow microphone access for this site in Chrome, then try Dictate again. You can still paste notes and use Fill form.",
         variant: "destructive",
       });
       return;
@@ -603,9 +626,12 @@ export default function IndustrialIntelRequirementsPage() {
     };
     nextRecognition.onerror = (event) => {
       setIsListening(false);
+      const isPermissionError = event.error === "not-allowed" || event.error === "service-not-allowed";
       toast({
-        title: "Dictation stopped",
-        description: event.error || "The browser stopped voice capture.",
+        title: isPermissionError ? "Microphone permission is blocked" : "Dictation stopped",
+        description: isPermissionError
+          ? "Allow microphone access for this site in Chrome, then try Dictate again. You can still paste notes and use Fill form."
+          : event.error || "The browser stopped voice capture.",
         variant: "destructive",
       });
     };
