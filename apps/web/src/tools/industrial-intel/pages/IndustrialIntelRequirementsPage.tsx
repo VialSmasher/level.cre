@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ClipboardList, Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -156,12 +157,21 @@ export default function IndustrialIntelRequirementsPage() {
 
   return (
     <div className="space-y-6">
-      <section>
-        <h2 className="text-3xl font-semibold text-slate-950">Requirements</h2>
-        <p className="mt-2 max-w-3xl text-sm text-slate-600">
-          Capture a clean requirement, keep the search criteria structured, and prepare the next
-          Tool B slice to score listings against it.
-        </p>
+      <section className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <span className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+            <ClipboardList className="h-3.5 w-3.5" />
+            Matching inputs
+          </span>
+          <h2 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">Requirements workbench</h2>
+          <p className="mt-2 max-w-3xl text-sm text-slate-600">
+            Capture clean tenant and buyer demand so Tool B can score inventory, flag gaps, and prepare client-ready shortlists.
+          </p>
+        </div>
+        <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600 shadow-sm">
+          <Sparkles className="h-4 w-4 text-blue-600" />
+          Matching engine foundation
+        </div>
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
