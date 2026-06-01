@@ -35,6 +35,7 @@ const Pricing = lazy(() => import("./pages/pricing"));
 const AdminDiag = lazy(() => import("./pages/admin-diag"));
 const BrokerStats = lazy(() => import("./pages/broker-stats"));
 const Leaderboard = lazy(() => import("./pages/leaderboard"));
+const TrackRecord = lazy(() => import("./pages/track-record"));
 const IndustrialIntelHomePage = lazy(
   () => import("./tools/industrial-intel/pages/IndustrialIntelHomePage"),
 );
@@ -185,6 +186,18 @@ function Router() {
             <AppLayout>
               <Suspense fallback={<Spinner />}>
                 <Leaderboard />
+              </Suspense>
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/track-record">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <Suspense fallback={<Spinner />}>
+                <TrackRecord />
               </Suspense>
             </AppLayout>
           </OnboardingCheck>

@@ -1,5 +1,5 @@
 import { Link } from 'wouter'
-import { ArrowRight, Briefcase, ChartSpline, Lock, Map, Search } from 'lucide-react'
+import { ArrowRight, Briefcase, ChartSpline, Lock, Map, Search, Trophy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -37,7 +37,7 @@ export default function LauncherPage() {
           </div>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid gap-6 lg:grid-cols-3">
           <section className="rounded-3xl border border-blue-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
@@ -119,6 +119,32 @@ export default function LauncherPage() {
                 </div>
               </div>
             )}
+          </section>
+
+          <section className="rounded-3xl border border-emerald-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600">Tool C</p>
+                <h2 className="mt-2 text-2xl font-semibold text-slate-950">Track Record</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Build a broker brag sheet, track lease expiries, and turn closed deals into a client-ready portfolio.
+                </p>
+              </div>
+              <div className="rounded-2xl bg-emerald-50 p-3 text-emerald-700">
+                <Trophy size={24} />
+              </div>
+            </div>
+            <ul className="mb-6 space-y-2 text-sm text-slate-600">
+              <li>Deal cards with SF, client, role, and expiry dates</li>
+              <li>Image drop zone for property photos</li>
+              <li>Presentation and print view for client-facing sheets</li>
+            </ul>
+            <Button asChild className="bg-emerald-700 text-white hover:bg-emerald-800">
+              <Link href="/track-record">
+                Open Track Record
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
+            </Button>
           </section>
         </div>
       </div>

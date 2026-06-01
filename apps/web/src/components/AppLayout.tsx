@@ -23,7 +23,8 @@ import {
   Menu,
   X,
   ChartSpline,
-  Bot
+  Bot,
+  Trophy
 } from 'lucide-react'
 import { Table } from 'lucide-react'
 import { Link, useLocation } from 'wouter'
@@ -59,6 +60,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   }
 
   const isScorecardActive = location === '/broker-stats' || location === '/leaderboard'
+  const isTrackRecordActive = location === '/track-record'
   const profileLabel = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'
 
   type NavItem = {
@@ -81,6 +83,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     ],
     [
       { label: 'Scorecard', href: '/broker-stats', icon: BarChart3, active: isScorecardActive },
+      { label: 'Track Record', href: '/track-record', icon: Trophy, active: isTrackRecordActive },
     ],
   ]
 
@@ -317,6 +320,27 @@ export function AppLayout({ children }: AppLayoutProps) {
                 </TooltipTrigger>
                 <TooltipContent side="right">
                   <p>Broker Stats</p>
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link
+                    href="/track-record"
+                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
+                      isTrackRecordActive
+                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30'
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                    onClick={() => setMobileMenuOpen(false)}
+                    aria-label="Track Record"
+                  >
+                    <Trophy size={20} />
+                    <span className="font-medium">Track Record</span>
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p>Track Record</p>
                 </TooltipContent>
               </Tooltip>
 
