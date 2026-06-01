@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import Papa from 'papaparse'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -12,6 +13,7 @@ import {
   Building2,
   CalendarClock,
   Download,
+  FileSpreadsheet,
   ImagePlus,
   Plus,
   Printer,
@@ -25,6 +27,7 @@ import {
 
 type TrackDeal = {
   id: string
+  sourceId?: string
   title: string
   address: string
   clientName?: string
@@ -46,6 +49,11 @@ type TrackDeal = {
 }
 
 const STORAGE_KEY = 'level-cre.track-record.v1'
+
+type CsvImportResult = {
+  deals: TrackDeal[]
+  skippedRows: number
+}
 
 const emptyDeal = (): TrackDeal => ({
   id: crypto.randomUUID(),
@@ -70,7 +78,7 @@ const emptyDeal = (): TrackDeal => ({
 })
 
 function parseNumber(value?: string) {
-  const n = Number(String(value || '').replace(/,/g, ''))
+  const n = Number(String(value || '').replace(/[$,\s]/g, ''))
   return Number.isFinite(n) ? n : 0
 }
 
@@ -97,13 +105,143 @@ function dateSoon(value?: string) {
   return diffDays >= 0 && diffDays <= 180
 }
 
+function clean(value: unknown) {
+  return String(value ?? '').trim()
+}
+
+function normalizeHeader(value: unknown) {
+  return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function normalizeCsvRow(row: unknown[]) {
+  return row.map((value) => clean(value))
+}
+
+function findHeaderRow(rows: unknown[][]) {
+  return rows.findIndex((row) => {
+    const headers = row.map(normalizeHeader)
+    return headers.includes('dealname') || headers.includes('lotplan') || headers.includes('squarefeet')
+  })
+}
+
+function fieldValue(row: string[], headers: string[], aliases: string[]) {
+  const aliasSet = new Set(aliases.map(normalizeHeader))
+  const index = headers.findIndex((header) => aliasSet.has(header))
+  return index >= 0 ? clean(row[index]) : ''
+}
+
+function toIsoDate(value: string) {
+  if (!value) return ''
+  const excelSerial = Number(value)
+  if (Number.isFinite(excelSerial) && excelSerial > 25000 && excelSerial < 60000) {
+    const utcDays = Math.floor(excelSerial - 25569)
+    const date = new Date(utcDays * 86400000)
+    return date.toISOString().slice(0, 10)
+  }
+  const parsed = new Date(value)
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString().slice(0, 10) : ''
+}
+
+function inferDealType(rowText: string): TrackDeal['dealType'] {
+  const text = rowText.toLowerCase()
+  if (text.includes('renew')) return 'renewal'
+  return text.includes('sale') || text.includes('selling price') ? 'sale' : 'lease'
+}
+
+function inferRole(rowText: string): TrackDeal['role'] {
+  const text = rowText.toLowerCase()
+  if (text.includes('buyer')) return 'buyer_rep'
+  if (text.includes('seller')) return 'seller_rep'
+  if (text.includes('landlord')) return 'landlord_rep'
+  if (text.includes('tenant')) return 'tenant_rep'
+  return 'advisor'
+}
+
+function inferAssetType(value: string): TrackDeal['assetType'] {
+  const text = value.toLowerCase()
+  if (text.includes('office')) return 'Office'
+  if (text.includes('retail')) return 'Retail'
+  if (text.includes('land')) return 'Land'
+  if (text.includes('industrial')) return 'Industrial'
+  return 'Other'
+}
+
+function parseTrackRecordCsv(file: File): Promise<CsvImportResult> {
+  return new Promise((resolve, reject) => {
+    Papa.parse<string[]>(file, {
+      skipEmptyLines: 'greedy',
+      complete: (result) => {
+        const rawRows = (result.data || []).filter((row) => Array.isArray(row) && row.some((cell) => clean(cell)))
+        const headerRowIndex = findHeaderRow(rawRows)
+        if (headerRowIndex < 0) {
+          reject(new Error('Could not find a header row. Expected columns like Deal Name, Lot & Plan, Square Feet, or Close Date.'))
+          return
+        }
+
+        const headers = normalizeCsvRow(rawRows[headerRowIndex]).map(normalizeHeader)
+        const dataRows = rawRows.slice(headerRowIndex + 1).map(normalizeCsvRow)
+        const now = new Date().toISOString()
+        let skippedRows = 0
+
+        const deals = dataRows.flatMap((row) => {
+          const tradeNumber = fieldValue(row, headers, ['Trade #', 'Trade Number', 'Deal #', 'Transaction ID'])
+          const dealName = fieldValue(row, headers, ['Deal Name', 'Name', 'Project', 'Client'])
+          const lotPlan = fieldValue(row, headers, ['Lot & Plan', 'Address', 'Property', 'Property Address', 'Location'])
+          const city = fieldValue(row, headers, ['City', 'Municipality', 'Market'])
+          const closeDate = toIsoDate(fieldValue(row, headers, ['Close Date', 'Closed Date', 'Date', 'Completion Date']))
+          const sellingPrice = fieldValue(row, headers, ['Selling Price', 'Sale Price', 'Price', 'Value', 'Deal Value'])
+          const squareFeet = fieldValue(row, headers, ['Square Feet', 'Square Footage', 'SF', 'Size SF', 'Size'])
+          const acres = fieldValue(row, headers, ['Acres', 'Land Acres'])
+          const propertyType = fieldValue(row, headers, ['Property Type', 'Asset Type', 'Type'])
+          const division = fieldValue(row, headers, ['Division Report', 'Division', 'Report'])
+          const rowText = row.join(' ')
+          const title = dealName || lotPlan
+          const address = [lotPlan, city].filter(Boolean).join(', ')
+
+          if (!title || !address) {
+            skippedRows += 1
+            return []
+          }
+
+          return [{
+            ...emptyDeal(),
+            id: crypto.randomUUID(),
+            sourceId: tradeNumber ? `trade-${tradeNumber}` : undefined,
+            title,
+            address,
+            clientName: dealName && lotPlan ? dealName.replace(/^PL\s*-\s*/i, '') : '',
+            dealType: inferDealType(`${rowText} ${sellingPrice}`),
+            role: inferRole(rowText),
+            assetType: inferAssetType(propertyType || division),
+            sizeSf: squareFeet,
+            acres,
+            submarket: city,
+            closedDate: closeDate,
+            value: sellingPrice ? `$${formatNumber(sellingPrice)}` : '',
+            summary: propertyType ? `${propertyType.trim()} transaction${city ? ` in ${city}` : ''}.` : '',
+            imageUrls: [],
+            isFeatured: true,
+            createdAt: now,
+            updatedAt: now,
+          } satisfies TrackDeal]
+        })
+
+        resolve({ deals, skippedRows })
+      },
+      error: (error) => reject(error),
+    })
+  })
+}
+
 export default function TrackRecordPage() {
   const [deals, setDeals] = useState<TrackDeal[]>([])
   const [form, setForm] = useState<TrackDeal>(() => emptyDeal())
   const [editingId, setEditingId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [mode, setMode] = useState<'manage' | 'presentation'>('manage')
+  const [importMessage, setImportMessage] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const csvInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     try {
@@ -170,6 +308,35 @@ export default function TrackRecordPage() {
     setForm((current) => ({ ...current, imageUrls: [...current.imageUrls, ...urls].slice(0, 8) }))
   }
 
+  const importCsv = async (file: File | undefined) => {
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setImportMessage('Please export the Excel report as CSV before importing.')
+      return
+    }
+
+    try {
+      const result = await parseTrackRecordCsv(file)
+      let duplicateCount = 0
+      const seen = new Set(deals.map((deal) => deal.sourceId || `${deal.title}|${deal.address}|${deal.closedDate}`.toLowerCase()))
+      const newDeals = result.deals.filter((deal) => {
+        const key = deal.sourceId || `${deal.title}|${deal.address}|${deal.closedDate}`.toLowerCase()
+        if (seen.has(key)) {
+          duplicateCount += 1
+          return false
+        }
+        seen.add(key)
+        return true
+      })
+      setDeals([...newDeals, ...deals])
+      setImportMessage(`Imported ${result.deals.length - duplicateCount} deals. Skipped ${duplicateCount + result.skippedRows} duplicate or incomplete rows.`)
+    } catch (error: any) {
+      setImportMessage(error?.message || 'CSV import failed.')
+    } finally {
+      if (csvInputRef.current) csvInputRef.current.value = ''
+    }
+  }
+
   const share = async () => {
     const text = `Track record: ${deals.length} deals, ${formatNumber(totals.totalSf)} SF tracked.`
     if (navigator.share) {
@@ -194,6 +361,15 @@ export default function TrackRecordPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2 print:hidden">
+            <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => importCsv(e.target.files?.[0])} />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button size="icon" variant="outline" onClick={() => csvInputRef.current?.click()} aria-label="Import CSV">
+                  <FileSpreadsheet className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Import CSV</TooltipContent>
+            </Tooltip>
             <ToggleGroup type="single" value={mode} onValueChange={(value) => value && setMode(value as 'manage' | 'presentation')}>
               <ToggleGroupItem value="manage" className="h-9 px-3 text-xs">Manage</ToggleGroupItem>
               <ToggleGroupItem value="presentation" className="h-9 px-3 text-xs">Presentation</ToggleGroupItem>
@@ -360,6 +536,21 @@ export default function TrackRecordPage() {
             </Card>
 
             <div className="space-y-4">
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="font-semibold">Import a deal CSV</p>
+                    <p className="mt-1 text-emerald-800">
+                      Supports exported reports with columns like Deal Name, Lot & Plan, City, Close Date, Selling Price, Square Feet, Acres, and Property Type.
+                    </p>
+                    {importMessage && <p className="mt-2 font-medium">{importMessage}</p>}
+                  </div>
+                  <Button variant="outline" className="border-emerald-300 bg-white" onClick={() => csvInputRef.current?.click()}>
+                    <FileSpreadsheet className="mr-2 h-4 w-4" />
+                    Import CSV
+                  </Button>
+                </div>
+              </div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input className="pl-9" placeholder="Search track record" value={query} onChange={(e) => setQuery(e.target.value)} />
