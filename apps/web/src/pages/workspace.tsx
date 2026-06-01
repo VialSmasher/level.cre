@@ -30,6 +30,7 @@ import { MapContextMenu } from '@/features/map/MapContextMenu';
 import { useGeocode } from '@/hooks/useGeocode';
 import { GOOGLE_MAPS_API_KEY_HELP_TEXT, getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
+import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 // Note: Avoid importing AlertDialog to prevent a circular-import bundle bug
 
 type Listing = {
@@ -1677,7 +1678,13 @@ export default function Workspace() {
                   )}
                 </div>
                 <div>
-                  <Label className="text-xs font-medium text-gray-700">Notes</Label>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <Label className="text-xs font-medium text-gray-700">Notes</Label>
+                    <VoiceDictationButton
+                      className="h-7 w-7 p-0"
+                      onTranscript={(text) => handleNotesChange(localNotes ? `${localNotes.trimEnd()} ${text}` : text)}
+                    />
+                  </div>
                   <Textarea
                     value={localNotes}
                     onChange={(e) => handleNotesChange(e.target.value)}

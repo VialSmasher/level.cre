@@ -13,6 +13,7 @@ import { Calendar, MapPin, Phone, Mail, Building2, Clock, Filter, Plus, MessageS
 import { Prospect, ProspectStatusType, FollowUpTimeframeType, Submarket, ContactInteractionType, ContactInteractionRow } from '@level-cre/shared/schema';
 import { apiRequest } from '@/lib/queryClient';
 import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospectDisplay';
+import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 
 const STATUS_COLORS: Record<ProspectStatusType, string> = {
   prospect: '#FBBF24',
@@ -183,7 +184,14 @@ function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; on
           </div>
 
           <div>
-            <Label htmlFor="notes">Notes</Label>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <Label htmlFor="notes">Notes</Label>
+              <VoiceDictationButton
+                className="h-7 w-7 p-0"
+                disabled={addInteractionMutation.isPending}
+                onTranscript={(text) => setNotes((prev) => prev ? `${prev.trimEnd()} ${text}` : text)}
+              />
+            </div>
             <Textarea
               id="notes"
               value={notes}
@@ -474,13 +482,20 @@ function QuickEngagement({ prospect, prospectInteractions }: { prospect: Prospec
             />
           )}
 
-          <Input
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            placeholder="Optional note"
-            className="mb-3 h-8 text-xs"
-          />
+          <div className="mb-3 flex gap-2">
+            <Input
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              placeholder="Optional note"
+              className="h-8 text-xs"
+            />
+            <VoiceDictationButton
+              className="h-8 w-8 shrink-0 p-0"
+              disabled={quickEngageMutation.isPending}
+              onTranscript={(text) => setNotes((prev) => prev ? `${prev.trimEnd()} ${text}` : text)}
+            />
+          </div>
 
           <Button
             size="sm"

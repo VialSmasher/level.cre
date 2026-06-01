@@ -15,6 +15,7 @@ import { useLocation } from 'wouter';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospectDisplay';
 import { apiRequest } from '@/lib/queryClient';
+import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 
 function getInteractionDate(interaction: any) {
   const parsed = new Date(interaction?.date || interaction?.createdAt || '');
@@ -912,9 +913,16 @@ export default function Knowledge() {
                 </section>
 
                 <section className="rounded-lg border border-slate-200 bg-white p-4">
-                  <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
-                    <MessageSquare className="h-4 w-4 text-blue-600" />
-                    Add note
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                      <MessageSquare className="h-4 w-4 text-blue-600" />
+                      Add note
+                    </div>
+                    <VoiceDictationButton
+                      className="h-8 w-8 p-0"
+                      disabled={logInteractionMutation.isPending}
+                      onTranscript={(text) => setQuickNote((prev) => prev ? `${prev.trimEnd()} ${text}` : text)}
+                    />
                   </div>
                   <Textarea
                     value={quickNote}

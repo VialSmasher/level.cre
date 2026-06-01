@@ -39,6 +39,7 @@ import { getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
 import { getProspectDisplayName } from '@/lib/prospectDisplay';
 import { quickLogSpecFor, type QuickLogType } from '@/lib/gamificationUi';
 import { logBrokerActivity } from '@/lib/brokerActions';
+import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { queryClient, apiRequest } from '@/lib/queryClient';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -318,6 +319,7 @@ export default function HomePage() {
   });
   // Legend open/close managed inside StatusLegend component
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
+  const notesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [isEditPanelOpen, setIsEditPanelOpen] = useState(false);
   const focusedProspectIdRef = useRef<string | null>(null);
   const [editingProspectId, setEditingProspectId] = useState<string | null>(null);
@@ -2454,8 +2456,23 @@ export default function HomePage() {
 
                 {/* Notes */}
                 <div>
-                  <Label className="text-xs font-medium text-gray-700">Notes</Label>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <Label className="text-xs font-medium text-gray-700">Notes</Label>
+                    <VoiceDictationButton
+                      className="h-7 w-7 p-0"
+                      onTranscript={(text) => {
+                        const existing = notesTextareaRef.current?.value || selectedProspect.notes || '';
+                        const next = existing ? `${existing.trimEnd()} ${text}` : text;
+                        if (notesTextareaRef.current) {
+                          notesTextareaRef.current.value = next;
+                        }
+                        setSelectedProspect({ ...selectedProspect, notes: next });
+                        queueSelectedProspectPatch('notes', next);
+                      }}
+                    />
+                  </div>
                   <Textarea
+                    ref={notesTextareaRef}
                     key={`notes-${selectedProspect.id}`}
                     defaultValue={selectedProspect.notes || ''}
                     onChange={(e) => queueSelectedProspectPatch('notes', e.target.value)}
