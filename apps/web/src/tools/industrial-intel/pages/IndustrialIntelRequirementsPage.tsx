@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, Sparkles } from "lucide-react";
+import { ClipboardList, Mic, MicOff, Sparkles, Wand2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,6 +78,17 @@ const EMPTY_FORM: RequirementFormState = {
   isOffMarketSearchEnabled: false,
 };
 
+type SpeechRecognitionCtor = new () => {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onend: (() => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onresult: ((event: any) => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
 function toNullableNumber(value: string) {
   if (!value.trim()) return null;
   const parsed = Number(value);
@@ -91,10 +102,94 @@ function formatDateTime(value: string | null) {
   return date.toLocaleString();
 }
 
+function extractNumber(value: string | undefined) {
+  if (!value) return "";
+  const parsed = Number(value.replace(/,/g, ""));
+  return Number.isFinite(parsed) ? String(parsed) : "";
+}
+
+function sentenceContaining(text: string, keyword: string) {
+  const found = text
+    .split(/[.!?]\s*/)
+    .map((sentence) => sentence.trim())
+    .find((sentence) => sentence.toLowerCase().includes(keyword));
+  return found || "";
+}
+
+function parseRequirementTranscript(transcript: string): Partial<RequirementFormState> {
+  const text = transcript.trim();
+  const lower = text.toLowerCase();
+  const parsed: Partial<RequirementFormState> = {};
+
+  if (!text) return parsed;
+
+  parsed.title = text.split(/[.!?]/)[0]?.slice(0, 72).trim() || "Dictated requirement";
+  parsed.status = "active";
+  parsed.market = lower.includes("calgary") ? "Calgary" : lower.includes("edmonton") ? "Edmonton" : "";
+  parsed.dealType = lower.includes("purchase") || lower.includes("buy") || lower.includes("sale")
+    ? "sale"
+    : lower.includes("lease")
+      ? "lease"
+      : lower.includes("either")
+        ? "either"
+        : undefined;
+
+  const clientMatch = text.match(/\b(?:client|tenant|buyer|company)\s+(?:is\s+|called\s+|named\s+)?([A-Za-z0-9 &'’.-]{2,60})/i);
+  if (clientMatch?.[1]) {
+    parsed.clientName = clientMatch[1].replace(/\b(?:needs|is|looking|wants|requires)\b.*$/i, "").trim();
+  }
+
+  const sfRangeMatch = text.match(/(\d[\d,]*)\s*(?:-|to|and)\s*(\d[\d,]*)\s*(?:sf|square feet|sq ft)/i);
+  const sfSingleMatch = text.match(/(?:about|around|approximately|needs|need|looking for)?\s*(\d[\d,]*)\s*(?:sf|square feet|sq ft)/i);
+  if (sfRangeMatch) {
+    parsed.minSf = extractNumber(sfRangeMatch[1]);
+    parsed.maxSf = extractNumber(sfRangeMatch[2]);
+  } else if (sfSingleMatch) {
+    parsed.minSf = extractNumber(sfSingleMatch[1]);
+  }
+
+  const clearHeightMatch = text.match(/(?:clear height|clear|ceiling height)[^\d]*(\d+(?:\.\d+)?)/i) || text.match(/(\d+(?:\.\d+)?)\s*(?:foot|feet|ft|')?\s*clear/i);
+  if (clearHeightMatch?.[1]) parsed.minClearHeightFt = clearHeightMatch[1];
+
+  const dockMatch = text.match(/(\d+)\s*(?:dock|dock doors|dock door)/i);
+  if (dockMatch?.[1]) parsed.requiredDockDoors = dockMatch[1];
+
+  const gradeMatch = text.match(/(\d+)\s*(?:grade|grade doors|grade door)/i);
+  if (gradeMatch?.[1]) parsed.requiredGradeDoors = gradeMatch[1];
+
+  const yardMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:acre|acres|ac)\s*(?:yard|site|land)?/i);
+  if (yardMatch?.[1]) parsed.minYardAcres = yardMatch[1];
+
+  const budgetMatch = text.match(/\$?\s*(\d+(?:\.\d+)?)\s*(?:psf|per square foot|net rent|net)/i);
+  if (budgetMatch?.[1]) parsed.maxBudgetPsf = budgetMatch[1];
+
+  const submarketMatch = text.match(/\b(?:in|near|around|focused on)\s+([A-Za-z ]+?)\s+(?:submarket|area|edmonton|calgary|with|for|from|and|$)/i);
+  if (submarketMatch?.[1]) parsed.submarket = submarketMatch[1].trim();
+
+  parsed.powerNotes = sentenceContaining(text, "power");
+  parsed.officeNotes = sentenceContaining(text, "office");
+  parsed.timingNotes =
+    sentenceContaining(text, "immediate") ||
+    sentenceContaining(text, "asap") ||
+    sentenceContaining(text, "month") ||
+    sentenceContaining(text, "quarter") ||
+    sentenceContaining(text, "q1") ||
+    sentenceContaining(text, "q2") ||
+    sentenceContaining(text, "q3") ||
+    sentenceContaining(text, "q4");
+  parsed.specialNotes = text;
+  parsed.isOffMarketSearchEnabled = lower.includes("off market") || lower.includes("off-market");
+
+  return parsed;
+}
+
 export default function IndustrialIntelRequirementsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [form, setForm] = useState<RequirementFormState>(EMPTY_FORM);
+  const [dictationText, setDictationText] = useState("");
+  const [isListening, setIsListening] = useState(false);
+  const [recognition, setRecognition] = useState<InstanceType<SpeechRecognitionCtor> | null>(null);
 
   const { data: requirements = [], isLoading } = useQuery<IntelRequirement[]>({
     queryKey: ["/api/intel/requirements"],
@@ -155,6 +250,59 @@ export default function IndustrialIntelRequirementsPage() {
     setForm((current) => ({ ...current, [key]: value }));
   };
 
+  const applyDictation = () => {
+    const parsed = parseRequirementTranscript(dictationText);
+    setForm((current) => ({
+      ...current,
+      ...Object.fromEntries(
+        Object.entries(parsed).filter(([, value]) => value !== undefined && value !== ""),
+      ),
+    }));
+    toast({ title: "Requirement draft filled", description: "Review the fields, then save when ready." });
+  };
+
+  const toggleDictation = () => {
+    if (isListening) {
+      recognition?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast({
+        title: "Voice dictation unavailable",
+        description: "Paste dictated notes into the transcript box and use Fill form instead.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const nextRecognition = new (SpeechRecognition as SpeechRecognitionCtor)();
+    nextRecognition.continuous = true;
+    nextRecognition.interimResults = true;
+    nextRecognition.lang = "en-CA";
+    nextRecognition.onresult = (event: any) => {
+      let spoken = "";
+      for (let index = 0; index < event.results.length; index += 1) {
+        spoken += event.results[index][0]?.transcript || "";
+      }
+      setDictationText(spoken.trim());
+    };
+    nextRecognition.onerror = (event) => {
+      setIsListening(false);
+      toast({
+        title: "Dictation stopped",
+        description: event.error || "The browser stopped voice capture.",
+        variant: "destructive",
+      });
+    };
+    nextRecognition.onend = () => setIsListening(false);
+    setRecognition(nextRecognition);
+    setIsListening(true);
+    nextRecognition.start();
+  };
+
   return (
     <div className="space-y-6">
       <section className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -181,6 +329,36 @@ export default function IndustrialIntelRequirementsPage() {
           </CardHeader>
           <CardContent>
             <form className="space-y-4" onSubmit={handleSubmit}>
+              <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-blue-800">
+                      <Mic className="h-4 w-4" />
+                      Voice intake
+                    </h3>
+                    <p className="mt-1 text-sm text-blue-900/80">
+                      Dictate a requirement, then let the workbench prefill the structured fields.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" onClick={toggleDictation} className={isListening ? "bg-rose-600 text-white hover:bg-rose-700" : "bg-blue-600 text-white hover:bg-blue-700"}>
+                      {isListening ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
+                      {isListening ? "Stop" : "Dictate"}
+                    </Button>
+                    <Button type="button" variant="outline" onClick={applyDictation} disabled={!dictationText.trim()}>
+                      <Wand2 className="mr-2 h-4 w-4" />
+                      Fill form
+                    </Button>
+                  </div>
+                </div>
+                <Textarea
+                  className="mt-3 min-h-24 bg-white"
+                  value={dictationText}
+                  onChange={(event) => setDictationText(event.target.value)}
+                  placeholder="Example: Client ABC needs 15,000 to 30,000 SF in West Edmonton, lease, 24 foot clear, two dock doors, one grade door, 1.5 acre yard, heavy power, immediate timing..."
+                />
+              </div>
+
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 Start with the basics, add any hard building constraints, then save the requirement
                 when it is ready for review or matching.
