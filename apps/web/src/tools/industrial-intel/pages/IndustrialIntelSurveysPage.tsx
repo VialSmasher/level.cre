@@ -277,6 +277,11 @@ export default function IndustrialIntelSurveysPage() {
     return explicit || mappableSurveyItems[0] || null;
   }, [mappableSurveyItems, selectedMapItemId]);
 
+  const selectedDetailItem = useMemo(() => {
+    const explicit = (selectedSurvey?.items || []).find((item) => item.id === selectedMapItemId);
+    return explicit || selectedMapItem || visibleItems[0] || null;
+  }, [selectedSurvey?.items, selectedMapItem, selectedMapItemId, visibleItems]);
+
   const mapCenter = useMemo(() => {
     if (selectedMapItem) {
       return { lat: selectedMapItem.listing.latitude, lng: selectedMapItem.listing.longitude };
@@ -581,14 +586,210 @@ export default function IndustrialIntelSurveysPage() {
                 </CardContent>
               </Card>
 
-              <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_460px]">
-                <div className="space-y-6">
+              <section className="space-y-6">
+                <div ref={previewRef} className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+                  <Card className="overflow-hidden">
+                    <CardHeader className="border-b border-slate-100 bg-white">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <CardTitle>Survey map</CardTitle>
+                          <p className="mt-1 text-sm text-slate-600">
+                            Build the client deliverable by adding listings, selecting pins, and checking missing map data.
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" className="bg-white">
+                            {mappableSurveyItems.length} mapped / {visibleItems.length} included
+                          </Badge>
+                          {unmappedVisibleCount > 0 && (
+                            <Badge variant="outline" className="bg-amber-50 text-amber-800">
+                              {unmappedVisibleCount} need coordinates
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      <div className="h-[620px] bg-slate-100">
+                        {!GOOGLE_MAPS_API_KEY ? (
+                          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-slate-600">
+                            {GOOGLE_MAPS_API_KEY_HELP_TEXT}
+                          </div>
+                        ) : mapLoadError ? (
+                          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-rose-700">
+                            Google Maps failed to load.
+                          </div>
+                        ) : !isMapLoaded ? (
+                          <div className="flex h-full items-center justify-center text-sm text-slate-500">Loading map...</div>
+                        ) : mappableSurveyItems.length === 0 ? (
+                          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-slate-600">
+                            Add listings with latitude and longitude to render the survey map.
+                          </div>
+                        ) : (
+                          <GoogleMap
+                            mapContainerStyle={MAP_CONTAINER_STYLE}
+                            center={mapCenter}
+                            zoom={mappableSurveyItems.length === 1 ? 13 : 10}
+                            options={{
+                              streetViewControl: false,
+                              mapTypeControl: false,
+                              fullscreenControl: true,
+                              gestureHandling: "greedy",
+                            }}
+                          >
+                            {mappableSurveyItems.map((item) => {
+                              const optionNumber = visibleItems.findIndex((visibleItem) => visibleItem.id === item.id) + 1;
+                              return (
+                                <MarkerF
+                                  key={item.id}
+                                  position={{ lat: item.listing.latitude, lng: item.listing.longitude }}
+                                  label={{ text: String(optionNumber), color: "#ffffff", fontWeight: "700" }}
+                                  onClick={() => setSelectedMapItemId(item.id)}
+                                />
+                              );
+                            })}
+                            {selectedMapItem && (
+                              <InfoWindowF
+                                position={{ lat: selectedMapItem.listing.latitude, lng: selectedMapItem.listing.longitude }}
+                                onCloseClick={() => setSelectedMapItemId(null)}
+                              >
+                                <div className="max-w-[17rem] space-y-2 p-1 text-sm text-slate-700">
+                                  <p className="font-semibold text-slate-950">{selectedMapItem.listing.title}</p>
+                                  <p>{selectedMapItem.listing.normalizedAddress || selectedMapItem.listing.address || "Address pending"}</p>
+                                  <p>{formatListingSize(selectedMapItem.listing)} - {listingArea(selectedMapItem.listing)}</p>
+                                  <div className="flex flex-wrap gap-3">
+                                    {firstLink(selectedMapItem.listing) && (
+                                      <a href={firstLink(selectedMapItem.listing) || undefined} target="_blank" rel="noreferrer" className="font-semibold text-blue-700">
+                                        Flyer/listing
+                                      </a>
+                                    )}
+                                    <a href={buildGoogleMapsUrl(selectedMapItem.listing)} target="_blank" rel="noreferrer" className="font-semibold text-blue-700">
+                                      Open maps
+                                    </a>
+                                  </div>
+                                </div>
+                              </InfoWindowF>
+                            )}
+                          </GoogleMap>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between gap-3">
+                        <CardTitle>Selected property</CardTitle>
+                        <Badge variant="outline" className="bg-slate-50">Private draft</Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {!selectedDetailItem ? (
+                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600">
+                          Select a pin or add a listing to start shaping the survey.
+                        </div>
+                      ) : (
+                        <>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-lg font-semibold text-slate-950">{selectedDetailItem.listing.title}</h3>
+                              {selectedDetailItem.hidden && <Badge variant="outline">Hidden</Badge>}
+                            </div>
+                            <p className="mt-1 text-sm text-slate-600">
+                              {selectedDetailItem.listing.normalizedAddress || selectedDetailItem.listing.address || "Address pending"}
+                            </p>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <Metric label="Building" value={formatListingSize(selectedDetailItem.listing)} />
+                            <Metric label="Land" value={selectedDetailItem.listing.landAcres ? `${formatNumber(selectedDetailItem.listing.landAcres)} ac` : "-"} />
+                            <Metric label="Lease" value={formatLeaseRate(selectedDetailItem.listing)} />
+                            <Metric label="Sale" value={formatMoney(selectedDetailItem.listing.totalPrice)} />
+                            <Metric label="Area" value={listingArea(selectedDetailItem.listing)} />
+                            <Metric label="Source" value={selectedDetailItem.listing.sourceName || "-"} />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor={`selected-label-${selectedDetailItem.id}`}>Recommendation</Label>
+                            <Input
+                              id={`selected-label-${selectedDetailItem.id}`}
+                              key={`label-${selectedDetailItem.id}`}
+                              defaultValue={selectedDetailItem.recommendationLabel || ""}
+                              onBlur={(event) => {
+                                const nextLabel = event.target.value || null;
+                                if (nextLabel !== selectedDetailItem.recommendationLabel) {
+                                  updateItemMutation.mutate({ item: selectedDetailItem, patch: { recommendationLabel: nextLabel } });
+                                }
+                              }}
+                              placeholder="Best fit"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor={`selected-notes-${selectedDetailItem.id}`}>Client-visible notes</Label>
+                            <Textarea
+                              id={`selected-notes-${selectedDetailItem.id}`}
+                              key={`notes-${selectedDetailItem.id}`}
+                              defaultValue={selectedDetailItem.clientNotes || ""}
+                              onBlur={(event) => {
+                                const nextNotes = event.target.value || null;
+                                if (nextNotes !== selectedDetailItem.clientNotes) {
+                                  updateItemMutation.mutate({ item: selectedDetailItem, patch: { clientNotes: nextNotes } });
+                                }
+                              }}
+                              placeholder="Why this option belongs in the survey"
+                              className="min-h-[120px]"
+                            />
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                            <div className="flex flex-wrap gap-3">
+                              {firstLink(selectedDetailItem.listing) ? (
+                                <a
+                                  href={firstLink(selectedDetailItem.listing) || undefined}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 text-sm font-semibold text-blue-700 hover:text-blue-900"
+                                >
+                                  View listing
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                </a>
+                              ) : (
+                                <span className="text-sm text-slate-500">No public link</span>
+                              )}
+                              <a
+                                href={buildGoogleMapsUrl(selectedDetailItem.listing)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-sm font-semibold text-blue-700 hover:text-blue-900"
+                              >
+                                Open maps
+                                <ExternalLink className="h-3.5 w-3.5" />
+                              </a>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              {selectedDetailItem.hidden ? <EyeOff className="h-4 w-4 text-slate-500" /> : <Eye className="h-4 w-4 text-emerald-600" />}
+                              <Label htmlFor={`selected-hidden-${selectedDetailItem.id}`} className="text-sm font-medium text-slate-700">Include</Label>
+                              <Switch
+                                id={`selected-hidden-${selectedDetailItem.id}`}
+                                checked={!selectedDetailItem.hidden}
+                                onCheckedChange={(checked) => updateItemMutation.mutate({ item: selectedDetailItem, patch: { hidden: !checked } })}
+                              />
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
                   <Card>
                     <CardHeader>
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
                           <CardTitle>Add listings</CardTitle>
-                          <p className="mt-1 text-sm text-slate-600">Pull from active inventory or seed from a linked shortlist.</p>
+                          <p className="mt-1 text-sm text-slate-600">Search inventory, then add properties to the survey map.</p>
                         </div>
                         <Button
                           type="button"
@@ -629,6 +830,11 @@ export default function IndustrialIntelSurveysPage() {
                               <span>{formatListingSize(listing)}</span>
                               <span>{listingArea(listing)}</span>
                               <span>{listing.sourceName || "Unknown source"}</span>
+                              {isMappableListing(listing) ? (
+                                <span className="font-semibold text-emerald-700">Map ready</span>
+                              ) : (
+                                <span className="font-semibold text-amber-700">Needs coordinates</span>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -636,279 +842,87 @@ export default function IndustrialIntelSurveysPage() {
                     </CardContent>
                   </Card>
 
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Survey listings</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      {selectedSurvey.items.length === 0 ? (
-                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-sm text-slate-600">
-                          Add listings from inventory or a shortlist to start the draft.
-                        </div>
-                      ) : (
-                        selectedSurvey.items.map((item, index) => (
-                          <div key={item.id} className={`rounded-lg border p-4 ${item.hidden ? "border-slate-200 bg-slate-50 opacity-75" : "border-slate-200 bg-white"}`}>
-                            <div className="flex flex-wrap items-start justify-between gap-4">
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <h3 className="text-lg font-semibold text-slate-950">{item.listing.title}</h3>
-                                  {item.hidden && <Badge variant="outline">Hidden</Badge>}
-                                  {isMappableListing(item.listing) ? (
-                                    <Badge variant="outline" className="bg-emerald-50 text-emerald-800">Map ready</Badge>
-                                  ) : (
-                                    <Badge variant="outline" className="bg-amber-50 text-amber-800">Needs coordinates</Badge>
-                                  )}
-                                  {firstLink(item.listing) ? (
-                                    <Badge variant="outline" className="bg-blue-50 text-blue-800">Flyer/link ready</Badge>
-                                  ) : (
-                                    <Badge variant="outline" className="bg-slate-50 text-slate-700">No public link</Badge>
-                                  )}
-                                </div>
-                                <p className="mt-1 text-sm text-slate-600">{item.listing.normalizedAddress || item.listing.address || "Address pending"}</p>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Button type="button" size="icon" variant="outline" disabled={index === 0} onClick={() => moveItem(item, "up")}>
-                                  <ArrowUp className="h-4 w-4" />
-                                </Button>
-                                <Button type="button" size="icon" variant="outline" disabled={index === selectedSurvey.items.length - 1} onClick={() => moveItem(item, "down")}>
-                                  <ArrowDown className="h-4 w-4" />
-                                </Button>
-                                <Button type="button" size="icon" variant="outline" onClick={() => deleteItemMutation.mutate(item)}>
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-
-                            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                              <Metric label="Building" value={formatListingSize(item.listing)} />
-                              <Metric label="Land" value={item.listing.landAcres ? `${formatNumber(item.listing.landAcres)} ac` : "-"} />
-                              <Metric label="Lease" value={formatLeaseRate(item.listing)} />
-                              <Metric label="Sale" value={formatMoney(item.listing.totalPrice)} />
-                              <Metric label="Submarket" value={listingArea(item.listing)} />
-                              <Metric label="Source" value={item.listing.sourceName || "-"} />
-                            </div>
-
-                            <div className="mt-4 grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
-                              <div className="space-y-2">
-                                <Label htmlFor={`label-${item.id}`}>Recommendation</Label>
-                                <Input
-                                  id={`label-${item.id}`}
-                                  defaultValue={item.recommendationLabel || ""}
-                                  onBlur={(event) => {
-                                    const nextLabel = event.target.value || null;
-                                    if (nextLabel !== item.recommendationLabel) {
-                                      updateItemMutation.mutate({ item, patch: { recommendationLabel: nextLabel } });
-                                    }
-                                  }}
-                                  placeholder="Best fit"
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <Label htmlFor={`notes-${item.id}`}>Client-visible notes</Label>
-                                <Textarea
-                                  id={`notes-${item.id}`}
-                                  defaultValue={item.clientNotes || ""}
-                                  onBlur={(event) => {
-                                    const nextNotes = event.target.value || null;
-                                    if (nextNotes !== item.clientNotes) {
-                                      updateItemMutation.mutate({ item, patch: { clientNotes: nextNotes } });
-                                    }
-                                  }}
-                                  placeholder="Why this option belongs in the survey"
-                                  className="min-h-[88px]"
-                                />
-                              </div>
-                            </div>
-
-                            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
-                              <div className="flex items-center gap-2">
-                                {firstLink(item.listing) ? (
-                                  <a
-                                    href={firstLink(item.listing) || undefined}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="inline-flex items-center gap-1 text-sm font-semibold text-blue-700 hover:text-blue-900"
-                                  >
-                                    Source link
-                                    <ExternalLink className="h-3.5 w-3.5" />
-                                  </a>
-                                ) : (
-                                  <span className="text-sm text-slate-500">No public source link</span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-3">
-                                {item.hidden ? <EyeOff className="h-4 w-4 text-slate-500" /> : <Eye className="h-4 w-4 text-emerald-600" />}
-                                <Label htmlFor={`hidden-${item.id}`} className="text-sm font-medium text-slate-700">Include</Label>
-                                <Switch
-                                  id={`hidden-${item.id}`}
-                                  checked={!item.hidden}
-                                  onCheckedChange={(checked) => updateItemMutation.mutate({ item, patch: { hidden: !checked } })}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
-
-                <aside className="space-y-4">
-                  <div ref={previewRef} className="sticky top-28 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Client map preview</p>
-                        <h2 className="mt-2 text-xl font-semibold text-slate-950">{selectedSurvey.title}</h2>
-                        <p className="mt-1 text-sm text-slate-600">{selectedSurvey.clientName || "Prepared client survey"}</p>
-                      </div>
-                      <Badge variant="outline" className="bg-slate-50">Private</Badge>
-                    </div>
-
-                    <div className="mt-5 overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <MapPin className="h-4 w-4 text-blue-700" />
-                          <p className="text-sm font-semibold text-slate-950">
-                            {mappableSurveyItems.length} mapped / {visibleItems.length} included
-                          </p>
-                        </div>
-                        {unmappedVisibleCount > 0 && (
-                          <Badge variant="outline" className="bg-amber-50 text-amber-800">
-                            {unmappedVisibleCount} need coordinates
-                          </Badge>
-                        )}
-                      </div>
-
-                      <div className="h-[360px]">
-                        {!GOOGLE_MAPS_API_KEY ? (
-                          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-slate-600">
-                            {GOOGLE_MAPS_API_KEY_HELP_TEXT}
-                          </div>
-                        ) : mapLoadError ? (
-                          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-rose-700">
-                            Google Maps failed to load.
-                          </div>
-                        ) : !isMapLoaded ? (
-                          <div className="flex h-full items-center justify-center text-sm text-slate-500">Loading map...</div>
-                        ) : mappableSurveyItems.length === 0 ? (
-                          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-slate-600">
-                            Add latitude and longitude to these listings before the client map can render pins.
+                  <div className="space-y-6">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Included options</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        {selectedSurvey.items.length === 0 ? (
+                          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600">
+                            Added listings will appear here in client order.
                           </div>
                         ) : (
-                          <GoogleMap
-                            mapContainerStyle={MAP_CONTAINER_STYLE}
-                            center={mapCenter}
-                            zoom={mappableSurveyItems.length === 1 ? 13 : 10}
-                            options={{
-                              streetViewControl: false,
-                              mapTypeControl: false,
-                              fullscreenControl: true,
-                            }}
-                          >
-                            {mappableSurveyItems.map((item) => {
-                              const optionNumber = visibleItems.findIndex((visibleItem) => visibleItem.id === item.id) + 1;
-                              return (
-                                <MarkerF
-                                  key={item.id}
-                                  position={{ lat: item.listing.latitude, lng: item.listing.longitude }}
-                                  label={{ text: String(optionNumber), color: "#ffffff", fontWeight: "700" }}
-                                  onClick={() => setSelectedMapItemId(item.id)}
-                                />
-                              );
-                            })}
-                            {selectedMapItem && (
-                              <InfoWindowF
-                                position={{ lat: selectedMapItem.listing.latitude, lng: selectedMapItem.listing.longitude }}
-                                onCloseClick={() => setSelectedMapItemId(null)}
-                              >
-                                <div className="max-w-[15rem] space-y-2 p-1 text-sm text-slate-700">
-                                  <p className="font-semibold text-slate-950">{selectedMapItem.listing.title}</p>
-                                  <p>{selectedMapItem.listing.normalizedAddress || selectedMapItem.listing.address || "Address pending"}</p>
-                                  <p>{formatListingSize(selectedMapItem.listing)} - {listingArea(selectedMapItem.listing)}</p>
-                                  <div className="flex flex-wrap gap-3">
-                                    {firstLink(selectedMapItem.listing) && (
-                                      <a href={firstLink(selectedMapItem.listing) || undefined} target="_blank" rel="noreferrer" className="font-semibold text-blue-700">
-                                        Flyer/listing
-                                      </a>
-                                    )}
-                                    <a href={buildGoogleMapsUrl(selectedMapItem.listing)} target="_blank" rel="noreferrer" className="font-semibold text-blue-700">
-                                      Open maps
-                                    </a>
-                                  </div>
+                          selectedSurvey.items.map((item, index) => (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onClick={() => setSelectedMapItemId(item.id)}
+                              className={`w-full rounded-lg border p-3 text-left transition ${
+                                selectedDetailItem?.id === item.id
+                                  ? "border-blue-300 bg-blue-50 shadow-sm"
+                                  : item.hidden
+                                    ? "border-slate-200 bg-slate-50 opacity-75"
+                                    : "border-slate-200 bg-white hover:border-blue-200"
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Option {index + 1}</p>
+                                  <p className="mt-1 font-semibold text-slate-950">{item.listing.title}</p>
+                                  <p className="mt-1 text-xs text-slate-500">{item.listing.normalizedAddress || item.listing.address || "Address pending"}</p>
                                 </div>
-                              </InfoWindowF>
-                            )}
-                          </GoogleMap>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="mt-5 space-y-4">
-                      {visibleItems.length === 0 ? (
-                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600">
-                          Included listings will appear here.
-                        </div>
-                      ) : (
-                        visibleItems.map((item, index) => (
-                          <div key={item.id} className="rounded-lg border border-slate-200 bg-white p-4">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Option {index + 1}</p>
-                                <h3 className="mt-1 font-semibold text-slate-950">{item.listing.title}</h3>
-                                <p className="mt-1 text-sm text-slate-600">{item.listing.normalizedAddress || item.listing.address || "Address pending"}</p>
+                                <div className="flex items-center gap-1">
+                                  <Button type="button" size="icon" variant="outline" disabled={index === 0} onClick={(event) => { event.stopPropagation(); moveItem(item, "up"); }}>
+                                    <ArrowUp className="h-4 w-4" />
+                                  </Button>
+                                  <Button type="button" size="icon" variant="outline" disabled={index === selectedSurvey.items.length - 1} onClick={(event) => { event.stopPropagation(); moveItem(item, "down"); }}>
+                                    <ArrowDown className="h-4 w-4" />
+                                  </Button>
+                                  <Button type="button" size="icon" variant="outline" onClick={(event) => { event.stopPropagation(); deleteItemMutation.mutate(item); }}>
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
                               </div>
-                              {item.recommendationLabel && <Badge className="bg-blue-100 text-blue-800">{item.recommendationLabel}</Badge>}
-                            </div>
-                            <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                              <Metric label="Building" value={formatListingSize(item.listing)} />
-                              <Metric label="Land" value={item.listing.landAcres ? `${formatNumber(item.listing.landAcres)} ac` : "-"} />
-                              <Metric label="Lease" value={formatLeaseRate(item.listing)} />
-                              <Metric label="Sale" value={formatMoney(item.listing.totalPrice)} />
-                            </div>
-                            {item.clientNotes && <p className="mt-4 text-sm leading-6 text-slate-700">{item.clientNotes}</p>}
-                            {firstLink(item.listing) && (
-                              <a
-                                href={firstLink(item.listing) || undefined}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-blue-700"
-                              >
-                                View listing
-                                <ExternalLink className="h-3.5 w-3.5" />
-                              </a>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
+                              <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-600">
+                                <span>{formatListingSize(item.listing)}</span>
+                                <span>{listingArea(item.listing)}</span>
+                                {item.hidden && <span className="font-semibold text-slate-700">Hidden</span>}
+                                {!isMappableListing(item.listing) && <span className="font-semibold text-amber-700">Needs coordinates</span>}
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </CardContent>
+                    </Card>
 
-                  <Card>
-                    <CardHeader>
-                      <div className="flex items-center gap-2">
-                        <Bot className="h-4 w-4 text-blue-700" />
-                        <CardTitle>Action trail</CardTitle>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      {surveyEvents.length === 0 ? (
-                        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-600">
-                          Survey actions will appear here for future assistant review.
+                    <Card>
+                      <CardHeader>
+                        <div className="flex items-center gap-2">
+                          <Bot className="h-4 w-4 text-blue-700" />
+                          <CardTitle>Action trail</CardTitle>
                         </div>
-                      ) : (
-                        surveyEvents.slice(0, 8).map((event) => (
-                          <div key={event.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                            <div className="flex items-start justify-between gap-3">
-                              <p className="text-sm font-semibold text-slate-900">{event.summary || event.action}</p>
-                              <Badge variant="outline" className="bg-white">{event.actorType}</Badge>
-                            </div>
-                            <p className="mt-1 text-xs text-slate-500">{formatRelativeTime(event.createdAt)}</p>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        {surveyEvents.length === 0 ? (
+                          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-600">
+                            Survey actions will appear here for future assistant review.
                           </div>
-                        ))
-                      )}
-                    </CardContent>
-                  </Card>
-                </aside>
+                        ) : (
+                          surveyEvents.slice(0, 8).map((event) => (
+                            <div key={event.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                              <div className="flex items-start justify-between gap-3">
+                                <p className="text-sm font-semibold text-slate-900">{event.summary || event.action}</p>
+                                <Badge variant="outline" className="bg-white">{event.actorType}</Badge>
+                              </div>
+                              <p className="mt-1 text-xs text-slate-500">{formatRelativeTime(event.createdAt)}</p>
+                            </div>
+                          ))
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
               </section>
             </>
           )}
