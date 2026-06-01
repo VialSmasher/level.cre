@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getGoogleMapsApiKey } from "@/lib/googleMapsApiKey";
 import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 type IntelListing = {
   id: string;
@@ -41,6 +42,18 @@ type IntelListing = {
 type MappableIntelListing = IntelListing & {
   latitude: number;
   longitude: number;
+};
+
+type DuplicateListing = IntelListing & {
+  sourceRecordKey: string;
+  duplicateScore: number;
+};
+
+type DuplicateGroup = {
+  key: string;
+  reason: string;
+  suggestedKeepId: string;
+  listings: DuplicateListing[];
 };
 
 type UploadListingRecord = {
@@ -388,6 +401,7 @@ function MapUnavailableCard() {
 
 export default function IndustrialIntelInventoryPage() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [showManualIntake, setShowManualIntake] = useState(false);
   const [selectedListingId, setSelectedListingId] = useState<string | null>(null);
   const [queueFilter, setQueueFilter] = useState("all");
@@ -421,6 +435,10 @@ export default function IndustrialIntelInventoryPage() {
 
   const { data: listings = [], isLoading, isError, error } = useQuery<IntelListing[]>({
     queryKey: ["/api/intel/listings"],
+  });
+
+  const { data: duplicateGroups = [] } = useQuery<DuplicateGroup[]>({
+    queryKey: ["/api/intel/listings/duplicates"],
   });
 
   const previewMutation = useMutation({
@@ -512,6 +530,32 @@ export default function IndustrialIntelInventoryPage() {
       setUploadRows([]);
       setUploadError(null);
       setShowManualIntake(false);
+    },
+  });
+
+  const archiveDuplicatesMutation = useMutation({
+    mutationFn: async ({ keepId, duplicateIds }: { keepId: string; duplicateIds: string[] }) => {
+      const response = await apiRequest("POST", "/api/intel/listings/duplicates/archive", {
+        keepId,
+        duplicateIds,
+      });
+      return response.json();
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/listings"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/listings/duplicates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/summary"] });
+      toast({
+        title: "Duplicates archived",
+        description: `${result.archived || 0} duplicate listing${result.archived === 1 ? "" : "s"} moved out of the active queue.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Could not archive duplicates",
+        description: error?.message || "Please try again.",
+        variant: "destructive",
+      });
     },
   });
 
@@ -867,6 +911,75 @@ export default function IndustrialIntelInventoryPage() {
           </div>
         </CardContent>
       </Card>
+
+      {duplicateGroups.length > 0 && (
+        <Card className="overflow-hidden border-amber-200 bg-white shadow-sm">
+          <div className="h-1 bg-amber-500" />
+          <CardHeader>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle>Duplicate review</CardTitle>
+                <p className="mt-1 text-sm text-slate-600">
+                  Potential duplicate listings are grouped by CoStar PropertyID or exact address/type/size. Archive keeps the best row active and soft-removes the extras.
+                </p>
+              </div>
+              <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                {duplicateGroups.length} group{duplicateGroups.length === 1 ? "" : "s"}
+              </span>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {duplicateGroups.slice(0, 5).map((group) => {
+              const keep = group.listings.find((listing) => listing.id === group.suggestedKeepId) || group.listings[0];
+              const duplicateIds = group.listings.filter((listing) => listing.id !== keep.id).map((listing) => listing.id);
+              return (
+                <div key={group.key} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-950">{keep.title}</p>
+                      <p className="mt-1 text-sm text-slate-600">{keep.address || "Address needs review"}</p>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold">
+                        <span className="rounded-full bg-white px-2.5 py-1 text-slate-700">{group.reason}</span>
+                        <span className="rounded-full bg-white px-2.5 py-1 text-slate-700">{group.listings.length} matching rows</span>
+                        <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-800">Keep: {keep.sourceName || "Unknown"}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => archiveDuplicatesMutation.mutate({ keepId: keep.id, duplicateIds })}
+                      disabled={archiveDuplicatesMutation.isPending || duplicateIds.length === 0}
+                      className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Archive {duplicateIds.length} duplicate{duplicateIds.length === 1 ? "" : "s"}
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    {group.listings.map((listing) => (
+                      <div
+                        key={listing.id}
+                        className={`rounded-xl border px-3 py-2 text-sm ${
+                          listing.id === keep.id ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-slate-950">{listing.sourceName || "Unknown source"}</p>
+                            <p className="mt-0.5 text-xs text-slate-500">{listing.sourceRecordKey}</p>
+                          </div>
+                          <span className="text-xs font-semibold text-slate-500">score {listing.duplicateScore}</span>
+                        </div>
+                        <p className="mt-2 text-xs text-slate-600">
+                          {formatListingSize(listing)} | {formatListingValue(listing) || "No rate/price"} | {formatDateTime(listing.lastSeenAt)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       {showManualIntake && (
         <Card>

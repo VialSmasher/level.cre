@@ -63,6 +63,18 @@ export type IntelListingListItem = {
   removedAt: string | null;
 };
 
+export type IntelDuplicateListingItem = IntelListingListItem & {
+  sourceRecordKey: string;
+  duplicateScore: number;
+};
+
+export type IntelDuplicateGroup = {
+  key: string;
+  reason: string;
+  suggestedKeepId: string;
+  listings: IntelDuplicateListingItem[];
+};
+
 export type IntelChangeListItem = {
   id: string;
   listingId: string;
@@ -562,6 +574,178 @@ export class IndustrialIntelRepository {
       }
       throw error;
     }
+  }
+
+  async getListingDuplicates(limit = 50): Promise<IntelDuplicateGroup[]> {
+    if (!(await this.hasCoreTables())) {
+      return [];
+    }
+
+    const result = await pool.query<{
+      id: string;
+      source_id: string;
+      source_name: string | null;
+      source_record_key: string;
+      title: string;
+      address: string | null;
+      normalized_address: string | null;
+      market: string | null;
+      submarket: string | null;
+      status: string;
+      listing_type: string;
+      asset_type: string;
+      lat: string | null;
+      lng: string | null;
+      geocode_status: string | null;
+      geocode_confidence: string | null;
+      geocode_source: string | null;
+      data_quality_status: string | null;
+      available_sf: number | null;
+      land_acres: string | null;
+      total_price: string | null;
+      price_per_acre: string | null;
+      raw_payload: Record<string, unknown> | null;
+      brochure_url: string | null;
+      source_url: string | null;
+      last_seen_at: Date | null;
+      removed_at: Date | null;
+    }>(
+      `
+        SELECT
+          listings.id,
+          listings.source_id,
+          sources.name AS source_name,
+          listings.source_record_key,
+          listings.title,
+          listings.address,
+          COALESCE(listings.normalized_address, listings.address) AS normalized_address,
+          listings.market,
+          listings.submarket,
+          listings.status,
+          listings.listing_type,
+          listings.asset_type,
+          listings.lat,
+          listings.lng,
+          listings.geocode_status,
+          listings.geocode_confidence,
+          listings.geocode_source,
+          listings.data_quality_status,
+          listings.available_sf,
+          listings.land_acres,
+          listings.total_price,
+          listings.price_per_acre,
+          listings.raw_payload,
+          listings.brochure_url,
+          listings.source_url,
+          listings.last_seen_at,
+          listings.removed_at
+        FROM public.intel_listings listings
+        LEFT JOIN public.intel_sources sources ON sources.id = listings.source_id
+        WHERE listings.removed_at IS NULL
+        ORDER BY listings.last_seen_at DESC NULLS LAST, listings.created_at DESC NULLS LAST
+        LIMIT 2000
+      `,
+    );
+
+    const listings = result.rows.map((row) => {
+      const item: IntelDuplicateListingItem = {
+        id: row.id,
+        sourceId: row.source_id,
+        sourceName: row.source_name,
+        sourceRecordKey: row.source_record_key,
+        title: row.title,
+        address: row.address,
+        normalizedAddress: row.normalized_address,
+        market: row.market,
+        submarket: row.submarket,
+        status: row.status,
+        listingType: row.listing_type,
+        assetType: row.asset_type,
+        latitude: numOrNull(row.lat),
+        longitude: numOrNull(row.lng),
+        geocodeStatus: row.geocode_status,
+        geocodeConfidence: numOrNull(row.geocode_confidence),
+        geocodeSource: row.geocode_source,
+        dataQualityStatus: row.data_quality_status,
+        availableSf: intOrNull(row.available_sf),
+        landAcres: numOrNull(row.land_acres),
+        totalPrice: numOrNull(row.total_price),
+        pricePerAcre: numOrNull(row.price_per_acre),
+        leaseRatePsf: numOrNull(row.raw_payload?.leaseRatePsf),
+        brochureUrl: row.brochure_url,
+        sourceUrl: row.source_url,
+        lastSeenAt: isoOrNull(row.last_seen_at),
+        removedAt: isoOrNull(row.removed_at),
+        duplicateScore: 0,
+      };
+      item.duplicateScore = [
+        item.latitude && item.longitude ? 25 : 0,
+        item.availableSf ? 20 : 0,
+        item.totalPrice || item.leaseRatePsf ? 20 : 0,
+        item.normalizedAddress || item.address ? 15 : 0,
+        item.sourceName?.toLowerCase().includes("costar") ? 10 : 0,
+        item.sourceUrl || item.brochureUrl ? 10 : 0,
+      ].reduce((sum, value) => sum + value, 0);
+      return item;
+    });
+
+    const groups = new Map<string, { reason: string; listings: IntelDuplicateListingItem[] }>();
+    const addGroup = (key: string, reason: string, listing: IntelDuplicateListingItem) => {
+      const existing = groups.get(key) || { reason, listings: [] };
+      existing.listings.push(listing);
+      groups.set(key, existing);
+    };
+
+    for (const listing of listings) {
+      const recordKey = listing.sourceRecordKey
+        .split("|")[0]
+        ?.replace(/^manual-upload-/i, "")
+        .trim();
+      if (recordKey && recordKey.length >= 5 && /^[a-z0-9_-]+$/i.test(recordKey)) {
+        addGroup(`property:${listing.listingType}:${recordKey}`, "Same property/listing identifier", listing);
+      }
+
+      const addressKey = String(listing.normalizedAddress || listing.address || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "")
+        .trim();
+      if (addressKey.length >= 8) {
+        addGroup(`address:${listing.listingType}:${addressKey}:${listing.availableSf || "nosf"}`, "Same address, listing type, and size", listing);
+      }
+    }
+
+    return Array.from(groups.entries())
+      .map(([key, group]) => ({
+        key,
+        reason: group.reason,
+        listings: Array.from(new Map(group.listings.map((listing) => [listing.id, listing])).values())
+          .sort((left, right) => right.duplicateScore - left.duplicateScore),
+      }))
+      .filter((group) => group.listings.length > 1)
+      .map((group) => ({
+        ...group,
+        suggestedKeepId: group.listings[0].id,
+      }))
+      .sort((left, right) => right.listings.length - left.listings.length)
+      .slice(0, limit);
+  }
+
+  async archiveDuplicateListings(keepId: string, duplicateIds: string[]): Promise<{ archived: number }> {
+    const ids = Array.from(new Set(duplicateIds.filter((id) => id && id !== keepId)));
+    if (ids.length === 0) return { archived: 0 };
+
+    const result = await pool.query(
+      `
+        UPDATE public.intel_listings
+        SET status = 'duplicate', removed_at = now(), updated_at = now()
+        WHERE id = ANY($1::varchar[])
+          AND id <> $2
+          AND removed_at IS NULL
+      `,
+      [ids, keepId],
+    );
+
+    return { archived: result.rowCount || 0 };
   }
 
   async getRecentChanges(limit = 10): Promise<IntelChangeListItem[]> {

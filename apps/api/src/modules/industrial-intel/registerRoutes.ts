@@ -69,6 +69,11 @@ const intelManualListingPreviewSchema = z.object({
   sourceUrl: z.string().trim().url(),
 });
 
+const intelArchiveDuplicatesSchema = z.object({
+  keepId: z.string().trim().min(1),
+  duplicateIds: z.array(z.string().trim().min(1)).min(1).max(50),
+});
+
 export function registerIndustrialIntelRoutes(app: Express): void {
   app.get("/api/intel/summary", requireAuth, async (_req, res) => {
     try {
@@ -117,6 +122,31 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     } catch (error) {
       console.error("Error fetching industrial intel changes:", error);
       res.status(500).json({ message: "Failed to fetch industrial intel changes" });
+    }
+  });
+
+  app.get("/api/intel/listings/duplicates", requireAuth, async (_req, res) => {
+    try {
+      const groups = await industrialIntelService.getListingDuplicates();
+      res.json(groups);
+    } catch (error) {
+      console.error("Error fetching industrial intel listing duplicates:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel listing duplicates" });
+    }
+  });
+
+  app.post("/api/intel/listings/duplicates/archive", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelArchiveDuplicatesSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid duplicate archive request", issues: parsed.error.flatten() });
+      }
+
+      const result = await industrialIntelService.archiveDuplicateListings(parsed.data.keepId, parsed.data.duplicateIds);
+      res.json(result);
+    } catch (error) {
+      console.error("Error archiving industrial intel listing duplicates:", error);
+      res.status(500).json({ message: "Failed to archive industrial intel listing duplicates" });
     }
   });
 

@@ -6,6 +6,7 @@ import {
   type IntelRequirementPreference,
   industrialIntelRepository,
   type IntelListingListItem,
+  type IntelDuplicateGroup,
   type IntelRunListItem,
   type IntelSourceListItem,
   type IntelSummary,
@@ -36,6 +37,14 @@ export class IndustrialIntelService {
 
   async getListings(): Promise<IntelListingListItem[]> {
     return industrialIntelRepository.getListings();
+  }
+
+  async getListingDuplicates(): Promise<IntelDuplicateGroup[]> {
+    return industrialIntelRepository.getListingDuplicates();
+  }
+
+  async archiveDuplicateListings(keepId: string, duplicateIds: string[]) {
+    return industrialIntelRepository.archiveDuplicateListings(keepId, duplicateIds);
   }
 
   async getRecentChanges(): Promise<IntelChangeListItem[]> {
