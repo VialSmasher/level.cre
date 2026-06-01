@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, Mic, MicOff, Sparkles, Wand2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ClipboardList, ExternalLink, MapPin, Mic, MicOff, Ruler, Sparkles, Wand2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +34,37 @@ type IntelRequirement = {
   isOffMarketSearchEnabled: boolean;
   updatedAt: string | null;
   archivedAt: string | null;
+};
+
+type IntelListing = {
+  id: string;
+  sourceName: string | null;
+  title: string;
+  address: string | null;
+  market: string | null;
+  submarket: string | null;
+  status: string;
+  listingType: string;
+  assetType: string;
+  availableSf: number | null;
+  landAcres: number | null;
+  totalPrice: number | null;
+  pricePerAcre: number | null;
+  brochureUrl: string | null;
+  sourceUrl: string | null;
+  removedAt: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  geocodeStatus?: string | null;
+  dataQualityStatus?: string | null;
+};
+
+type RequirementMatch = {
+  listing: IntelListing;
+  score: number;
+  tier: "strong" | "adjacent" | "review";
+  reasons: string[];
+  warnings: string[];
 };
 
 type RequirementFormState = {
@@ -100,6 +131,162 @@ function formatDateTime(value: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Never";
   return date.toLocaleString();
+}
+
+function formatNumber(value: number | null | undefined) {
+  return typeof value === "number" ? value.toLocaleString() : "-";
+}
+
+function formatMoney(value: number | null | undefined) {
+  if (!value) return null;
+  return new Intl.NumberFormat(undefined, { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(value);
+}
+
+function formatListingSize(listing: IntelListing) {
+  if (listing.assetType === "land") {
+    return listing.landAcres ? `${listing.landAcres.toLocaleString()} ac` : "-";
+  }
+  return listing.availableSf ? `${listing.availableSf.toLocaleString()} SF` : "-";
+}
+
+function formatListingValue(listing: IntelListing) {
+  if (listing.totalPrice) return formatMoney(listing.totalPrice);
+  if (listing.pricePerAcre) return `${formatMoney(listing.pricePerAcre)} / ac`;
+  return null;
+}
+
+function normalizeMatchText(value: string | null | undefined) {
+  return (value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function uniqueValues(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function getRequirementAreaTokens(requirement: IntelRequirement) {
+  const areaText = normalizeMatchText([
+    requirement.submarket,
+    requirement.market,
+    requirement.specialNotes,
+    requirement.timingNotes,
+  ].filter(Boolean).join(" "));
+
+  const knownAreas = [
+    "south edmonton",
+    "southeast",
+    "south east",
+    "sherwood park",
+    "leduc",
+    "nisku",
+    "acheson",
+    "northwest",
+    "north west",
+    "west edmonton",
+    "fort saskatchewan",
+    "st albert",
+    "edmonton",
+    "calgary",
+  ];
+
+  const detected = knownAreas.filter((area) => areaText.includes(area));
+  if (requirement.submarket) detected.push(normalizeMatchText(requirement.submarket));
+  if (requirement.market) detected.push(normalizeMatchText(requirement.market));
+  return uniqueValues(detected);
+}
+
+function listingMatchesArea(listing: IntelListing, areaTokens: string[]) {
+  if (areaTokens.length === 0) return false;
+  const listingArea = normalizeMatchText([listing.submarket, listing.market, listing.address, listing.title].filter(Boolean).join(" "));
+  if (!listingArea) return false;
+  return areaTokens.some((area) => listingArea.includes(area) || area.includes(listingArea));
+}
+
+function scoreListingForRequirement(requirement: IntelRequirement, listing: IntelListing): RequirementMatch {
+  let score = 0;
+  const reasons: string[] = [];
+  const warnings: string[] = [];
+  const dealType = normalizeMatchText(requirement.dealType);
+  const listingType = normalizeMatchText(listing.listingType);
+  const areaTokens = getRequirementAreaTokens(requirement);
+
+  if (dealType === "either" || dealType === listingType || (dealType === "lease" && listingType === "sublease")) {
+    score += 22;
+    reasons.push(`${listing.listingType} aligns with the requirement`);
+  } else {
+    warnings.push(`Deal type mismatch: requirement is ${requirement.dealType}, listing is ${listing.listingType}`);
+  }
+
+  if (listingMatchesArea(listing, areaTokens)) {
+    score += 24;
+    reasons.push(`Area matches ${listing.submarket || listing.market || "the target geography"}`);
+  } else if (requirement.submarket || requirement.specialNotes) {
+    score += 6;
+    warnings.push("Target geography needs broker review");
+  }
+
+  if (listing.availableSf && (requirement.minSf || requirement.maxSf)) {
+    const minSf = requirement.minSf || 0;
+    const maxSf = requirement.maxSf || Number.POSITIVE_INFINITY;
+    if (listing.availableSf >= minSf && listing.availableSf <= maxSf) {
+      score += 30;
+      reasons.push(`Size fits at ${listing.availableSf.toLocaleString()} SF`);
+    } else {
+      const lowBound = minSf ? minSf * 0.75 : 0;
+      const highBound = Number.isFinite(maxSf) ? maxSf * 1.25 : Number.POSITIVE_INFINITY;
+      if (listing.availableSf >= lowBound && listing.availableSf <= highBound) {
+        score += 15;
+        reasons.push(`Size is adjacent at ${listing.availableSf.toLocaleString()} SF`);
+      } else {
+        warnings.push(`Size is outside target at ${listing.availableSf.toLocaleString()} SF`);
+      }
+    }
+  } else if (listing.assetType === "land" && requirement.minYardAcres && listing.landAcres) {
+    if (listing.landAcres >= requirement.minYardAcres) {
+      score += 20;
+      reasons.push(`Land size supports yard need at ${listing.landAcres.toLocaleString()} ac`);
+    }
+  } else {
+    score += 4;
+    warnings.push("Size data is missing or incomplete");
+  }
+
+  if (requirement.powerNotes) {
+    const listingText = normalizeMatchText([listing.title, listing.address, listing.submarket, listing.sourceName].filter(Boolean).join(" "));
+    if (listingText.includes("power") || listingText.includes("manufacturing") || listingText.includes("shop")) {
+      score += 8;
+      reasons.push("Listing language may support power/manufacturing use");
+    } else {
+      warnings.push("Power requirement cannot be verified from listing data");
+    }
+  }
+
+  if (listing.latitude && listing.longitude) {
+    score += 5;
+    reasons.push("Mappable for client survey");
+  } else {
+    warnings.push("Needs coordinates before map-ready survey");
+  }
+
+  if (listing.brochureUrl || listing.sourceUrl) {
+    score += 4;
+    reasons.push("Source link available");
+  } else {
+    warnings.push("No brochure/source link attached");
+  }
+
+  if (listing.dataQualityStatus === "review") {
+    score -= 8;
+    warnings.push("Listing is flagged for data review");
+  }
+
+  const boundedScore = Math.max(0, Math.min(100, score));
+  return {
+    listing,
+    score: boundedScore,
+    tier: boundedScore >= 70 ? "strong" : boundedScore >= 45 ? "adjacent" : "review",
+    reasons,
+    warnings,
+  };
 }
 
 function extractNumber(value: string | undefined) {
@@ -183,6 +370,108 @@ function parseRequirementTranscript(transcript: string): Partial<RequirementForm
   return parsed;
 }
 
+function MatchCard({
+  match,
+  decision,
+  onDecision,
+}: {
+  match: RequirementMatch;
+  decision?: "shortlist" | "maybe" | "reject";
+  onDecision: (decision: "shortlist" | "maybe" | "reject") => void;
+}) {
+  const listingValue = formatListingValue(match.listing);
+  return (
+    <div className={`rounded-2xl border p-4 ${
+      match.tier === "strong"
+        ? "border-emerald-200 bg-emerald-50/60"
+        : match.tier === "adjacent"
+          ? "border-blue-200 bg-blue-50/50"
+          : "border-slate-200 bg-white"
+    }`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-slate-950 px-2.5 py-1 text-xs font-semibold text-white">{match.score}</span>
+            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+              match.tier === "strong"
+                ? "bg-emerald-100 text-emerald-800"
+                : match.tier === "adjacent"
+                  ? "bg-blue-100 text-blue-800"
+                  : "bg-slate-100 text-slate-700"
+            }`}>
+              {match.tier === "strong" ? "Strong match" : match.tier === "adjacent" ? "Compatible adjacent" : "Review later"}
+            </span>
+            {decision && (
+              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                {decision}
+              </span>
+            )}
+          </div>
+          <h3 className="mt-3 line-clamp-2 text-base font-semibold text-slate-950">{match.listing.title}</h3>
+          <p className="mt-1 line-clamp-2 text-sm text-slate-600">{match.listing.address || "Address still needs review"}</p>
+        </div>
+        <div className="shrink-0 text-right text-sm">
+          <p className="font-semibold text-slate-950">{formatListingSize(match.listing)}</p>
+          {listingValue && <p className="mt-1 text-slate-500">{listingValue}</p>}
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+        <span className="rounded-full bg-white/80 px-2.5 py-1 text-slate-700">{match.listing.listingType}</span>
+        <span className="rounded-full bg-white/80 px-2.5 py-1 text-slate-700">{match.listing.assetType}</span>
+        <span className="rounded-full bg-white/80 px-2.5 py-1 text-slate-700">{match.listing.submarket || match.listing.market || "Unassigned"}</span>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-white/80 bg-white/70 p-3">
+          <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Why it fits
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-slate-700">
+            {(match.reasons.length ? match.reasons.slice(0, 3) : ["Needs broker review"]).map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </div>
+        <div className="rounded-xl border border-white/80 bg-white/70 p-3">
+          <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-700">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Gaps
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-slate-700">
+            {(match.warnings.length ? match.warnings.slice(0, 3) : ["No major gaps flagged"]).map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" onClick={() => onDecision("shortlist")} className="bg-slate-950 text-white hover:bg-slate-800">
+          Shortlist
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => onDecision("maybe")}>
+          Maybe
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => onDecision("reject")}>
+          Reject
+        </Button>
+        {match.listing.sourceUrl && (
+          <a href={match.listing.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-sm font-semibold text-blue-700 hover:text-blue-900">
+            Source <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        )}
+        {match.listing.brochureUrl && (
+          <a href={match.listing.brochureUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-sm font-semibold text-blue-700 hover:text-blue-900">
+            Brochure <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function IndustrialIntelRequirementsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -190,10 +479,33 @@ export default function IndustrialIntelRequirementsPage() {
   const [dictationText, setDictationText] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [recognition, setRecognition] = useState<InstanceType<SpeechRecognitionCtor> | null>(null);
+  const [selectedRequirementId, setSelectedRequirementId] = useState<string | null>(null);
+  const [reviewDecisions, setReviewDecisions] = useState<Record<string, "shortlist" | "maybe" | "reject">>({});
 
   const { data: requirements = [], isLoading } = useQuery<IntelRequirement[]>({
     queryKey: ["/api/intel/requirements"],
   });
+
+  const { data: listings = [], isLoading: isLoadingListings } = useQuery<IntelListing[]>({
+    queryKey: ["/api/intel/listings"],
+  });
+
+  const selectedRequirement = requirements.find((requirement) => requirement.id === selectedRequirementId) || requirements[0] || null;
+
+  const matches = useMemo(() => {
+    if (!selectedRequirement) return [];
+    return listings
+      .filter((listing) => !listing.removedAt && listing.status !== "removed")
+      .map((listing) => scoreListingForRequirement(selectedRequirement, listing))
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 24);
+  }, [listings, selectedRequirement]);
+
+  const matchGroups = useMemo(() => ({
+    strong: matches.filter((match) => match.tier === "strong"),
+    adjacent: matches.filter((match) => match.tier === "adjacent"),
+    review: matches.filter((match) => match.tier === "review"),
+  }), [matches]);
 
   const createRequirementMutation = useMutation({
     mutationFn: async () => {
@@ -494,7 +806,7 @@ export default function IndustrialIntelRequirementsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Saved requirements</CardTitle>
+            <CardTitle>Saved requirements and matches</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -507,41 +819,103 @@ export default function IndustrialIntelRequirementsPage() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-4">
-                {requirements.map((requirement) => (
-                  <div key={requirement.id} className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-base font-semibold text-slate-950">{requirement.title}</p>
-                        <p className="mt-1 text-sm text-slate-600">
-                          {requirement.clientName || "No client name yet"}
+              <div className="space-y-6">
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {requirements.map((requirement) => {
+                    const isSelected = selectedRequirement?.id === requirement.id;
+                    return (
+                      <button
+                        key={requirement.id}
+                        type="button"
+                        onClick={() => setSelectedRequirementId(requirement.id)}
+                        className={`rounded-2xl border p-4 text-left transition ${
+                          isSelected
+                            ? "border-blue-300 bg-blue-50/80 shadow-sm"
+                            : "border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-base font-semibold text-slate-950">{requirement.title}</p>
+                            <p className="mt-1 text-sm text-slate-600">
+                              {requirement.clientName || "No client name yet"}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                            <span className="rounded-full bg-white px-2.5 py-1 text-slate-700">{requirement.dealType}</span>
+                            <span className="rounded-full bg-blue-100 px-2.5 py-1 text-blue-700">{requirement.status}</span>
+                            {requirement.isOffMarketSearchEnabled && (
+                              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-amber-700">off-market on</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
+                          <p className="flex items-center gap-2">
+                            <MapPin className="h-4 w-4 text-slate-400" />
+                            {requirement.submarket || requirement.market || "Unspecified"}
+                          </p>
+                          <p className="flex items-center gap-2">
+                            <Ruler className="h-4 w-4 text-slate-400" />
+                            {formatNumber(requirement.minSf)} - {formatNumber(requirement.maxSf)} SF
+                          </p>
+                        </div>
+
+                        <p className="mt-3 text-xs text-slate-500">
+                          Updated {formatDateTime(requirement.updatedAt)}
                         </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2 text-xs font-semibold">
-                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">{requirement.dealType}</span>
-                        <span className="rounded-full bg-blue-100 px-2.5 py-1 text-blue-700">{requirement.status}</span>
-                        {requirement.isOffMarketSearchEnabled && (
-                          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-amber-700">off-market on</span>
-                        )}
-                      </div>
-                    </div>
+                      </button>
+                    );
+                  })}
+                </div>
 
-                    <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
-                      <p>
-                        <span className="font-medium text-slate-900">Area:</span>{" "}
-                        {requirement.submarket || requirement.market || "Unspecified"}
-                      </p>
-                      <p>
-                        <span className="font-medium text-slate-900">Size:</span>{" "}
-                        {requirement.minSf?.toLocaleString() || "?"} - {requirement.maxSf?.toLocaleString() || "?"} SF
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Matchmaker</p>
+                      <h3 className="mt-1 text-2xl font-semibold text-slate-950">
+                        {selectedRequirement ? selectedRequirement.title : "Select a requirement"}
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Ranked against current Industrial Intel inventory. Use decisions to stage a client shortlist.
                       </p>
                     </div>
-
-                    <p className="mt-3 text-xs text-slate-500">
-                      Updated {formatDateTime(requirement.updatedAt)}
-                    </p>
+                    <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                      <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-emerald-800">{matchGroups.strong.length} strong</span>
+                      <span className="rounded-full bg-blue-100 px-3 py-1.5 text-blue-800">{matchGroups.adjacent.length} adjacent</span>
+                      <span className="rounded-full bg-slate-100 px-3 py-1.5 text-slate-700">{matchGroups.review.length} review</span>
+                    </div>
                   </div>
-                ))}
+
+                  {isLoadingListings ? (
+                    <p className="mt-5 text-sm text-slate-500">Scoring listings...</p>
+                  ) : !selectedRequirement ? (
+                    <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-8 text-center text-sm text-slate-600">
+                      Save or select a requirement to see compatible listings.
+                    </div>
+                  ) : matches.length === 0 ? (
+                    <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-8 text-center">
+                      <p className="font-medium text-slate-950">No active listings available to score yet</p>
+                      <p className="mt-2 text-sm text-slate-600">Import inventory first, then return here to build a shortlist.</p>
+                    </div>
+                  ) : (
+                    <div className="mt-5 max-h-[820px] space-y-4 overflow-y-auto pr-1">
+                      {matches.map((match) => (
+                        <MatchCard
+                          key={match.listing.id}
+                          match={match}
+                          decision={reviewDecisions[`${selectedRequirement.id}:${match.listing.id}`]}
+                          onDecision={(decision) =>
+                            setReviewDecisions((current) => ({
+                              ...current,
+                              [`${selectedRequirement.id}:${match.listing.id}`]: decision,
+                            }))
+                          }
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </CardContent>
