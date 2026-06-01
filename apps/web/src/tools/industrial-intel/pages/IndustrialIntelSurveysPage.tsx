@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, Copy, ExternalLink, Eye, EyeOff, FileText, MapPin, Plus, Share2, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, Copy, ExternalLink, Eye, EyeOff, FileText, MapPin, Plus, Share2, Trash2, Upload } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { getGoogleMapsApiKey, GOOGLE_MAPS_API_KEY_HELP_TEXT } from "@/lib/googleMapsApiKey";
+import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -110,6 +111,25 @@ type IntelSurveyEvent = {
   summary: string | null;
   payload: Record<string, unknown>;
   createdAt: string | null;
+};
+
+type IntelListingAsset = {
+  id: string;
+  listingId: string | null;
+  surveyId: string | null;
+  surveyItemId: string | null;
+  assetType: "brochure" | "flyer" | "aerial" | "site_plan" | "photo" | "survey_page" | "other";
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+  storageBucket: string;
+  storagePath: string;
+  source: string;
+  status: "pending" | "active" | "failed" | "archived";
+  isPrimary: boolean;
+  signedUrl: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 };
 
 function formatNumber(value: number | null | undefined) {
@@ -228,6 +248,12 @@ export default function IndustrialIntelSurveysPage() {
     enabled: Boolean(selectedSurveyId),
   });
 
+  const assetsQueryKey = selectedSurveyId ? [`/api/intel/surveys/${selectedSurveyId}/assets`] : ["/api/intel/surveys/_/assets"];
+  const { data: surveyAssets = [] } = useQuery<IntelListingAsset[]>({
+    queryKey: assetsQueryKey,
+    enabled: Boolean(selectedSurveyId),
+  });
+
   const { isLoaded: isMapLoaded, loadError: mapLoadError } = useJsApiLoader({
     id: "industrial-intel-survey-map",
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
@@ -281,6 +307,14 @@ export default function IndustrialIntelSurveysPage() {
     const explicit = (selectedSurvey?.items || []).find((item) => item.id === selectedMapItemId);
     return explicit || selectedMapItem || visibleItems[0] || null;
   }, [selectedSurvey?.items, selectedMapItem, selectedMapItemId, visibleItems]);
+
+  const selectedDetailAssets = useMemo(() => {
+    if (!selectedDetailItem) return [];
+    return surveyAssets.filter((asset) => (
+      asset.surveyItemId === selectedDetailItem.id ||
+      (!asset.surveyItemId && asset.listingId === selectedDetailItem.listingId)
+    ));
+  }, [selectedDetailItem, surveyAssets]);
 
   const mapCenter = useMemo(() => {
     if (selectedMapItem) {
@@ -424,6 +458,53 @@ export default function IndustrialIntelSurveysPage() {
     },
   });
 
+  const uploadAssetMutation = useMutation({
+    mutationFn: async ({ item, files }: { item: IntelSurveyItem; files: File[] }) => {
+      if (!selectedSurveyId) throw new Error("No survey selected");
+      if (!supabase) throw new Error("Supabase is not configured in this browser");
+
+      const uploaded: IntelListingAsset[] = [];
+      for (const file of files) {
+        if (!["application/pdf", "image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+          throw new Error(`${file.name} is not a supported brochure or image file`);
+        }
+        if (file.size > 25 * 1024 * 1024) {
+          throw new Error(`${file.name} is larger than the 25 MB upload limit`);
+        }
+
+        const response = await apiRequest("POST", `/api/intel/surveys/${selectedSurveyId}/items/${item.id}/assets/upload-url`, {
+          fileName: file.name,
+          contentType: file.type,
+          fileSize: file.size,
+          assetType: file.type === "application/pdf" ? "brochure" : "photo",
+        });
+        const created = await response.json() as {
+          asset: IntelListingAsset;
+          upload: { bucket: string; path: string; token: string };
+        };
+
+        const { error } = await (supabase.storage.from(created.upload.bucket) as any).uploadToSignedUrl(
+          created.upload.path,
+          created.upload.token,
+          file,
+          { contentType: file.type, upsert: false },
+        );
+        if (error) throw error;
+
+        const completeResponse = await apiRequest("POST", `/api/intel/assets/${created.asset.id}/complete`);
+        uploaded.push(await completeResponse.json() as IntelListingAsset);
+      }
+      return uploaded;
+    },
+    onSuccess: (assets) => {
+      queryClient.invalidateQueries({ queryKey: assetsQueryKey });
+      toast({ title: assets.length === 1 ? "Brochure uploaded" : `${assets.length} assets uploaded` });
+    },
+    onError: (error: any) => {
+      toast({ title: "Upload failed", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
   const addShortlist = () => {
     const missing = shortlistedListingIds.filter((listingId) => !selectedListingIds.has(listingId));
     if (missing.length === 0) {
@@ -459,6 +540,13 @@ export default function IndustrialIntelSurveysPage() {
     } catch {
       toast({ title: "Copy failed", description: shareUrl, variant: "destructive" });
     }
+  };
+
+  const uploadFilesForSelectedItem = (fileList: FileList | File[] | null) => {
+    if (!selectedDetailItem || !fileList) return;
+    const files = Array.from(fileList);
+    if (files.length === 0) return;
+    uploadAssetMutation.mutate({ item: selectedDetailItem, files });
   };
 
   return (
@@ -795,6 +883,54 @@ export default function IndustrialIntelSurveysPage() {
                             <Metric label="Sale" value={formatMoney(selectedDetailItem.listing.totalPrice)} />
                             <Metric label="Area" value={listingArea(selectedDetailItem.listing)} />
                             <Metric label="Source" value={selectedDetailItem.listing.sourceName || "-"} />
+                          </div>
+
+                          <div className="space-y-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4">
+                            <div
+                              className="rounded-lg border border-slate-200 bg-white px-4 py-5 text-center"
+                              onDragOver={(event) => event.preventDefault()}
+                              onDrop={(event) => {
+                                event.preventDefault();
+                                uploadFilesForSelectedItem(event.dataTransfer.files);
+                              }}
+                            >
+                              <Upload className="mx-auto h-5 w-5 text-blue-700" />
+                              <p className="mt-2 text-sm font-semibold text-slate-950">Drop brochures or photos</p>
+                              <p className="mt-1 text-xs text-slate-500">PDF, JPG, PNG, or WebP. 25 MB max.</p>
+                              <label className="mt-3 inline-flex h-9 cursor-pointer items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm hover:bg-slate-50">
+                                Choose files
+                                <input
+                                  type="file"
+                                  multiple
+                                  accept="application/pdf,image/jpeg,image/png,image/webp"
+                                  className="hidden"
+                                  disabled={uploadAssetMutation.isPending}
+                                  onChange={(event) => {
+                                    uploadFilesForSelectedItem(event.target.files);
+                                    event.target.value = "";
+                                  }}
+                                />
+                              </label>
+                              {uploadAssetMutation.isPending && <p className="mt-2 text-xs text-slate-500">Uploading...</p>}
+                            </div>
+
+                            {selectedDetailAssets.length > 0 && (
+                              <div className="space-y-2">
+                                {selectedDetailAssets.map((asset) => (
+                                  <div key={asset.id} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2">
+                                    <div>
+                                      <p className="text-sm font-semibold text-slate-950">{asset.fileName}</p>
+                                      <p className="text-xs text-slate-500">{asset.assetType}</p>
+                                    </div>
+                                    {asset.signedUrl && (
+                                      <a href={asset.signedUrl} target="_blank" rel="noreferrer" className="text-sm font-semibold text-blue-700">
+                                        View
+                                      </a>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
 
                           <div className="space-y-2">

@@ -43,6 +43,16 @@ type IntelSurveyDetail = {
   items: IntelSurveyItem[];
 };
 
+type IntelListingAsset = {
+  id: string;
+  listingId: string | null;
+  surveyId: string | null;
+  surveyItemId: string | null;
+  assetType: string;
+  fileName: string;
+  signedUrl: string | null;
+};
+
 type MappableSurveyItem = IntelSurveyItem & {
   listing: IntelListing & {
     latitude: number;
@@ -108,6 +118,16 @@ async function fetchSharedSurvey(token: string): Promise<IntelSurveyDetail> {
   return response.json();
 }
 
+async function fetchSharedSurveyAssets(token: string): Promise<IntelListingAsset[]> {
+  const response = await fetch(apiUrl(`/api/intel/surveys/share/${encodeURIComponent(token)}/assets`), {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`${response.status}: ${await response.text()}`);
+  }
+  return response.json();
+}
+
 export default function IndustrialIntelSurveyClientPage() {
   const [, params] = useRoute("/tools/industrial-intel/surveys/share/:token");
   const token = params?.token || "";
@@ -116,6 +136,12 @@ export default function IndustrialIntelSurveyClientPage() {
   const { data: survey, isLoading, error } = useQuery<IntelSurveyDetail>({
     queryKey: [`/api/intel/surveys/share/${token}`],
     queryFn: () => fetchSharedSurvey(token),
+    enabled: token.length > 0,
+  });
+
+  const { data: assets = [] } = useQuery<IntelListingAsset[]>({
+    queryKey: [`/api/intel/surveys/share/${token}/assets`],
+    queryFn: () => fetchSharedSurveyAssets(token),
     enabled: token.length > 0,
   });
 
@@ -144,6 +170,15 @@ export default function IndustrialIntelSurveyClientPage() {
     if (selectedItem && isMappableListing(selectedItem.listing)) return selectedItem as MappableSurveyItem;
     return mappableItems[0] || null;
   }, [mappableItems, selectedItem, selectedItemId]);
+
+  const assetsByItemId = useMemo(() => {
+    const grouped = new Map<string, IntelListingAsset[]>();
+    assets.forEach((asset) => {
+      if (!asset.surveyItemId) return;
+      grouped.set(asset.surveyItemId, [...(grouped.get(asset.surveyItemId) || []), asset]);
+    });
+    return grouped;
+  }, [assets]);
 
   const mapCenter = selectedMapItem
     ? { lat: selectedMapItem.listing.latitude, lng: selectedMapItem.listing.longitude }
@@ -255,6 +290,11 @@ export default function IndustrialIntelSurveyClientPage() {
                       <p>{selectedMapItem.listing.normalizedAddress || selectedMapItem.listing.address || "Address pending"}</p>
                       <p>{formatListingSize(selectedMapItem.listing)} - {listingArea(selectedMapItem.listing)}</p>
                       <div className="flex flex-wrap gap-3">
+                        {assetsByItemId.get(selectedMapItem.id)?.[0]?.signedUrl && (
+                          <a href={assetsByItemId.get(selectedMapItem.id)?.[0]?.signedUrl || undefined} target="_blank" rel="noreferrer" className="font-semibold text-blue-700">
+                            Brochure
+                          </a>
+                        )}
                         {firstLink(selectedMapItem.listing) && (
                           <a href={firstLink(selectedMapItem.listing) || undefined} target="_blank" rel="noreferrer" className="font-semibold text-blue-700">
                             Flyer/listing
@@ -273,63 +313,80 @@ export default function IndustrialIntelSurveyClientPage() {
         </section>
 
         <aside className="space-y-3 print:space-y-4">
-          {orderedItems.map((item, index) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setSelectedItemId(item.id)}
-              className={`block w-full rounded-lg border bg-white p-4 text-left shadow-sm transition print:break-inside-avoid print:shadow-none ${
-                selectedItem?.id === item.id
-                  ? "border-blue-300 ring-2 ring-blue-100"
-                  : "border-slate-200 hover:border-blue-200"
-              }`}
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Option {index + 1}</p>
-                  <h2 className="mt-1 text-lg font-semibold text-slate-950">{item.listing.title}</h2>
-                  <p className="mt-1 text-sm text-slate-600">{item.listing.normalizedAddress || item.listing.address || "Address pending"}</p>
+          {orderedItems.map((item, index) => {
+            const itemAssets = assetsByItemId.get(item.id) || [];
+            const primaryAsset = itemAssets[0] || null;
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setSelectedItemId(item.id)}
+                className={`block w-full rounded-lg border bg-white p-4 text-left shadow-sm transition print:break-inside-avoid print:shadow-none ${
+                  selectedItem?.id === item.id
+                    ? "border-blue-300 ring-2 ring-blue-100"
+                    : "border-slate-200 hover:border-blue-200"
+                }`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Option {index + 1}</p>
+                    <h2 className="mt-1 text-lg font-semibold text-slate-950">{item.listing.title}</h2>
+                    <p className="mt-1 text-sm text-slate-600">{item.listing.normalizedAddress || item.listing.address || "Address pending"}</p>
+                  </div>
+                  {item.recommendationLabel && <Badge className="bg-blue-100 text-blue-800">{item.recommendationLabel}</Badge>}
                 </div>
-                {item.recommendationLabel && <Badge className="bg-blue-100 text-blue-800">{item.recommendationLabel}</Badge>}
-              </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-                <ClientMetric label="Building" value={formatListingSize(item.listing)} />
-                <ClientMetric label="Land" value={item.listing.landAcres ? `${formatNumber(item.listing.landAcres)} ac` : "-"} />
-                <ClientMetric label="Lease" value={formatLeaseRate(item.listing)} />
-                <ClientMetric label="Sale" value={formatMoney(item.listing.totalPrice)} />
-                <ClientMetric label="Area" value={listingArea(item.listing)} />
-                <ClientMetric label="Source" value={item.listing.sourceName || "-"} />
-              </div>
+                <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+                  <ClientMetric label="Building" value={formatListingSize(item.listing)} />
+                  <ClientMetric label="Land" value={item.listing.landAcres ? `${formatNumber(item.listing.landAcres)} ac` : "-"} />
+                  <ClientMetric label="Lease" value={formatLeaseRate(item.listing)} />
+                  <ClientMetric label="Sale" value={formatMoney(item.listing.totalPrice)} />
+                  <ClientMetric label="Area" value={listingArea(item.listing)} />
+                  <ClientMetric label="Source" value={item.listing.sourceName || "-"} />
+                </div>
 
-              {item.clientNotes && <p className="mt-4 text-sm leading-6 text-slate-700">{item.clientNotes}</p>}
+                {item.clientNotes && <p className="mt-4 text-sm leading-6 text-slate-700">{item.clientNotes}</p>}
 
-              <div className="mt-4 flex flex-wrap gap-3 print:hidden">
-                {firstLink(item.listing) && (
+                <div className="mt-4 flex flex-wrap gap-3 print:hidden">
+                  {primaryAsset?.signedUrl && (
+                    <a
+                      href={primaryAsset.signedUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-sm font-semibold text-blue-700"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      View brochure
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  )}
+                  {firstLink(item.listing) && (
+                    <a
+                      href={firstLink(item.listing) || undefined}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-sm font-semibold text-blue-700"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      View listing
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  )}
                   <a
-                    href={firstLink(item.listing) || undefined}
+                    href={buildGoogleMapsUrl(item.listing)}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-1 text-sm font-semibold text-blue-700"
                     onClick={(event) => event.stopPropagation()}
                   >
-                    View listing
+                    Open maps
                     <ExternalLink className="h-3.5 w-3.5" />
                   </a>
-                )}
-                <a
-                  href={buildGoogleMapsUrl(item.listing)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 text-sm font-semibold text-blue-700"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  Open maps
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </a>
-              </div>
-            </button>
-          ))}
+                </div>
+              </button>
+            );
+          })}
         </aside>
       </main>
     </div>

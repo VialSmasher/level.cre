@@ -253,6 +253,48 @@ export type IntelSurveyEvent = {
   createdAt: string | null;
 };
 
+export type IntelListingAssetType = "brochure" | "flyer" | "aerial" | "site_plan" | "photo" | "survey_page" | "other";
+export type IntelListingAssetStatus = "pending" | "active" | "failed" | "archived";
+
+export type IntelListingAsset = {
+  id: string;
+  listingId: string | null;
+  surveyId: string | null;
+  surveyItemId: string | null;
+  assetType: IntelListingAssetType;
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+  storageBucket: string;
+  storagePath: string;
+  source: string;
+  status: IntelListingAssetStatus;
+  isPrimary: boolean;
+  createdByUserId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type IntelListingAssetWithUrl = IntelListingAsset & {
+  signedUrl: string | null;
+};
+
+export type CreateIntelListingAssetInput = {
+  id: string;
+  listingId: string;
+  surveyId?: string | null;
+  surveyItemId?: string | null;
+  assetType?: IntelListingAssetType | null;
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+  storageBucket: string;
+  storagePath: string;
+  source?: string | null;
+  status?: IntelListingAssetStatus | null;
+  isPrimary?: boolean | null;
+};
+
 export type CreateIntelSurveyEventInput = {
   surveyId: string;
   actorType?: IntelSurveyEventActorType;
@@ -311,6 +353,10 @@ const PUBLIC_LINK_TABLES = [
   "intel_listing_public_link_candidates",
 ] as const;
 
+const LISTING_ASSET_TABLES = [
+  "intel_listing_assets",
+] as const;
+
 function isoOrNull(value: unknown): string | null {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(String(value));
@@ -343,6 +389,44 @@ function boolOrNull(value: unknown): boolean | null {
   if (value === true || value === 'true' || value === 1 || value === '1') return true;
   if (value === false || value === 'false' || value === 0 || value === '0') return false;
   return null;
+}
+
+function listingAssetFromRow(row: {
+  id: string;
+  listing_id: string | null;
+  survey_id: string | null;
+  survey_item_id: string | null;
+  asset_type: IntelListingAssetType;
+  file_name: string;
+  content_type: string;
+  file_size: string | number | null;
+  storage_bucket: string;
+  storage_path: string;
+  source: string;
+  status: IntelListingAssetStatus;
+  is_primary: boolean;
+  created_by_user_id: string | null;
+  created_at: Date | null;
+  updated_at: Date | null;
+}): IntelListingAsset {
+  return {
+    id: row.id,
+    listingId: row.listing_id,
+    surveyId: row.survey_id,
+    surveyItemId: row.survey_item_id,
+    assetType: row.asset_type,
+    fileName: row.file_name,
+    contentType: row.content_type,
+    fileSize: intOrZero(row.file_size),
+    storageBucket: row.storage_bucket,
+    storagePath: row.storage_path,
+    source: row.source,
+    status: row.status,
+    isPrimary: Boolean(row.is_primary),
+    createdByUserId: row.created_by_user_id,
+    createdAt: isoOrNull(row.created_at),
+    updatedAt: isoOrNull(row.updated_at),
+  };
 }
 
 function isRecoverableIntelSchemaError(error: unknown): boolean {
@@ -420,6 +504,64 @@ export class IndustrialIntelRepository {
 
     const found = new Set(result.rows.map((row: { table_name: string }) => row.table_name));
     return PUBLIC_LINK_TABLES.every((name) => found.has(name));
+  }
+
+  async hasListingAssetTables(): Promise<boolean> {
+    const result = await pool.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('intel_listing_assets')
+    `);
+
+    const found = new Set(result.rows.map((row: { table_name: string }) => row.table_name));
+    return LISTING_ASSET_TABLES.every((name) => found.has(name));
+  }
+
+  async ensureListingAssetTables(): Promise<void> {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.intel_listing_assets (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        listing_id varchar REFERENCES public.intel_listings(id) ON DELETE CASCADE,
+        survey_id varchar REFERENCES public.intel_surveys(id) ON DELETE CASCADE,
+        survey_item_id varchar REFERENCES public.intel_survey_items(id) ON DELETE CASCADE,
+        asset_type varchar NOT NULL DEFAULT 'brochure',
+        file_name text NOT NULL,
+        content_type varchar NOT NULL,
+        file_size bigint NOT NULL DEFAULT 0,
+        storage_bucket varchar NOT NULL,
+        storage_path text NOT NULL UNIQUE,
+        source varchar NOT NULL DEFAULT 'upload',
+        status varchar NOT NULL DEFAULT 'pending',
+        is_primary boolean NOT NULL DEFAULT false,
+        created_by_user_id varchar REFERENCES public.users(id) ON DELETE SET NULL,
+        created_at timestamp DEFAULT now(),
+        updated_at timestamp DEFAULT now(),
+        CONSTRAINT chk_intel_listing_assets_type
+          CHECK (asset_type IN ('brochure', 'flyer', 'aerial', 'site_plan', 'photo', 'survey_page', 'other')),
+        CONSTRAINT chk_intel_listing_assets_source
+          CHECK (source IN ('upload', 'email', 'resolver', 'manual')),
+        CONSTRAINT chk_intel_listing_assets_status
+          CHECK (status IN ('pending', 'active', 'failed', 'archived'))
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_listing_assets_listing
+        ON public.intel_listing_assets (listing_id)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_listing_assets_survey
+        ON public.intel_listing_assets (survey_id)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_listing_assets_survey_item
+        ON public.intel_listing_assets (survey_item_id)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_listing_assets_status
+        ON public.intel_listing_assets (status)
+    `);
   }
 
   async ensurePublicLinkTables(): Promise<void> {
@@ -2427,6 +2569,230 @@ export class IndustrialIntelRepository {
       },
     });
     return updated;
+  }
+
+  async createSurveyItemAsset(
+    userId: string,
+    surveyId: string,
+    itemId: string,
+    input: CreateIntelListingAssetInput,
+  ): Promise<IntelListingAsset | null> {
+    await this.ensureListingAssetTables();
+
+    const survey = await this.getSurveyById(userId, surveyId);
+    if (!survey) return null;
+    const item = survey.items.find((candidate) => candidate.id === itemId);
+    if (!item || item.listingId !== input.listingId) return null;
+
+    const result = await pool.query<{
+      id: string;
+      listing_id: string | null;
+      survey_id: string | null;
+      survey_item_id: string | null;
+      asset_type: IntelListingAssetType;
+      file_name: string;
+      content_type: string;
+      file_size: string | number | null;
+      storage_bucket: string;
+      storage_path: string;
+      source: string;
+      status: IntelListingAssetStatus;
+      is_primary: boolean;
+      created_by_user_id: string | null;
+      created_at: Date | null;
+      updated_at: Date | null;
+    }>(
+      `
+        INSERT INTO public.intel_listing_assets (
+          id,
+          listing_id,
+          survey_id,
+          survey_item_id,
+          asset_type,
+          file_name,
+          content_type,
+          file_size,
+          storage_bucket,
+          storage_path,
+          source,
+          status,
+          is_primary,
+          created_by_user_id,
+          updated_at
+        ) VALUES (
+          $1, $2, $3, $4, COALESCE($5, 'brochure'), $6, $7, $8, $9, $10,
+          COALESCE($11, 'upload'), COALESCE($12, 'pending'), COALESCE($13, false), $14, now()
+        )
+        RETURNING *
+      `,
+      [
+        input.id,
+        input.listingId,
+        surveyId,
+        itemId,
+        input.assetType ?? null,
+        input.fileName,
+        input.contentType,
+        input.fileSize,
+        input.storageBucket,
+        input.storagePath,
+        input.source ?? null,
+        input.status ?? null,
+        input.isPrimary ?? null,
+        userId,
+      ],
+    );
+
+    await pool.query(`UPDATE public.intel_surveys SET updated_at = now() WHERE id = $1`, [surveyId]);
+    await this.logSurveyEvent({
+      surveyId,
+      actorId: userId,
+      action: "survey_asset.created",
+      summary: `Uploaded ${input.fileName}`,
+      payload: {
+        assetId: input.id,
+        listingId: input.listingId,
+        surveyItemId: itemId,
+        assetType: input.assetType ?? "brochure",
+      },
+    });
+
+    return listingAssetFromRow(result.rows[0]);
+  }
+
+  async completeListingAsset(userId: string, assetId: string): Promise<IntelListingAsset | null> {
+    await this.ensureListingAssetTables();
+
+    const result = await pool.query<{
+      id: string;
+      listing_id: string | null;
+      survey_id: string | null;
+      survey_item_id: string | null;
+      asset_type: IntelListingAssetType;
+      file_name: string;
+      content_type: string;
+      file_size: string | number | null;
+      storage_bucket: string;
+      storage_path: string;
+      source: string;
+      status: IntelListingAssetStatus;
+      is_primary: boolean;
+      created_by_user_id: string | null;
+      created_at: Date | null;
+      updated_at: Date | null;
+    }>(
+      `
+        UPDATE public.intel_listing_assets
+        SET status = 'active', updated_at = now()
+        WHERE id = $1 AND created_by_user_id = $2
+        RETURNING *
+      `,
+      [assetId, userId],
+    );
+
+    return result.rows[0] ? listingAssetFromRow(result.rows[0]) : null;
+  }
+
+  async getSurveyAssets(userId: string, surveyId: string): Promise<IntelListingAsset[]> {
+    try {
+      await this.ensureListingAssetTables();
+      const survey = await this.getSurveyById(userId, surveyId);
+      if (!survey) return [];
+
+      const result = await pool.query<{
+        id: string;
+        listing_id: string | null;
+        survey_id: string | null;
+        survey_item_id: string | null;
+        asset_type: IntelListingAssetType;
+        file_name: string;
+        content_type: string;
+        file_size: string | number | null;
+        storage_bucket: string;
+        storage_path: string;
+        source: string;
+        status: IntelListingAssetStatus;
+        is_primary: boolean;
+        created_by_user_id: string | null;
+        created_at: Date | null;
+        updated_at: Date | null;
+      }>(
+        `
+          SELECT *
+          FROM public.intel_listing_assets
+          WHERE survey_id = $1
+            AND created_by_user_id = $2
+            AND status = 'active'
+          ORDER BY is_primary DESC, created_at DESC NULLS LAST
+        `,
+        [surveyId, userId],
+      );
+
+      return result.rows.map(listingAssetFromRow);
+    } catch (error) {
+      if (isRecoverableIntelSchemaError(error)) return [];
+      throw error;
+    }
+  }
+
+  async getSharedSurveyAssets(token: string): Promise<IntelListingAsset[]> {
+    try {
+      await this.ensureListingAssetTables();
+      const tokenResult = await pool.query<{
+        id: string;
+        created_by_user_id: string | null;
+      }>(
+        `
+          SELECT id, created_by_user_id
+          FROM public.intel_surveys
+          WHERE share_token = $1
+            AND status = 'shared'
+          LIMIT 1
+        `,
+        [token],
+      );
+
+      const survey = tokenResult.rows[0];
+      if (!survey?.created_by_user_id) return [];
+      const sharedSurvey = await this.getSurveyByShareToken(token);
+      if (!sharedSurvey) return [];
+      const visibleItemIds = sharedSurvey.items.map((item) => item.id);
+      if (visibleItemIds.length === 0) return [];
+
+      const result = await pool.query<{
+        id: string;
+        listing_id: string | null;
+        survey_id: string | null;
+        survey_item_id: string | null;
+        asset_type: IntelListingAssetType;
+        file_name: string;
+        content_type: string;
+        file_size: string | number | null;
+        storage_bucket: string;
+        storage_path: string;
+        source: string;
+        status: IntelListingAssetStatus;
+        is_primary: boolean;
+        created_by_user_id: string | null;
+        created_at: Date | null;
+        updated_at: Date | null;
+      }>(
+        `
+          SELECT *
+          FROM public.intel_listing_assets
+          WHERE survey_id = $1
+            AND survey_item_id = ANY($2::varchar[])
+            AND status = 'active'
+          ORDER BY is_primary DESC, created_at DESC NULLS LAST
+        `,
+        [survey.id, visibleItemIds],
+      );
+
+      return result.rows.map(listingAssetFromRow);
+    } catch (error) {
+      if (isRecoverableIntelSchemaError(error)) return [];
+      throw error;
+    }
   }
 }
 

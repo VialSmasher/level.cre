@@ -1,4 +1,5 @@
 import {
+  type CreateIntelListingAssetInput,
   type CreateIntelRequirementInput,
   type CreateIntelSurveyInput,
   type CreateIntelSurveyItemInput,
@@ -14,6 +15,8 @@ import {
   type UpsertIntelRequirementListingDecisionInput,
   industrialIntelRepository,
   type IntelListingListItem,
+  type IntelListingAssetWithUrl,
+  type IntelListingAssetType,
   type IntelDuplicateGroup,
   type IntelRunListItem,
   type IntelSourceListItem,
@@ -23,6 +26,7 @@ import {
   type UpdateIntelSurveyInput,
   type UpdateIntelSurveyItemInput,
 } from "./repo";
+import { randomUUID } from "crypto";
 import {
   ingestManualIntelListing,
   ingestManualIntelListingUpload,
@@ -32,6 +36,27 @@ import {
 import { previewManualIntelListing } from "./manualPreview";
 import { resolvePublicLinkCandidates } from "./publicLinkResolver";
 import { runIndustrialIntelSource } from "./sourceRegistry";
+import {
+  createIntelAssetSignedUpload,
+  getIntelAssetBucket,
+  signIntelListingAssets,
+} from "./assetStorage";
+
+export type CreateSurveyItemAssetUploadInput = {
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+  assetType?: IntelListingAssetType | null;
+};
+
+function sanitizeFileName(fileName: string) {
+  return fileName
+    .trim()
+    .replace(/[/\\]/g, "-")
+    .replace(/[^a-zA-Z0-9._',!$@=;:+?()& -]/g, "-")
+    .replace(/\s+/g, " ")
+    .slice(0, 120) || "asset";
+}
 
 export class IndustrialIntelService {
   async getSummary(): Promise<IntelSummary> {
@@ -180,6 +205,59 @@ export class IndustrialIntelService {
 
   async deleteSurveyItem(userId: string, surveyId: string, itemId: string): Promise<IntelSurveyDetail | null> {
     return industrialIntelRepository.deleteSurveyItem(userId, surveyId, itemId);
+  }
+
+  async createSurveyItemAssetUpload(
+    userId: string,
+    surveyId: string,
+    itemId: string,
+    input: CreateSurveyItemAssetUploadInput,
+  ) {
+    const survey = await industrialIntelRepository.getSurveyById(userId, surveyId);
+    if (!survey) return null;
+    const item = survey.items.find((candidate) => candidate.id === itemId);
+    if (!item) return null;
+
+    const assetId = randomUUID();
+    const fileName = sanitizeFileName(input.fileName);
+    const storagePath = `surveys/${surveyId}/items/${itemId}/${assetId}-${fileName}`;
+    const upload = await createIntelAssetSignedUpload(storagePath);
+
+    const assetInput: CreateIntelListingAssetInput = {
+      id: assetId,
+      listingId: item.listingId,
+      surveyId,
+      surveyItemId: itemId,
+      assetType: input.assetType || "brochure",
+      fileName,
+      contentType: input.contentType,
+      fileSize: input.fileSize,
+      storageBucket: upload.bucket || getIntelAssetBucket(),
+      storagePath: upload.path || storagePath,
+      source: "upload",
+      status: "pending",
+    };
+
+    const asset = await industrialIntelRepository.createSurveyItemAsset(userId, surveyId, itemId, assetInput);
+    if (!asset) return null;
+    return { asset, upload };
+  }
+
+  async completeListingAsset(userId: string, assetId: string): Promise<IntelListingAssetWithUrl | null> {
+    const asset = await industrialIntelRepository.completeListingAsset(userId, assetId);
+    if (!asset) return null;
+    const [signed] = await signIntelListingAssets([asset]);
+    return signed;
+  }
+
+  async getSurveyAssets(userId: string, surveyId: string): Promise<IntelListingAssetWithUrl[]> {
+    const assets = await industrialIntelRepository.getSurveyAssets(userId, surveyId);
+    return signIntelListingAssets(assets);
+  }
+
+  async getSharedSurveyAssets(token: string): Promise<IntelListingAssetWithUrl[]> {
+    const assets = await industrialIntelRepository.getSharedSurveyAssets(token);
+    return signIntelListingAssets(assets);
   }
 
   async ingestManualListing(_userId: string, input: ManualIntelListingInput) {

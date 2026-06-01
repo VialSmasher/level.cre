@@ -104,6 +104,13 @@ const intelSurveyItemSchema = z.object({
 
 const intelSurveyItemUpdateSchema = intelSurveyItemSchema.omit({ listingId: true }).partial();
 
+const intelSurveyAssetUploadSchema = z.object({
+  fileName: z.string().trim().min(1).max(180),
+  contentType: z.enum(["application/pdf", "image/jpeg", "image/png", "image/webp"]),
+  fileSize: z.number().int().positive().max(25 * 1024 * 1024),
+  assetType: z.enum(["brochure", "flyer", "aerial", "site_plan", "photo", "survey_page", "other"]).nullable().optional(),
+});
+
 async function ensureIntelActor(req: Request) {
   if (req.headers["x-demo-mode"] === "true") return;
   await ensureUser(getUserId(req), (req as any)?.user?.email || null);
@@ -341,6 +348,20 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/intel/surveys/share/:token/assets", async (req, res) => {
+    try {
+      const token = String(req.params.token || "").trim();
+      if (!token) {
+        return res.status(400).json({ message: "Missing survey share token" });
+      }
+      const assets = await industrialIntelService.getSharedSurveyAssets(token);
+      res.json(assets);
+    } catch (error) {
+      console.error("Error fetching shared industrial intel survey assets:", error);
+      res.status(500).json({ message: "Failed to fetch shared industrial intel survey assets" });
+    }
+  });
+
   app.post("/api/intel/surveys/:id/share", requireAuth, async (req, res) => {
     try {
       await ensureIntelActor(req);
@@ -386,6 +407,16 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     } catch (error) {
       console.error("Error fetching industrial intel survey:", error);
       res.status(500).json({ message: "Failed to fetch industrial intel survey" });
+    }
+  });
+
+  app.get("/api/intel/surveys/:id/assets", requireAuth, async (req, res) => {
+    try {
+      const assets = await industrialIntelService.getSurveyAssets(getUserId(req), req.params.id);
+      res.json(assets);
+    } catch (error) {
+      console.error("Error fetching industrial intel survey assets:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel survey assets" });
     }
   });
 
@@ -440,6 +471,46 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       }
       console.error("Error adding industrial intel survey item:", error);
       res.status(500).json({ message: "Failed to add industrial intel survey item" });
+    }
+  });
+
+  app.post("/api/intel/surveys/:id/items/:itemId/assets/upload-url", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelSurveyAssetUploadSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel asset upload", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const result = await industrialIntelService.createSurveyItemAssetUpload(
+        getUserId(req),
+        req.params.id,
+        req.params.itemId,
+        parsed.data,
+      );
+      if (!result) {
+        return res.status(404).json({ message: "Industrial intel survey item not found" });
+      }
+      res.status(201).json(result);
+    } catch (error: any) {
+      console.error("Error creating industrial intel asset upload:", error);
+      res.status(500).json({
+        message: "Failed to create industrial intel asset upload",
+        detail: String(error?.message || error || "Unknown upload failure"),
+      });
+    }
+  });
+
+  app.post("/api/intel/assets/:assetId/complete", requireAuth, async (req, res) => {
+    try {
+      await ensureIntelActor(req);
+      const asset = await industrialIntelService.completeListingAsset(getUserId(req), req.params.assetId);
+      if (!asset) {
+        return res.status(404).json({ message: "Industrial intel asset not found" });
+      }
+      res.json(asset);
+    } catch (error) {
+      console.error("Error completing industrial intel asset upload:", error);
+      res.status(500).json({ message: "Failed to complete industrial intel asset upload" });
     }
   });
 
