@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -125,6 +126,14 @@ function parseUploadNumber(value: string) {
   if (!cleaned) return null;
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sourceNameFromFile(file: File) {
+  return file.name
+    .replace(/\.(csv|xlsx|xls)$/i, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function inferUploadListingType(rowText: string) {
@@ -475,30 +484,57 @@ export default function IndustrialIntelInventoryPage() {
     },
   });
 
-  function handleUploadFile(file: File | null) {
+  function applyUploadRows(rows: Record<string, unknown>[], sourceFile?: File) {
+    const records = rows
+      .map((row, index) => buildUploadRecord(row, index))
+      .filter((record): record is UploadListingRecord => Boolean(record));
+
+    if (records.length === 0) {
+      setUploadRows([]);
+      setUploadError("No usable listing rows found. Make sure the file has a property name or address column.");
+      return;
+    }
+
+    if (sourceFile) {
+      setUploadSourceName(sourceNameFromFile(sourceFile));
+    }
+    setUploadRows(records.slice(0, 500));
+  }
+
+  async function handleUploadFile(file: File | null) {
     if (!file) return;
     setUploadError(null);
+
+    const lowerName = file.name.toLowerCase();
+    if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
+      try {
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
+        if (!worksheet) {
+          setUploadRows([]);
+          setUploadError("That workbook does not have a readable first sheet.");
+          return;
+        }
+        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "" });
+        applyUploadRows(rows, file);
+      } catch (error) {
+        setUploadRows([]);
+        setUploadError(error instanceof Error ? error.message : "Could not parse that Excel file.");
+      }
+      return;
+    }
+
     Papa.parse<Record<string, unknown>>(file, {
       header: true,
       skipEmptyLines: true,
       complete: (result) => {
-        const records = result.data
-          .map((row, index) => buildUploadRecord(row, index))
-          .filter((record): record is UploadListingRecord => Boolean(record));
-
-        if (result.errors.length > 0 && records.length === 0) {
+        if (result.errors.length > 0 && result.data.length === 0) {
           setUploadRows([]);
           setUploadError(result.errors[0]?.message || "Could not parse that CSV.");
           return;
         }
-
-        if (records.length === 0) {
-          setUploadRows([]);
-          setUploadError("No usable listing rows found. Make sure the file has a title or address column.");
-          return;
-        }
-
-        setUploadRows(records.slice(0, 500));
+        applyUploadRows(result.data, file);
       },
       error: (error) => {
         setUploadRows([]);
@@ -778,7 +814,7 @@ export default function IndustrialIntelInventoryPage() {
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-              Upload a weekly CSV export for bulk updates, or save a one-off URL when a listing needs manual handling.
+              Upload weekly Excel or CSV exports for bulk updates, or save a one-off URL when a listing needs manual handling.
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -787,10 +823,10 @@ export default function IndustrialIntelInventoryPage() {
                   <div>
                     <h3 className="text-base font-semibold text-slate-950">Spreadsheet upload</h3>
                     <p className="mt-1 text-sm text-slate-600">
-                      Export Excel as CSV, then upload it here. Common columns like address, title, SF, acres, type, price, and URL are detected automatically.
+                      Drop a CoStar, LoopNet, broker, or landlord export here. Common columns like PropertyID, address, title, SF, lat/long, type, price, and URL are detected automatically.
                     </p>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.6fr)]">
+                  <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)]">
                     <div className="space-y-2">
                       <Label htmlFor="uploadSourceName">Upload source</Label>
                       <Input
@@ -801,13 +837,26 @@ export default function IndustrialIntelInventoryPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="listingCsv">CSV file</Label>
-                      <Input
-                        id="listingCsv"
-                        type="file"
-                        accept=".csv,text/csv"
-                        onChange={(event) => handleUploadFile(event.target.files?.[0] || null)}
-                      />
+                      <Label htmlFor="listingUpload">Export file</Label>
+                      <label
+                        htmlFor="listingUpload"
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          handleUploadFile(event.dataTransfer.files?.[0] || null);
+                        }}
+                        className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-blue-300 bg-blue-50/60 px-4 py-4 text-center transition hover:border-blue-400 hover:bg-blue-50"
+                      >
+                        <span className="text-sm font-semibold text-slate-950">Drop Excel or CSV here</span>
+                        <span className="mt-1 text-xs text-slate-600">Supports .xlsx, .xls, and .csv exports</span>
+                        <Input
+                          id="listingUpload"
+                          type="file"
+                          accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                          className="sr-only"
+                          onChange={(event) => handleUploadFile(event.target.files?.[0] || null)}
+                        />
+                      </label>
                     </div>
                   </div>
                   {uploadError && <p className="text-sm text-rose-600">{uploadError}</p>}
@@ -850,7 +899,7 @@ export default function IndustrialIntelInventoryPage() {
                   <div>
                     <p className="text-sm font-semibold text-slate-900">Weekly importer</p>
                     <p className="mt-2 text-sm text-slate-600">
-                      Imports update existing rows when the source URL or row identity matches. Missing rows are not removed yet, so this is safe for mixed exports.
+                      Imports update existing rows when the source URL, PropertyID, or row identity matches. Missing rows are not removed yet, so this is safe for mixed exports.
                     </p>
                   </div>
                   <button

@@ -67,6 +67,15 @@ function buildManualSourceRecordKey(sourceUrl: string, recordKeySuffix?: string 
 
 function buildUploadRecordKey(input: ManualIntelListingInput, index: number): string {
   if (input.sourceUrl) return buildManualSourceRecordKey(input.sourceUrl, input.recordKeySuffix);
+  const suffix = String(input.recordKeySuffix || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (suffix) {
+    return [suffix, input.listingType]
+      .filter(Boolean)
+      .join('|')
+      .toLowerCase()
+      .replace(/[^a-z0-9|_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
   const base = [input.address, input.title, input.listingType, input.availableSf]
     .filter(Boolean)
     .join('|')
