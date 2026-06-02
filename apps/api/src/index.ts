@@ -139,6 +139,14 @@ app.get('/api/ping', (req, res) => {
   const user = (req as any).user ?? null;
   res.json({ ok: true, user });
 });
+app.get('/api/version', (_req, res) => {
+  res.json({
+    ok: true,
+    feature: 'outlook-email-review-queue',
+    outlookRoutes: true,
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || process.env.COMMIT_SHA || null,
+  });
+});
 
 (async () => {
   const server = await registerRoutes(app);
