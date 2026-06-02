@@ -15,6 +15,9 @@ import { apiRequest } from '@/lib/queryClient';
 import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospectDisplay';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { logBrokerActivity, type BrokerActivityOutcome } from '@/lib/brokerActions';
+import { getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
+
+const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 
 const STATUS_COLORS: Record<ProspectStatusType, string> = {
   prospect: '#FBBF24',
@@ -586,6 +589,135 @@ type SmartCallCandidate = {
   latestTouch: Date | null;
 };
 
+function getGeometryRing(prospect: Prospect): [number, number][] {
+  const geometry = prospect.geometry as any;
+  if (!geometry) return [];
+  if (geometry.type === 'Point' && Array.isArray(geometry.coordinates)) {
+    const [lng, lat] = geometry.coordinates as [number, number];
+    return Number.isFinite(lat) && Number.isFinite(lng) ? [[lng, lat]] : [];
+  }
+  if ((geometry.type === 'Polygon' || geometry.type === 'Rectangle') && Array.isArray(geometry.coordinates)) {
+    const ring = Array.isArray(geometry.coordinates[0]?.[0])
+      ? geometry.coordinates[0]
+      : geometry.coordinates;
+    return (ring as [number, number][])
+      .filter(([lng, lat]) => Number.isFinite(Number(lng)) && Number.isFinite(Number(lat)))
+      .map(([lng, lat]) => [Number(lng), Number(lat)]);
+  }
+  return [];
+}
+
+function getGeometryCenter(points: [number, number][]) {
+  if (points.length === 0) return null;
+  const bounds = points.reduce(
+    (acc, [lng, lat]) => ({
+      minLng: Math.min(acc.minLng, lng),
+      maxLng: Math.max(acc.maxLng, lng),
+      minLat: Math.min(acc.minLat, lat),
+      maxLat: Math.max(acc.maxLat, lat),
+    }),
+    { minLng: points[0][0], maxLng: points[0][0], minLat: points[0][1], maxLat: points[0][1] },
+  );
+  return {
+    lat: (bounds.minLat + bounds.maxLat) / 2,
+    lng: (bounds.minLng + bounds.maxLng) / 2,
+  };
+}
+
+function buildGoogleMapsUrl(points: [number, number][]) {
+  const center = getGeometryCenter(points);
+  if (!center) return '';
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${center.lat},${center.lng}`)}`;
+}
+
+function buildStaticMapUrl(prospect: Prospect) {
+  if (!GOOGLE_MAPS_API_KEY) return '';
+  const points = getGeometryRing(prospect);
+  if (points.length === 0) return '';
+  const params = new URLSearchParams({
+    size: '640x300',
+    scale: '2',
+    maptype: 'roadmap',
+    key: GOOGLE_MAPS_API_KEY,
+  });
+  if (points.length === 1) {
+    const [lng, lat] = points[0];
+    params.set('center', `${lat},${lng}`);
+    params.set('zoom', '15');
+    params.append('markers', `color:blue|${lat},${lng}`);
+  } else {
+    const path = points
+      .concat(points[0])
+      .map(([lng, lat]) => `${lat},${lng}`)
+      .join('|');
+    params.append('path', `color:0x2563ebff|weight:3|fillcolor:0x2563eb33|${path}`);
+  }
+  return `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`;
+}
+
+function GeometrySketch({ points }: { points: [number, number][] }) {
+  if (points.length === 0) {
+    return <div className="flex h-full items-center justify-center text-xs text-slate-500">No map geometry</div>;
+  }
+  if (points.length === 1) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-blue-700">
+          <MapPin className="h-6 w-6" />
+        </div>
+      </div>
+    );
+  }
+  const lngs = points.map(([lng]) => lng);
+  const lats = points.map(([, lat]) => lat);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const width = Math.max(maxLng - minLng, 0.00001);
+  const height = Math.max(maxLat - minLat, 0.00001);
+  const polygonPoints = points
+    .map(([lng, lat]) => {
+      const x = 8 + ((lng - minLng) / width) * 84;
+      const y = 92 - ((lat - minLat) / height) * 84;
+      return `${x},${y}`;
+    })
+    .join(' ');
+  return (
+    <svg viewBox="0 0 100 100" className="h-full w-full">
+      <polygon points={polygonPoints} fill="rgba(37,99,235,0.18)" stroke="#2563eb" strokeWidth="2.5" />
+    </svg>
+  );
+}
+
+function ProspectMapPreview({ prospect }: { prospect: Prospect }) {
+  const points = getGeometryRing(prospect);
+  const staticMapUrl = buildStaticMapUrl(prospect);
+  const mapsUrl = buildGoogleMapsUrl(points);
+  return (
+    <div className="overflow-hidden rounded-md border border-slate-200 bg-slate-100">
+      <div className="flex items-center justify-between border-b border-slate-200 bg-white px-3 py-2">
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-500">
+          <MapPin className="h-3.5 w-3.5" />
+          Map Context
+        </div>
+        {mapsUrl ? (
+          <a href={mapsUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-600 hover:underline">
+            Open map
+          </a>
+        ) : null}
+      </div>
+      <div className="relative h-44">
+        {staticMapUrl ? (
+          <img src={staticMapUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <GeometrySketch points={points} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SmartCallQueue({
   candidates,
   selectedSubmarketLabel,
@@ -690,32 +822,35 @@ function SmartCallQueue({
             <Badge variant="outline" className="bg-white text-slate-600">{formatLastTouch(active.latestTouch)}</Badge>
           </div>
 
-          <div className="mb-4 grid gap-3 text-sm sm:grid-cols-2">
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <div className="text-xs font-semibold uppercase text-slate-500">Contact</div>
-              <div className="mt-1 font-medium text-slate-900">{prospect.contactName || prospect.contactCompany || 'Missing contact'}</div>
-              <div className="mt-2 flex flex-wrap gap-3">
-                {prospect.contactPhone ? (
-                  <a className="inline-flex items-center gap-1 text-blue-600 hover:underline" href={`tel:${prospect.contactPhone}`}>
-                    <Phone className="h-3.5 w-3.5" />
-                    {prospect.contactPhone}
-                  </a>
-                ) : <span className="text-slate-500">No phone</span>}
-                {prospect.contactEmail ? (
-                  <a className="inline-flex items-center gap-1 text-blue-600 hover:underline" href={`mailto:${prospect.contactEmail}`}>
-                    <Mail className="h-3.5 w-3.5" />
-                    Email
-                  </a>
-                ) : <span className="text-slate-500">No email</span>}
+          <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="grid gap-3 text-sm sm:grid-cols-2">
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-semibold uppercase text-slate-500">Contact</div>
+                <div className="mt-1 font-medium text-slate-900">{prospect.contactName || prospect.contactCompany || 'Missing contact'}</div>
+                <div className="mt-2 flex flex-wrap gap-3">
+                  {prospect.contactPhone ? (
+                    <a className="inline-flex items-center gap-1 text-blue-600 hover:underline" href={`tel:${prospect.contactPhone}`}>
+                      <Phone className="h-3.5 w-3.5" />
+                      {prospect.contactPhone}
+                    </a>
+                  ) : <span className="text-slate-500">No phone</span>}
+                  {prospect.contactEmail ? (
+                    <a className="inline-flex items-center gap-1 text-blue-600 hover:underline" href={`mailto:${prospect.contactEmail}`}>
+                      <Mail className="h-3.5 w-3.5" />
+                      Email
+                    </a>
+                  ) : <span className="text-slate-500">No email</span>}
+                </div>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-semibold uppercase text-slate-500">Asset</div>
+                <div className="mt-1 font-medium text-slate-900">{prospect.contactCompany || prospect.businessName || prospect.status.replace('_', ' ')}</div>
+                <div className="mt-2 text-slate-600">
+                  {active.dueDate ? formatDueBadgeLabel(active.dueDate) : 'No scheduled follow-up'}
+                </div>
               </div>
             </div>
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <div className="text-xs font-semibold uppercase text-slate-500">Asset</div>
-              <div className="mt-1 font-medium text-slate-900">{prospect.contactCompany || prospect.businessName || prospect.status.replace('_', ' ')}</div>
-              <div className="mt-2 text-slate-600">
-                {active.dueDate ? formatDueBadgeLabel(active.dueDate) : 'No scheduled follow-up'}
-              </div>
-            </div>
+            <ProspectMapPreview prospect={prospect} />
           </div>
 
           <div className="grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)]">
