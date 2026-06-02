@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type ReactNode, type SetStateAction } from 'react'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import { Badge } from '@/components/ui/badge'
@@ -7,12 +7,18 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { TRACK_RECORD_STORAGE_KEY, parseTrackRecordNumber } from '@/lib/trackRecordMetrics'
 import {
-  Building2,
   CalendarClock,
   Copy,
   Download,
@@ -334,6 +340,12 @@ function buildLinkedInSummary(dealCount: number, totalSf: number) {
   return `Representative industrial transaction experience: ${dealCount} completed assignments totaling ${formatNumber(totalSf)} SF across sale, lease, and renewal mandates.`
 }
 
+const placeholderPositions = ['0% 0%', '50% 0%', '100% 0%', '0% 100%', '50% 100%', '100% 100%']
+
+function placeholderPosition(index: number) {
+  return placeholderPositions[index % placeholderPositions.length]
+}
+
 export default function TrackRecordPage() {
   const [deals, setDeals] = useState<TrackDeal[]>([])
   const [form, setForm] = useState<TrackDeal>(() => emptyDeal())
@@ -342,6 +354,7 @@ export default function TrackRecordPage() {
   const [mode, setMode] = useState<'manage' | 'presentation'>('manage')
   const [importMessage, setImportMessage] = useState('')
   const [isImportDragging, setIsImportDragging] = useState(false)
+  const [isEditorOpen, setIsEditorOpen] = useState(false)
   const [showClientNames, setShowClientNames] = useState(false)
   const [showDealValues, setShowDealValues] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -384,18 +397,26 @@ export default function TrackRecordPage() {
     setEditingId(null)
   }
 
+  const startNewDeal = () => {
+    setForm(emptyDeal())
+    setEditingId(null)
+    setMode('manage')
+    setIsEditorOpen(true)
+  }
+
   const save = () => {
     if (!form.title.trim() || !form.address.trim()) return
     const payload = { ...form, updatedAt: new Date().toISOString() }
     setDeals((current) => editingId ? current.map((deal) => deal.id === editingId ? payload : deal) : [payload, ...current])
     reset()
+    setIsEditorOpen(false)
   }
 
   const edit = (deal: TrackDeal) => {
     setForm(deal)
     setEditingId(deal.id)
     setMode('manage')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    setIsEditorOpen(true)
   }
 
   const remove = (id: string) => {
@@ -552,7 +573,7 @@ export default function TrackRecordPage() {
                 </p>
                 <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Broker Track Record</h1>
                 <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
-                  Capture closed deals, track lease expiries, and decide what is polished enough for a client-facing brag sheet.
+                  Track closed deals, renewal dates, and which wins are ready for a client-facing sheet.
                 </p>
               </>
             )}
@@ -571,6 +592,12 @@ export default function TrackRecordPage() {
               <ToggleGroupItem value="manage" className="h-9 px-3 text-xs">Private Ledger</ToggleGroupItem>
               <ToggleGroupItem value="presentation" className="h-9 px-3 text-xs">Client Sheet</ToggleGroupItem>
             </ToggleGroup>
+            {mode === 'manage' && (
+              <Button onClick={startNewDeal}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add deal
+              </Button>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button size="icon" variant="outline" onClick={share} aria-label="Share summary">
@@ -590,176 +617,26 @@ export default function TrackRecordPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card className={mode === 'presentation' ? 'border-emerald-200 bg-white' : ''}>
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-500">{mode === 'presentation' ? 'SF Represented' : 'Total SF'}</CardTitle></CardHeader>
-            <CardContent className="text-3xl font-semibold text-slate-950">{formatNumber(totals.totalSf)}</CardContent>
-          </Card>
-          <Card className={mode === 'presentation' ? 'border-emerald-200 bg-white' : ''}>
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-500">{mode === 'presentation' ? 'Representative Deals' : 'Deal Mix'}</CardTitle></CardHeader>
-            <CardContent className={mode === 'presentation' ? 'text-3xl font-semibold text-slate-950' : 'space-y-2'}>
-              {mode === 'presentation' ? (
-                featuredDeals.length
-              ) : (
-                <div className="grid grid-cols-4 gap-2 text-center">
-                  <div>
-                    <div className="text-2xl font-semibold text-slate-950">{totals.saleCount}</div>
-                    <div className="text-xs font-medium text-slate-500">Sales</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-semibold text-slate-950">{totals.leaseCount}</div>
-                    <div className="text-xs font-medium text-slate-500">Leases</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-semibold text-slate-950">{totals.renewalCount}</div>
-                    <div className="text-xs font-medium text-slate-500">Renewals</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-semibold text-slate-950">{totals.unknownCount}</div>
-                    <div className="text-xs font-medium text-slate-500">Review</div>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          <Card className={mode === 'presentation' ? 'border-emerald-200 bg-white' : ''}>
-            <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-500">{mode === 'presentation' ? 'Markets Covered' : 'Expiry Watch'}</CardTitle></CardHeader>
-            <CardContent className="flex items-center gap-2 text-3xl font-semibold text-slate-950">
-              {mode === 'presentation' ? new Set(featuredDeals.map((deal) => deal.submarket).filter(Boolean)).size : totals.expiries}
-              {mode === 'presentation' ? <Building2 className="h-5 w-5 text-emerald-600" /> : <CalendarClock className="h-5 w-5 text-amber-600" />}
-            </CardContent>
-          </Card>
+        <div className="rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm">
+          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
+            {[
+              { label: mode === 'presentation' ? 'SF represented' : 'Total SF', value: formatNumber(totals.totalSf) },
+              { label: mode === 'presentation' ? 'Selected deals' : 'Deals', value: mode === 'presentation' ? featuredDeals.length : deals.length },
+              { label: 'Leases', value: totals.leaseCount },
+              { label: 'Sales', value: totals.saleCount },
+              { label: 'Renewals', value: totals.renewalCount },
+              { label: mode === 'presentation' ? 'Markets' : 'Expiry watch', value: mode === 'presentation' ? new Set(featuredDeals.map((deal) => deal.submarket).filter(Boolean)).size : totals.expiries },
+            ].map((stat) => (
+              <div key={stat.label} className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{stat.label}</p>
+                <p className="mt-1 truncate text-2xl font-semibold text-slate-950">{stat.value}</p>
+              </div>
+            ))}
+          </div>
         </div>
 
         {mode === 'manage' && (
-          <section className="grid gap-5 lg:grid-cols-[420px_1fr] print:hidden">
-            <Card className="h-fit">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  {editingId ? <SquarePen className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
-                  {editingId ? 'Edit deal' : 'Add deal'}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="md:col-span-2">
-                    <Label>Deal Name</Label>
-                    <Input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="Acme Logistics renewal" />
-                  </div>
-                  <div className="md:col-span-2">
-                    <Label>Address</Label>
-                    <Input value={form.address} onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))} placeholder="123 Industrial Way" />
-                  </div>
-                  <div>
-                    <Label>Client</Label>
-                    <Input value={form.clientName || ''} onChange={(e) => setForm((p) => ({ ...p, clientName: e.target.value }))} />
-                  </div>
-                  <div>
-                    <Label>Submarket</Label>
-                    <Input value={form.submarket || ''} onChange={(e) => setForm((p) => ({ ...p, submarket: e.target.value }))} />
-                  </div>
-                  <div>
-                    <Label>Deal Type</Label>
-                    <Select value={form.dealType} onValueChange={(value) => setForm((p) => ({ ...p, dealType: value as TrackDeal['dealType'] }))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="lease">Lease</SelectItem>
-                        <SelectItem value="sale">Sale</SelectItem>
-                        <SelectItem value="renewal">Renewal</SelectItem>
-                        <SelectItem value="unknown">Needs Review</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Role</Label>
-                    <Select value={form.role} onValueChange={(value) => setForm((p) => ({ ...p, role: value as TrackDeal['role'] }))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="tenant_rep">Tenant Rep</SelectItem>
-                        <SelectItem value="landlord_rep">Landlord Rep</SelectItem>
-                        <SelectItem value="buyer_rep">Buyer Rep</SelectItem>
-                        <SelectItem value="seller_rep">Seller Rep</SelectItem>
-                        <SelectItem value="advisor">Advisor</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Asset</Label>
-                    <Select value={form.assetType} onValueChange={(value) => setForm((p) => ({ ...p, assetType: value as TrackDeal['assetType'] }))}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Industrial">Industrial</SelectItem>
-                        <SelectItem value="Office">Office</SelectItem>
-                        <SelectItem value="Retail">Retail</SelectItem>
-                        <SelectItem value="Land">Land</SelectItem>
-                        <SelectItem value="Other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Size SF</Label>
-                    <Input inputMode="numeric" value={form.sizeSf || ''} onChange={(e) => setForm((p) => ({ ...p, sizeSf: e.target.value }))} />
-                  </div>
-                  <div>
-                    <Label>Closed Date</Label>
-                    <Input type="date" value={form.closedDate || ''} onChange={(e) => setForm((p) => ({ ...p, closedDate: e.target.value }))} />
-                  </div>
-                  <div>
-                    <Label>Lease Expiry</Label>
-                    <Input type="date" value={form.leaseExpiryDate || ''} onChange={(e) => setForm((p) => ({ ...p, leaseExpiryDate: e.target.value }))} />
-                  </div>
-                  <div>
-                    <Label>Renewal Notice</Label>
-                    <Input type="date" value={form.renewalNoticeDate || ''} onChange={(e) => setForm((p) => ({ ...p, renewalNoticeDate: e.target.value }))} />
-                  </div>
-                  <div>
-                    <Label>Deal Value</Label>
-                    <Input value={form.value || ''} onChange={(e) => setForm((p) => ({ ...p, value: e.target.value }))} placeholder="$2.4M / $15.00 PSF" />
-                  </div>
-                </div>
-                <div>
-                  <Label>Client-Facing Summary</Label>
-                  <Textarea rows={3} value={form.summary || ''} onChange={(e) => setForm((p) => ({ ...p, summary: e.target.value }))} placeholder="Negotiated renewal and expansion for..." />
-                </div>
-                <div
-                  className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center"
-                  onDragOver={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    addImages(e.dataTransfer.files)
-                  }}
-                >
-                  <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => addImages(e.target.files)} />
-                  <ImagePlus className="mx-auto h-6 w-6 text-slate-500" />
-                  <p className="mt-2 text-sm font-medium text-slate-700">Drop property photos here</p>
-                  <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => fileInputRef.current?.click()}>
-                    <Upload className="mr-2 h-4 w-4" />
-                    Add Images
-                  </Button>
-                </div>
-                {form.imageUrls.length > 0 && (
-                  <div className="grid grid-cols-4 gap-2">
-                    {form.imageUrls.map((url, index) => (
-                      <button key={`${url}-${index}`} type="button" className="aspect-square overflow-hidden rounded-md border border-slate-200" onClick={() => setForm((p) => ({ ...p, imageUrls: p.imageUrls.filter((_, i) => i !== index) }))}>
-                        <img src={url} alt="" className="h-full w-full object-cover" />
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <Button onClick={save} disabled={!form.title.trim() || !form.address.trim()}>
-                    <Download className="mr-2 h-4 w-4" />
-                    {editingId ? 'Update' : 'Save'}
-                  </Button>
-                  <Button variant="outline" onClick={reset}>Reset</Button>
-                </div>
-              </CardContent>
-            </Card>
-
+          <section className="space-y-4 print:hidden">
             <div className="space-y-4">
               <div
                 className={`rounded-lg border border-dashed p-4 text-sm transition-colors ${
@@ -791,7 +668,7 @@ export default function TrackRecordPage() {
                   <div>
                     <p className="font-semibold">Import a deal report</p>
                     <p className="mt-1 text-emerald-800">
-                      Drag and drop a CSV or Excel workbook anywhere on this page. Rows without a clear sale, lease, sublease, renewal, or extension clue land in Needs Review instead of being guessed.
+                      Drop a CSV or Excel workbook here. Rows without a clear sale, lease, sublease, renewal, or extension clue land in Needs Review.
                     </p>
                     {importMessage && <p className="mt-2 font-medium">{importMessage}</p>}
                   </div>
@@ -807,11 +684,27 @@ export default function TrackRecordPage() {
                   </div>
                 </div>
               </div>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <Input className="pl-9" placeholder="Search track record" value={query} onChange={(e) => setQuery(e.target.value)} />
+
+              <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <Input className="pl-9" placeholder="Search track record" value={query} onChange={(e) => setQuery(e.target.value)} />
+                </div>
               </div>
-              <DealGrid deals={filteredDeals} onEdit={edit} onDelete={remove} onAddImages={addImagesToDeal} onRemoveImage={removeDealImage} onSetDealType={setDealType} />
+              <DealGrid
+                deals={filteredDeals}
+                onEdit={edit}
+                onDelete={remove}
+                onAddImages={addImagesToDeal}
+                onRemoveImage={removeDealImage}
+                onSetDealType={setDealType}
+                emptyState={(
+                  <EmptyTrackRecordState
+                    onImport={() => csvInputRef.current?.click()}
+                    onAddDeal={startNewDeal}
+                  />
+                )}
+              />
             </div>
           </section>
         )}
@@ -851,6 +744,198 @@ export default function TrackRecordPage() {
             <DealGrid deals={featuredDeals} presentation showClientNames={showClientNames} showDealValues={showDealValues} />
           </section>
         )}
+
+        <Sheet
+          open={isEditorOpen}
+          onOpenChange={(open) => {
+            setIsEditorOpen(open)
+            if (!open) reset()
+          }}
+        >
+          <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
+            <SheetHeader className="pr-8">
+              <SheetTitle className="flex items-center gap-2">
+                {editingId ? <SquarePen className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
+                {editingId ? 'Edit deal' : 'Add deal'}
+              </SheetTitle>
+              <SheetDescription>
+                Add private ledger details now, then decide whether this deal belongs on the client sheet.
+              </SheetDescription>
+            </SheetHeader>
+            <DealEditor
+              form={form}
+              setForm={setForm}
+              editingId={editingId}
+              onSave={save}
+              onReset={reset}
+              onAddImages={addImages}
+              fileInputRef={fileInputRef}
+            />
+          </SheetContent>
+        </Sheet>
+      </div>
+    </div>
+  )
+}
+
+function DealEditor({
+  form,
+  setForm,
+  editingId,
+  onSave,
+  onReset,
+  onAddImages,
+  fileInputRef,
+}: {
+  form: TrackDeal
+  setForm: Dispatch<SetStateAction<TrackDeal>>
+  editingId: string | null
+  onSave: () => void
+  onReset: () => void
+  onAddImages: (files: FileList | null) => void
+  fileInputRef: MutableRefObject<HTMLInputElement | null>
+}) {
+  return (
+    <div className="mt-6 space-y-4 pb-8">
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="md:col-span-2">
+          <Label>Deal Name</Label>
+          <Input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="Acme Logistics renewal" />
+        </div>
+        <div className="md:col-span-2">
+          <Label>Address</Label>
+          <Input value={form.address} onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))} placeholder="123 Industrial Way" />
+        </div>
+        <div>
+          <Label>Client</Label>
+          <Input value={form.clientName || ''} onChange={(e) => setForm((p) => ({ ...p, clientName: e.target.value }))} />
+        </div>
+        <div>
+          <Label>Submarket</Label>
+          <Input value={form.submarket || ''} onChange={(e) => setForm((p) => ({ ...p, submarket: e.target.value }))} />
+        </div>
+        <div>
+          <Label>Deal Type</Label>
+          <Select value={form.dealType} onValueChange={(value) => setForm((p) => ({ ...p, dealType: value as TrackDeal['dealType'] }))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="lease">Lease</SelectItem>
+              <SelectItem value="sale">Sale</SelectItem>
+              <SelectItem value="renewal">Renewal</SelectItem>
+              <SelectItem value="unknown">Needs Review</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label>Role</Label>
+          <Select value={form.role} onValueChange={(value) => setForm((p) => ({ ...p, role: value as TrackDeal['role'] }))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="tenant_rep">Tenant Rep</SelectItem>
+              <SelectItem value="landlord_rep">Landlord Rep</SelectItem>
+              <SelectItem value="buyer_rep">Buyer Rep</SelectItem>
+              <SelectItem value="seller_rep">Seller Rep</SelectItem>
+              <SelectItem value="advisor">Advisor</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label>Asset</Label>
+          <Select value={form.assetType} onValueChange={(value) => setForm((p) => ({ ...p, assetType: value as TrackDeal['assetType'] }))}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Industrial">Industrial</SelectItem>
+              <SelectItem value="Office">Office</SelectItem>
+              <SelectItem value="Retail">Retail</SelectItem>
+              <SelectItem value="Land">Land</SelectItem>
+              <SelectItem value="Other">Other</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label>Size SF</Label>
+          <Input inputMode="numeric" value={form.sizeSf || ''} onChange={(e) => setForm((p) => ({ ...p, sizeSf: e.target.value }))} />
+        </div>
+        <div>
+          <Label>Closed Date</Label>
+          <Input type="date" value={form.closedDate || ''} onChange={(e) => setForm((p) => ({ ...p, closedDate: e.target.value }))} />
+        </div>
+        <div>
+          <Label>Lease Expiry</Label>
+          <Input type="date" value={form.leaseExpiryDate || ''} onChange={(e) => setForm((p) => ({ ...p, leaseExpiryDate: e.target.value }))} />
+        </div>
+        <div>
+          <Label>Renewal Notice</Label>
+          <Input type="date" value={form.renewalNoticeDate || ''} onChange={(e) => setForm((p) => ({ ...p, renewalNoticeDate: e.target.value }))} />
+        </div>
+        <div>
+          <Label>Deal Value</Label>
+          <Input value={form.value || ''} onChange={(e) => setForm((p) => ({ ...p, value: e.target.value }))} placeholder="$2.4M / $15.00 PSF" />
+        </div>
+      </div>
+      <div>
+        <Label>Client-Facing Summary</Label>
+        <Textarea rows={3} value={form.summary || ''} onChange={(e) => setForm((p) => ({ ...p, summary: e.target.value }))} placeholder="Negotiated renewal and expansion for..." />
+      </div>
+      <div
+        className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center"
+        onDragOver={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          onAddImages(e.dataTransfer.files)
+        }}
+      >
+        <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => onAddImages(e.target.files)} />
+        <ImagePlus className="mx-auto h-6 w-6 text-slate-500" />
+        <p className="mt-2 text-sm font-medium text-slate-700">Drop property photos here</p>
+        <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => fileInputRef.current?.click()}>
+          <Upload className="mr-2 h-4 w-4" />
+          Add Images
+        </Button>
+      </div>
+      {form.imageUrls.length > 0 && (
+        <div className="grid grid-cols-4 gap-2">
+          {form.imageUrls.map((url, index) => (
+            <button key={`${url}-${index}`} type="button" className="aspect-square overflow-hidden rounded-md border border-slate-200" onClick={() => setForm((p) => ({ ...p, imageUrls: p.imageUrls.filter((_, i) => i !== index) }))}>
+              <img src={url} alt="" className="h-full w-full object-cover" />
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="sticky bottom-0 -mx-6 flex gap-2 border-t border-slate-200 bg-white px-6 py-4">
+        <Button onClick={onSave} disabled={!form.title.trim() || !form.address.trim()}>
+          <Download className="mr-2 h-4 w-4" />
+          {editingId ? 'Update' : 'Save'}
+        </Button>
+        <Button variant="outline" onClick={onReset}>Reset</Button>
+      </div>
+    </div>
+  )
+}
+
+function EmptyTrackRecordState({ onImport, onAddDeal }: { onImport: () => void; onAddDeal: () => void }) {
+  return (
+    <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center shadow-sm">
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+        <Trophy className="h-6 w-6" />
+      </div>
+      <h2 className="mt-4 text-xl font-semibold text-slate-950">Build your private deal library</h2>
+      <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-600">
+        Start with a deal report or add one deal manually. Once the ledger has shape, choose the wins that belong on the client sheet.
+      </p>
+      <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
+        <Button onClick={onImport}>
+          <FileSpreadsheet className="mr-2 h-4 w-4" />
+          Import deal report
+        </Button>
+        <Button variant="outline" onClick={onAddDeal}>
+          <Plus className="mr-2 h-4 w-4" />
+          Add deal manually
+        </Button>
       </div>
     </div>
   )
@@ -863,6 +948,7 @@ function DealGrid({
   onAddImages,
   onRemoveImage,
   onSetDealType,
+  emptyState,
   presentation = false,
   showClientNames = true,
   showDealValues = true,
@@ -873,17 +959,18 @@ function DealGrid({
   onAddImages?: (id: string, files: FileList | null) => void
   onRemoveImage?: (id: string, imageIndex: number) => void
   onSetDealType?: (id: string, dealType: TrackDeal['dealType']) => void
+  emptyState?: ReactNode
   presentation?: boolean
   showClientNames?: boolean
   showDealValues?: boolean
 }) {
   if (deals.length === 0) {
-    return <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">No track record deals yet.</div>
+    return emptyState || <div className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">No track record deals yet.</div>
   }
 
   return (
     <div className={presentation ? 'grid gap-5 md:grid-cols-2 xl:grid-cols-3' : 'grid gap-4 md:grid-cols-2 xl:grid-cols-3'}>
-      {deals.map((deal) => {
+      {deals.map((deal, index) => {
         const imageInputId = `deal-images-${deal.id}`
 
         return (
@@ -913,14 +1000,19 @@ function DealGrid({
               )}
             </div>
           ) : (
-            <div className={presentation ? 'flex h-52 items-center justify-center bg-emerald-50 text-emerald-700' : 'flex h-44 flex-col items-center justify-center gap-2 border-b border-dashed border-slate-300 bg-slate-50 text-slate-500'}>
-              {presentation ? (
-                <Building2 className="h-10 w-10" />
-              ) : (
-                <>
-                  <ImagePlus className="h-8 w-8" />
-                  <label htmlFor={imageInputId} className="cursor-pointer text-sm font-medium text-slate-700 hover:text-emerald-700">Drop photos or click to add</label>
-                </>
+            <div
+              className={`${presentation ? 'h-52' : 'h-44 border-b border-slate-200'} relative overflow-hidden bg-slate-100`}
+              style={{
+                backgroundImage: "url('/assets/industrial-track-record-placeholders.png')",
+                backgroundPosition: placeholderPosition(index),
+                backgroundSize: '300% 200%',
+              }}
+            >
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/20 via-transparent to-white/10" />
+              {!presentation && onAddImages && (
+                <label htmlFor={imageInputId} className="absolute bottom-3 right-3 inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-white/70 bg-white/95 text-slate-700 shadow-sm hover:bg-emerald-50" aria-label="Add deal photos">
+                  <ImagePlus className="h-4 w-4" />
+                </label>
               )}
             </div>
           )}
