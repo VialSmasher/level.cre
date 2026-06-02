@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,10 +9,30 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
-import { User, Settings, Palette, Bell, Shield, Download, Upload, Plus, X } from "lucide-react";
+import { User, Settings, Palette, Bell, Shield, Download, Upload, Plus, X, Mail, Copy, RefreshCcw } from "lucide-react";
 import { Prospect, Submarket } from "@level-cre/shared/schema";
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
+
+type OutlookConfig = {
+  configured: boolean;
+  connected: boolean;
+  redirectUri?: string;
+  connection: null | {
+    emailAddress: string | null;
+    displayName: string | null;
+    status: string;
+    lastSyncedAt: string | null;
+    errorMessage: string | null;
+  };
+};
+
+type InboundEmailConfig = {
+  configured: boolean;
+  intakeAddress: string | null;
+  webhookUrl: string;
+};
 
 export default function ProfilePage() {
   const { user } = useAuth();
@@ -26,6 +46,31 @@ export default function ProfilePage() {
 
   const { data: submarkets = [] } = useQuery<Submarket[]>({
     queryKey: ['/api/submarkets'],
+  });
+
+  const { data: outlookConfig } = useQuery<OutlookConfig>({
+    queryKey: ['/api/email/outlook/config'],
+  });
+
+  const { data: inboundConfig } = useQuery<InboundEmailConfig>({
+    queryKey: ['/api/email/inbound/config'],
+  });
+
+  const connectOutlookMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('GET', '/api/ms365/auth-url?returnTo=/app/profile');
+      return response.json() as Promise<{ url: string }>;
+    },
+    onSuccess: ({ url }) => {
+      window.location.assign(url);
+    },
+  });
+
+  const syncOutlookMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/email/outlook/sync', { days: 30 });
+      return response.json();
+    },
   });
 
   // Control Panel State
@@ -173,6 +218,79 @@ export default function ProfilePage() {
             <>Not signed in.</>
           )}
         </div>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <Mail className="h-6 w-6 text-blue-600" />
+              <div>
+                <CardTitle>Email Capture</CardTitle>
+                <CardDescription>Configure the capture layer that feeds CRM Activity</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-slate-950">BCC intake</div>
+                  <p className="mt-1 text-sm text-slate-600">Use this address from Outlook to capture sent emails.</p>
+                </div>
+                <Badge variant="outline" className={inboundConfig?.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-600'}>
+                  {inboundConfig?.configured ? 'Ready' : 'Needs setup'}
+                </Badge>
+              </div>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <Input readOnly value={inboundConfig?.intakeAddress || 'No BCC address configured'} className="bg-white" />
+                <Button
+                  variant="outline"
+                  disabled={!inboundConfig?.intakeAddress}
+                  onClick={() => inboundConfig?.intakeAddress && navigator.clipboard?.writeText(inboundConfig.intakeAddress)}
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy
+                </Button>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-slate-950">Outlook sync</div>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {outlookConfig?.connected
+                      ? outlookConfig.connection?.emailAddress || outlookConfig.connection?.displayName || 'Microsoft 365 connected'
+                      : outlookConfig?.configured
+                        ? 'OAuth is configured, but not connected.'
+                        : `Redirect URI: ${outlookConfig?.redirectUri || '/api/email/outlook/callback'}`}
+                  </p>
+                </div>
+                <Badge variant="outline" className={outlookConfig?.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-600'}>
+                  {outlookConfig?.connected ? 'Connected' : outlookConfig?.configured ? 'Ready' : 'Not configured'}
+                </Badge>
+              </div>
+              {outlookConfig?.connection?.errorMessage ? (
+                <p className="mt-2 text-sm text-red-600">{outlookConfig.connection.errorMessage}</p>
+              ) : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {!outlookConfig?.connected ? (
+                  <Button
+                    variant="outline"
+                    disabled={!outlookConfig?.configured || connectOutlookMutation.isPending}
+                    onClick={() => connectOutlookMutation.mutate()}
+                  >
+                    {connectOutlookMutation.isPending ? 'Connecting...' : 'Connect Outlook'}
+                  </Button>
+                ) : (
+                  <Button variant="outline" disabled={syncOutlookMutation.isPending} onClick={() => syncOutlookMutation.mutate()}>
+                    <RefreshCcw className="mr-2 h-4 w-4" />
+                    {syncOutlookMutation.isPending ? 'Syncing...' : 'Sync 30 days'}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Submarkets Management */}
         <Card>

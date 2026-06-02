@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
-import { Archive, CheckCircle2, ExternalLink, Inbox as InboxIcon, Mail, RefreshCcw, Search, ShieldCheck } from 'lucide-react'
+import { Archive, CheckCircle2, ExternalLink, Inbox as InboxIcon, Mail, RefreshCcw, Search, Settings, ShieldCheck, Sparkles } from 'lucide-react'
+import { Link } from 'wouter'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -148,6 +149,15 @@ export default function InboxPage() {
     })
   }, [items, search])
 
+  const capturedCount = (counts?.needsContext ?? 0) + (counts?.pendingReview ?? 0) + (counts?.autoLogged ?? 0) + (counts?.approved ?? 0)
+  const estimatedEmailXp = capturedCount * 10
+  const dashboardCards = [
+    { label: 'Captured', value: capturedCount, helper: 'BCC email activity', tone: 'text-slate-950' },
+    { label: 'Needs Context', value: counts?.needsContext ?? 0, helper: 'Optional cleanup', tone: 'text-amber-700' },
+    { label: 'Attached', value: counts?.autoLogged ?? 0, helper: 'Linked to prospects', tone: 'text-emerald-700' },
+    { label: 'Email XP', value: estimatedEmailXp, helper: 'Captured activity value', tone: 'text-blue-700' },
+  ]
+
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['/api/email/review/counts'] })
     queryClient.invalidateQueries({ queryKey: [`/api/email/review?status=${status}`] })
@@ -202,20 +212,33 @@ export default function InboxPage() {
               <InboxIcon className="h-4 w-4" />
               Inbox
             </div>
-            <h1 className="mt-1 text-2xl font-bold text-slate-950">Email Review</h1>
+            <h1 className="mt-1 text-2xl font-bold text-slate-950">CRM Activity</h1>
+            <p className="mt-1 text-sm text-slate-500">Captured emails, lightweight context cleanup, and sales activity credit.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="h-8 gap-1.5 bg-white px-3 text-slate-700">
+            <Badge variant="outline" className="h-8 gap-1.5 bg-white px-3 text-emerald-700">
               <ShieldCheck className="h-3.5 w-3.5" />
-              {counts?.needsContext ?? 0} needs context
+              BCC capture {inboundConfig?.configured ? 'ready' : 'needs setup'}
             </Badge>
-            <Badge variant="outline" className="h-8 bg-white px-3 text-slate-700">
-              {counts?.pendingReview ?? 0} review
-            </Badge>
-            <Badge variant="outline" className="h-8 bg-white px-3 text-slate-700">
-              {counts?.autoLogged ?? 0} logged
-            </Badge>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/app/profile">
+                <Settings className="mr-2 h-4 w-4" />
+                Email Settings
+              </Link>
+            </Button>
           </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {dashboardCards.map((card) => (
+            <Card key={card.label} className="rounded-lg border-slate-200 bg-white shadow-sm">
+              <CardContent className="p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{card.label}</p>
+                <div className={`mt-2 text-3xl font-semibold ${card.tone}`}>{card.value.toLocaleString()}</div>
+                <p className="mt-1 text-xs text-slate-500">{card.helper}</p>
+              </CardContent>
+            </Card>
+          ))}
         </div>
 
         <Card className="rounded-lg border-slate-200 shadow-sm">
@@ -251,7 +274,7 @@ export default function InboxPage() {
           </CardContent>
         </Card>
 
-        <Card className="rounded-lg border-slate-200 shadow-sm">
+        <Card className="hidden rounded-lg border-slate-200 shadow-sm">
           <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -293,7 +316,7 @@ export default function InboxPage() {
           </CardContent>
         </Card>
 
-        <Card className="rounded-lg border-slate-200 shadow-sm">
+        <Card className="hidden rounded-lg border-slate-200 shadow-sm">
           <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -348,6 +371,12 @@ export default function InboxPage() {
                         <Badge variant="outline" className={confidenceTone(item.confidence)}>
                           {item.confidence}% match
                         </Badge>
+                        {item.matchStatus === 'needs_context' ? (
+                          <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                            <Sparkles className="mr-1 h-3 w-3" />
+                            XP captured
+                          </Badge>
+                        ) : null}
                         <span className="text-xs text-slate-500">{formatEmailDate(item)}</span>
                       </div>
                       <CardTitle className="mt-2 truncate text-base text-slate-950">
@@ -378,12 +407,12 @@ export default function InboxPage() {
                       </Button>
                       <Button
                         size="sm"
-                    disabled={!item.prospect || logInteractionMutation.isPending}
-                    onClick={() => logInteractionMutation.mutate(item.id)}
-                  >
-                    <CheckCircle2 className="mr-2 h-4 w-4" />
-                    Attach to Prospect
-                  </Button>
+                        disabled={!item.prospect || logInteractionMutation.isPending}
+                        onClick={() => logInteractionMutation.mutate(item.id)}
+                      >
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Attach to Prospect
+                      </Button>
                     </div>
                   </div>
                 </CardHeader>
