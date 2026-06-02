@@ -315,8 +315,17 @@ function scoreListingForRequirement(requirement: IntelRequirement, listing: Inte
 
 function extractNumber(value: string | undefined) {
   if (!value) return "";
-  const parsed = Number(value.replace(/,/g, ""));
+  const normalized = value.toLowerCase().replace(/\s+/g, "");
+  const parsed = Number(normalized.replace(/,/g, "").replace(/k$/, ""));
   return Number.isFinite(parsed) ? String(parsed) : "";
+}
+
+function extractSpaceNumber(value: string | undefined) {
+  if (!value) return null;
+  const normalized = value.toLowerCase().replace(/\s+/g, "");
+  const multiplier = normalized.endsWith("k") ? 1000 : 1;
+  const parsed = Number(normalized.replace(/,/g, "").replace(/k$/, ""));
+  return Number.isFinite(parsed) ? Math.round(parsed * multiplier) : null;
 }
 
 function sentenceContaining(text: string, keyword: string) {
@@ -392,6 +401,138 @@ function parseRequirementTranscript(transcript: string): Partial<RequirementForm
   parsed.isOffMarketSearchEnabled = lower.includes("off market") || lower.includes("off-market");
 
   return parsed;
+}
+
+function parseRequirementTranscriptV2(transcript: string): Partial<RequirementFormState> {
+  const text = transcript.trim();
+  const lower = text.toLowerCase();
+  const parsed: Partial<RequirementFormState> = {};
+
+  if (!text) return parsed;
+
+  const knownAreas = [
+    "South Edmonton",
+    "Southeast Edmonton",
+    "Sherwood Park",
+    "Leduc",
+    "Nisku",
+    "Acheson",
+    "Northwest Edmonton",
+    "West Edmonton",
+    "Fort Saskatchewan",
+    "St. Albert",
+    "Edmonton",
+    "Calgary",
+  ];
+  const detectedAreas = knownAreas.filter((area) => lower.includes(area.toLowerCase()));
+  const clientMatch = text.match(/\b(?:talk(?:ed|ing)?\s+to|spoke\s+with|finished\s+talking\s+to|met\s+with|client|tenant|buyer|company)\s+(?:is\s+|called\s+|named\s+)?([A-Za-z0-9 &'â€™.-]{2,60})/i);
+  const clientName = clientMatch?.[1]
+    ?.replace(/\b(?:they|they're|they are|is|are|needs|need|wants|want|looking|requires|require|in)\b.*$/i, "")
+    .trim();
+
+  if (clientName) parsed.clientName = clientName;
+  parsed.status = "active";
+  parsed.market = lower.includes("calgary") ? "Calgary" : lower.includes("edmonton") ? "Edmonton" : "";
+  parsed.dealType = lower.includes("purchase") || lower.includes("buy") || lower.includes("sale")
+    ? "sale"
+    : lower.includes("lease")
+      ? "lease"
+      : lower.includes("either")
+        ? "either"
+        : undefined;
+
+  const sfRangeMatch = text.match(/(\d[\d,]*(?:\.\d+)?\s*k?)\s*(?:-|to|and)\s*(\d[\d,]*(?:\.\d+)?\s*k?)\s*(?:sf|square feet|sq ft)/i);
+  const sfMentions = Array.from(text.matchAll(/(\d[\d,]*(?:\.\d+)?\s*k?)\s*(?:sf|square feet|sq ft)/gi))
+    .map((match) => extractSpaceNumber(match[1]))
+    .filter((value): value is number => typeof value === "number");
+  const targetSizeMatch = text.match(/(?:downsize(?: them)? to|rightsize(?: them)? to|target(?:ing)?|goal (?:is|would be) to find(?: something with)?|looking for|needs?|want(?:s)?|require(?:s)?)\s*(?:about|around|approximately)?\s*(\d[\d,]*(?:\.\d+)?\s*k?)/i);
+  const sfSingleMatch = text.match(/(?:about|around|approximately|needs|need|looking for)?\s*(\d[\d,]*(?:\.\d+)?\s*k?)\s*(?:sf|square feet|sq ft)/i);
+
+  if (sfRangeMatch) {
+    const first = extractSpaceNumber(sfRangeMatch[1]);
+    const second = extractSpaceNumber(sfRangeMatch[2]);
+    if (first && second) {
+      parsed.minSf = String(Math.min(first, second));
+      parsed.maxSf = String(Math.max(first, second));
+    }
+  } else if (lower.includes("downsize") && sfMentions.length >= 2) {
+    const target = Math.min(...sfMentions);
+    parsed.minSf = String(Math.round(target * 0.85));
+    parsed.maxSf = String(Math.round(target * 1.15));
+  } else if (targetSizeMatch?.[1]) {
+    const target = extractSpaceNumber(targetSizeMatch[1]);
+    if (target) {
+      parsed.minSf = String(Math.round(target * 0.85));
+      parsed.maxSf = String(Math.round(target * 1.15));
+    }
+  } else if (sfSingleMatch) {
+    const target = extractSpaceNumber(sfSingleMatch[1]);
+    if (target) parsed.minSf = String(target);
+  }
+
+  const clearHeightMatch = text.match(/(?:clear height|clear|ceiling height)[^\d]*(\d+(?:\.\d+)?)/i) || text.match(/(\d+(?:\.\d+)?)\s*(?:foot|feet|ft|')?\s*clear/i);
+  if (clearHeightMatch?.[1]) parsed.minClearHeightFt = clearHeightMatch[1];
+
+  const dockMatch = text.match(/(\d+)\s*(?:dock|dock doors|dock door)/i);
+  if (dockMatch?.[1]) parsed.requiredDockDoors = dockMatch[1];
+
+  const gradeMatch = text.match(/(\d+)\s*(?:grade|grade doors|grade door)/i);
+  if (gradeMatch?.[1]) parsed.requiredGradeDoors = gradeMatch[1];
+
+  const yardMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:acre|acres|ac)\s*(?:yard|site|land)?/i);
+  if (yardMatch?.[1]) parsed.minYardAcres = yardMatch[1];
+
+  const budgetMatch = text.match(/\$?\s*(\d+(?:\.\d+)?)\s*(?:psf|per square foot|net rent|net)/i);
+  if (budgetMatch?.[1]) parsed.maxBudgetPsf = budgetMatch[1];
+
+  const submarketMatch = text.match(/\b(?:in|near|around|focused on)\s+([A-Za-z ]+?)\s+(?:submarket|area|edmonton|calgary|with|for|from|and|$)/i);
+  if (detectedAreas.length > 0) {
+    parsed.submarket = detectedAreas.join(", ");
+  } else if (submarketMatch?.[1]) {
+    parsed.submarket = submarketMatch[1].trim();
+  }
+
+  parsed.title = [
+    clientName,
+    parsed.maxSf ? `${Number(parsed.maxSf).toLocaleString()} SF` : parsed.minSf ? `${Number(parsed.minSf).toLocaleString()} SF` : "",
+    parsed.dealType && parsed.dealType !== "either" ? parsed.dealType : "",
+    "requirement",
+  ].filter(Boolean).join(" ") || text.split(/[.!?]/)[0]?.slice(0, 72).trim() || "Dictated requirement";
+
+  parsed.powerNotes = sentenceContaining(text, "power") || (lower.includes("machine shop") ? "Machine shop use; verify heavy power." : "");
+  parsed.officeNotes = sentenceContaining(text, "office");
+  parsed.timingNotes =
+    sentenceContaining(text, "immediate") ||
+    sentenceContaining(text, "asap") ||
+    sentenceContaining(text, "month") ||
+    sentenceContaining(text, "quarter") ||
+    sentenceContaining(text, "q1") ||
+    sentenceContaining(text, "q2") ||
+    sentenceContaining(text, "q3") ||
+    sentenceContaining(text, "q4");
+  parsed.specialNotes = text;
+  parsed.isOffMarketSearchEnabled = lower.includes("off market") || lower.includes("off-market");
+
+  return parsed;
+}
+
+function getDictationInsights(transcript: string) {
+  const parsed = parseRequirementTranscriptV2(transcript);
+  const items = [
+    { label: "Client", value: parsed.clientName },
+    { label: "Deal", value: parsed.dealType },
+    {
+      label: "Size",
+      value: parsed.minSf || parsed.maxSf
+        ? `${parsed.minSf ? Number(parsed.minSf).toLocaleString() : "-"} - ${parsed.maxSf ? Number(parsed.maxSf).toLocaleString() : "-"} SF`
+        : undefined,
+    },
+    { label: "Area", value: parsed.submarket || parsed.market },
+    { label: "Power", value: parsed.powerNotes ? "Captured" : undefined },
+    { label: "Timing", value: parsed.timingNotes ? "Captured" : undefined },
+  ];
+
+  return items.filter((item) => item.value);
 }
 
 function SurveyDraftPanel({
@@ -624,6 +765,8 @@ export default function IndustrialIntelRequirementsPage() {
     review: matches.filter((match) => match.tier === "review"),
   }), [matches]);
 
+  const dictationInsights = useMemo(() => getDictationInsights(dictationText), [dictationText]);
+
   const saveDecisionMutation = useMutation({
     mutationFn: async ({ requirementId, match, decision }: { requirementId: string; match: RequirementMatch; decision: DecisionValue }) => {
       const response = await apiRequest("PUT", `/api/intel/requirements/${requirementId}/shortlist/${match.listing.id}`, {
@@ -712,7 +855,7 @@ export default function IndustrialIntelRequirementsPage() {
   };
 
   const applyDictation = () => {
-    const parsed = parseRequirementTranscript(dictationText);
+    const parsed = parseRequirementTranscriptV2(dictationText);
     setForm((current) => ({
       ...current,
       ...Object.fromEntries(
@@ -844,6 +987,27 @@ export default function IndustrialIntelRequirementsPage() {
                   onChange={(event) => setDictationText(event.target.value)}
                   placeholder="Example: Client ABC needs 15,000 to 30,000 SF in West Edmonton, lease, 24 foot clear, two dock doors, one grade door, 1.5 acre yard, heavy power, immediate timing..."
                 />
+                <div className="mt-3 rounded-2xl border border-blue-100 bg-white/80 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-950">Requirement brief</p>
+                    <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-800">
+                      {dictationInsights.length} fields detected
+                    </span>
+                  </div>
+                  {dictationInsights.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {dictationInsights.map((item) => (
+                        <span key={item.label} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700">
+                          {item.label}: <span className="text-slate-950">{item.value}</span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-600">
+                      Speak naturally, then use Fill form. The full transcript is still saved into special notes so no context gets lost.
+                    </p>
+                  )}
+                </div>
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">

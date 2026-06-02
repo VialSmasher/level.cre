@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, Clock3, Database, RefreshCw, TrendingUp } from "lucide-react";
+import { AlertTriangle, ArrowRight, ClipboardList, Clock3, Database, FileText, RefreshCw, TrendingUp } from "lucide-react";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiRequest } from "@/lib/queryClient";
@@ -161,10 +161,10 @@ export default function IndustrialIntelHomePage() {
             <ArrowRight className="h-4 w-4" />
           </Link>
           <Link
-            href="/tools/industrial-intel/requirements"
+            href="/tools/industrial-intel/surveys"
             className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:border-blue-200 hover:text-blue-700"
           >
-            Requirements
+            Build survey
           </Link>
         </div>
       </section>
@@ -205,6 +205,63 @@ export default function IndustrialIntelHomePage() {
             </Card>
           );
         })}
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-3">
+        <Link
+          href="/tools/industrial-intel/listings"
+          className="group rounded-3xl border border-blue-200 bg-blue-50/70 p-5 shadow-sm transition hover:border-blue-300 hover:bg-blue-50"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-blue-800">1. Clean inventory</p>
+              <h3 className="mt-2 text-xl font-semibold text-slate-950">Review listings and duplicates</h3>
+              <p className="mt-2 text-sm text-slate-600">
+                Confirm mapped records, archive duplicates, and avoid sending rough data into surveys.
+              </p>
+            </div>
+            <Database className="h-5 w-5 text-blue-700" />
+          </div>
+          <p className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-blue-700">
+            Open inventory <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+          </p>
+        </Link>
+        <Link
+          href="/tools/industrial-intel/requirements"
+          className="group rounded-3xl border border-emerald-200 bg-emerald-50/70 p-5 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-emerald-800">2. Capture demand</p>
+              <h3 className="mt-2 text-xl font-semibold text-slate-950">Dictate a requirement brief</h3>
+              <p className="mt-2 text-sm text-slate-600">
+                Turn messy broker notes into structured size, area, power, timing, and matching criteria.
+              </p>
+            </div>
+            <ClipboardList className="h-5 w-5 text-emerald-700" />
+          </div>
+          <p className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-emerald-700">
+            Open requirements <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+          </p>
+        </Link>
+        <Link
+          href="/tools/industrial-intel/surveys"
+          className="group rounded-3xl border border-violet-200 bg-violet-50/70 p-5 shadow-sm transition hover:border-violet-300 hover:bg-violet-50"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-violet-800">3. Package options</p>
+              <h3 className="mt-2 text-xl font-semibold text-slate-950">Build the client survey</h3>
+              <p className="mt-2 text-sm text-slate-600">
+                Add only verified listings, write client notes, check map readiness, and stage the shortlist.
+              </p>
+            </div>
+            <FileText className="h-5 w-5 text-violet-700" />
+          </div>
+          <p className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-violet-700">
+            Open surveys <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+          </p>
+        </Link>
       </section>
 
       <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">

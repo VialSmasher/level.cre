@@ -363,6 +363,15 @@ export default function IndustrialIntelSurveysPage() {
   }, [selectedMapItem]);
 
   const unmappedVisibleCount = visibleItems.length - mappableSurveyItems.length;
+  const visibleWithLinksCount = useMemo(
+    () => visibleItems.filter((item) => Boolean(firstLink(item.listing))).length,
+    [visibleItems],
+  );
+  const visibleWithNotesCount = useMemo(
+    () => visibleItems.filter((item) => Boolean(item.clientNotes?.trim() || item.recommendationLabel?.trim())).length,
+    [visibleItems],
+  );
+  const surveyReadyCount = Math.min(mappableSurveyItems.length, visibleWithLinksCount, visibleWithNotesCount);
 
   const focusPreview = () => {
     previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -639,10 +648,10 @@ export default function IndustrialIntelSurveysPage() {
     <div className="space-y-8">
       <section className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-blue-700">Tool B</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.22em] text-blue-700">Client package studio</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950">Survey builder</h1>
           <p className="mt-2 max-w-3xl text-sm text-slate-600">
-            Build private client-facing survey drafts from requirements, shortlist decisions, and live Industrial Intel inventory.
+            Build private client-facing survey drafts from requirements, shortlist decisions, and verified Industrial Intel inventory.
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
@@ -845,6 +854,32 @@ export default function IndustrialIntelSurveysPage() {
                       }}
                     />
                   </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-blue-200 bg-blue-50/50">
+                <CardContent className="p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-blue-900">Survey readiness</p>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Treat this as the pre-flight check before anything becomes client-facing.
+                      </p>
+                    </div>
+                    <Badge className={surveyReadyCount === visibleItems.length && visibleItems.length > 0 ? "bg-emerald-600 text-white" : "bg-slate-950 text-white"}>
+                      {surveyReadyCount} / {visibleItems.length} ready
+                    </Badge>
+                  </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <Metric label="Mapped" value={`${mappableSurveyItems.length} / ${visibleItems.length}`} />
+                    <Metric label="Source links" value={`${visibleWithLinksCount} / ${visibleItems.length}`} />
+                    <Metric label="Client notes" value={`${visibleWithNotesCount} / ${visibleItems.length}`} />
+                  </div>
+                  {(unmappedVisibleCount > 0 || visibleWithLinksCount < visibleItems.length || visibleWithNotesCount < visibleItems.length) && (
+                    <p className="mt-3 text-sm text-slate-600">
+                      Keep drafts internal until every included option has coordinates, a verified source or brochure link, and a client-readable note.
+                    </p>
+                  )}
                 </CardContent>
               </Card>
 

@@ -12,6 +12,8 @@ const TRUSTED_DOMAINS = [
   "loopnet.ca",
 ] as const;
 
+const MIN_PERSISTED_CONFIDENCE = 55;
+
 type GoogleSearchItem = {
   title?: string;
   link?: string;
@@ -151,12 +153,13 @@ function buildQueries(listing: IntelListingListItem) {
   ].filter(Boolean);
   const titleParts = [`"${listing.title}"`, city ? `"${city}"` : "", "industrial"].filter(Boolean);
   const queries = [
+    address ? `"${address}" ${city ? `"${city}" ` : ""}${listing.listingType === "sale" ? "sale" : "lease"} industrial` : "",
     `${coreParts.join(" ")} (${TRUSTED_DOMAINS.map((domain) => `site:${domain}`).join(" OR ")})`,
     `${titleParts.join(" ")} (${TRUSTED_DOMAINS.map((domain) => `site:${domain}`).join(" OR ")})`,
-    ...TRUSTED_DOMAINS.map((domain) => `${coreParts.join(" ")} site:${domain}`),
+    ...["cwedm.com", "cushmanwakefield.com", "cbre.ca", "collierscanada.com"].map((domain) => `${coreParts.join(" ")} site:${domain}`),
   ];
 
-  return Array.from(new Set(queries.map((query) => query.trim()).filter(Boolean))).slice(0, 10);
+  return Array.from(new Set(queries.map((query) => query.trim()).filter(Boolean))).slice(0, 5);
 }
 
 function buildVertexPrompt(listing: IntelListingListItem) {
@@ -206,7 +209,7 @@ async function runGoogleSearch(query: string, apiKey: string, cx: string): Promi
   url.searchParams.set("key", apiKey);
   url.searchParams.set("cx", cx);
   url.searchParams.set("q", query);
-  url.searchParams.set("num", "5");
+  url.searchParams.set("num", "3");
 
   const response = await fetch(url);
   const data = (await response.json()) as GoogleSearchResponse;
@@ -425,7 +428,7 @@ function toCandidateMap(listing: IntelListingListItem, items: GoogleSearchItem[]
     if (!item.link) continue;
     const candidateUrl = normalizeUrl(item.link);
     const confidence = scoreCandidate(listing, item);
-    if (confidence < 20) continue;
+    if (confidence < MIN_PERSISTED_CONFIDENCE) continue;
     const candidate = {
       candidateUrl,
       domain: domainFromUrl(candidateUrl, item.displayLink),
@@ -485,8 +488,8 @@ export async function resolvePublicLinkCandidates(listing: IntelListingListItem)
         status: "resolved",
         message:
           candidates.length > 0
-            ? `Public link candidates resolved with ${provider}.`
-            : `No candidates found with ${provider}.`,
+            ? `High-confidence public link candidates resolved with ${provider}. Approve only after opening the source.`
+            : `No high-confidence candidates found with ${provider}. Add the broker link manually instead of spending more search attempts.`,
         candidates,
         queries: provider === "google" ? queries : [buildVertexPrompt(listing)],
       };
