@@ -2898,6 +2898,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/email/outlook/connect', requireAuth, startOutlookOAuth);
   app.get('/api/integrations/microsoft365/connect', requireAuth, startOutlookOAuth);
+  app.get('/api/ms365/start', requireAuth, startOutlookOAuth);
 
   app.get('/api/email/outlook/callback', async (req, res) => {
     let returnTo = '/app/inbox';

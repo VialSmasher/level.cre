@@ -241,7 +241,7 @@ export default function InboxPage() {
             <div className="flex flex-wrap gap-2">
               {!outlookConfig?.connected ? (
                 <Button asChild disabled={!outlookConfig?.configured}>
-                  <a href={apiUrl('/api/integrations/microsoft365/connect?returnTo=/app/inbox')}>Connect Outlook</a>
+                  <a href={apiUrl('/api/ms365/start?returnTo=/app/inbox')}>Connect Outlook</a>
                 </Button>
               ) : (
                 <Button onClick={() => syncOutlookMutation.mutate()} disabled={syncOutlookMutation.isPending}>
