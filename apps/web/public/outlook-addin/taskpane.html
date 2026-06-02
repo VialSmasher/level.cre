@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Level CRE Logger</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script src="/outlook-addin/commands.js"></script>
+    <script src="/outlook-addin/taskpane.js" defer></script>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        color: #0f172a;
+        background: #f8fafc;
+      }
+      main {
+        padding: 18px;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 18px;
+      }
+      p {
+        margin: 0 0 14px;
+        color: #475569;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: 6px;
+        background: #0f62fe;
+        color: white;
+        cursor: pointer;
+        font-weight: 700;
+        padding: 10px 12px;
+      }
+      #status {
+        margin-top: 12px;
+        min-height: 18px;
+        font-size: 13px;
+        color: #166534;
+      }
+      code {
+        display: block;
+        margin-top: 10px;
+        overflow-wrap: anywhere;
+        color: #334155;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Level CRE Logger</h1>
+      <p>Add the Level CRE intake address to BCC, then send normally. The email will appear in Level CRE's review queue.</p>
+      <button id="add-bcc" type="button">Add Level CRE BCC</button>
+      <div id="status"></div>
+      <code>8feefe98cef5cf7437bbdb5d2e20e761@inbound.postmarkapp.com</code>
+    </main>
+  </body>
+</html>
