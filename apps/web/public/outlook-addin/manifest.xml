@@ -5,7 +5,7 @@
   xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
   xsi:type="MailApp">
   <Id>f4d6380a-d92f-4a07-9bb7-9ce2d2fa0c7d</Id>
-  <Version>1.0.0.0</Version>
+  <Version>1.0.1.0</Version>
   <ProviderName>Level CRE</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Level CRE Logger"/>
@@ -93,8 +93,8 @@
         <bt:Image id="Icon.80x80" DefaultValue="https://level-cre.vercel.app/outlook-addin/assets/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://level-cre.vercel.app/outlook-addin/commands.html"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://level-cre.vercel.app/outlook-addin/taskpane.html"/>
+        <bt:Url id="Commands.Url" DefaultValue="https://level-cre.vercel.app/outlook-addin/commands.html?v=1.0.1"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://level-cre.vercel.app/outlook-addin/taskpane.html?v=1.0.1"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="Group.Label" DefaultValue="Level CRE"/>
