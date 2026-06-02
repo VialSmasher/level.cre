@@ -107,7 +107,7 @@ export interface IStorage {
 
   // Contact interaction operations with user filtering
   getContactInteractions(userId: string, prospectId?: string, listingId?: string, start?: string, end?: string): Promise<ContactInteractionRow[]>;
-  createContactInteraction(interaction: InsertContactInteraction & { userId: string; listingId?: string | null }): Promise<ContactInteractionRow>;
+  createContactInteraction(interaction: InsertContactInteraction & { userId: string; listingId?: string | null }, options?: { skipXp?: boolean }): Promise<ContactInteractionRow>;
   deleteContactInteraction(id: string, userId: string): Promise<boolean>;
 
   // Broker Skills operations
@@ -1199,13 +1199,17 @@ export class DatabaseStorage implements IStorage {
     return results;
   }
 
-  async createContactInteraction(interactionData: InsertContactInteraction & { userId: string; listingId?: string | null }): Promise<ContactInteractionRow> {
+  async createContactInteraction(interactionData: InsertContactInteraction & { userId: string; listingId?: string | null }, options?: { skipXp?: boolean }): Promise<ContactInteractionRow> {
     const [result] = await db.insert(contactInteractions)
       .values({
         ...interactionData,
         id: randomUUID()
       })
       .returning();
+
+    if (options?.skipXp) {
+      return result;
+    }
     
     // Award XP for follow-up activities
     const interactionType = (interactionData.type === 'call' || interactionData.type === 'email' || interactionData.type === 'meeting')

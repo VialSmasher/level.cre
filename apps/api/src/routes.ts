@@ -102,6 +102,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     )).toISOString();
   }
 
+  async function awardCapturedEmailActivity(userId: string, emailMessageId: string, isNewMessage: boolean) {
+    if (!isNewMessage) return false;
+    const existing = await pool.query(`
+      SELECT id FROM public.skill_activities
+      WHERE user_id = $1
+        AND skill_type = 'followUp'
+        AND action = $2
+        AND related_id = $3
+      LIMIT 1
+    `, [userId, actionForInteractionType('email'), emailMessageId]);
+    if (existing.rows[0]) return false;
+    await storage.addSkillActivity({
+      userId,
+      skillType: 'followUp',
+      action: actionForInteractionType('email'),
+      xpGained: xpForInteractionType('email'),
+      relatedId: emailMessageId,
+      multiplier: 1,
+    });
+    return true;
+  }
+
   function cleanProspectName(data: { name?: string | null; businessName?: string | null; contactCompany?: string | null; geometry?: unknown }): string {
     const business = data.businessName?.trim();
     const company = data.contactCompany?.trim();
@@ -473,6 +495,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       JSON.stringify(messageData.rawMetadata || {}),
     ]);
     const emailMessageId = inserted.rows[0].id;
+    const isNewMessage = Boolean(inserted.rows[0]?.inserted);
+    const xpAwarded = await awardCapturedEmailActivity(userId, emailMessageId, isNewMessage);
     const prospectsResult = await pool.query(`
       SELECT id, name, status, notes, address, contact_name, contact_email, contact_company, business_name
       FROM public.prospects
@@ -508,7 +532,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ]);
       if (result.rows[0]?.inserted) matchesCreated += 1;
     }
-    return { emailMessageId, inserted: Boolean(inserted.rows[0]?.inserted), matchesCreated };
+    if (bestMatches.length === 0) {
+      const result = await pool.query(`
+        INSERT INTO public.email_prospect_matches (
+          user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
+          suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
+        )
+        SELECT $1, $2, NULL, 0, 'needs_context', $3, 'email', 'contacted', $4, now()
+        WHERE NOT EXISTS (
+          SELECT 1 FROM public.email_prospect_matches
+          WHERE user_id = $1 AND email_message_id = $2 AND prospect_id IS NULL
+        )
+        RETURNING id
+      `, [
+        userId,
+        emailMessageId,
+        'No confident prospect match; activity captured for later context.',
+        [messageData.subject, messageData.snippet].filter(Boolean).join('\n').slice(0, 1000),
+      ]);
+      if (result.rows[0]) matchesCreated += 1;
+    }
+    return { emailMessageId, inserted: isNewMessage, matchesCreated, xpAwarded, newXpGained: xpAwarded ? xpForInteractionType('email') : 0 };
   }
 
   function getInboundWebhookSecret() {
@@ -3063,7 +3107,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  const EmailMatchStatusSchema = z.enum(['pending_review', 'auto_logged', 'approved', 'ignored', 'rejected']);
+  const EmailMatchStatusSchema = z.enum(['needs_context', 'pending_review', 'auto_logged', 'approved', 'ignored', 'rejected']);
 
   app.get('/api/email/outlook/config', requireAuth, async (req, res) => {
     try {
@@ -3534,7 +3578,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/email/review/counts', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      if (isDemo(req)) return res.json({ pendingReview: 0, approved: 0, autoLogged: 0, ignored: 0, rejected: 0 });
+      if (isDemo(req)) return res.json({ needsContext: 0, pendingReview: 0, approved: 0, autoLogged: 0, ignored: 0, rejected: 0 });
       const result = await pool.query(`
         SELECT match_status, COUNT(*)::int AS count
         FROM public.email_prospect_matches
@@ -3543,6 +3587,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `, [userId]);
       const counts = Object.fromEntries(result.rows.map((row: any) => [row.match_status, row.count]));
       res.json({
+        needsContext: counts.needs_context || 0,
         pendingReview: counts.pending_review || 0,
         approved: counts.approved || 0,
         autoLogged: counts.auto_logged || 0,
@@ -3663,6 +3708,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const nextFollowUpIso = row.suggested_next_follow_up
         ? new Date(row.suggested_next_follow_up).toISOString()
         : addDaysAtNoonUtc(new Date(interactionDate), 14);
+      const emailAlreadyAwarded = await pool.query(`
+        SELECT id FROM public.skill_activities
+        WHERE user_id = $1
+          AND skill_type = 'followUp'
+          AND action = $2
+          AND related_id = $3
+        LIMIT 1
+      `, [userId, actionForInteractionType('email'), row.email_message_id]);
       const interaction = await storage.createContactInteraction({
         userId,
         prospectId: row.prospect_id,
@@ -3677,7 +3730,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sourceThreadId: row.provider_thread_id || null,
         sourceEmailMessageId: row.email_message_id,
         sourceMetadata: { emailReviewMatchId: req.params.id, defaultFollowUpDays: hasSuggestedNextFollowUp ? null : 14 },
-      });
+      }, { skipXp: Boolean(emailAlreadyAwarded.rows[0]) });
       const interactionId = interaction.id;
       await pool.query(`
         UPDATE public.email_prospect_matches

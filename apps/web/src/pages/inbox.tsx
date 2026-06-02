@@ -8,8 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { apiRequest } from '@/lib/queryClient'
+import type { Prospect } from '@level-cre/shared/schema'
 
-type EmailReviewStatus = 'pending_review' | 'auto_logged' | 'approved' | 'ignored' | 'rejected' | 'all'
+type EmailReviewStatus = 'needs_context' | 'pending_review' | 'auto_logged' | 'approved' | 'ignored' | 'rejected' | 'all'
 
 type EmailReviewItem = {
   id: string
@@ -49,6 +50,7 @@ type EmailReviewItem = {
 }
 
 type EmailReviewCounts = {
+  needsContext: number
   pendingReview: number
   approved: number
   autoLogged: number
@@ -80,6 +82,7 @@ type InboundEmailConfig = {
 }
 
 const statusLabels: Record<EmailReviewStatus, string> = {
+  needs_context: 'Needs Context',
   pending_review: 'Needs Review',
   auto_logged: 'Logged',
   approved: 'Approved',
@@ -104,8 +107,9 @@ function confidenceTone(confidence: number) {
 
 export default function InboxPage() {
   const queryClient = useQueryClient()
-  const [status, setStatus] = useState<EmailReviewStatus>('pending_review')
+  const [status, setStatus] = useState<EmailReviewStatus>('needs_context')
   const [search, setSearch] = useState('')
+  const [prospectDrafts, setProspectDrafts] = useState<Record<string, string>>({})
 
   const { data: counts } = useQuery<EmailReviewCounts>({
     queryKey: ['/api/email/review/counts'],
@@ -117,6 +121,10 @@ export default function InboxPage() {
 
   const { data: inboundConfig } = useQuery<InboundEmailConfig>({
     queryKey: ['/api/email/inbound/config'],
+  })
+
+  const { data: prospects = [] } = useQuery<Prospect[]>({
+    queryKey: ['/api/prospects'],
   })
 
   const { data: items = [], isLoading } = useQuery<EmailReviewItem[]>({
@@ -146,8 +154,8 @@ export default function InboxPage() {
   }
 
   const updateStatusMutation = useMutation({
-    mutationFn: async ({ id, matchStatus }: { id: string; matchStatus: Exclude<EmailReviewStatus, 'all'> }) => {
-      const response = await apiRequest('PATCH', `/api/email/review/${id}`, { matchStatus })
+    mutationFn: async ({ id, matchStatus, prospectId }: { id: string; matchStatus?: Exclude<EmailReviewStatus, 'all'>; prospectId?: string | null }) => {
+      const response = await apiRequest('PATCH', `/api/email/review/${id}`, { matchStatus, prospectId })
       return response.json()
     },
     onSuccess: invalidate,
@@ -168,6 +176,12 @@ export default function InboxPage() {
     },
     onSuccess: invalidate,
   })
+
+  const prospectOptions = useMemo(() => {
+    return [...prospects]
+      .sort((left, right) => (left.name || '').localeCompare(right.name || ''))
+      .slice(0, 250)
+  }, [prospects])
 
   const connectOutlookMutation = useMutation({
     mutationFn: async () => {
@@ -193,7 +207,10 @@ export default function InboxPage() {
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="h-8 gap-1.5 bg-white px-3 text-slate-700">
               <ShieldCheck className="h-3.5 w-3.5" />
-              {counts?.pendingReview ?? 0} pending
+              {counts?.needsContext ?? 0} needs context
+            </Badge>
+            <Badge variant="outline" className="h-8 bg-white px-3 text-slate-700">
+              {counts?.pendingReview ?? 0} review
             </Badge>
             <Badge variant="outline" className="h-8 bg-white px-3 text-slate-700">
               {counts?.autoLogged ?? 0} logged
@@ -218,6 +235,7 @@ export default function InboxPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="needs_context">Needs Context</SelectItem>
                   <SelectItem value="pending_review">Needs Review</SelectItem>
                   <SelectItem value="auto_logged">Logged</SelectItem>
                   <SelectItem value="approved">Approved</SelectItem>
@@ -360,12 +378,12 @@ export default function InboxPage() {
                       </Button>
                       <Button
                         size="sm"
-                        disabled={!item.prospect || logInteractionMutation.isPending}
-                        onClick={() => logInteractionMutation.mutate(item.id)}
-                      >
-                        <CheckCircle2 className="mr-2 h-4 w-4" />
-                        Log Email
-                      </Button>
+                    disabled={!item.prospect || logInteractionMutation.isPending}
+                    onClick={() => logInteractionMutation.mutate(item.id)}
+                  >
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    Attach to Prospect
+                  </Button>
                     </div>
                   </div>
                 </CardHeader>
@@ -387,7 +405,32 @@ export default function InboxPage() {
                         <Badge variant="outline" className="mt-1 bg-white text-slate-700">{item.prospect.status}</Badge>
                       </div>
                     ) : (
-                      <p className="mt-2 text-sm text-slate-500">No prospect selected</p>
+                      <div className="mt-2 space-y-2">
+                        <p className="text-sm text-slate-500">Captured as sales activity. Attach context only if it is worth it.</p>
+                        <Select
+                          value={prospectDrafts[item.id] || ''}
+                          onValueChange={(value) => setProspectDrafts((prev) => ({ ...prev, [item.id]: value }))}
+                        >
+                          <SelectTrigger className="bg-white">
+                            <SelectValue placeholder="Choose existing prospect" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {prospectOptions.map((prospect) => (
+                              <SelectItem key={prospect.id} value={prospect.id}>
+                                {prospect.name || prospect.businessName || 'Untitled prospect'}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!prospectDrafts[item.id] || updateStatusMutation.isPending}
+                          onClick={() => updateStatusMutation.mutate({ id: item.id, prospectId: prospectDrafts[item.id], matchStatus: 'pending_review' })}
+                        >
+                          Attach Context
+                        </Button>
+                      </div>
                     )}
                   </div>
                 </CardContent>
