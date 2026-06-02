@@ -1,4 +1,4 @@
-export type QuickLogType = 'call' | 'email' | 'meeting';
+export type QuickLogType = 'call' | 'meeting';
 
 export type QuickLogSpec = {
   note: string;
@@ -13,12 +13,6 @@ const QUICK_LOG_SPECS: Record<QuickLogType, QuickLogSpec> = {
     xp: 15,
     followUpDays: 30,
     toastLabel: 'Call logged',
-  },
-  email: {
-    note: 'Email follow-up',
-    xp: 10,
-    followUpDays: 14,
-    toastLabel: 'Email logged',
   },
   meeting: {
     note: 'Meeting follow-up',

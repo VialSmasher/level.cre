@@ -179,7 +179,6 @@ function ContactInteractionModal({ prospect, onClose }: { prospect: Prospect; on
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="call">Phone Call</SelectItem>
-                  <SelectItem value="email">Email</SelectItem>
                   <SelectItem value="meeting">Meeting</SelectItem>
                   <SelectItem value="note">Note</SelectItem>
                 </SelectContent>
@@ -391,17 +390,13 @@ function QuickEngagement({ prospect, prospectInteractions }: { prospect: Prospec
           <PhoneCall className="h-3 w-3" />
           <span className="text-xs font-semibold">{callCount}</span>
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={(e) => startAction(e, 'email')}
-          disabled={quickEngageMutation.isPending}
-          className="flex items-center gap-1 px-2 transition-all hover:bg-orange-50 hover:border-orange-300"
-          title="Log email"
+        <div
+          className="inline-flex h-9 items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 text-slate-600"
+          title="Emails are logged from BCC intake"
         >
           <Mail className="h-3 w-3" />
           <span className="text-xs font-semibold">{emailCount}</span>
-        </Button>
+        </div>
         <Button
           size="sm"
           variant="outline"

@@ -19,7 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Download, MapIcon, MapPin, Satellite, ChevronLeft, ChevronRight, X, Trash2, Filter, User, LogOut, Settings, Edit3, Phone, Mail, Handshake } from 'lucide-react';
+import { Download, MapIcon, MapPin, Satellite, ChevronLeft, ChevronRight, X, Trash2, Filter, User, LogOut, Settings, Edit3, Phone, Handshake } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MapControls } from '@/features/map/MapControls';
 import { MapContextMenu } from '@/features/map/MapContextMenu';
@@ -2575,21 +2575,6 @@ export default function HomePage() {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Quick call + 30d follow-up</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      onClick={() => void runQuickLog('email')}
-                      variant="outline"
-                      className="h-8 w-8 p-0"
-                      aria-label="Quick log email"
-                      title="Quick log email"
-                      disabled={quickLogPendingType !== null}
-                    >
-                      <Mail className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Quick email follow-up</TooltipContent>
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>

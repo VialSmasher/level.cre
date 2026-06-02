@@ -10,14 +10,6 @@ test('quickLogSpecFor returns expected call mapping', () => {
   assert.equal(spec.toastLabel, 'Call logged');
 });
 
-test('quickLogSpecFor returns expected email mapping', () => {
-  const spec = quickLogSpecFor('email');
-  assert.equal(spec.note, 'Email follow-up');
-  assert.equal(spec.xp, 10);
-  assert.equal(spec.followUpDays, 14);
-  assert.equal(spec.toastLabel, 'Email logged');
-});
-
 test('quickLogSpecFor returns expected meeting mapping', () => {
   const spec = quickLogSpecFor('meeting');
   assert.equal(spec.note, 'Meeting follow-up');

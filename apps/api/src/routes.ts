@@ -89,6 +89,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return 'Untitled Prospect';
   }
 
+  function addDaysAtNoonUtc(anchor: Date, days: number): string {
+    const date = new Date(anchor);
+    date.setUTCDate(date.getUTCDate() + days);
+    return new Date(Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth(),
+      date.getUTCDate(),
+      12,
+      0,
+      0,
+    )).toISOString();
+  }
+
   function cleanProspectName(data: { name?: string | null; businessName?: string | null; contactCompany?: string | null; geometry?: unknown }): string {
     const business = data.businessName?.trim();
     const company = data.contactCompany?.trim();
@@ -3645,29 +3658,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         row.snippet || '',
         row.sender_email ? `From: ${row.sender_email}` : '',
       ].filter(Boolean).join('\n');
-      const inserted = await pool.query(`
-        INSERT INTO public.contact_interactions (
-          user_id, prospect_id, listing_id, date, type, outcome, notes, next_follow_up,
-          source_provider, source_message_id, source_thread_id, source_email_message_id, source_metadata
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-        RETURNING id
-      `, [
+      const interactionIso = new Date(interactionDate).toISOString();
+      const hasSuggestedNextFollowUp = Boolean(row.suggested_next_follow_up);
+      const nextFollowUpIso = row.suggested_next_follow_up
+        ? new Date(row.suggested_next_follow_up).toISOString()
+        : addDaysAtNoonUtc(new Date(interactionDate), 14);
+      const interaction = await storage.createContactInteraction({
         userId,
-        row.prospect_id,
-        row.listing_id || null,
-        new Date(interactionDate).toISOString(),
-        row.suggested_interaction_type || 'email',
-        row.suggested_outcome || 'contacted',
+        prospectId: row.prospect_id,
+        listingId: row.listing_id || null,
+        date: interactionIso,
+        type: row.suggested_interaction_type || 'email',
+        outcome: row.suggested_outcome || 'contacted',
         notes,
-        row.suggested_next_follow_up ? new Date(row.suggested_next_follow_up).toISOString() : null,
-        row.provider,
-        row.provider_message_id,
-        row.provider_thread_id || null,
-        row.email_message_id,
-        JSON.stringify({ emailReviewMatchId: req.params.id }),
-      ]);
-      const interactionId = inserted.rows[0].id;
+        nextFollowUp: nextFollowUpIso,
+        sourceProvider: row.provider,
+        sourceMessageId: row.provider_message_id,
+        sourceThreadId: row.provider_thread_id || null,
+        sourceEmailMessageId: row.email_message_id,
+        sourceMetadata: { emailReviewMatchId: req.params.id, defaultFollowUpDays: hasSuggestedNextFollowUp ? null : 14 },
+      });
+      const interactionId = interaction.id;
       await pool.query(`
         UPDATE public.email_prospect_matches
         SET interaction_id = $3, match_status = 'auto_logged', reviewed_at = now(), reviewed_by_user_id = $2, updated_at = now()
@@ -3677,11 +3688,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         UPDATE public.prospects
         SET
           last_contact_date = $3,
+          follow_up_due_date = CASE WHEN $5 THEN $4 ELSE COALESCE(follow_up_due_date, $4) END,
           status = CASE WHEN status = 'prospect' THEN 'contacted' ELSE status END,
           updated_at = now()
         WHERE id = $1 AND user_id = $2
-      `, [row.prospect_id, userId, new Date(interactionDate).toISOString()]);
-      res.json({ interactionId, duplicate: false });
+      `, [row.prospect_id, userId, interactionIso, nextFollowUpIso, hasSuggestedNextFollowUp]);
+      res.json({ interactionId, duplicate: false, nextFollowUp: nextFollowUpIso, newXpGained: xpForInteractionType('email') });
     } catch (error) {
       console.error('Error creating interaction from email review item:', error);
       res.status(500).json({ message: 'Failed to create interaction from email' });
