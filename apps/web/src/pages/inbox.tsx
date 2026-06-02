@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { apiUrl } from '@/lib/api'
 import { apiRequest } from '@/lib/queryClient'
 
 type EmailReviewStatus = 'pending_review' | 'auto_logged' | 'approved' | 'ignored' | 'rejected' | 'all'
@@ -159,6 +158,16 @@ export default function InboxPage() {
     onSuccess: invalidate,
   })
 
+  const connectOutlookMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('GET', '/api/ms365/auth-url?returnTo=/app/inbox')
+      return response.json() as Promise<{ url: string }>
+    },
+    onSuccess: ({ url }) => {
+      window.location.assign(url)
+    },
+  })
+
   return (
     <div className="min-h-0 flex-1 bg-slate-50">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
@@ -240,8 +249,11 @@ export default function InboxPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               {!outlookConfig?.connected ? (
-                <Button asChild disabled={!outlookConfig?.configured}>
-                  <a href={apiUrl('/api/ms365/start?returnTo=/app/inbox')}>Connect Outlook</a>
+                <Button
+                  disabled={!outlookConfig?.configured || connectOutlookMutation.isPending}
+                  onClick={() => connectOutlookMutation.mutate()}
+                >
+                  {connectOutlookMutation.isPending ? 'Connecting...' : 'Connect Outlook'}
                 </Button>
               ) : (
                 <Button onClick={() => syncOutlookMutation.mutate()} disabled={syncOutlookMutation.isPending}>

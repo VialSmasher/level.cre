@@ -2867,34 +2867,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  const buildOutlookAuthorizeUrl = (req: Request) => {
+    if (isDemo(req)) {
+      const error = new Error('Email connection is disabled in demo mode');
+      (error as any).statusCode = 400;
+      throw error;
+    }
+    const config = getOutlookConfig(req);
+    if (!config.configured) {
+      const error = new Error('Outlook OAuth is not configured');
+      (error as any).statusCode = 400;
+      (error as any).redirectUri = config.redirectUri;
+      throw error;
+    }
+    const state = signEmailState({
+      provider: 'outlook',
+      userId: getUserId(req),
+      iat: Date.now(),
+      returnTo: typeof req.query.returnTo === 'string' ? req.query.returnTo : '/app/inbox',
+      nonce: randomUUID(),
+    });
+    const authorizeUrl = new URL(config.authorizeUrl);
+    authorizeUrl.searchParams.set('client_id', config.clientId);
+    authorizeUrl.searchParams.set('response_type', 'code');
+    authorizeUrl.searchParams.set('redirect_uri', config.redirectUri);
+    authorizeUrl.searchParams.set('response_mode', 'query');
+    authorizeUrl.searchParams.set('scope', OUTLOOK_SCOPES.join(' '));
+    authorizeUrl.searchParams.set('state', state);
+    authorizeUrl.searchParams.set('prompt', 'select_account');
+    return authorizeUrl.toString();
+  };
+
   const startOutlookOAuth = async (req: Request, res: Response) => {
     try {
-      if (isDemo(req)) return res.status(400).json({ message: 'Email connection is disabled in demo mode' });
-      const config = getOutlookConfig(req);
-      if (!config.configured) {
-        return res.status(400).json({ message: 'Outlook OAuth is not configured', redirectUri: config.redirectUri });
-      }
-      const state = signEmailState({
-        provider: 'outlook',
-        userId: getUserId(req),
-        iat: Date.now(),
-        returnTo: typeof req.query.returnTo === 'string' ? req.query.returnTo : '/app/inbox',
-        nonce: randomUUID(),
-      });
-      const authorizeUrl = new URL(config.authorizeUrl);
-      authorizeUrl.searchParams.set('client_id', config.clientId);
-      authorizeUrl.searchParams.set('response_type', 'code');
-      authorizeUrl.searchParams.set('redirect_uri', config.redirectUri);
-      authorizeUrl.searchParams.set('response_mode', 'query');
-      authorizeUrl.searchParams.set('scope', OUTLOOK_SCOPES.join(' '));
-      authorizeUrl.searchParams.set('state', state);
-      authorizeUrl.searchParams.set('prompt', 'select_account');
-      res.redirect(authorizeUrl.toString());
-    } catch (error) {
+      res.redirect(buildOutlookAuthorizeUrl(req));
+    } catch (error: any) {
       console.error('Error starting Outlook OAuth:', error);
-      res.status(500).json({ message: 'Failed to start Outlook connection' });
+      res.status(error?.statusCode || 500).json({
+        message: error?.message || 'Failed to start Outlook connection',
+        redirectUri: error?.redirectUri,
+      });
     }
   };
+
+  app.get('/api/ms365/auth-url', requireAuth, async (req, res) => {
+    try {
+      res.json({ url: buildOutlookAuthorizeUrl(req) });
+    } catch (error: any) {
+      console.error('Error building Outlook OAuth URL:', error);
+      res.status(error?.statusCode || 500).json({
+        message: error?.message || 'Failed to start Outlook connection',
+        redirectUri: error?.redirectUri,
+      });
+    }
+  });
 
   app.get('/api/email/outlook/connect', requireAuth, startOutlookOAuth);
   app.get('/api/integrations/microsoft365/connect', requireAuth, startOutlookOAuth);
