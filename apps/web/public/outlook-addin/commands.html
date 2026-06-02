@@ -3,7 +3,71 @@
   <head>
     <meta charset="utf-8" />
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-    <script src="https://level-cre.vercel.app/outlook-addin/commands.js"></script>
+    <script>
+      (function () {
+        var intakeAddress = '8feefe98cef5cf7437bbdb5d2e20e761@inbound.postmarkapp.com';
+
+        function complete(event) {
+          if (event && event.completed) {
+            event.completed();
+          }
+        }
+
+        function showStatus(message) {
+          var item = Office.context.mailbox.item;
+          if (!item.notificationMessages) return;
+          item.notificationMessages.replaceAsync('level-cre-status', {
+            type: Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage,
+            message: message,
+            persistent: false
+          });
+        }
+
+        function addLevelCreBcc(event) {
+          var item = Office.context.mailbox.item;
+
+          item.bcc.getAsync(function (getResult) {
+            if (getResult.status !== Office.AsyncResultStatus.Succeeded) {
+              showStatus('Level CRE: Could not read BCC.');
+              complete(event);
+              return;
+            }
+
+            var existing = getResult.value || [];
+            var alreadyAdded = existing.some(function (recipient) {
+              var email = (recipient.emailAddress || recipient.displayName || '').toLowerCase();
+              return email === intakeAddress;
+            });
+
+            if (alreadyAdded) {
+              showStatus('Level CRE BCC is already on this email.');
+              complete(event);
+              return;
+            }
+
+            item.bcc.addAsync(
+              [{ displayName: 'Level CRE BCC', emailAddress: intakeAddress }],
+              function (addResult) {
+                showStatus(
+                  addResult.status === Office.AsyncResultStatus.Succeeded
+                    ? 'Level CRE BCC added.'
+                    : 'Level CRE: Could not add BCC.'
+                );
+                complete(event);
+              }
+            );
+          });
+        }
+
+        window.addLevelCreBcc = addLevelCreBcc;
+        Office.initialize = function () {};
+        Office.onReady(function () {
+          if (Office.actions && Office.actions.associate) {
+            Office.actions.associate('addLevelCreBcc', addLevelCreBcc);
+          }
+        });
+      })();
+    </script>
   </head>
   <body>
     Level CRE Logger
