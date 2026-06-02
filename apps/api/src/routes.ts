@@ -318,9 +318,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   function usefulTokens(value: unknown) {
+    const stopwords = new Set([
+      'ltd', 'inc', 'corp', 'company', 'building', 'property',
+      'edmonton', 'alberta', 'canada', 'northwest', 'northeast', 'southwest', 'southeast',
+      'ave', 'avenue', 'street', 'road', 'drive', 'suite',
+    ]);
     return normalizeMatchText(value)
       .split(' ')
-      .filter((token) => token.length > 2 && !['ltd', 'inc', 'corp', 'company', 'building', 'property'].includes(token));
+      .filter((token) => token.length > 2 && !stopwords.has(token));
   }
 
   function scoreEmailProspect(message: any, prospect: any) {
@@ -352,6 +357,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (address && messageText.includes(address)) {
       score += 80;
       reasons.push('address');
+    }
+    const companyTokens = usefulTokens([prospect.business_name, prospect.contact_company].join(' '));
+    const companyHits = companyTokens.filter((token) => messageText.includes(token));
+    if (companyHits.length) {
+      score += Math.min(75, companyHits.length * 60);
+      reasons.push(`company token ${companyHits.join(', ')}`);
     }
     const nameTokens = usefulTokens([prospect.name, prospect.business_name, prospect.contact_company].join(' '));
     const tokenHits = nameTokens.filter((token) => messageText.includes(token));
