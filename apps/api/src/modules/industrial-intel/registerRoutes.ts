@@ -82,6 +82,12 @@ const intelArchiveDuplicatesSchema = z.object({
   duplicateIds: z.array(z.string().trim().min(1)).min(1).max(50),
 });
 
+const intelManualPublicLinkSchema = z.object({
+  candidateUrl: z.string().trim().url(),
+  title: z.string().trim().min(1).nullable().optional(),
+  snippet: z.string().trim().min(1).nullable().optional(),
+});
+
 const intelSurveySchema = z.object({
   requirementId: z.string().trim().min(1).nullable().optional(),
   title: z.string().trim().min(1),
@@ -218,6 +224,24 @@ export function registerIndustrialIntelRoutes(app: Express): void {
         message: "Resolver failed",
         detail: String((error as Error)?.message || error || "Unknown resolver failure"),
       });
+    }
+  });
+
+  app.post("/api/intel/listings/:id/public-links/manual", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelManualPublicLinkSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid public link", issues: parsed.error.flatten() });
+      }
+
+      const candidate = await industrialIntelService.createManualPublicLinkCandidate(req.params.id, parsed.data);
+      if (!candidate) {
+        return res.status(404).json({ message: "Industrial intel listing not found" });
+      }
+      res.status(201).json(candidate);
+    } catch (error) {
+      console.error("Error saving manual industrial intel public link:", error);
+      res.status(500).json({ message: "Failed to save public link" });
     }
   });
 

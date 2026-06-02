@@ -233,6 +233,8 @@ export default function IndustrialIntelSurveysPage() {
   const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
   const [selectedMapItemId, setSelectedMapItemId] = useState<string | null>(null);
   const [listingSearch, setListingSearch] = useState("");
+  const [manualPublicLink, setManualPublicLink] = useState("");
+  const [manualPublicLinkTitle, setManualPublicLinkTitle] = useState("");
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [createForm, setCreateForm] = useState({
     title: "",
@@ -332,6 +334,11 @@ export default function IndustrialIntelSurveysPage() {
     return explicit || selectedMapItem || visibleItems[0] || null;
   }, [selectedSurvey?.items, selectedMapItem, selectedMapItemId, visibleItems]);
 
+  useEffect(() => {
+    setManualPublicLink("");
+    setManualPublicLinkTitle("");
+  }, [selectedDetailItem?.id]);
+
   const selectedDetailAssets = useMemo(() => {
     if (!selectedDetailItem) return [];
     return surveyAssets.filter((asset) => (
@@ -363,15 +370,24 @@ export default function IndustrialIntelSurveysPage() {
   }, [selectedMapItem]);
 
   const unmappedVisibleCount = visibleItems.length - mappableSurveyItems.length;
+  const visibleItemIdsWithAssets = useMemo(() => {
+    const ids = new Set<string>();
+    for (const asset of surveyAssets) {
+      if (asset.status !== "active" || !asset.surveyItemId) continue;
+      ids.add(asset.surveyItemId);
+    }
+    return ids;
+  }, [surveyAssets]);
   const visibleWithLinksCount = useMemo(
-    () => visibleItems.filter((item) => Boolean(firstLink(item.listing))).length,
-    [visibleItems],
+    () => visibleItems.filter((item) => Boolean(firstLink(item.listing)) || visibleItemIdsWithAssets.has(item.id)).length,
+    [visibleItemIdsWithAssets, visibleItems],
   );
   const visibleWithNotesCount = useMemo(
     () => visibleItems.filter((item) => Boolean(item.clientNotes?.trim() || item.recommendationLabel?.trim())).length,
     [visibleItems],
   );
   const surveyReadyCount = Math.min(mappableSurveyItems.length, visibleWithLinksCount, visibleWithNotesCount);
+  const isSurveyReady = visibleItems.length > 0 && surveyReadyCount === visibleItems.length;
 
   const focusPreview = () => {
     previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -597,6 +613,30 @@ export default function IndustrialIntelSurveysPage() {
     },
     onError: (error: any) => {
       toast({ title: "Public link update failed", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
+  const saveManualPublicLinkMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedDetailItem) throw new Error("Select a survey property before saving a public link.");
+      const response = await apiRequest("POST", `/api/intel/listings/${selectedDetailItem.listingId}/public-links/manual`, {
+        candidateUrl: manualPublicLink.trim(),
+        title: manualPublicLinkTitle.trim() || null,
+      });
+      return response.json() as Promise<PublicLinkCandidate>;
+    },
+    onSuccess: () => {
+      setManualPublicLink("");
+      setManualPublicLinkTitle("");
+      queryClient.invalidateQueries({ queryKey: publicLinksQueryKey });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/listings"] });
+      if (selectedSurveyId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/intel/surveys/${selectedSurveyId}`] });
+      }
+      toast({ title: "Verified listing link saved" });
+    },
+    onError: (error: any) => {
+      toast({ title: "Link save failed", description: error?.message || "Paste a valid public URL.", variant: "destructive" });
     },
   });
 
@@ -866,19 +906,24 @@ export default function IndustrialIntelSurveysPage() {
                         Treat this as the pre-flight check before anything becomes client-facing.
                       </p>
                     </div>
-                    <Badge className={surveyReadyCount === visibleItems.length && visibleItems.length > 0 ? "bg-emerald-600 text-white" : "bg-slate-950 text-white"}>
+                    <Badge className={isSurveyReady ? "bg-emerald-600 text-white" : "bg-slate-950 text-white"}>
                       {surveyReadyCount} / {visibleItems.length} ready
                     </Badge>
                   </div>
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
                     <Metric label="Mapped" value={`${mappableSurveyItems.length} / ${visibleItems.length}`} />
-                    <Metric label="Source links" value={`${visibleWithLinksCount} / ${visibleItems.length}`} />
+                    <Metric label="Links / assets" value={`${visibleWithLinksCount} / ${visibleItems.length}`} />
                     <Metric label="Client notes" value={`${visibleWithNotesCount} / ${visibleItems.length}`} />
                   </div>
                   {(unmappedVisibleCount > 0 || visibleWithLinksCount < visibleItems.length || visibleWithNotesCount < visibleItems.length) && (
                     <p className="mt-3 text-sm text-slate-600">
-                      Keep drafts internal until every included option has coordinates, a verified source or brochure link, and a client-readable note.
+                      Keep drafts internal until every included option has coordinates, a verified source link or uploaded asset, and a client-readable note.
                     </p>
+                  )}
+                  {shareUrl && !isSurveyReady && (
+                    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                      This client link is live, but the package is not fully ready yet. Finish the checks above before sending it.
+                    </div>
                   )}
                 </CardContent>
               </Card>
@@ -1057,9 +1102,9 @@ export default function IndustrialIntelSurveysPage() {
                           <div className="rounded-lg border border-slate-200 bg-white p-4">
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div>
-                                <p className="text-sm font-semibold text-slate-950">Find public flyer</p>
+                                <p className="text-sm font-semibold text-slate-950">Source links</p>
                                 <p className="mt-1 text-xs leading-5 text-slate-500">
-                                  Use the configured Google or Vertex resolver to find broker and landlord listing pages.
+                                  Paste a known broker link, or use the resolver when you need help finding a public listing page.
                                 </p>
                               </div>
                               <div className="flex flex-wrap gap-2">
@@ -1083,6 +1128,35 @@ export default function IndustrialIntelSurveysPage() {
                                   {resolvePublicLinksMutation.isPending ? "Searching..." : "Find link"}
                                 </Button>
                               </div>
+                            </div>
+
+                            <div className="mt-4 rounded-md border border-blue-100 bg-blue-50/60 p-3">
+                              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_auto]">
+                                <Input
+                                  value={manualPublicLink}
+                                  onChange={(event) => setManualPublicLink(event.target.value)}
+                                  placeholder="Paste broker listing, flyer, or brochure URL"
+                                  aria-label="Manual public listing link"
+                                />
+                                <Input
+                                  value={manualPublicLinkTitle}
+                                  onChange={(event) => setManualPublicLinkTitle(event.target.value)}
+                                  placeholder="Optional title"
+                                  aria-label="Manual public listing link title"
+                                />
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="h-10 whitespace-nowrap"
+                                  onClick={() => saveManualPublicLinkMutation.mutate()}
+                                  disabled={saveManualPublicLinkMutation.isPending || manualPublicLink.trim().length === 0}
+                                >
+                                  {saveManualPublicLinkMutation.isPending ? "Saving..." : "Save verified link"}
+                                </Button>
+                              </div>
+                              <p className="mt-2 text-xs leading-5 text-blue-900">
+                                Saved links are approved immediately and become the listing link used by the client survey.
+                              </p>
                             </div>
 
                             {resolvePublicLinksMutation.data?.status === "not_configured" && (

@@ -49,6 +49,12 @@ export type CreateSurveyItemAssetUploadInput = {
   assetType?: IntelListingAssetType | null;
 };
 
+export type CreateManualPublicLinkInput = {
+  candidateUrl: string;
+  title?: string | null;
+  snippet?: string | null;
+};
+
 function sanitizeFileName(fileName: string) {
   return fileName
     .trim()
@@ -104,6 +110,30 @@ export class IndustrialIntelService {
       ...result,
       persistedCandidates,
     };
+  }
+
+  async createManualPublicLinkCandidate(
+    listingId: string,
+    input: CreateManualPublicLinkInput,
+  ): Promise<IntelPublicLinkCandidate | null> {
+    const listing = await industrialIntelRepository.getListingById(listingId);
+    if (!listing) return null;
+
+    const url = new URL(input.candidateUrl);
+    const candidates = await industrialIntelRepository.upsertPublicLinkCandidates(listingId, [
+      {
+        candidateUrl: url.toString(),
+        domain: url.hostname.replace(/^www\./, ""),
+        title: input.title || listing.title,
+        snippet: input.snippet || "Manually verified broker listing link.",
+        confidence: 100,
+        source: "manual",
+      },
+    ]);
+    const candidate = candidates.find((item) => item.candidateUrl === url.toString());
+    if (!candidate) return null;
+
+    return industrialIntelRepository.updatePublicLinkCandidateStatus(listingId, candidate.id, "approved");
   }
 
   async approvePublicLinkCandidate(listingId: string, candidateId: string): Promise<IntelPublicLinkCandidate | null> {
