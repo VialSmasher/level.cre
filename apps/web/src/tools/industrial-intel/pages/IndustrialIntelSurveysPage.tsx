@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, Copy, ExternalLink, Eye, EyeOff, FileText, MapPin, Plus, Share2, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Bot, CheckCircle2, Copy, ExternalLink, Eye, EyeOff, FileText, MapPin, Plus, Share2, Trash2, Upload } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { getGoogleMapsApiKey, GOOGLE_MAPS_API_KEY_HELP_TEXT } from "@/lib/googleMapsApiKey";
 import { supabase } from "@/lib/supabase";
@@ -150,6 +150,16 @@ type PublicLinksResponse = {
   candidates: PublicLinkCandidate[];
 };
 
+type SurveyReadinessFilter = "all" | "ready" | "needs_map" | "needs_link" | "needs_note";
+
+type SurveyItemReadiness = {
+  hasMap: boolean;
+  hasLinkOrAsset: boolean;
+  hasClientNote: boolean;
+  ready: boolean;
+  missing: string[];
+};
+
 type ResolvePublicLinksResponse = {
   status: "resolved" | "not_configured";
   message: string;
@@ -200,6 +210,25 @@ function buildGoogleMapsUrl(listing: IntelListing) {
   )}`;
 }
 
+function buildItemReadiness(item: IntelSurveyItem, hasAsset: boolean): SurveyItemReadiness {
+  const hasMap = isMappableListing(item.listing);
+  const hasLinkOrAsset = Boolean(firstLink(item.listing)) || hasAsset;
+  const hasClientNote = Boolean(item.clientNotes?.trim() || item.recommendationLabel?.trim());
+  const missing = [
+    !hasMap ? "map" : null,
+    !hasLinkOrAsset ? "link or asset" : null,
+    !hasClientNote ? "client note" : null,
+  ].filter(Boolean) as string[];
+
+  return {
+    hasMap,
+    hasLinkOrAsset,
+    hasClientNote,
+    ready: missing.length === 0,
+    missing,
+  };
+}
+
 function formatRelativeTime(value: string | null | undefined) {
   if (!value) return "Just now";
   const date = new Date(value);
@@ -233,6 +262,7 @@ export default function IndustrialIntelSurveysPage() {
   const [selectedSurveyId, setSelectedSurveyId] = useState<string | null>(null);
   const [selectedMapItemId, setSelectedMapItemId] = useState<string | null>(null);
   const [listingSearch, setListingSearch] = useState("");
+  const [readinessFilter, setReadinessFilter] = useState<SurveyReadinessFilter>("all");
   const [manualPublicLink, setManualPublicLink] = useState("");
   const [manualPublicLinkTitle, setManualPublicLinkTitle] = useState("");
   const previewRef = useRef<HTMLDivElement | null>(null);
@@ -388,6 +418,34 @@ export default function IndustrialIntelSurveysPage() {
   );
   const surveyReadyCount = Math.min(mappableSurveyItems.length, visibleWithLinksCount, visibleWithNotesCount);
   const isSurveyReady = visibleItems.length > 0 && surveyReadyCount === visibleItems.length;
+  const readinessByItemId = useMemo(() => {
+    const next = new Map<string, SurveyItemReadiness>();
+    for (const item of selectedSurvey?.items || []) {
+      next.set(item.id, buildItemReadiness(item, visibleItemIdsWithAssets.has(item.id)));
+    }
+    return next;
+  }, [selectedSurvey?.items, visibleItemIdsWithAssets]);
+  const selectedDetailReadiness = selectedDetailItem ? readinessByItemId.get(selectedDetailItem.id) || null : null;
+  const readinessCounts = useMemo(() => ({
+    all: selectedSurvey?.items.length || 0,
+    ready: (selectedSurvey?.items || []).filter((item) => readinessByItemId.get(item.id)?.ready).length,
+    needs_map: (selectedSurvey?.items || []).filter((item) => !readinessByItemId.get(item.id)?.hasMap).length,
+    needs_link: (selectedSurvey?.items || []).filter((item) => !readinessByItemId.get(item.id)?.hasLinkOrAsset).length,
+    needs_note: (selectedSurvey?.items || []).filter((item) => !readinessByItemId.get(item.id)?.hasClientNote).length,
+  }), [readinessByItemId, selectedSurvey?.items]);
+  const filteredSurveyItems = useMemo(() => {
+    const items = selectedSurvey?.items || [];
+    if (readinessFilter === "all") return items;
+    return items.filter((item) => {
+      const readiness = readinessByItemId.get(item.id);
+      if (!readiness) return false;
+      if (readinessFilter === "ready") return readiness.ready;
+      if (readinessFilter === "needs_map") return !readiness.hasMap;
+      if (readinessFilter === "needs_link") return !readiness.hasLinkOrAsset;
+      if (readinessFilter === "needs_note") return !readiness.hasClientNote;
+      return true;
+    });
+  }, [readinessByItemId, readinessFilter, selectedSurvey?.items]);
 
   const focusPreview = () => {
     previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1036,11 +1094,32 @@ export default function IndustrialIntelSurveysPage() {
                             <div className="flex flex-wrap items-center gap-2">
                               <h3 className="text-lg font-semibold text-slate-950">{selectedDetailItem.listing.title}</h3>
                               {selectedDetailItem.hidden && <Badge variant="outline">Hidden</Badge>}
+                              {selectedDetailReadiness?.ready ? (
+                                <Badge className="bg-emerald-600 text-white">Client ready</Badge>
+                              ) : (
+                                <Badge variant="outline" className="bg-amber-50 text-amber-800">Needs work</Badge>
+                              )}
                             </div>
                             <p className="mt-1 text-sm text-slate-600">
                               {selectedDetailItem.listing.normalizedAddress || selectedDetailItem.listing.address || "Address pending"}
                             </p>
                           </div>
+
+                          {selectedDetailReadiness && (
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Readiness</p>
+                              <div className="mt-3 grid gap-2">
+                                <ReadinessCheck label="Map coordinates" checked={selectedDetailReadiness.hasMap} />
+                                <ReadinessCheck label="Verified link or uploaded asset" checked={selectedDetailReadiness.hasLinkOrAsset} />
+                                <ReadinessCheck label="Client note or recommendation" checked={selectedDetailReadiness.hasClientNote} />
+                              </div>
+                              {!selectedDetailReadiness.ready && (
+                                <p className="mt-3 text-xs leading-5 text-amber-800">
+                                  Missing {selectedDetailReadiness.missing.join(", ")} before this should go to a client.
+                                </p>
+                              )}
+                            </div>
+                          )}
 
                           <div className="grid grid-cols-2 gap-3">
                             <Metric label="Building" value={formatListingSize(selectedDetailItem.listing)} />
@@ -1376,15 +1455,61 @@ export default function IndustrialIntelSurveysPage() {
                   <div className="space-y-6">
                     <Card>
                       <CardHeader>
-                        <CardTitle>Included options</CardTitle>
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <CardTitle>Included options</CardTitle>
+                            <Badge variant="outline" className="bg-white">
+                              {filteredSurveyItems.length} shown
+                            </Badge>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <ReadinessFilterButton
+                              label="All"
+                              count={readinessCounts.all}
+                              active={readinessFilter === "all"}
+                              onClick={() => setReadinessFilter("all")}
+                            />
+                            <ReadinessFilterButton
+                              label="Ready"
+                              count={readinessCounts.ready}
+                              active={readinessFilter === "ready"}
+                              onClick={() => setReadinessFilter("ready")}
+                            />
+                            <ReadinessFilterButton
+                              label="Needs map"
+                              count={readinessCounts.needs_map}
+                              active={readinessFilter === "needs_map"}
+                              onClick={() => setReadinessFilter("needs_map")}
+                            />
+                            <ReadinessFilterButton
+                              label="Needs link"
+                              count={readinessCounts.needs_link}
+                              active={readinessFilter === "needs_link"}
+                              onClick={() => setReadinessFilter("needs_link")}
+                            />
+                            <ReadinessFilterButton
+                              label="Needs note"
+                              count={readinessCounts.needs_note}
+                              active={readinessFilter === "needs_note"}
+                              onClick={() => setReadinessFilter("needs_note")}
+                            />
+                          </div>
+                        </div>
                       </CardHeader>
                       <CardContent className="space-y-3">
                         {selectedSurvey.items.length === 0 ? (
                           <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600">
                             Added listings will appear here in client order.
                           </div>
+                        ) : filteredSurveyItems.length === 0 ? (
+                          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600">
+                            No options match this readiness filter.
+                          </div>
                         ) : (
-                          selectedSurvey.items.map((item, index) => (
+                          filteredSurveyItems.map((item) => {
+                            const index = selectedSurvey.items.findIndex((candidate) => candidate.id === item.id);
+                            const readiness = readinessByItemId.get(item.id);
+                            return (
                             <button
                               key={item.id}
                               type="button"
@@ -1419,10 +1544,17 @@ export default function IndustrialIntelSurveysPage() {
                                 <span>{formatListingSize(item.listing)}</span>
                                 <span>{listingArea(item.listing)}</span>
                                 {item.hidden && <span className="font-semibold text-slate-700">Hidden</span>}
-                                {!isMappableListing(item.listing) && <span className="font-semibold text-amber-700">Needs coordinates</span>}
+                                {readiness?.ready ? (
+                                  <span className="font-semibold text-emerald-700">Client ready</span>
+                                ) : (
+                                  <span className="font-semibold text-amber-700">
+                                    Needs {readiness?.missing.join(", ") || "review"}
+                                  </span>
+                                )}
                               </div>
                             </button>
-                          ))
+                            );
+                          })
                         )}
                       </CardContent>
                     </Card>
@@ -1469,5 +1601,51 @@ function Metric({ label, value }: { label: string; value: string }) {
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 break-words text-sm font-semibold text-slate-950">{value}</p>
     </div>
+  );
+}
+
+function ReadinessCheck({ label, checked }: { label: string; checked: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2">
+      <span className="text-sm font-medium text-slate-700">{label}</span>
+      {checked ? (
+        <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">
+          <CheckCircle2 className="h-4 w-4" />
+          Ready
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700">
+          <AlertTriangle className="h-4 w-4" />
+          Missing
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ReadinessFilterButton({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs font-semibold transition ${
+        active
+          ? "border-blue-300 bg-blue-50 text-blue-800"
+          : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:text-blue-700"
+      }`}
+    >
+      {label}
+      <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] text-slate-600">{count}</span>
+    </button>
   );
 }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, MapPin, Printer } from "lucide-react";
+import { ExternalLink, FileText, MapPin, Printer } from "lucide-react";
 import { useRoute } from "wouter";
 import { apiUrl } from "@/lib/api";
 import { getGoogleMapsApiKey, GOOGLE_MAPS_API_KEY_HELP_TEXT } from "@/lib/googleMapsApiKey";
@@ -183,6 +183,7 @@ export default function IndustrialIntelSurveyClientPage() {
   const mapCenter = selectedMapItem
     ? { lat: selectedMapItem.listing.latitude, lng: selectedMapItem.listing.longitude }
     : DEFAULT_MAP_CENTER;
+  const assetItemCount = assetsByItemId.size;
 
   if (isLoading) {
     return (
@@ -226,6 +227,17 @@ export default function IndustrialIntelSurveyClientPage() {
           </div>
         </div>
       </header>
+
+      <section className="mx-auto grid max-w-[1800px] gap-3 px-4 pt-4 md:grid-cols-4 print:grid-cols-4 print:px-0 print:pt-0">
+        <ClientSummaryMetric label="Options" value={String(orderedItems.length)} caption="shortlisted properties" />
+        <ClientSummaryMetric label="Mapped" value={`${mappableItems.length} / ${orderedItems.length}`} caption="shown on map" />
+        <ClientSummaryMetric label="Brochures" value={`${assetItemCount} / ${orderedItems.length}`} caption="attached files" />
+        <ClientSummaryMetric
+          label="Updated"
+          value={survey.updatedAt ? new Date(survey.updatedAt).toLocaleDateString() : "-"}
+          caption="latest package refresh"
+        />
+      </section>
 
       <main className="mx-auto grid max-w-[1800px] gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_420px] print:block print:max-w-none print:p-0">
         <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm print:hidden">
@@ -398,6 +410,21 @@ function ClientMetric({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-1 text-sm font-semibold text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function ClientSummaryMetric({ label, value, caption }: { label: string; value: string; caption: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm print:shadow-none">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium text-slate-600">{label}</p>
+          <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">{value}</p>
+          <p className="mt-1 text-xs text-slate-500">{caption}</p>
+        </div>
+        <FileText className="h-4 w-4 text-blue-700" />
+      </div>
     </div>
   );
 }
