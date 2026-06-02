@@ -375,6 +375,187 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return { score: Math.min(score, 100), reason: reasons.join('; ') };
   }
 
+  async function storeInboundEmailForReview(userId: string, messageData: any) {
+    const inserted = await pool.query(`
+      INSERT INTO public.email_messages (
+        user_id, connection_id, provider, provider_message_id, provider_thread_id, mailbox, direction,
+        subject, sender_email, sender_name, recipient_emails, cc_emails, sent_at, received_at,
+        snippet, attachment_names, source_url, raw_metadata, updated_at
+      )
+      VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, now())
+      ON CONFLICT (user_id, provider, provider_message_id)
+      DO UPDATE SET
+        provider_thread_id = EXCLUDED.provider_thread_id,
+        mailbox = EXCLUDED.mailbox,
+        direction = EXCLUDED.direction,
+        subject = EXCLUDED.subject,
+        sender_email = EXCLUDED.sender_email,
+        sender_name = EXCLUDED.sender_name,
+        recipient_emails = EXCLUDED.recipient_emails,
+        cc_emails = EXCLUDED.cc_emails,
+        sent_at = EXCLUDED.sent_at,
+        received_at = EXCLUDED.received_at,
+        snippet = EXCLUDED.snippet,
+        attachment_names = EXCLUDED.attachment_names,
+        source_url = EXCLUDED.source_url,
+        raw_metadata = EXCLUDED.raw_metadata,
+        updated_at = now()
+      RETURNING id, (xmax = 0) AS inserted
+    `, [
+      userId,
+      messageData.provider,
+      messageData.providerMessageId,
+      messageData.providerThreadId,
+      messageData.mailbox,
+      messageData.direction,
+      messageData.subject,
+      messageData.senderEmail,
+      messageData.senderName,
+      messageData.recipientEmails,
+      messageData.ccEmails,
+      messageData.sentAt,
+      messageData.receivedAt,
+      messageData.snippet,
+      messageData.attachmentNames,
+      messageData.sourceUrl,
+      JSON.stringify(messageData.rawMetadata || {}),
+    ]);
+    const emailMessageId = inserted.rows[0].id;
+    const prospectsResult = await pool.query(`
+      SELECT id, name, status, notes, address, contact_name, contact_email, contact_company, business_name
+      FROM public.prospects
+      WHERE user_id = $1
+    `, [userId]);
+    const bestMatches = prospectsResult.rows
+      .map((prospect: any) => ({ prospect, ...scoreEmailProspect(messageData, prospect) }))
+      .filter((candidate: any) => candidate.score >= 45)
+      .sort((a: any, b: any) => b.score - a.score)
+      .slice(0, 3);
+    let matchesCreated = 0;
+    for (const candidate of bestMatches) {
+      const result = await pool.query(`
+        INSERT INTO public.email_prospect_matches (
+          user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
+          suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
+        )
+        VALUES ($1, $2, $3, $4, 'pending_review', $5, 'email', 'contacted', $6, now())
+        ON CONFLICT (email_message_id, prospect_id) WHERE prospect_id IS NOT NULL
+        DO UPDATE SET
+          confidence = GREATEST(public.email_prospect_matches.confidence, EXCLUDED.confidence),
+          match_reason = EXCLUDED.match_reason,
+          suggested_summary = COALESCE(public.email_prospect_matches.suggested_summary, EXCLUDED.suggested_summary),
+          updated_at = now()
+        RETURNING (xmax = 0) AS inserted
+      `, [
+        userId,
+        emailMessageId,
+        candidate.prospect.id,
+        candidate.score,
+        candidate.reason,
+        [messageData.subject, messageData.snippet].filter(Boolean).join('\n').slice(0, 1000),
+      ]);
+      if (result.rows[0]?.inserted) matchesCreated += 1;
+    }
+    return { emailMessageId, inserted: Boolean(inserted.rows[0]?.inserted), matchesCreated };
+  }
+
+  function getInboundWebhookSecret() {
+    return process.env.EMAIL_INBOUND_WEBHOOK_SECRET || process.env.INBOUND_EMAIL_WEBHOOK_SECRET || '';
+  }
+
+  function isInboundRequestAuthorized(req: Request) {
+    const expected = getInboundWebhookSecret();
+    if (!expected) return false;
+    const supplied = String(req.headers['x-levelcre-inbound-secret'] || '').trim();
+    const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    const candidate = supplied || bearer || String(req.query.secret || '');
+    if (!candidate) return false;
+    const actualBuffer = Buffer.from(candidate);
+    const expectedBuffer = Buffer.from(expected);
+    return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+  }
+
+  function parseEmailAddresses(value: unknown): string[] {
+    const text = Array.isArray(value) ? value.join(',') : String(value || '');
+    return Array.from(new Set(text
+      .split(/[;,]/)
+      .map((part) => {
+        const match = part.match(/<([^>]+)>/);
+        return (match?.[1] || part).trim().toLowerCase();
+      })
+      .filter((part) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(part))));
+  }
+
+  function parseSender(value: unknown) {
+    const text = String(value || '').trim();
+    const match = text.match(/^(.*?)<([^>]+)>$/);
+    if (match) return { name: match[1].replace(/^"|"$/g, '').trim(), email: match[2].trim().toLowerCase() };
+    const email = parseEmailAddresses(text)[0] || '';
+    return { name: '', email };
+  }
+
+  function pickString(source: any, keys: string[]) {
+    for (const key of keys) {
+      const value = source?.[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+      if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    }
+    return '';
+  }
+
+  function resolveInboundUserId(payload: any) {
+    const explicit = pickString(payload, ['userId', 'user_id', 'levelCreUserId']);
+    if (explicit) return explicit;
+    const recipients = [
+      ...parseEmailAddresses(payload?.to || payload?.To || payload?.recipient || payload?.Recipients),
+      ...parseEmailAddresses(payload?.cc || payload?.Cc),
+    ];
+    const token = recipients
+      .map((email) => email.match(/\+([a-z0-9-]{20,})@/i)?.[1])
+      .find(Boolean);
+    return token || process.env.EMAIL_INBOUND_DEFAULT_USER_ID || '';
+  }
+
+  function normalizeInboundPayload(payload: any, userId: string) {
+    const from = parseSender(payload?.from || payload?.From || payload?.sender || payload?.Sender);
+    const to = parseEmailAddresses(payload?.to || payload?.To || payload?.recipient || payload?.Recipients);
+    const cc = parseEmailAddresses(payload?.cc || payload?.Cc);
+    const subject = pickString(payload, ['subject', 'Subject']) || '(no subject)';
+    const textBody = pickString(payload, ['text', 'TextBody', 'body-plain', 'stripped-text', 'plain', 'body']);
+    const htmlBody = pickString(payload, ['html', 'HtmlBody', 'body-html', 'stripped-html']);
+    const snippet = (textBody || htmlBody.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, 4000);
+    const messageId = pickString(payload, ['messageId', 'MessageID', 'Message-Id', 'message-id', 'MessageId']);
+    const dateText = pickString(payload, ['date', 'Date', 'timestamp']);
+    const parsedDate = dateText ? new Date(/^\d+$/.test(dateText) ? Number(dateText) * 1000 : dateText) : new Date();
+    const attachmentNames = Array.isArray(payload?.Attachments)
+      ? payload.Attachments.map((item: any) => item?.Name || item?.name || item?.filename).filter(Boolean)
+      : [];
+    const fallbackId = createHash('sha256')
+      .update([userId, from.email, subject, parsedDate.toISOString(), snippet.slice(0, 500)].join('|'))
+      .digest('hex');
+    return {
+      provider: 'inbound',
+      providerMessageId: messageId || fallbackId,
+      providerThreadId: pickString(payload, ['threadId', 'ThreadID', 'conversationId']) || null,
+      mailbox: 'inbound',
+      direction: 'sent',
+      subject,
+      senderEmail: from.email,
+      senderName: from.name,
+      recipientEmails: to,
+      ccEmails: cc,
+      sentAt: parsedDate,
+      receivedAt: new Date(),
+      snippet,
+      attachmentNames,
+      sourceUrl: '',
+      rawMetadata: {
+        source: payload?.source || payload?.provider || 'inbound-webhook',
+        inboundAddress: [...to, ...cc].find((email) => email.includes(`+${userId}`)) || null,
+      },
+    };
+  }
+
   function mapProspectRow(row: any) {
     const parsedSize = row.size !== null && row.size !== undefined && row.size !== ''
       ? Number(row.size)
@@ -3161,6 +3342,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error syncing Outlook email:', error);
       res.status(500).json({ message: 'Failed to sync Outlook email' });
+    }
+  });
+
+  app.get('/api/email/inbound/config', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const domain = process.env.EMAIL_INBOUND_DOMAIN || process.env.INBOUND_EMAIL_DOMAIN || '';
+      const fixedAddress = process.env.EMAIL_INBOUND_ADDRESS || process.env.INBOUND_EMAIL_ADDRESS || '';
+      const webhookBase =
+        process.env.EMAIL_INBOUND_WEBHOOK_BASE_URL ||
+        process.env.PUBLIC_APP_URL ||
+        process.env.OUTLOOK_REDIRECT_BASE_URL ||
+        `${req.protocol}://${req.get('host')}`;
+      res.json({
+        configured: Boolean(getInboundWebhookSecret()),
+        domainConfigured: Boolean(domain || fixedAddress),
+        intakeAddress: fixedAddress || (domain ? `levelcre+${userId}@${domain}` : null),
+        webhookUrl: `${String(webhookBase).replace(/\/$/, '')}/api/email/inbound/webhook`,
+      });
+    } catch (error) {
+      console.error('Error fetching inbound email config:', error);
+      res.status(500).json({ message: 'Failed to fetch inbound email config' });
+    }
+  });
+
+  app.post('/api/email/inbound/webhook', async (req, res) => {
+    try {
+      if (!isInboundRequestAuthorized(req)) {
+        return res.status(getInboundWebhookSecret() ? 401 : 503).json({
+          message: getInboundWebhookSecret() ? 'Invalid inbound email secret' : 'Inbound email webhook is not configured',
+        });
+      }
+      const payload = req.body || {};
+      const userId = resolveInboundUserId({ ...req.query, ...payload });
+      if (!userId) {
+        return res.status(400).json({ message: 'Inbound email did not include a Level CRE user token' });
+      }
+      const userResult = await pool.query(`SELECT id FROM public.users WHERE id = $1 LIMIT 1`, [userId]);
+      if (!userResult.rows[0]) return res.status(404).json({ message: 'Level CRE user not found' });
+      const messageData = normalizeInboundPayload(payload, userId);
+      const result = await storeInboundEmailForReview(userId, messageData);
+      res.json({ ok: true, provider: 'inbound', ...result });
+    } catch (error) {
+      console.error('Error processing inbound email webhook:', error);
+      res.status(500).json({ message: 'Failed to process inbound email' });
     }
   });
 

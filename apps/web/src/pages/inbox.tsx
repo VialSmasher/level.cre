@@ -72,6 +72,13 @@ type OutlookConfig = {
   }
 }
 
+type InboundEmailConfig = {
+  configured: boolean
+  domainConfigured: boolean
+  intakeAddress: string | null
+  webhookUrl: string
+}
+
 const statusLabels: Record<EmailReviewStatus, string> = {
   pending_review: 'Needs Review',
   auto_logged: 'Logged',
@@ -106,6 +113,10 @@ export default function InboxPage() {
 
   const { data: outlookConfig } = useQuery<OutlookConfig>({
     queryKey: ['/api/email/outlook/config'],
+  })
+
+  const { data: inboundConfig } = useQuery<InboundEmailConfig>({
+    queryKey: ['/api/email/inbound/config'],
   })
 
   const { data: items = [], isLoading } = useQuery<EmailReviewItem[]>({
@@ -261,6 +272,36 @@ export default function InboxPage() {
                 </Button>
               )}
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg border-slate-200 shadow-sm">
+          <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-semibold text-slate-950">BCC intake</p>
+                <Badge
+                  variant="outline"
+                  className={inboundConfig?.configured ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-600'}
+                >
+                  {inboundConfig?.configured ? 'Webhook ready' : 'Needs secret'}
+                </Badge>
+              </div>
+              {inboundConfig?.intakeAddress ? (
+                <p className="mt-1 break-all text-sm text-slate-500">{inboundConfig.intakeAddress}</p>
+              ) : (
+                <p className="mt-1 break-all text-sm text-slate-500">
+                  Add EMAIL_INBOUND_WEBHOOK_SECRET and EMAIL_INBOUND_DOMAIN to enable a personal BCC address.
+                </p>
+              )}
+            </div>
+            <Button
+              variant="outline"
+              disabled={!inboundConfig?.intakeAddress}
+              onClick={() => inboundConfig?.intakeAddress && navigator.clipboard?.writeText(inboundConfig.intakeAddress)}
+            >
+              Copy address
+            </Button>
           </CardContent>
         </Card>
 
