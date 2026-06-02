@@ -2867,7 +2867,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get('/api/email/outlook/connect', requireAuth, async (req, res) => {
+  const startOutlookOAuth = async (req: Request, res: Response) => {
     try {
       if (isDemo(req)) return res.status(400).json({ message: 'Email connection is disabled in demo mode' });
       const config = getOutlookConfig(req);
@@ -2894,7 +2894,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('Error starting Outlook OAuth:', error);
       res.status(500).json({ message: 'Failed to start Outlook connection' });
     }
-  });
+  };
+
+  app.get('/api/email/outlook/connect', requireAuth, startOutlookOAuth);
+  app.get('/api/integrations/microsoft365/connect', requireAuth, startOutlookOAuth);
 
   app.get('/api/email/outlook/callback', async (req, res) => {
     let returnTo = '/app/inbox';
