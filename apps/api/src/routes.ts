@@ -322,13 +322,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       'ltd', 'inc', 'corp', 'company', 'building', 'property',
       'edmonton', 'alberta', 'canada', 'northwest', 'northeast', 'southwest', 'southeast',
       'ave', 'avenue', 'street', 'road', 'drive', 'suite',
+      'and', 'the', 'for', 'with', 'from', 'this', 'that', 'test', 'email',
+      'sales', 'leasing', 'industrial', 'office', 'direct', 'main', 'partner',
+      'associate', 'regards', 'confidential', 'privileged', 'intended',
+      'recipient', 'communication', 'information', 'member', 'alliance',
+      'facebook', 'linkedin', 'youtube', 'instagram', 'cushman', 'wakefield',
     ]);
     return normalizeMatchText(value)
       .split(' ')
       .filter((token) => token.length > 2 && !stopwords.has(token));
   }
 
+  function distinctiveTokens(value: unknown) {
+    return usefulTokens(value).filter((token) => token.length >= 4 && !/^\d+$/.test(token));
+  }
+
+  function addressLikeTokens(value: unknown) {
+    return usefulTokens(value).filter((token) => /^\d+$/.test(token) || /^[a-z]{1,3}$/.test(token));
+  }
+
   function scoreEmailProspect(message: any, prospect: any) {
+    const subjectText = normalizeMatchText([
+      message.subject,
+      ...(message.attachmentNames || []),
+    ].join(' '));
+    const participantText = normalizeMatchText([
+      message.senderEmail,
+      message.senderName,
+      ...(message.recipientEmails || []),
+    ].join(' '));
     const messageText = normalizeMatchText([
       message.subject,
       message.snippet,
@@ -349,32 +371,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let score = 0;
     const reasons: string[] = [];
     const prospectEmail = normalizeMatchText(prospect.contact_email);
-    if (prospectEmail && messageText.includes(prospectEmail)) {
+    if (prospectEmail && (participantText.includes(prospectEmail) || messageText.includes(prospectEmail))) {
       score += 90;
       reasons.push('contact email');
     }
-    const address = normalizeMatchText(prospect.address);
-    if (address && messageText.includes(address)) {
-      score += 80;
-      reasons.push('address');
+    const prospectName = normalizeMatchText(prospect.name);
+    if (prospectName && subjectText.includes(prospectName)) {
+      score += 95;
+      reasons.push('subject name');
     }
-    const companyTokens = usefulTokens([prospect.business_name, prospect.contact_company].join(' '));
-    const companyHits = companyTokens.filter((token) => messageText.includes(token));
+    const address = normalizeMatchText(prospect.address || prospect.name);
+    if (address && subjectText.includes(address)) {
+      score += 90;
+      reasons.push('subject address');
+    }
+    const addressTokens = addressLikeTokens([prospect.address, prospect.name].join(' '));
+    const numericAddressHits = addressTokens.filter((token) => /^\d+$/.test(token) && subjectText.includes(token));
+    const streetAddressHits = addressTokens.filter((token) => !/^\d+$/.test(token) && subjectText.includes(token));
+    if (numericAddressHits.length >= 2 || (numericAddressHits.length >= 1 && streetAddressHits.length >= 1)) {
+      score += Math.min(95, 65 + (numericAddressHits.length + streetAddressHits.length) * 8);
+      reasons.push(`subject address tokens ${numericAddressHits.length + streetAddressHits.length}/${addressTokens.length}`);
+    }
+    const companyTokens = distinctiveTokens([prospect.business_name, prospect.contact_company].join(' '));
+    const companyHits = companyTokens.filter((token) => subjectText.includes(token) || participantText.includes(token));
     if (companyHits.length) {
-      score += Math.min(75, companyHits.length * 60);
+      score += Math.min(75, companyHits.length * 65);
       reasons.push(`company token ${companyHits.join(', ')}`);
     }
-    const nameTokens = usefulTokens([prospect.name, prospect.business_name, prospect.contact_company].join(' '));
-    const tokenHits = nameTokens.filter((token) => messageText.includes(token));
+    const nameTokens = distinctiveTokens([prospect.name, prospect.business_name, prospect.contact_company].join(' '));
+    const tokenHits = nameTokens.filter((token) => subjectText.includes(token));
     if (tokenHits.length) {
       score += Math.min(45, tokenHits.length * 12);
-      reasons.push(`name/company tokens ${tokenHits.length}/${nameTokens.length}`);
-    }
-    const addressTokens = usefulTokens(prospect.address);
-    const addressHits = addressTokens.filter((token) => messageText.includes(token));
-    if (addressHits.length >= 2) {
-      score += Math.min(35, addressHits.length * 8);
-      reasons.push(`address tokens ${addressHits.length}/${addressTokens.length}`);
+      reasons.push(`subject name/company tokens ${tokenHits.length}/${nameTokens.length}`);
     }
     if (!score && prospectText) {
       const senderDomain = String(message.senderEmail || '').split('@')[1]?.toLowerCase();
