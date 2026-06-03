@@ -3,9 +3,10 @@ import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowRight, BarChart3, Brain, CalendarCheck, Flame, Mail, MapPin, Medal, Phone, Sparkles, Target, Trophy, Users, Zap } from 'lucide-react';
+import { ArrowRight, BarChart3, Brain, CalendarCheck, MapPin, Medal, Phone, Sparkles, Target, Trophy, Zap } from 'lucide-react';
 import { BrokerSkillsRow, SkillActivityRow, Requirement } from '@level-cre/shared/schema';
 import { Link } from 'wouter';
+import { buildSalesBadgeSummary, BADGE_TONES } from '@/lib/salesBadges';
 
 // XP calculation helpers
 const getLevel = (xp: number): number => {
@@ -32,15 +33,6 @@ const getProgressToNextLevel = (currentXp: number): number => {
   const progressXp = Math.max(0, currentXp - currentLevelXp);
   const totalNeeded = Math.max(1, nextLevelXp - currentLevelXp);
   return Math.floor((progressXp / totalNeeded) * 100);
-};
-
-const getLevelColor = (level: number): string => {
-  if (level >= 99) return 'text-yellow-500'; // Gold for maxed
-  if (level >= 80) return 'text-purple-500'; // Purple for high level
-  if (level >= 60) return 'text-blue-500'; // Blue for advanced
-  if (level >= 40) return 'text-green-500'; // Green for intermediate
-  if (level >= 20) return 'text-orange-500'; // Orange for beginner
-  return 'text-gray-500'; // Gray for novice
 };
 
 const SKILL_TONES = {
@@ -84,80 +76,6 @@ const FOLLOW_UP_COUNT_ACTIONS = new Set([
   'note_added',
 ]);
 
-type SalesActivityKind = 'call' | 'email' | 'meeting' | 'note' | 'touch';
-
-type SalesBadgeDefinition = {
-  id: string;
-  title: string;
-  description: string;
-  metric: SalesActivityKind;
-  threshold: number;
-  window: 'day' | 'tracked';
-  icon: React.ComponentType<any>;
-  tone: 'blue' | 'emerald' | 'orange' | 'violet' | 'slate';
-};
-
-type SalesBadgeView = SalesBadgeDefinition & {
-  value: number;
-  unlocked: boolean;
-};
-
-const SALES_BADGE_DEFINITIONS: SalesBadgeDefinition[] = [
-  { id: 'daily_5_calls', title: 'Warm Line', description: 'Make 5 calls in a day', metric: 'call', threshold: 5, window: 'day', icon: Phone, tone: 'emerald' },
-  { id: 'daily_15_calls', title: 'Power Dialer', description: 'Make 15 calls in a day', metric: 'call', threshold: 15, window: 'day', icon: Phone, tone: 'emerald' },
-  { id: 'daily_30_calls', title: 'Call Blitz', description: 'Make 30 calls in a day', metric: 'call', threshold: 30, window: 'day', icon: Flame, tone: 'orange' },
-  { id: 'daily_10_emails', title: 'Inbox Push', description: 'Send 10 emails in a day', metric: 'email', threshold: 10, window: 'day', icon: Mail, tone: 'blue' },
-  { id: 'daily_25_emails', title: 'Campaign Day', description: 'Send 25 emails in a day', metric: 'email', threshold: 25, window: 'day', icon: Mail, tone: 'blue' },
-  { id: 'daily_20_touches', title: 'Touchpoint Sprint', description: 'Log 20 calls, emails, meetings, or notes in a day', metric: 'touch', threshold: 20, window: 'day', icon: Zap, tone: 'orange' },
-  { id: 'tracked_100_calls', title: 'Century Caller', description: 'Log 100 calls in tracked history', metric: 'call', threshold: 100, window: 'tracked', icon: Medal, tone: 'emerald' },
-  { id: 'tracked_250_calls', title: 'Rainmaker Rhythm', description: 'Log 250 calls in tracked history', metric: 'call', threshold: 250, window: 'tracked', icon: Trophy, tone: 'orange' },
-  { id: 'tracked_100_emails', title: 'Email Engine', description: 'Log 100 emails in tracked history', metric: 'email', threshold: 100, window: 'tracked', icon: Medal, tone: 'blue' },
-  { id: 'tracked_25_meetings', title: 'Meeting Maker', description: 'Log 25 meetings in tracked history', metric: 'meeting', threshold: 25, window: 'tracked', icon: Users, tone: 'violet' },
-  { id: 'tracked_50_notes', title: 'Intel Keeper', description: 'Add 50 notes in tracked history', metric: 'note', threshold: 50, window: 'tracked', icon: Brain, tone: 'slate' },
-];
-
-const BADGE_TONES = {
-  blue: {
-    unlocked: 'border-blue-200 bg-blue-50 text-blue-800',
-    icon: 'bg-blue-600 text-white',
-    progress: 'bg-blue-500',
-  },
-  emerald: {
-    unlocked: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-    icon: 'bg-emerald-600 text-white',
-    progress: 'bg-emerald-500',
-  },
-  orange: {
-    unlocked: 'border-orange-200 bg-orange-50 text-orange-800',
-    icon: 'bg-orange-500 text-white',
-    progress: 'bg-orange-500',
-  },
-  violet: {
-    unlocked: 'border-violet-200 bg-violet-50 text-violet-800',
-    icon: 'bg-violet-600 text-white',
-    progress: 'bg-violet-500',
-  },
-  slate: {
-    unlocked: 'border-slate-200 bg-slate-50 text-slate-800',
-    icon: 'bg-slate-800 text-white',
-    progress: 'bg-slate-500',
-  },
-} as const;
-
-function activityKind(actionValue: unknown): SalesActivityKind | null {
-  const action = String(actionValue || '').toLowerCase();
-  if (action === 'call' || action === 'phone_call') return 'call';
-  if (action === 'email' || action === 'email_sent') return 'email';
-  if (action === 'meeting' || action === 'meeting_held') return 'meeting';
-  if (action === 'note' || action === 'note_added') return 'note';
-  return null;
-}
-
-function getDayKeyInTimeZone(date: Date, timeZone: string) {
-  const { year, month, day } = getDatePartsInTimeZone(date, timeZone);
-  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
-
 const getDatePartsInTimeZone = (date: Date, timeZone: string) => {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone,
@@ -192,7 +110,6 @@ function SkillCard({ name, xp, icon: Icon, description, skillKey, progressPercen
   const level = getLevel(xp);
   const progress = typeof progressPercentOverride === 'number' ? progressPercentOverride : getProgressToNextLevel(xp);
   const xpToNext = getXpToNextLevel(xp);
-  const levelColor = getLevelColor(level);
   const tone = SKILL_TONES[skillKey];
   const actionsToNext = (() => {
     if (typeof progressLabelOverride === 'string') return progressLabelOverride;
@@ -225,90 +142,43 @@ function SkillCard({ name, xp, icon: Icon, description, skillKey, progressPercen
 
   return (
     <Card className={`relative overflow-hidden border-slate-200 bg-white shadow-sm ${tone.ring}`}>
-      <CardHeader className="pb-2 pt-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-lg ${tone.iconBg}`}>
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className={`mt-0.5 rounded-lg p-2 ${tone.iconBg}`}>
               <Icon className={`h-5 w-5 ${tone.iconText}`} />
             </div>
             <div className="min-w-0">
-              <CardTitle className="text-base md:text-lg text-slate-950">{name}</CardTitle>
-              <p className="text-xs md:text-sm text-slate-600 truncate">{description}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-bold text-slate-950">{name}</h3>
+                <Badge variant="outline" className="bg-white">Lv {level}</Badge>
+              </div>
+              <p className="mt-1 text-xs leading-5 text-slate-600">{description}</p>
             </div>
           </div>
-          <div className="text-right">
-            <div className={`text-2xl font-bold ${levelColor}`}>
-              {level}
-            </div>
-            <div className="text-xs text-gray-500">
-              {xp.toLocaleString()} XP
-            </div>
+          <div className="shrink-0 text-right">
+            <p className="text-sm font-semibold text-slate-950">{xp.toLocaleString()} XP</p>
+            <p className="mt-1 text-xs text-slate-500">to Lv {level + 1}</p>
           </div>
         </div>
-      </CardHeader>
-      
-      <CardContent className="pt-1 pb-4">
-        <div className="space-y-2">
-          <div className="flex justify-between text-sm text-slate-700">
-            <span>Level {level + 1} progress</span>
-            <span className="font-semibold">{progress}%</span>
+        <div className="mt-4 space-y-2">
+          <div className="flex items-center justify-between text-xs text-slate-600">
+            <span>Progress to next level</span>
+            <span className="font-semibold text-slate-950">{progress}%</span>
           </div>
           <div className="h-2 overflow-hidden rounded-full bg-slate-100">
             <div className={`h-full rounded-full ${tone.fill}`} style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
           </div>
-          <div className="h-4 text-xs text-slate-600 truncate">
-            {xpToNext > 0 ? actionsToNext : ''}
-          </div>
+          <p className="text-xs text-slate-600">{xpToNext > 0 ? actionsToNext : 'Max level reached'}</p>
         </div>
-      </CardContent>
-      
-      {level >= 99 && (
-        <div className="absolute top-2 right-2">
-          <Badge className="bg-yellow-500 text-white">
+        {level >= 99 && (
+          <Badge className="absolute right-3 top-3 bg-yellow-500 text-white">
             <Sparkles className="h-3 w-3 mr-1" />
             MAX
           </Badge>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function SalesBadgeCard({ badge }: { badge: SalesBadgeView }) {
-  const Icon = badge.icon;
-  const tone = BADGE_TONES[badge.tone];
-  const progress = Math.min(100, Math.floor((badge.value / Math.max(1, badge.threshold)) * 100));
-  const cardClass = badge.unlocked
-    ? tone.unlocked
-    : 'border-slate-200 bg-slate-50 text-slate-500';
-  const iconClass = badge.unlocked
-    ? tone.icon
-    : 'bg-white text-slate-400';
-
-  return (
-    <div className={`rounded-xl border p-4 shadow-sm transition ${cardClass}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className={`rounded-lg p-2 ${iconClass}`}>
-          <Icon className="h-4 w-4" />
-        </div>
-        {badge.unlocked ? (
-          <Badge className="bg-slate-950 text-white">Unlocked</Badge>
-        ) : (
-          <Badge variant="outline" className="bg-white text-slate-600">Locked</Badge>
         )}
-      </div>
-      <p className="mt-4 text-base font-bold text-slate-950">{badge.title}</p>
-      <p className="mt-1 min-h-[2rem] text-xs leading-4 text-slate-600">{badge.description}</p>
-      <div className="mt-4 space-y-2">
-        <div className="flex items-center justify-between text-xs font-semibold">
-          <span>{badge.window === 'day' ? 'Best day' : 'Tracked total'}</span>
-          <span>{badge.value} / {badge.threshold}</span>
-        </div>
-        <div className="h-2 overflow-hidden rounded-full bg-white">
-          <div className={`h-full rounded-full ${badge.unlocked ? tone.progress : 'bg-slate-300'}`} style={{ width: `${progress}%` }} />
-        </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -406,48 +276,7 @@ export default function StatsPage() {
   const followupsToTarget = Math.max(0, 5 - weeklyFollowupsCount);
   const streakToTarget = Math.max(0, 5 - (header?.streakDays ?? 0));
 
-  const salesBadgeSummary = React.useMemo(() => {
-    const dailyBuckets = new Map<string, Record<SalesActivityKind, number>>();
-    const bestDayCounts: Record<SalesActivityKind, number> = { call: 0, email: 0, meeting: 0, note: 0, touch: 0 };
-    const trackedCounts: Record<SalesActivityKind, number> = { call: 0, email: 0, meeting: 0, note: 0, touch: 0 };
-
-    for (const activity of recentActivities || []) {
-      const kind = activityKind((activity as any).action);
-      if (!kind) continue;
-      const activityDate = new Date((activity as any).timestamp || (activity as any).date || (activity as any).createdAt || Date.now());
-      trackedCounts[kind] += 1;
-      trackedCounts.touch += 1;
-      const dayKey = getDayKeyInTimeZone(activityDate, EDMONTON_TZ);
-      const dayCounts = dailyBuckets.get(dayKey) || { call: 0, email: 0, meeting: 0, note: 0, touch: 0 };
-      dayCounts[kind] += 1;
-      dayCounts.touch += 1;
-      dailyBuckets.set(dayKey, dayCounts);
-    }
-
-    for (const dayCounts of dailyBuckets.values()) {
-      bestDayCounts.call = Math.max(bestDayCounts.call, dayCounts.call);
-      bestDayCounts.email = Math.max(bestDayCounts.email, dayCounts.email);
-      bestDayCounts.meeting = Math.max(bestDayCounts.meeting, dayCounts.meeting);
-      bestDayCounts.note = Math.max(bestDayCounts.note, dayCounts.note);
-      bestDayCounts.touch = Math.max(bestDayCounts.touch, dayCounts.touch);
-    }
-
-    const badges = SALES_BADGE_DEFINITIONS.map((definition): SalesBadgeView => {
-      const value = definition.window === 'day' ? bestDayCounts[definition.metric] : trackedCounts[definition.metric];
-      return {
-        ...definition,
-        value,
-        unlocked: value >= definition.threshold,
-      };
-    });
-
-    const unlocked = badges.filter((badge) => badge.unlocked);
-    const next = badges
-      .filter((badge) => !badge.unlocked)
-      .sort((a, b) => ((b.value / b.threshold) - (a.value / a.threshold)) || (a.threshold - b.threshold))[0] || null;
-
-    return { badges, unlocked, next, bestDayCounts, trackedCounts };
-  }, [recentActivities]);
+  const salesBadgeSummary = React.useMemo(() => buildSalesBadgeSummary(recentActivities || [], EDMONTON_TZ), [recentActivities]);
 
   const nextActions = [
     {
@@ -625,43 +454,41 @@ export default function StatsPage() {
         </div>
 
         <Card className="border-slate-200 bg-white shadow-sm">
-          <CardHeader className="pb-2">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-lg">
+          <CardContent className="p-4">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="rounded-lg bg-orange-50 p-2">
                   <Medal className="h-5 w-5 text-orange-500" />
-                  Sales Badges
-                </CardTitle>
-                <p className="mt-1 text-sm text-slate-600">
-                  Fitbit-style activity badges for calls, emails, meetings, notes, and daily touchpoint pushes.
-                </p>
-              </div>
-              <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
-                {salesBadgeSummary.unlocked.length} / {salesBadgeSummary.badges.length} unlocked
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {salesBadgeSummary.next && (
-              <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-blue-950">Next badge: {salesBadgeSummary.next.title}</p>
-                    <p className="mt-1 text-xs text-blue-800">
-                      {Math.max(0, salesBadgeSummary.next.threshold - salesBadgeSummary.next.value)} more to unlock. {salesBadgeSummary.next.description}.
-                    </p>
-                  </div>
-                  <Badge className="bg-blue-600 text-white">
-                    {salesBadgeSummary.next.value} / {salesBadgeSummary.next.threshold}
-                  </Badge>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-slate-950">Sales Badges</p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    {salesBadgeSummary.unlocked.length} / {salesBadgeSummary.badges.length} unlocked
+                    {salesBadgeSummary.next ? ` - Next: ${salesBadgeSummary.next.title}` : ' - Collection complete'}
+                  </p>
                 </div>
               </div>
-            )}
-
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {salesBadgeSummary.badges.map((badge) => (
-                <SalesBadgeCard key={badge.id} badge={badge} />
-              ))}
+              {salesBadgeSummary.next && (
+                <div className="min-w-[220px] flex-1 lg:max-w-md">
+                  <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-600">
+                    <span>{salesBadgeSummary.next.description}</span>
+                    <span>{salesBadgeSummary.next.value} / {salesBadgeSummary.next.threshold}</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className={`h-full rounded-full ${BADGE_TONES[salesBadgeSummary.next.tone].progress}`}
+                      style={{ width: `${Math.min(100, Math.floor((salesBadgeSummary.next.value / salesBadgeSummary.next.threshold) * 100))}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+              <Link
+                href="/badges"
+                className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 shadow-sm hover:bg-slate-50"
+              >
+                View badges
+                <ArrowRight className="h-4 w-4" />
+              </Link>
             </div>
           </CardContent>
         </Card>
@@ -670,8 +497,8 @@ export default function StatsPage() {
         <div className="grid grid-cols-1 gap-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-bold text-slate-950">Skill Progress</h2>
-              <p className="text-sm text-slate-600">Broker-specific XP paths and what moves each one forward.</p>
+              <h2 className="text-xl font-bold text-slate-950">Skill Paths</h2>
+              <p className="text-sm text-slate-600">Compact XP paths with the next action needed to level up.</p>
             </div>
             <CalendarCheck className="h-5 w-5 text-slate-400" />
           </div>

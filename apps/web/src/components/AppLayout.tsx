@@ -60,7 +60,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     return location === path
   }
 
-  const isScorecardActive = location === '/broker-stats' || location === '/leaderboard'
+  const isScorecardActive = location === '/broker-stats' || location === '/leaderboard' || location === '/badges'
   const profileLabel = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'
 
   type NavItem = {
