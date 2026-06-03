@@ -6,8 +6,11 @@ import { Link } from 'wouter'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { apiRequest } from '@/lib/queryClient'
 import type { Prospect } from '@level-cre/shared/schema'
 
@@ -84,6 +87,9 @@ type InboundEmailConfig = {
   webhookUrl: string
 }
 
+type EmailOutcome = 'contacted' | 'scheduled_meeting' | 'not_interested' | 'follow_up_later'
+type FollowUpChoice = 'tomorrow' | '3d' | '1w' | '2w' | '1m' | 'none' | 'custom'
+
 const statusLabels: Record<EmailReviewStatus, string> = {
   needs_context: 'Needs Context',
   pending_review: 'Ready to Log',
@@ -94,6 +100,23 @@ const statusLabels: Record<EmailReviewStatus, string> = {
   all: 'All',
 }
 
+const outcomeLabels: Record<EmailOutcome, string> = {
+  contacted: 'Sent / Contacted',
+  scheduled_meeting: 'Meeting booked',
+  not_interested: 'Not interested',
+  follow_up_later: 'Follow up later',
+}
+
+const followUpChoices: Array<{ value: FollowUpChoice; label: string; days?: number }> = [
+  { value: 'tomorrow', label: 'Tomorrow', days: 1 },
+  { value: '3d', label: '3d', days: 3 },
+  { value: '1w', label: '1w', days: 7 },
+  { value: '2w', label: '2w', days: 14 },
+  { value: '1m', label: '1mo', days: 30 },
+  { value: 'none', label: 'None' },
+  { value: 'custom', label: 'Custom' },
+]
+
 function formatEmailDate(item: EmailReviewItem) {
   const value = item.email.sentAt || item.email.receivedAt
   if (!value) return 'No date'
@@ -102,11 +125,44 @@ function formatEmailDate(item: EmailReviewItem) {
   return `${formatDistanceToNow(date, { addSuffix: true })}`
 }
 
+function addDaysAtNoonIso(days: number) {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  date.setHours(12, 0, 0, 0)
+  return date.toISOString()
+}
+
+function dateInputToNoonIso(value: string) {
+  if (!value) return null
+  const [year, month, day] = value.split('-').map(Number)
+  if (!year || !month || !day) return null
+  return new Date(year, month - 1, day, 12, 0, 0, 0).toISOString()
+}
+
+function defaultEmailNote(item: EmailReviewItem) {
+  return [
+    item.email.subject ? `Subject: ${item.email.subject}` : '',
+    item.email.snippet || item.suggestedSummary || '',
+    item.email.senderEmail ? `From: ${item.email.senderEmail}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+function prospectDisplayName(prospect: EmailReviewItem['prospect']) {
+  if (!prospect) return 'No prospect selected'
+  return prospect.contactCompany || prospect.businessName || prospect.name || 'Untitled prospect'
+}
+
 export default function InboxPage() {
   const queryClient = useQueryClient()
   const [status, setStatus] = useState<EmailReviewStatus>('all')
   const [search, setSearch] = useState('')
   const [prospectDrafts, setProspectDrafts] = useState<Record<string, string>>({})
+  const [logItem, setLogItem] = useState<EmailReviewItem | null>(null)
+  const [logOutcome, setLogOutcome] = useState<EmailOutcome>('contacted')
+  const [logPropertyContext, setLogPropertyContext] = useState('')
+  const [logNote, setLogNote] = useState('')
+  const [followUpChoice, setFollowUpChoice] = useState<FollowUpChoice>('2w')
+  const [customFollowUpDate, setCustomFollowUpDate] = useState('')
 
   const { data: counts } = useQuery<EmailReviewCounts>({
     queryKey: ['/api/email/review/counts'],
@@ -175,11 +231,14 @@ export default function InboxPage() {
   })
 
   const logInteractionMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const response = await apiRequest('POST', `/api/email/review/${id}/create-interaction`)
+    mutationFn: async ({ id, outcome, notes, nextFollowUp }: { id: string; outcome: EmailOutcome; notes: string; nextFollowUp: string | null }) => {
+      const response = await apiRequest('POST', `/api/email/review/${id}/create-interaction`, { outcome, notes, nextFollowUp })
       return response.json()
     },
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setLogItem(null)
+      invalidate()
+    },
   })
 
   const syncOutlookMutation = useMutation({
@@ -205,6 +264,36 @@ export default function InboxPage() {
       window.location.assign(url)
     },
   })
+
+  const openLogDialog = (item: EmailReviewItem) => {
+    setLogItem(item)
+    setLogOutcome('contacted')
+    setLogPropertyContext('')
+    setLogNote(defaultEmailNote(item))
+    setFollowUpChoice('2w')
+    setCustomFollowUpDate('')
+  }
+
+  const resolveNextFollowUp = () => {
+    if (followUpChoice === 'none') return null
+    if (followUpChoice === 'custom') return dateInputToNoonIso(customFollowUpDate)
+    const choice = followUpChoices.find((option) => option.value === followUpChoice)
+    return choice?.days ? addDaysAtNoonIso(choice.days) : addDaysAtNoonIso(14)
+  }
+
+  const submitLogEmail = () => {
+    if (!logItem) return
+    const notes = [
+      logPropertyContext.trim() ? `Property/context: ${logPropertyContext.trim()}` : '',
+      logNote.trim(),
+    ].filter(Boolean).join('\n\n')
+    logInteractionMutation.mutate({
+      id: logItem.id,
+      outcome: logOutcome,
+      notes,
+      nextFollowUp: resolveNextFollowUp(),
+    })
+  }
 
   return (
     <div className="min-h-0 flex-1 bg-slate-50">
@@ -412,7 +501,7 @@ export default function InboxPage() {
                       <Button
                         size="sm"
                         disabled={!item.prospect || logInteractionMutation.isPending}
-                        onClick={() => logInteractionMutation.mutate(item.id)}
+                        onClick={() => openLogDialog(item)}
                       >
                         <CheckCircle2 className="mr-2 h-4 w-4" />
                         Log to Prospect
@@ -485,6 +574,105 @@ export default function InboxPage() {
           )}
         </div>
       </div>
+      <Dialog open={Boolean(logItem)} onOpenChange={(open) => !open && setLogItem(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Log Email</DialogTitle>
+            <DialogDescription>
+              Confirm the CRM context before this becomes a prospect interaction.
+            </DialogDescription>
+          </DialogHeader>
+
+          {logItem ? (
+            <div className="grid gap-4">
+              <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Prospect / Company</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-950">{prospectDisplayName(logItem.prospect)}</p>
+                  <p className="mt-1 text-xs text-slate-600">{logItem.prospect?.address || 'No address'}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Email</p>
+                  <p className="mt-1 truncate text-sm font-semibold text-slate-950">{logItem.email.subject || '(No subject)'}</p>
+                  <p className="mt-1 truncate text-xs text-slate-600">{logItem.email.senderEmail || 'Unknown sender'}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="email-log-outcome">Outcome</Label>
+                <Select value={logOutcome} onValueChange={(value) => setLogOutcome(value as EmailOutcome)}>
+                  <SelectTrigger id="email-log-outcome" className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(outcomeLabels) as EmailOutcome[]).map((outcome) => (
+                      <SelectItem key={outcome} value={outcome}>{outcomeLabels[outcome]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="email-log-property">Property / context</Label>
+                <Input
+                  id="email-log-property"
+                  value={logPropertyContext}
+                  onChange={(event) => setLogPropertyContext(event.target.value)}
+                  placeholder="2420 80 Ave, freezer/cooler requirement, nearby listing..."
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="email-log-note">Note</Label>
+                <Textarea
+                  id="email-log-note"
+                  value={logNote}
+                  onChange={(event) => setLogNote(event.target.value)}
+                  className="min-h-[140px]"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label>Next follow-up</Label>
+                <div className="flex flex-wrap gap-2">
+                  {followUpChoices.map((choice) => (
+                    <Button
+                      key={choice.value}
+                      type="button"
+                      variant={followUpChoice === choice.value ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setFollowUpChoice(choice.value)}
+                    >
+                      {choice.label}
+                    </Button>
+                  ))}
+                </div>
+                {followUpChoice === 'custom' ? (
+                  <Input
+                    type="date"
+                    value={customFollowUpDate}
+                    onChange={(event) => setCustomFollowUpDate(event.target.value)}
+                    className="max-w-[220px]"
+                  />
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setLogItem(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={!logItem?.prospect || logInteractionMutation.isPending || (followUpChoice === 'custom' && !customFollowUpDate)}
+              onClick={submitLogEmail}
+            >
+              {logInteractionMutation.isPending ? 'Logging...' : 'Log Email'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

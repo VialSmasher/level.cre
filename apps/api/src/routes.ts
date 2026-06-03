@@ -3494,6 +3494,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       if (isDemo(req)) return res.status(404).json({ message: 'Email match not found' });
+      const CreateEmailInteractionSchema = z.object({
+        outcome: z.enum(['contacted', 'no_answer', 'left_message', 'scheduled_meeting', 'not_interested', 'follow_up_later']).optional(),
+        notes: z.string().max(5000).optional(),
+        nextFollowUp: z.string().nullable().optional(),
+      });
+      const parsed = CreateEmailInteractionSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid email log data', error: parsed.error.errors });
+      }
+      const input = parsed.data;
       const { rows } = await pool.query(`
         SELECT
           epm.*,
@@ -3532,16 +3542,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const interactionDate = row.sent_at || row.received_at || new Date();
-      const notes = row.suggested_summary || [
+      const defaultNotes = row.suggested_summary || [
         row.subject ? `Subject: ${row.subject}` : '',
         row.snippet || '',
         row.sender_email ? `From: ${row.sender_email}` : '',
       ].filter(Boolean).join('\n');
+      const notes = typeof input.notes === 'string' ? input.notes.trim() : defaultNotes;
       const interactionIso = new Date(interactionDate).toISOString();
-      const hasSuggestedNextFollowUp = Boolean(row.suggested_next_follow_up);
-      const nextFollowUpIso = row.suggested_next_follow_up
-        ? new Date(row.suggested_next_follow_up).toISOString()
-        : addDaysAtNoonUtc(new Date(interactionDate), 14);
+      const hasRequestedNextFollowUp = Object.prototype.hasOwnProperty.call(input, 'nextFollowUp');
+      const nextFollowUpIso = hasRequestedNextFollowUp
+        ? (input.nextFollowUp ? new Date(input.nextFollowUp).toISOString() : null)
+        : (row.suggested_next_follow_up
+          ? new Date(row.suggested_next_follow_up).toISOString()
+          : addDaysAtNoonUtc(new Date(interactionDate), 14));
       const emailAlreadyAwarded = await pool.query(`
         SELECT id FROM public.skill_activities
         WHERE user_id = $1
@@ -3556,14 +3569,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         listingId: row.listing_id || null,
         date: interactionIso,
         type: row.suggested_interaction_type || 'email',
-        outcome: row.suggested_outcome || 'contacted',
+        outcome: input.outcome || row.suggested_outcome || 'contacted',
         notes,
         nextFollowUp: nextFollowUpIso,
         sourceProvider: row.provider,
         sourceMessageId: row.provider_message_id,
         sourceThreadId: row.provider_thread_id || null,
         sourceEmailMessageId: row.email_message_id,
-        sourceMetadata: { emailReviewMatchId: req.params.id, defaultFollowUpDays: hasSuggestedNextFollowUp ? null : 14 },
+        sourceMetadata: {
+          emailReviewMatchId: req.params.id,
+          defaultFollowUpDays: hasRequestedNextFollowUp || row.suggested_next_follow_up ? null : 14,
+        },
       }, { skipXp: Boolean(emailAlreadyAwarded.rows[0]) });
       const interactionId = interaction.id;
       await pool.query(`
@@ -3579,7 +3595,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           status = CASE WHEN status = 'prospect' THEN 'contacted' ELSE status END,
           updated_at = now()
         WHERE id = $1 AND user_id = $2
-      `, [row.prospect_id, userId, interactionIso, nextFollowUpIso, hasSuggestedNextFollowUp]);
+      `, [row.prospect_id, userId, interactionIso, nextFollowUpIso, hasRequestedNextFollowUp || Boolean(row.suggested_next_follow_up)]);
       res.json({ interactionId, duplicate: false, nextFollowUp: nextFollowUpIso, newXpGained: xpForInteractionType('email') });
     } catch (error) {
       console.error('Error creating interaction from email review item:', error);
