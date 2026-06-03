@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowRight, BarChart3, Brain, CalendarCheck, MapPin, Medal, Phone, Sparkles, Target, Trophy, Zap } from 'lucide-react';
+import { ArrowRight, Brain, CalendarCheck, MapPin, Medal, Phone, Sparkles, Target, Trophy, Zap } from 'lucide-react';
 import { BrokerSkillsRow, SkillActivityRow, Requirement } from '@level-cre/shared/schema';
 import { Link } from 'wouter';
 import { buildSalesBadgeSummary, BADGE_TONES } from '@/lib/salesBadges';
@@ -37,32 +37,24 @@ const getProgressToNextLevel = (currentXp: number): number => {
 
 const SKILL_TONES = {
   prospecting: {
-    iconBg: 'bg-blue-600',
-    iconText: 'text-blue-600',
+    accent: 'bg-blue-500',
+    text: 'text-blue-600',
     fill: 'bg-blue-500',
-    ring: 'border-blue-200',
-    wash: 'bg-blue-50',
   },
   followUp: {
-    iconBg: 'bg-emerald-600',
-    iconText: 'text-emerald-600',
+    accent: 'bg-emerald-500',
+    text: 'text-emerald-600',
     fill: 'bg-emerald-500',
-    ring: 'border-emerald-200',
-    wash: 'bg-emerald-50',
   },
   consistency: {
-    iconBg: 'bg-orange-500',
-    iconText: 'text-orange-600',
+    accent: 'bg-orange-500',
+    text: 'text-orange-600',
     fill: 'bg-orange-500',
-    ring: 'border-orange-200',
-    wash: 'bg-orange-50',
   },
   marketKnowledge: {
-    iconBg: 'bg-violet-600',
-    iconText: 'text-violet-600',
+    accent: 'bg-violet-500',
+    text: 'text-violet-600',
     fill: 'bg-violet-500',
-    ring: 'border-violet-200',
-    wash: 'bg-violet-50',
   },
 } as const;
 
@@ -145,36 +137,40 @@ function SkillCard({ name, xp, icon: Icon, description, skillKey, progressPercen
   })();
 
   return (
-    <Card className={`relative overflow-hidden border bg-white shadow-sm ${tone.ring}`}>
-      <div className={`absolute inset-x-0 top-0 h-1 ${tone.fill}`} />
-      <CardContent className="p-4">
+    <Card className="relative overflow-hidden border-slate-200 bg-white shadow-sm">
+      <CardContent className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-3">
-            <div className={`mt-0.5 rounded-xl p-2.5 text-white shadow-sm ${tone.iconBg}`}>
+            <div className="mt-0.5 rounded-xl bg-slate-950 p-2.5 text-white shadow-sm">
               <Icon className="h-5 w-5" />
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-base font-bold text-slate-950">{name}</h3>
-                <Badge variant="outline" className={`${tone.wash} border-transparent text-slate-700`}>Lv {level}</Badge>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                  Level {level}
+                </span>
               </div>
               <p className="mt-1 text-xs leading-5 text-slate-600">{description}</p>
             </div>
           </div>
           <div className="shrink-0 text-right">
-            <p className="text-sm font-semibold text-slate-950">{xp.toLocaleString()} XP</p>
-            <p className="mt-1 text-xs text-slate-500">to Lv {level + 1}</p>
+            <p className="text-lg font-black leading-none text-slate-950">{xp.toLocaleString()}</p>
+            <p className="mt-1 text-xs font-medium text-slate-500">XP</p>
           </div>
         </div>
-        <div className="mt-4 space-y-2">
+        <div className="mt-5 space-y-2">
           <div className="flex items-center justify-between text-xs text-slate-600">
-            <span>Progress to next level</span>
-            <span className="font-semibold text-slate-950">{progress}%</span>
+            <span className="font-medium">Next level progress</span>
+            <span className={`font-bold ${tone.text}`}>{progress}%</span>
           </div>
-          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+          <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
             <div className={`h-full rounded-full ${tone.fill}`} style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
           </div>
-          <p className="text-xs text-slate-600">{xpToNext > 0 ? actionsToNext : 'Max level reached'}</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-slate-600">{xpToNext > 0 ? actionsToNext : 'Max level reached'}</p>
+            <div className={`h-2 w-2 shrink-0 rounded-full ${tone.accent}`} />
+          </div>
         </div>
         {level >= 99 && (
           <Badge className="absolute right-3 top-3 bg-yellow-500 text-white">
@@ -318,27 +314,33 @@ export default function StatsPage() {
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div>
-          <div className="mb-5 flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
+          <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="flex items-start gap-3">
               <div className="rounded-2xl bg-slate-950 p-3 shadow-sm">
                 <Trophy className="h-5 w-5 text-white" />
               </div>
               <div>
-                <div className="mb-1 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 shadow-sm">
-                  <BarChart3 className="h-3.5 w-3.5" />
-                  Weekly scorecard
-                </div>
-                <h1 className="text-2xl md:text-3xl font-bold text-slate-950">Broker Performance</h1>
+                <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Scorecard</p>
+                <h1 className="text-2xl font-black tracking-tight text-slate-950 md:text-3xl">Broker Performance</h1>
                 <p className="mt-1 text-sm text-slate-600">Weekly activity, CRM momentum, and market knowledge progress.</p>
               </div>
             </div>
-            <Link
-              href="/leaderboard"
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm hover:bg-slate-50 transition-colors shrink-0"
-            >
-              <Trophy className="h-4 w-4" />
-              <span>Standings</span>
-            </Link>
+            <div className="flex items-center gap-2 md:pb-1">
+              <Link
+                href="/badges"
+                className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
+              >
+                <Medal className="h-4 w-4" />
+                Badges
+              </Link>
+              <Link
+                href="/leaderboard"
+                className="inline-flex h-9 items-center gap-2 rounded-full bg-slate-950 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+              >
+                <Trophy className="h-4 w-4" />
+                Standings
+              </Link>
+            </div>
           </div>
 
           {/* Overall Stats */}
