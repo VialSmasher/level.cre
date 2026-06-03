@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowRight, Brain, CalendarCheck, MapPin, Medal, Phone, Sparkles, Target, Trophy, Zap } from 'lucide-react';
+import { ArrowRight, Brain, MapPin, Medal, Phone, Sparkles, Target, Trophy, Zap } from 'lucide-react';
 import { BrokerSkillsRow, SkillActivityRow, Requirement } from '@level-cre/shared/schema';
 import { Link } from 'wouter';
 import { buildSalesBadgeSummary, BADGE_TONES } from '@/lib/salesBadges';
@@ -92,7 +92,7 @@ const getWeekKeyInTimeZone = (date: Date, timeZone: string) => {
   return `${localDateAsUtc.getUTCFullYear()}-${String(localDateAsUtc.getUTCMonth() + 1).padStart(2, '0')}-${String(localDateAsUtc.getUTCDate()).padStart(2, '0')}`;
 };
 
-interface SkillCardProps {
+interface SkillTrackProps {
   name: string;
   xp: number;
   icon: React.ComponentType<any>;
@@ -102,7 +102,7 @@ interface SkillCardProps {
   progressLabelOverride?: string;
 }
 
-function SkillCard({ name, xp, icon: Icon, description, skillKey, progressPercentOverride, progressLabelOverride }: SkillCardProps) {
+function SkillTrackRow({ name, xp, icon: Icon, description, skillKey, progressPercentOverride, progressLabelOverride }: SkillTrackProps) {
   const level = getLevel(xp);
   const progress = typeof progressPercentOverride === 'number' ? progressPercentOverride : getProgressToNextLevel(xp);
   const xpToNext = getXpToNextLevel(xp);
@@ -137,49 +137,36 @@ function SkillCard({ name, xp, icon: Icon, description, skillKey, progressPercen
   })();
 
   return (
-    <Card className="relative overflow-hidden border-slate-200 bg-white shadow-sm">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="mt-0.5 rounded-xl bg-slate-950 p-2.5 text-white shadow-sm">
-              <Icon className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-base font-bold text-slate-950">{name}</h3>
-                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                  Level {level}
-                </span>
-              </div>
-              <p className="mt-1 text-xs leading-5 text-slate-600">{description}</p>
-            </div>
-          </div>
-          <div className="shrink-0 text-right">
-            <p className="text-lg font-black leading-none text-slate-950">{xp.toLocaleString()}</p>
-            <p className="mt-1 text-xs font-medium text-slate-500">XP</p>
-          </div>
+    <div className="grid gap-4 border-b border-slate-100 px-5 py-4 last:border-b-0 lg:grid-cols-[minmax(190px,1fr)_90px_minmax(210px,1.2fr)_minmax(150px,0.8fr)] lg:items-center">
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="mt-0.5 rounded-lg bg-slate-950 p-2 text-white shadow-sm">
+          <Icon className="h-4 w-4" />
         </div>
-        <div className="mt-5 space-y-2">
-          <div className="flex items-center justify-between text-xs text-slate-600">
-            <span className="font-medium">Next level progress</span>
-            <span className={`font-bold ${tone.text}`}>{progress}%</span>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-bold text-slate-950">{name}</h3>
+            <div className={`h-2 w-2 rounded-full ${tone.accent}`} />
           </div>
-          <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-            <div className={`h-full rounded-full ${tone.fill}`} style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-slate-600">{xpToNext > 0 ? actionsToNext : 'Max level reached'}</p>
-            <div className={`h-2 w-2 shrink-0 rounded-full ${tone.accent}`} />
-          </div>
+          <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>
         </div>
-        {level >= 99 && (
-          <Badge className="absolute right-3 top-3 bg-yellow-500 text-white">
-            <Sparkles className="h-3 w-3 mr-1" />
-            MAX
-          </Badge>
-        )}
-      </CardContent>
-    </Card>
+      </div>
+      <div className="flex items-center gap-3 lg:block lg:text-right">
+        <p className="text-lg font-black leading-none text-slate-950">Lv {level}</p>
+        <p className="mt-0.5 text-xs font-medium text-slate-500">{xp.toLocaleString()} XP</p>
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-medium text-slate-500">Progress</span>
+          <span className={`font-bold ${tone.text}`}>{progress}%</span>
+        </div>
+        <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+          <div className={`h-full rounded-full ${tone.fill}`} style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
+        </div>
+      </div>
+      <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+        {xpToNext > 0 ? actionsToNext : 'Max level reached'}
+      </div>
+    </div>
   );
 }
 
@@ -325,17 +312,21 @@ export default function StatsPage() {
                 <p className="mt-1 text-sm text-slate-600">Weekly activity, CRM momentum, and market knowledge progress.</p>
               </div>
             </div>
-            <div className="flex items-center gap-2 md:pb-1">
+            <div className="flex w-fit items-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm md:pb-0">
+              <span className="inline-flex h-9 items-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white">
+                <Trophy className="h-4 w-4" />
+                Overview
+              </span>
               <Link
                 href="/badges"
-                className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
+                className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
               >
                 <Medal className="h-4 w-4" />
                 Badges
               </Link>
               <Link
                 href="/leaderboard"
-                className="inline-flex h-9 items-center gap-2 rounded-full bg-slate-950 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
               >
                 <Trophy className="h-4 w-4" />
                 Standings
@@ -471,11 +462,66 @@ export default function StatsPage() {
           </Card>
         </div>
 
+        <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">
+          <CardHeader className="border-b border-slate-100 pb-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div>
+                <CardTitle className="text-xl font-black tracking-tight text-slate-950">Performance Tracks</CardTitle>
+                <p className="mt-1 text-sm text-slate-600">Progress by prospecting, follow-up, consistency, and market knowledge.</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                {weeklyXpTotal} XP this week
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="hidden border-b border-slate-100 bg-slate-50 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid lg:grid-cols-[minmax(190px,1fr)_90px_minmax(210px,1.2fr)_minmax(150px,0.8fr)]">
+              <span>Track</span>
+              <span className="text-right">Level</span>
+              <span>Progress</span>
+              <span>Next action</span>
+            </div>
+            <SkillTrackRow
+              name="Prospecting"
+              xp={skills?.prospecting || 0}
+              icon={MapPin}
+              description="Adding prospects, mapping areas, discovering opportunities"
+              skillKey="prospecting"
+            />
+            <SkillTrackRow
+              name="Follow Up"
+              xp={skills?.followUp || 0}
+              icon={Phone}
+              description="Calls, emails, meetings, and consistent communication"
+              skillKey="followUp"
+            />
+            <SkillTrackRow
+              name="Consistency"
+              xp={skills?.consistency || 0}
+              icon={Zap}
+              description="Daily activity streaks and regular engagement patterns"
+              skillKey="consistency"
+              progressPercentOverride={(() => {
+                const sd = header?.streakDays ?? 0;
+                return Math.min(100, Math.floor((Math.min(sd, 5) / 5) * 100));
+              })()}
+              progressLabelOverride={`${header?.streakDays ?? 0}/5 active days`}
+            />
+            <SkillTrackRow
+              name="Market Knowledge"
+              xp={skills?.marketKnowledge || 0}
+              icon={Brain}
+              description="Requirements tracking, market research, and industry insights"
+              skillKey="marketKnowledge"
+            />
+          </CardContent>
+        </Card>
+
         <Card className="overflow-hidden border-orange-100 bg-white shadow-sm">
           <CardContent className="p-0">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex min-w-0 items-center gap-3 px-4 py-4">
-                <div className="rounded-xl bg-orange-50 p-2.5">
+                <div className="rounded-lg bg-orange-50 p-2.5">
                   <Medal className="h-5 w-5 text-orange-500" />
                 </div>
                 <div className="min-w-0">
@@ -502,7 +548,7 @@ export default function StatsPage() {
               )}
               <Link
                 href="/badges"
-                className="mr-4 inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
+                className="mr-4 inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
               >
                 View badges
                 <ArrowRight className="h-4 w-4" />
@@ -510,57 +556,6 @@ export default function StatsPage() {
             </div>
           </CardContent>
         </Card>
-
-        {/* Main Content */}
-        <div className="grid grid-cols-1 gap-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-bold text-slate-950">Skill Paths</h2>
-              <p className="text-sm text-slate-600">Compact XP paths with the next action needed to level up.</p>
-            </div>
-            <CalendarCheck className="h-5 w-5 text-slate-400" />
-          </div>
-          <div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <SkillCard
-                name="Prospecting"
-                xp={skills?.prospecting || 0}
-                icon={MapPin}
-                description="Adding prospects, mapping areas, discovering opportunities"
-                skillKey="prospecting"
-              />
-              
-              <SkillCard
-                name="Follow Up"
-                xp={skills?.followUp || 0}
-                icon={Phone}
-                description="Calls, emails, meetings, and consistent communication"
-                skillKey="followUp"
-              />
-              
-              <SkillCard
-                name="Consistency"
-                xp={skills?.consistency || 0}
-                icon={Zap}
-                description="Daily activity streaks and regular engagement patterns"
-                skillKey="consistency"
-                progressPercentOverride={(() => {
-                  const sd = header?.streakDays ?? 0;
-                  return Math.min(100, Math.floor((Math.min(sd, 5) / 5) * 100));
-                })()}
-                progressLabelOverride={`${header?.streakDays ?? 0}/5 active days`}
-              />
-              
-              <SkillCard
-                name="Market Knowledge"
-                xp={skills?.marketKnowledge || 0}
-                icon={Brain}
-                description="Requirements tracking, market research, and industry insights"
-                skillKey="marketKnowledge"
-              />
-            </div>
-          </div>
-        </div>
 
         {/* Bricks removed (quarantined) */}
       </div>
