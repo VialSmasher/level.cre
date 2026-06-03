@@ -37,28 +37,32 @@ const getProgressToNextLevel = (currentXp: number): number => {
 
 const SKILL_TONES = {
   prospecting: {
-    iconBg: 'bg-blue-50',
+    iconBg: 'bg-blue-600',
     iconText: 'text-blue-600',
     fill: 'bg-blue-500',
-    ring: 'border-blue-100',
+    ring: 'border-blue-200',
+    wash: 'bg-blue-50',
   },
   followUp: {
-    iconBg: 'bg-emerald-50',
+    iconBg: 'bg-emerald-600',
     iconText: 'text-emerald-600',
     fill: 'bg-emerald-500',
-    ring: 'border-emerald-100',
+    ring: 'border-emerald-200',
+    wash: 'bg-emerald-50',
   },
   consistency: {
-    iconBg: 'bg-orange-50',
+    iconBg: 'bg-orange-500',
     iconText: 'text-orange-600',
     fill: 'bg-orange-500',
-    ring: 'border-orange-100',
+    ring: 'border-orange-200',
+    wash: 'bg-orange-50',
   },
   marketKnowledge: {
-    iconBg: 'bg-violet-50',
+    iconBg: 'bg-violet-600',
     iconText: 'text-violet-600',
     fill: 'bg-violet-500',
-    ring: 'border-violet-100',
+    ring: 'border-violet-200',
+    wash: 'bg-violet-50',
   },
 } as const;
 
@@ -141,17 +145,18 @@ function SkillCard({ name, xp, icon: Icon, description, skillKey, progressPercen
   })();
 
   return (
-    <Card className={`relative overflow-hidden border-slate-200 bg-white shadow-sm ${tone.ring}`}>
+    <Card className={`relative overflow-hidden border bg-white shadow-sm ${tone.ring}`}>
+      <div className={`absolute inset-x-0 top-0 h-1 ${tone.fill}`} />
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-start gap-3">
-            <div className={`mt-0.5 rounded-lg p-2 ${tone.iconBg}`}>
-              <Icon className={`h-5 w-5 ${tone.iconText}`} />
+            <div className={`mt-0.5 rounded-xl p-2.5 text-white shadow-sm ${tone.iconBg}`}>
+              <Icon className="h-5 w-5" />
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="text-base font-bold text-slate-950">{name}</h3>
-                <Badge variant="outline" className="bg-white">Lv {level}</Badge>
+                <Badge variant="outline" className={`${tone.wash} border-transparent text-slate-700`}>Lv {level}</Badge>
               </div>
               <p className="mt-1 text-xs leading-5 text-slate-600">{description}</p>
             </div>
@@ -309,17 +314,17 @@ export default function StatsPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-6">
+    <div className="min-h-screen bg-[#f6f8fb] p-4 md:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div>
           <div className="mb-5 flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-lg bg-slate-950">
+              <div className="rounded-2xl bg-slate-950 p-3 shadow-sm">
                 <Trophy className="h-5 w-5 text-white" />
               </div>
               <div>
-                <div className="mb-1 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                <div className="mb-1 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 shadow-sm">
                   <BarChart3 className="h-3.5 w-3.5" />
                   Weekly scorecard
                 </div>
@@ -337,104 +342,115 @@ export default function StatsPage() {
           </div>
 
           {/* Overall Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <Card className="border-slate-200 bg-white shadow-sm">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <Card className="overflow-hidden border-slate-900 bg-slate-950 text-white shadow-sm md:col-span-1">
+              <CardContent className="relative p-5">
+                <div className="absolute right-0 top-0 h-24 w-24 rounded-bl-full bg-blue-500/20" />
+                <div className="relative flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-sm font-medium text-slate-600">Level</p>
-                    <p className="text-3xl font-bold text-slate-950">{headerLoading || headerError ? 0 : totalLevel}</p>
-                    <p className="mt-1 text-xs text-slate-500">Across all skills</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Broker level</p>
+                    <p className="mt-2 text-4xl font-black leading-none">{headerLoading || headerError ? 0 : totalLevel}</p>
+                    <p className="mt-2 text-xs text-slate-300">Across all skills</p>
                   </div>
-                  <Trophy className="h-6 w-6 text-blue-500" />
+                  <div className="rounded-xl bg-white/10 p-2">
+                    <Trophy className="h-5 w-5 text-blue-200" />
+                  </div>
                 </div>
               </CardContent>
             </Card>
             
             <Card className="border-slate-200 bg-white shadow-sm">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-sm font-medium text-slate-600">Assets tracked</p>
-                    <p className="text-3xl font-bold text-violet-600">{headerLoading || headerError ? 0 : (header?.assetsTracked ?? 0)}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Assets tracked</p>
+                    <p className="mt-2 text-3xl font-black text-slate-950">{headerLoading || headerError ? 0 : (header?.assetsTracked ?? 0)}</p>
                     <p className="mt-1 text-xs text-slate-500">Market coverage base</p>
                   </div>
-                  <MapPin className="h-6 w-6 text-violet-400" />
+                  <div className="rounded-xl bg-violet-50 p-2">
+                    <MapPin className="h-5 w-5 text-violet-600" />
+                  </div>
                 </div>
               </CardContent>
             </Card>
             
             <Card className="border-slate-200 bg-white shadow-sm">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-sm font-medium text-slate-600">Follow-ups this week</p>
-                    <p className="text-3xl font-bold text-emerald-600">{weeklyFollowupsCount}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Follow-ups</p>
+                    <p className="mt-2 text-3xl font-black text-emerald-600">{weeklyFollowupsCount}</p>
                     <p className="mt-1 text-xs text-slate-500">{followupsToTarget > 0 ? `${followupsToTarget} to weekly target` : 'Target hit'}</p>
                   </div>
-                  <Phone className="h-6 w-6 text-emerald-400" />
+                  <div className="rounded-xl bg-emerald-50 p-2">
+                    <Phone className="h-5 w-5 text-emerald-600" />
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
             <Card className="border-slate-200 bg-white shadow-sm">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-sm font-medium text-slate-600">Streak days</p>
-                    <p className="text-3xl font-bold text-orange-600">{headerLoading || headerError ? 0 : (header?.streakDays ?? 0)}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Streak</p>
+                    <p className="mt-2 text-3xl font-black text-orange-600">{headerLoading || headerError ? 0 : (header?.streakDays ?? 0)}</p>
                     <p className="mt-1 text-xs text-slate-500">{streakToTarget > 0 ? `${streakToTarget} to 5-day rhythm` : '5-day rhythm hit'}</p>
                   </div>
-                  <Zap className="h-6 w-6 text-orange-400" />
+                  <div className="rounded-xl bg-orange-50 p-2">
+                    <Zap className="h-5 w-5 text-orange-600" />
+                  </div>
                 </div>
               </CardContent>
             </Card>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.1fr_1.9fr]">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.05fr_1.95fr]">
           <Card className="border-slate-200 bg-white shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-lg">
-                <Sparkles className="h-5 w-5 text-blue-600" />
+                <span className="rounded-lg bg-blue-50 p-1.5">
+                  <Sparkles className="h-4 w-4 text-blue-600" />
+                </span>
                 Next Best Actions
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-2.5">
               {nextActions.map((action) => {
                 const Icon = action.icon;
                 return (
                   <Link
                     key={action.label}
                     href={action.href}
-                    className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 p-3 transition-colors hover:bg-slate-50"
+                    className="group flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3 transition hover:border-blue-200 hover:bg-white hover:shadow-sm"
                   >
                     <div className="flex items-start gap-3">
-                      <span className="rounded-lg bg-slate-50 p-2">
-                        <Icon className="h-4 w-4 text-slate-700" />
+                      <span className="rounded-lg bg-white p-2 shadow-sm">
+                        <Icon className="h-4 w-4 text-slate-700 group-hover:text-blue-700" />
                       </span>
                       <span>
                         <span className="block text-sm font-semibold text-slate-950">{action.label}</span>
                         <span className="mt-0.5 block text-xs text-slate-500">{action.description}</span>
                       </span>
                     </div>
-                    <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-slate-400" />
+                    <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-slate-400 transition group-hover:translate-x-0.5 group-hover:text-blue-700" />
                   </Link>
                 );
               })}
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200 bg-white shadow-sm">
+          <Card className="overflow-hidden border-slate-200 bg-white shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center justify-between gap-3 text-lg">
                 <span>This Week</span>
-                <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
+                <Badge variant="outline" className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
                   {weeklyXpTotal} XP
                 </Badge>
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-5">
               {weeklyRings.map((r) => {
                 const pct = Math.min(100, Math.floor((r.value / Math.max(1, r.goal)) * 100));
                 return (
@@ -443,7 +459,7 @@ export default function StatsPage() {
                       <span className="font-medium text-slate-800">{r.label}</span>
                       <span className="text-slate-500">{r.value} / {r.goal} XP</span>
                     </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
                       <div className={`h-full rounded-full ${r.color}`} style={{ width: `${pct}%` }} />
                     </div>
                   </div>
@@ -453,11 +469,11 @@ export default function StatsPage() {
           </Card>
         </div>
 
-        <Card className="border-slate-200 bg-white shadow-sm">
-          <CardContent className="p-4">
+        <Card className="overflow-hidden border-orange-100 bg-white shadow-sm">
+          <CardContent className="p-0">
             <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="rounded-lg bg-orange-50 p-2">
+              <div className="flex min-w-0 items-center gap-3 px-4 py-4">
+                <div className="rounded-xl bg-orange-50 p-2.5">
                   <Medal className="h-5 w-5 text-orange-500" />
                 </div>
                 <div className="min-w-0">
@@ -469,12 +485,12 @@ export default function StatsPage() {
                 </div>
               </div>
               {salesBadgeSummary.next && (
-                <div className="min-w-[220px] flex-1 lg:max-w-md">
+                <div className="min-w-[260px] flex-1 px-4 py-3 lg:max-w-lg">
                   <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-600">
                     <span>{salesBadgeSummary.next.description}</span>
                     <span>{salesBadgeSummary.next.value} / {salesBadgeSummary.next.threshold}</span>
                   </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
                     <div
                       className={`h-full rounded-full ${BADGE_TONES[salesBadgeSummary.next.tone].progress}`}
                       style={{ width: `${Math.min(100, Math.floor((salesBadgeSummary.next.value / salesBadgeSummary.next.threshold) * 100))}%` }}
@@ -484,7 +500,7 @@ export default function StatsPage() {
               )}
               <Link
                 href="/badges"
-                className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 shadow-sm hover:bg-slate-50"
+                className="mr-4 inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
               >
                 View badges
                 <ArrowRight className="h-4 w-4" />
