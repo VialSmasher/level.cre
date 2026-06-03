@@ -334,92 +334,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return json;
   }
 
-  function normalizeMatchText(value: unknown) {
-    return String(value || '')
-      .toLowerCase()
-      .replace(/&/g, ' and ')
-      .replace(/\bnorthwest\b/g, 'nw')
-      .replace(/\bnortheast\b/g, 'ne')
-      .replace(/\bsouthwest\b/g, 'sw')
-      .replace(/\bsoutheast\b/g, 'se')
-      .replace(/\bstreet\b/g, 'st')
-      .replace(/\bavenue\b/g, 'ave')
-      .replace(/\broad\b/g, 'rd')
-      .replace(/\bdrive\b/g, 'dr')
-      .replace(/\bcrescent\b/g, 'cres')
-      .replace(/[^a-z0-9]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  function usefulTokens(value: unknown) {
-    const stopwords = new Set([
-      'ltd', 'inc', 'corp', 'company', 'building', 'property',
-      'edmonton', 'alberta', 'canada', 'northwest', 'northeast', 'southwest', 'southeast',
-      'ave', 'avenue', 'street', 'road', 'drive', 'suite',
-      'and', 'the', 'for', 'with', 'from', 'this', 'that', 'test', 'email',
-      'sales', 'leasing', 'industrial', 'office', 'direct', 'main', 'partner',
-      'associate', 'regards', 'confidential', 'privileged', 'intended',
-      'recipient', 'communication', 'information', 'member', 'alliance',
-      'facebook', 'linkedin', 'youtube', 'instagram', 'cushman', 'wakefield',
-    ]);
-    return normalizeMatchText(value)
-      .split(' ')
-      .filter((token) => token.length > 2 && !stopwords.has(token));
-  }
-
-  function distinctiveTokens(value: unknown) {
-    return usefulTokens(value).filter((token) => token.length >= 4 && !/^\d+$/.test(token));
-  }
-
-  function addressLikeTokens(value: unknown) {
-    return usefulTokens(value).filter((token) => /^\d+$/.test(token) || /^[a-z]{1,3}$/.test(token));
-  }
-
-  function scoreEmailProspect(message: any, prospect: any) {
-    const participantEmails = [
-      message.senderEmail,
-      ...(message.recipientEmails || []),
-      ...(message.ccEmails || []),
-    ]
-      .map((value: unknown) => String(value || '').trim().toLowerCase())
-      .filter(Boolean);
-    const participantText = normalizeMatchText([
-      message.senderEmail,
-      message.senderName,
-      ...(message.recipientEmails || []),
-      ...(message.ccEmails || []),
-    ].join(' '));
-    const participantDomains = participantEmails
-      .map((email) => email.split('@')[1] || '')
-      .filter((domain) => domain && !/^(gmail|outlook|hotmail|icloud|yahoo|live|me)\./i.test(domain));
-    const participantDomainText = normalizeMatchText(participantDomains.join(' '));
-    let score = 0;
-    const reasons: string[] = [];
-    const prospectEmail = String(prospect.contact_email || '').trim().toLowerCase();
-    if (prospectEmail && participantEmails.includes(prospectEmail)) {
-      score += 100;
-      reasons.push('contact email');
-    }
-    const companyTokens = distinctiveTokens([prospect.contact_company, prospect.business_name].join(' '));
-    const joinedCompany = companyTokens.join('');
-    const companyHits = companyTokens.filter((token) => participantText.includes(token) || participantDomainText.includes(token));
-    if (joinedCompany && joinedCompany.length >= 6 && participantDomainText.includes(joinedCompany)) {
-      companyHits.push(joinedCompany);
-    }
-    if (companyHits.length) {
-      score += Math.min(85, 55 + companyHits.length * 15);
-      reasons.push(`company/domain ${Array.from(new Set(companyHits)).join(', ')}`);
-    }
-    const contactNameTokens = distinctiveTokens(prospect.contact_name);
-    const contactNameHits = contactNameTokens.filter((token) => participantText.includes(token));
-    if (contactNameHits.length && companyHits.length) {
-      score += Math.min(15, contactNameHits.length * 8);
-      reasons.push(`contact name ${contactNameHits.join(', ')}`);
-    }
-    return { score: Math.min(score, 100), reason: reasons.join('; ') };
-  }
-
   async function storeInboundEmailForReview(userId: string, messageData: any) {
     const inserted = await pool.query(`
       INSERT INTO public.email_messages (
@@ -468,61 +382,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const emailMessageId = inserted.rows[0].id;
     const isNewMessage = Boolean(inserted.rows[0]?.inserted);
     const xpAwarded = await awardCapturedEmailActivity(userId, emailMessageId, isNewMessage);
-    const prospectsResult = await pool.query(`
-      SELECT id, name, status, notes, address, contact_name, contact_email, contact_company, business_name
-      FROM public.prospects
-      WHERE user_id = $1
-    `, [userId]);
-    const bestMatches = prospectsResult.rows
-      .map((prospect: any) => ({ prospect, ...scoreEmailProspect(messageData, prospect) }))
-      .filter((candidate: any) => candidate.score >= 45)
-      .sort((a: any, b: any) => b.score - a.score)
-      .slice(0, 3);
     let matchesCreated = 0;
-    for (const candidate of bestMatches) {
-      const result = await pool.query(`
-        INSERT INTO public.email_prospect_matches (
-          user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
-          suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
-        )
-        VALUES ($1, $2, $3, $4, 'pending_review', $5, 'email', 'contacted', $6, now())
-        ON CONFLICT (email_message_id, prospect_id) WHERE prospect_id IS NOT NULL
-        DO UPDATE SET
-          confidence = GREATEST(public.email_prospect_matches.confidence, EXCLUDED.confidence),
-          match_reason = EXCLUDED.match_reason,
-          suggested_summary = COALESCE(public.email_prospect_matches.suggested_summary, EXCLUDED.suggested_summary),
-          updated_at = now()
-        RETURNING (xmax = 0) AS inserted
-      `, [
-        userId,
-        emailMessageId,
-        candidate.prospect.id,
-        candidate.score,
-        candidate.reason,
-        [messageData.subject, messageData.snippet].filter(Boolean).join('\n').slice(0, 1000),
-      ]);
-      if (result.rows[0]?.inserted) matchesCreated += 1;
-    }
-    if (bestMatches.length === 0) {
-      const result = await pool.query(`
-        INSERT INTO public.email_prospect_matches (
-          user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
-          suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
-        )
-        SELECT $1, $2, NULL, 0, 'needs_context', $3, 'email', 'contacted', $4, now()
-        WHERE NOT EXISTS (
-          SELECT 1 FROM public.email_prospect_matches
-          WHERE user_id = $1 AND email_message_id = $2 AND prospect_id IS NULL
-        )
-        RETURNING id
-      `, [
-        userId,
-        emailMessageId,
-        'No confident prospect match; activity captured for later context.',
-        [messageData.subject, messageData.snippet].filter(Boolean).join('\n').slice(0, 1000),
-      ]);
-      if (result.rows[0]) matchesCreated += 1;
-    }
+    const result = await pool.query(`
+      INSERT INTO public.email_prospect_matches (
+        user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
+        suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
+      )
+      SELECT $1, $2, NULL, 0, 'needs_context', $3, 'email', 'contacted', $4, now()
+      WHERE NOT EXISTS (
+        SELECT 1 FROM public.email_prospect_matches
+        WHERE user_id = $1 AND email_message_id = $2 AND prospect_id IS NULL
+      )
+      RETURNING id
+    `, [
+      userId,
+      emailMessageId,
+      'Captured email activity; no automatic prospect matching.',
+      [messageData.subject, messageData.snippet].filter(Boolean).join('\n').slice(0, 1000),
+    ]);
+    if (result.rows[0]) matchesCreated += 1;
     return { emailMessageId, inserted: isNewMessage, matchesCreated, xpAwarded, newXpGained: xpAwarded ? xpForInteractionType('email') : 0 };
   }
 
@@ -3230,12 +3108,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let messagesSeen = 0;
     let messagesStored = 0;
     let matchesCreated = 0;
-    const prospectsResult = await pool.query(`
-      SELECT id, name, status, notes, address, contact_name, contact_email, contact_company, business_name
-      FROM public.prospects
-      WHERE user_id = $1
-    `, [userId]);
-    const prospects = prospectsResult.rows;
 
     for (const folder of folders) {
       const url = new URL(`https://graph.microsoft.com/v1.0/me/mailFolders/${folder.id}/messages`);
@@ -3325,37 +3197,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const emailMessageId = inserted.rows[0].id;
         if (inserted.rows[0].inserted) messagesStored += 1;
 
-        const bestMatches = prospects
-          .map((prospect: any) => ({ prospect, ...scoreEmailProspect(messageData, prospect) }))
-          .filter((candidate: any) => candidate.score >= 45)
-          .sort((a: any, b: any) => b.score - a.score)
-          .slice(0, 3);
-        for (const candidate of bestMatches) {
-          const matchStatus = candidate.score >= 90 ? 'pending_review' : 'pending_review';
-          const result = await pool.query(`
-            INSERT INTO public.email_prospect_matches (
-              user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
-              suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, 'email', 'contacted', $7, now())
-            ON CONFLICT (email_message_id, prospect_id) WHERE prospect_id IS NOT NULL
-            DO UPDATE SET
-              confidence = GREATEST(public.email_prospect_matches.confidence, EXCLUDED.confidence),
-              match_reason = EXCLUDED.match_reason,
-              suggested_summary = COALESCE(public.email_prospect_matches.suggested_summary, EXCLUDED.suggested_summary),
-              updated_at = now()
-            RETURNING (xmax = 0) AS inserted
-          `, [
-            userId,
-            emailMessageId,
-            candidate.prospect.id,
-            candidate.score,
-            matchStatus,
-            candidate.reason,
-            [messageData.subject, messageData.snippet].filter(Boolean).join('\n').slice(0, 1000),
-          ]);
-          if (result.rows[0]?.inserted) matchesCreated += 1;
-        }
+        const result = await pool.query(`
+          INSERT INTO public.email_prospect_matches (
+            user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
+            suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
+          )
+          SELECT $1, $2, NULL, 0, 'needs_context', $3, 'email', 'contacted', $4, now()
+          WHERE NOT EXISTS (
+            SELECT 1 FROM public.email_prospect_matches
+            WHERE user_id = $1 AND email_message_id = $2 AND prospect_id IS NULL
+          )
+          RETURNING id
+        `, [
+          userId,
+          emailMessageId,
+          'Captured email activity; no automatic prospect matching.',
+          [messageData.subject, messageData.snippet].filter(Boolean).join('\n').slice(0, 1000),
+        ]);
+        if (result.rows[0]) matchesCreated += 1;
       }
     }
     await pool.query(`

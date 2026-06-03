@@ -86,7 +86,7 @@ type InboundEmailConfig = {
 
 const statusLabels: Record<EmailReviewStatus, string> = {
   needs_context: 'Needs Context',
-  pending_review: 'Needs Review',
+  pending_review: 'Context Attached',
   auto_logged: 'Logged',
   approved: 'Approved',
   ignored: 'Ignored',
@@ -100,12 +100,6 @@ function formatEmailDate(item: EmailReviewItem) {
   const date = new Date(value)
   if (!Number.isFinite(date.getTime())) return 'No date'
   return `${formatDistanceToNow(date, { addSuffix: true })}`
-}
-
-function confidenceTone(confidence: number) {
-  if (confidence >= 85) return 'bg-emerald-50 text-emerald-700 border-emerald-200'
-  if (confidence >= 60) return 'bg-amber-50 text-amber-700 border-amber-200'
-  return 'bg-slate-50 text-slate-600 border-slate-200'
 }
 
 export default function InboxPage() {
@@ -156,7 +150,7 @@ export default function InboxPage() {
   const dashboardCards = [
     { label: 'Captured', value: capturedCount, helper: 'BCC email activity', tone: 'text-slate-950' },
     { label: 'Needs Context', value: counts?.needsContext ?? 0, helper: 'Optional cleanup', tone: 'text-amber-700' },
-    { label: 'Attached', value: counts?.autoLogged ?? 0, helper: 'Linked to prospects', tone: 'text-emerald-700' },
+    { label: 'Attached', value: (counts?.pendingReview ?? 0) + (counts?.autoLogged ?? 0), helper: 'Linked to context', tone: 'text-emerald-700' },
     { label: 'Email XP', value: estimatedEmailXp, helper: 'Captured activity value', tone: 'text-blue-700' },
   ]
 
@@ -261,7 +255,7 @@ export default function InboxPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="needs_context">Needs Context</SelectItem>
-                  <SelectItem value="pending_review">Needs Review</SelectItem>
+                  <SelectItem value="pending_review">Context Attached</SelectItem>
                   <SelectItem value="auto_logged">Logged</SelectItem>
                   <SelectItem value="approved">Approved</SelectItem>
                   <SelectItem value="ignored">Ignored</SelectItem>
@@ -370,8 +364,11 @@ export default function InboxPage() {
                         <Badge variant="outline" className="bg-slate-50 text-slate-700">
                           {statusLabels[item.matchStatus]}
                         </Badge>
-                        <Badge variant="outline" className={confidenceTone(item.confidence)}>
-                          {item.confidence}% match
+                        <Badge
+                          variant="outline"
+                          className={item.prospect ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-600 border-slate-200'}
+                        >
+                          {item.prospect ? 'Manual context' : 'Unattached'}
                         </Badge>
                         {item.matchStatus === 'needs_context' ? (
                           <Badge variant="outline" className="bg-blue-50 text-blue-700">
@@ -413,7 +410,7 @@ export default function InboxPage() {
                         onClick={() => logInteractionMutation.mutate(item.id)}
                       >
                         <CheckCircle2 className="mr-2 h-4 w-4" />
-                        Attach to Prospect
+                        Log to Prospect
                       </Button>
                     </div>
                   </div>
@@ -428,7 +425,7 @@ export default function InboxPage() {
                     ) : null}
                   </div>
                   <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Matched Company / Prospect</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Email Context</p>
                     {item.prospect ? (
                       <div className="mt-2 space-y-1">
                         <p className="text-sm font-semibold text-slate-950">{item.prospect.contactCompany || item.prospect.businessName || item.prospect.name || 'Untitled prospect'}</p>
@@ -446,7 +443,7 @@ export default function InboxPage() {
                           onValueChange={(value) => setProspectDrafts((prev) => ({ ...prev, [item.id]: value }))}
                         >
                           <SelectTrigger className="bg-white">
-                            <SelectValue placeholder="Choose existing prospect" />
+                            <SelectValue placeholder="Choose company or prospect" />
                           </SelectTrigger>
                           <SelectContent>
                             {prospectOptions.map((prospect) => (
