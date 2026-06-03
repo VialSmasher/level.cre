@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowRight, BarChart3, Brain, CalendarCheck, CheckCircle2, MapPin, Phone, Sparkles, Target, Trophy, Users, Zap } from 'lucide-react';
+import { ArrowRight, BarChart3, Brain, CalendarCheck, Flame, Mail, MapPin, Medal, Phone, Sparkles, Target, Trophy, Users, Zap } from 'lucide-react';
 import { BrokerSkillsRow, SkillActivityRow, Requirement } from '@level-cre/shared/schema';
 import { Link } from 'wouter';
 
@@ -83,6 +83,80 @@ const FOLLOW_UP_COUNT_ACTIONS = new Set([
   'interaction',
   'note_added',
 ]);
+
+type SalesActivityKind = 'call' | 'email' | 'meeting' | 'note' | 'touch';
+
+type SalesBadgeDefinition = {
+  id: string;
+  title: string;
+  description: string;
+  metric: SalesActivityKind;
+  threshold: number;
+  window: 'day' | 'tracked';
+  icon: React.ComponentType<any>;
+  tone: 'blue' | 'emerald' | 'orange' | 'violet' | 'slate';
+};
+
+type SalesBadgeView = SalesBadgeDefinition & {
+  value: number;
+  unlocked: boolean;
+};
+
+const SALES_BADGE_DEFINITIONS: SalesBadgeDefinition[] = [
+  { id: 'daily_5_calls', title: 'Warm Line', description: 'Make 5 calls in a day', metric: 'call', threshold: 5, window: 'day', icon: Phone, tone: 'emerald' },
+  { id: 'daily_15_calls', title: 'Power Dialer', description: 'Make 15 calls in a day', metric: 'call', threshold: 15, window: 'day', icon: Phone, tone: 'emerald' },
+  { id: 'daily_30_calls', title: 'Call Blitz', description: 'Make 30 calls in a day', metric: 'call', threshold: 30, window: 'day', icon: Flame, tone: 'orange' },
+  { id: 'daily_10_emails', title: 'Inbox Push', description: 'Send 10 emails in a day', metric: 'email', threshold: 10, window: 'day', icon: Mail, tone: 'blue' },
+  { id: 'daily_25_emails', title: 'Campaign Day', description: 'Send 25 emails in a day', metric: 'email', threshold: 25, window: 'day', icon: Mail, tone: 'blue' },
+  { id: 'daily_20_touches', title: 'Touchpoint Sprint', description: 'Log 20 calls, emails, meetings, or notes in a day', metric: 'touch', threshold: 20, window: 'day', icon: Zap, tone: 'orange' },
+  { id: 'tracked_100_calls', title: 'Century Caller', description: 'Log 100 calls in tracked history', metric: 'call', threshold: 100, window: 'tracked', icon: Medal, tone: 'emerald' },
+  { id: 'tracked_250_calls', title: 'Rainmaker Rhythm', description: 'Log 250 calls in tracked history', metric: 'call', threshold: 250, window: 'tracked', icon: Trophy, tone: 'orange' },
+  { id: 'tracked_100_emails', title: 'Email Engine', description: 'Log 100 emails in tracked history', metric: 'email', threshold: 100, window: 'tracked', icon: Medal, tone: 'blue' },
+  { id: 'tracked_25_meetings', title: 'Meeting Maker', description: 'Log 25 meetings in tracked history', metric: 'meeting', threshold: 25, window: 'tracked', icon: Users, tone: 'violet' },
+  { id: 'tracked_50_notes', title: 'Intel Keeper', description: 'Add 50 notes in tracked history', metric: 'note', threshold: 50, window: 'tracked', icon: Brain, tone: 'slate' },
+];
+
+const BADGE_TONES = {
+  blue: {
+    unlocked: 'border-blue-200 bg-blue-50 text-blue-800',
+    icon: 'bg-blue-600 text-white',
+    progress: 'bg-blue-500',
+  },
+  emerald: {
+    unlocked: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    icon: 'bg-emerald-600 text-white',
+    progress: 'bg-emerald-500',
+  },
+  orange: {
+    unlocked: 'border-orange-200 bg-orange-50 text-orange-800',
+    icon: 'bg-orange-500 text-white',
+    progress: 'bg-orange-500',
+  },
+  violet: {
+    unlocked: 'border-violet-200 bg-violet-50 text-violet-800',
+    icon: 'bg-violet-600 text-white',
+    progress: 'bg-violet-500',
+  },
+  slate: {
+    unlocked: 'border-slate-200 bg-slate-50 text-slate-800',
+    icon: 'bg-slate-800 text-white',
+    progress: 'bg-slate-500',
+  },
+} as const;
+
+function activityKind(actionValue: unknown): SalesActivityKind | null {
+  const action = String(actionValue || '').toLowerCase();
+  if (action === 'call' || action === 'phone_call') return 'call';
+  if (action === 'email' || action === 'email_sent') return 'email';
+  if (action === 'meeting' || action === 'meeting_held') return 'meeting';
+  if (action === 'note' || action === 'note_added') return 'note';
+  return null;
+}
+
+function getDayKeyInTimeZone(date: Date, timeZone: string) {
+  const { year, month, day } = getDatePartsInTimeZone(date, timeZone);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
 
 const getDatePartsInTimeZone = (date: Date, timeZone: string) => {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -200,6 +274,44 @@ function SkillCard({ name, xp, icon: Icon, description, skillKey, progressPercen
   );
 }
 
+function SalesBadgeCard({ badge }: { badge: SalesBadgeView }) {
+  const Icon = badge.icon;
+  const tone = BADGE_TONES[badge.tone];
+  const progress = Math.min(100, Math.floor((badge.value / Math.max(1, badge.threshold)) * 100));
+  const cardClass = badge.unlocked
+    ? tone.unlocked
+    : 'border-slate-200 bg-slate-50 text-slate-500';
+  const iconClass = badge.unlocked
+    ? tone.icon
+    : 'bg-white text-slate-400';
+
+  return (
+    <div className={`rounded-xl border p-4 shadow-sm transition ${cardClass}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className={`rounded-lg p-2 ${iconClass}`}>
+          <Icon className="h-4 w-4" />
+        </div>
+        {badge.unlocked ? (
+          <Badge className="bg-slate-950 text-white">Unlocked</Badge>
+        ) : (
+          <Badge variant="outline" className="bg-white text-slate-600">Locked</Badge>
+        )}
+      </div>
+      <p className="mt-4 text-base font-bold text-slate-950">{badge.title}</p>
+      <p className="mt-1 min-h-[2rem] text-xs leading-4 text-slate-600">{badge.description}</p>
+      <div className="mt-4 space-y-2">
+        <div className="flex items-center justify-between text-xs font-semibold">
+          <span>{badge.window === 'day' ? 'Best day' : 'Tracked total'}</span>
+          <span>{badge.value} / {badge.threshold}</span>
+        </div>
+        <div className="h-2 overflow-hidden rounded-full bg-white">
+          <div className={`h-full rounded-full ${badge.unlocked ? tone.progress : 'bg-slate-300'}`} style={{ width: `${progress}%` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Leaderboard moved to its own page
 
 export default function StatsPage() {
@@ -293,6 +405,49 @@ export default function StatsPage() {
   const weeklyXpTotal = Object.values(weeklySummary.sums).reduce((sum, value) => sum + Number(value || 0), 0);
   const followupsToTarget = Math.max(0, 5 - weeklyFollowupsCount);
   const streakToTarget = Math.max(0, 5 - (header?.streakDays ?? 0));
+
+  const salesBadgeSummary = React.useMemo(() => {
+    const dailyBuckets = new Map<string, Record<SalesActivityKind, number>>();
+    const bestDayCounts: Record<SalesActivityKind, number> = { call: 0, email: 0, meeting: 0, note: 0, touch: 0 };
+    const trackedCounts: Record<SalesActivityKind, number> = { call: 0, email: 0, meeting: 0, note: 0, touch: 0 };
+
+    for (const activity of recentActivities || []) {
+      const kind = activityKind((activity as any).action);
+      if (!kind) continue;
+      const activityDate = new Date((activity as any).timestamp || (activity as any).date || (activity as any).createdAt || Date.now());
+      trackedCounts[kind] += 1;
+      trackedCounts.touch += 1;
+      const dayKey = getDayKeyInTimeZone(activityDate, EDMONTON_TZ);
+      const dayCounts = dailyBuckets.get(dayKey) || { call: 0, email: 0, meeting: 0, note: 0, touch: 0 };
+      dayCounts[kind] += 1;
+      dayCounts.touch += 1;
+      dailyBuckets.set(dayKey, dayCounts);
+    }
+
+    for (const dayCounts of dailyBuckets.values()) {
+      bestDayCounts.call = Math.max(bestDayCounts.call, dayCounts.call);
+      bestDayCounts.email = Math.max(bestDayCounts.email, dayCounts.email);
+      bestDayCounts.meeting = Math.max(bestDayCounts.meeting, dayCounts.meeting);
+      bestDayCounts.note = Math.max(bestDayCounts.note, dayCounts.note);
+      bestDayCounts.touch = Math.max(bestDayCounts.touch, dayCounts.touch);
+    }
+
+    const badges = SALES_BADGE_DEFINITIONS.map((definition): SalesBadgeView => {
+      const value = definition.window === 'day' ? bestDayCounts[definition.metric] : trackedCounts[definition.metric];
+      return {
+        ...definition,
+        value,
+        unlocked: value >= definition.threshold,
+      };
+    });
+
+    const unlocked = badges.filter((badge) => badge.unlocked);
+    const next = badges
+      .filter((badge) => !badge.unlocked)
+      .sort((a, b) => ((b.value / b.threshold) - (a.value / a.threshold)) || (a.threshold - b.threshold))[0] || null;
+
+    return { badges, unlocked, next, bestDayCounts, trackedCounts };
+  }, [recentActivities]);
 
   const nextActions = [
     {
@@ -468,6 +623,48 @@ export default function StatsPage() {
             </CardContent>
           </Card>
         </div>
+
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader className="pb-2">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <Medal className="h-5 w-5 text-orange-500" />
+                  Sales Badges
+                </CardTitle>
+                <p className="mt-1 text-sm text-slate-600">
+                  Fitbit-style activity badges for calls, emails, meetings, notes, and daily touchpoint pushes.
+                </p>
+              </div>
+              <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
+                {salesBadgeSummary.unlocked.length} / {salesBadgeSummary.badges.length} unlocked
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {salesBadgeSummary.next && (
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-blue-950">Next badge: {salesBadgeSummary.next.title}</p>
+                    <p className="mt-1 text-xs text-blue-800">
+                      {Math.max(0, salesBadgeSummary.next.threshold - salesBadgeSummary.next.value)} more to unlock. {salesBadgeSummary.next.description}.
+                    </p>
+                  </div>
+                  <Badge className="bg-blue-600 text-white">
+                    {salesBadgeSummary.next.value} / {salesBadgeSummary.next.threshold}
+                  </Badge>
+                </div>
+              </div>
+            )}
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {salesBadgeSummary.badges.map((badge) => (
+                <SalesBadgeCard key={badge.id} badge={badge} />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Main Content */}
         <div className="grid grid-cols-1 gap-4">
