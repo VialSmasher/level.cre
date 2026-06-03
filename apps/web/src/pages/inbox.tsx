@@ -160,8 +160,8 @@ export default function InboxPage() {
   }
 
   const updateStatusMutation = useMutation({
-    mutationFn: async ({ id, matchStatus, prospectId }: { id: string; matchStatus?: Exclude<EmailReviewStatus, 'all'>; prospectId?: string | null }) => {
-      const response = await apiRequest('PATCH', `/api/email/review/${id}`, { matchStatus, prospectId })
+    mutationFn: async ({ id, matchStatus, prospectId, listingId }: { id: string; matchStatus?: Exclude<EmailReviewStatus, 'all'>; prospectId?: string | null; listingId?: string | null }) => {
+      const response = await apiRequest('PATCH', `/api/email/review/${id}`, { matchStatus, prospectId, listingId })
       return response.json()
     },
     onSuccess: invalidate,
@@ -412,6 +412,16 @@ export default function InboxPage() {
                         <CheckCircle2 className="mr-2 h-4 w-4" />
                         Log to Prospect
                       </Button>
+                      {item.prospect ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={updateStatusMutation.isPending}
+                          onClick={() => updateStatusMutation.mutate({ id: item.id, prospectId: null, listingId: null, matchStatus: 'needs_context' })}
+                        >
+                          Clear Context
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
                 </CardHeader>
