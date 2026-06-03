@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowLeft, ArrowUpRight, Crown, Medal, ShieldCheck, Sparkles, Target, Trophy, Users } from 'lucide-react';
+import { ArrowUpRight, Crown, Medal, ShieldCheck, Sparkles, Target, Trophy, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { Link } from 'wouter';
@@ -59,24 +59,34 @@ export default function LeaderboardPage() {
   const topThree = leaderboard.slice(0, 3);
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
-      <div className="mx-auto max-w-6xl space-y-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+    <div className="min-h-screen bg-[#f6f8fb] p-4 md:p-6">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <Badge variant="outline" className="mb-2 gap-2 rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
-              <Trophy className="h-3.5 w-3.5" />
-              Market standings
-            </Badge>
-            <h1 className="text-3xl font-bold text-slate-950">Market Standings</h1>
-            <p className="text-slate-600">See where you stand, who is leading, and the XP gap to climb.</p>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Scorecard</p>
+            <h1 className="text-2xl font-black tracking-tight text-slate-950 md:text-3xl">Market Standings</h1>
+            <p className="mt-1 text-sm text-slate-600">See where you stand, who is leading, and the XP gap to climb.</p>
           </div>
-          <Link
-            href="/broker-stats"
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-blue-200 hover:text-blue-700"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Broker Scorecard
-          </Link>
+          <div className="flex w-fit items-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+            <Link
+              href="/broker-stats"
+              className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+            >
+              <Trophy className="h-4 w-4" />
+              Overview
+            </Link>
+            <Link
+              href="/badges"
+              className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+            >
+              <Medal className="h-4 w-4" />
+              Badges
+            </Link>
+            <span className="inline-flex h-9 items-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white">
+              <Trophy className="h-4 w-4" />
+              Standings
+            </span>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-4">

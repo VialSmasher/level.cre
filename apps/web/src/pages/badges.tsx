@@ -1,7 +1,7 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'wouter';
-import { ArrowLeft, Flame, Medal, Phone, Trophy, Zap } from 'lucide-react';
+import { Flame, Medal, Phone, Trophy, Zap } from 'lucide-react';
 import { apiRequest } from '@/lib/queryClient';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -29,24 +29,34 @@ export default function BadgesPage() {
   const touchTotal = salesBadgeSummary.trackedCounts.touch;
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-6">
+    <div className="min-h-screen bg-[#f6f8fb] p-4 md:p-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <Badge variant="outline" className="mb-2 gap-2 rounded-full border-orange-200 bg-orange-50 px-3 py-1 text-orange-700">
-              <Medal className="h-3.5 w-3.5" />
-              Sales badges
-            </Badge>
-            <h1 className="text-3xl font-bold text-slate-950">Badge Collection</h1>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Scorecard</p>
+            <h1 className="text-2xl font-black tracking-tight text-slate-950 md:text-3xl">Badge Collection</h1>
             <p className="mt-1 text-sm text-slate-600">Daily spikes, tracked totals, and sales activity milestones.</p>
           </div>
-          <Link
-            href="/broker-stats"
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-blue-200 hover:text-blue-700"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Broker Scorecard
-          </Link>
+          <div className="flex w-fit items-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+            <Link
+              href="/broker-stats"
+              className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+            >
+              <Trophy className="h-4 w-4" />
+              Overview
+            </Link>
+            <span className="inline-flex h-9 items-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white">
+              <Medal className="h-4 w-4" />
+              Badges
+            </span>
+            <Link
+              href="/leaderboard"
+              className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+            >
+              <Trophy className="h-4 w-4" />
+              Standings
+            </Link>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-4">

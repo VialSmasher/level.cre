@@ -6,7 +6,6 @@ import { Badge } from '@/components/ui/badge';
 import { ArrowRight, Brain, MapPin, Medal, Phone, Sparkles, Target, Trophy, Zap } from 'lucide-react';
 import { BrokerSkillsRow, SkillActivityRow, Requirement } from '@level-cre/shared/schema';
 import { Link } from 'wouter';
-import { buildSalesBadgeSummary, BADGE_TONES } from '@/lib/salesBadges';
 
 // XP calculation helpers
 const getLevel = (xp: number): number => {
@@ -264,8 +263,6 @@ export default function StatsPage() {
   const followupsToTarget = Math.max(0, 5 - weeklyFollowupsCount);
   const streakToTarget = Math.max(0, 5 - (header?.streakDays ?? 0));
 
-  const salesBadgeSummary = React.useMemo(() => buildSalesBadgeSummary(recentActivities || [], EDMONTON_TZ), [recentActivities]);
-
   const nextActions = [
     {
       label: followupsToTarget > 0 ? `Log ${followupsToTarget} more follow-up${followupsToTarget === 1 ? '' : 's'} this week` : 'Weekly follow-up target hit',
@@ -302,15 +299,10 @@ export default function StatsPage() {
         {/* Header */}
         <div>
           <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="rounded-2xl bg-slate-950 p-3 shadow-sm">
-                <Trophy className="h-5 w-5 text-white" />
-              </div>
-              <div>
-                <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Scorecard</p>
-                <h1 className="text-2xl font-black tracking-tight text-slate-950 md:text-3xl">Broker Performance</h1>
-                <p className="mt-1 text-sm text-slate-600">Weekly activity, CRM momentum, and market knowledge progress.</p>
-              </div>
+            <div>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Scorecard</p>
+              <h1 className="text-2xl font-black tracking-tight text-slate-950 md:text-3xl">Broker Performance</h1>
+              <p className="mt-1 text-sm text-slate-600">Weekly activity, CRM momentum, and market knowledge progress.</p>
             </div>
             <div className="flex w-fit items-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm md:pb-0">
               <span className="inline-flex h-9 items-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white">
@@ -514,46 +506,6 @@ export default function StatsPage() {
               description="Requirements tracking, market research, and industry insights"
               skillKey="marketKnowledge"
             />
-          </CardContent>
-        </Card>
-
-        <Card className="overflow-hidden border-orange-100 bg-white shadow-sm">
-          <CardContent className="p-0">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex min-w-0 items-center gap-3 px-4 py-4">
-                <div className="rounded-lg bg-orange-50 p-2.5">
-                  <Medal className="h-5 w-5 text-orange-500" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-slate-950">Sales Badges</p>
-                  <p className="mt-1 text-xs text-slate-600">
-                    {salesBadgeSummary.unlocked.length} / {salesBadgeSummary.badges.length} unlocked
-                    {salesBadgeSummary.next ? ` - Next: ${salesBadgeSummary.next.title}` : ' - Collection complete'}
-                  </p>
-                </div>
-              </div>
-              {salesBadgeSummary.next && (
-                <div className="min-w-[260px] flex-1 px-4 py-3 lg:max-w-lg">
-                  <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-600">
-                    <span>{salesBadgeSummary.next.description}</span>
-                    <span>{salesBadgeSummary.next.value} / {salesBadgeSummary.next.threshold}</span>
-                  </div>
-                  <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className={`h-full rounded-full ${BADGE_TONES[salesBadgeSummary.next.tone].progress}`}
-                      style={{ width: `${Math.min(100, Math.floor((salesBadgeSummary.next.value / salesBadgeSummary.next.threshold) * 100))}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-              <Link
-                href="/badges"
-                className="mr-4 inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
-              >
-                View badges
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
           </CardContent>
         </Card>
 
