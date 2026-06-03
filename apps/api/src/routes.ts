@@ -377,74 +377,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   function scoreEmailProspect(message: any, prospect: any) {
-    const subjectText = normalizeMatchText([
-      message.subject,
-      ...(message.attachmentNames || []),
-    ].join(' '));
+    const participantEmails = [
+      message.senderEmail,
+      ...(message.recipientEmails || []),
+      ...(message.ccEmails || []),
+    ]
+      .map((value: unknown) => String(value || '').trim().toLowerCase())
+      .filter(Boolean);
     const participantText = normalizeMatchText([
       message.senderEmail,
       message.senderName,
       ...(message.recipientEmails || []),
+      ...(message.ccEmails || []),
     ].join(' '));
-    const messageText = normalizeMatchText([
-      message.subject,
-      message.snippet,
-      message.senderEmail,
-      message.senderName,
-      ...(message.recipientEmails || []),
-      ...(message.attachmentNames || []),
-    ].join(' '));
-    const prospectText = normalizeMatchText([
-      prospect.name,
-      prospect.address,
-      prospect.business_name,
-      prospect.contact_company,
-      prospect.contact_email,
-      prospect.contact_name,
-      prospect.notes,
-    ].join(' '));
+    const participantDomains = participantEmails
+      .map((email) => email.split('@')[1] || '')
+      .filter((domain) => domain && !/^(gmail|outlook|hotmail|icloud|yahoo|live|me)\./i.test(domain));
+    const participantDomainText = normalizeMatchText(participantDomains.join(' '));
     let score = 0;
     const reasons: string[] = [];
-    const prospectEmail = normalizeMatchText(prospect.contact_email);
-    if (prospectEmail && (participantText.includes(prospectEmail) || messageText.includes(prospectEmail))) {
-      score += 90;
+    const prospectEmail = String(prospect.contact_email || '').trim().toLowerCase();
+    if (prospectEmail && participantEmails.includes(prospectEmail)) {
+      score += 100;
       reasons.push('contact email');
     }
-    const prospectName = normalizeMatchText(prospect.name);
-    if (prospectName && subjectText.includes(prospectName)) {
-      score += 95;
-      reasons.push('subject name');
+    const companyTokens = distinctiveTokens([prospect.contact_company, prospect.business_name].join(' '));
+    const joinedCompany = companyTokens.join('');
+    const companyHits = companyTokens.filter((token) => participantText.includes(token) || participantDomainText.includes(token));
+    if (joinedCompany && joinedCompany.length >= 6 && participantDomainText.includes(joinedCompany)) {
+      companyHits.push(joinedCompany);
     }
-    const address = normalizeMatchText(prospect.address || prospect.name);
-    if (address && subjectText.includes(address)) {
-      score += 90;
-      reasons.push('subject address');
-    }
-    const addressTokens = addressLikeTokens([prospect.address, prospect.name].join(' '));
-    const numericAddressHits = addressTokens.filter((token) => /^\d+$/.test(token) && subjectText.includes(token));
-    const streetAddressHits = addressTokens.filter((token) => !/^\d+$/.test(token) && subjectText.includes(token));
-    if (numericAddressHits.length >= 2 || (numericAddressHits.length >= 1 && streetAddressHits.length >= 1)) {
-      score += Math.min(95, 65 + (numericAddressHits.length + streetAddressHits.length) * 8);
-      reasons.push(`subject address tokens ${numericAddressHits.length + streetAddressHits.length}/${addressTokens.length}`);
-    }
-    const companyTokens = distinctiveTokens([prospect.business_name, prospect.contact_company].join(' '));
-    const companyHits = companyTokens.filter((token) => subjectText.includes(token) || participantText.includes(token));
     if (companyHits.length) {
-      score += Math.min(75, companyHits.length * 65);
-      reasons.push(`company token ${companyHits.join(', ')}`);
+      score += Math.min(85, 55 + companyHits.length * 15);
+      reasons.push(`company/domain ${Array.from(new Set(companyHits)).join(', ')}`);
     }
-    const nameTokens = distinctiveTokens([prospect.name, prospect.business_name, prospect.contact_company].join(' '));
-    const tokenHits = nameTokens.filter((token) => subjectText.includes(token));
-    if (tokenHits.length) {
-      score += Math.min(45, tokenHits.length * 12);
-      reasons.push(`subject name/company tokens ${tokenHits.length}/${nameTokens.length}`);
-    }
-    if (!score && prospectText) {
-      const senderDomain = String(message.senderEmail || '').split('@')[1]?.toLowerCase();
-      if (senderDomain && prospectText.includes(senderDomain.replace(/\..*$/, ''))) {
-        score += 25;
-        reasons.push('domain hint');
-      }
+    const contactNameTokens = distinctiveTokens(prospect.contact_name);
+    const contactNameHits = contactNameTokens.filter((token) => participantText.includes(token));
+    if (contactNameHits.length && companyHits.length) {
+      score += Math.min(15, contactNameHits.length * 8);
+      reasons.push(`contact name ${contactNameHits.join(', ')}`);
     }
     return { score: Math.min(score, 100), reason: reasons.join('; ') };
   }
@@ -3521,6 +3492,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: row.prospect_name || '',
         address: row.prospect_address || '',
         status: row.prospect_status || '',
+        contactCompany: row.prospect_contact_company || '',
+        businessName: row.prospect_business_name || '',
       } : null,
       listing: row.listing_id ? {
         id: row.listing_id,
@@ -3558,6 +3531,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           p.name AS prospect_name,
           p.address AS prospect_address,
           p.status AS prospect_status,
+          p.contact_company AS prospect_contact_company,
+          p.business_name AS prospect_business_name,
           l.title AS listing_title
         FROM public.email_prospect_matches epm
         JOIN public.email_messages em ON em.id = epm.email_message_id

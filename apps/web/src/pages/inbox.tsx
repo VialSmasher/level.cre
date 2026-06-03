@@ -43,6 +43,8 @@ type EmailReviewItem = {
     name: string
     address: string
     status: string
+    contactCompany?: string
+    businessName?: string
   }
   listing: null | {
     id: string
@@ -189,7 +191,7 @@ export default function InboxPage() {
 
   const prospectOptions = useMemo(() => {
     return [...prospects]
-      .sort((left, right) => (left.name || '').localeCompare(right.name || ''))
+      .sort((left, right) => (left.contactCompany || left.businessName || left.name || '').localeCompare(right.contactCompany || right.businessName || right.name || ''))
       .slice(0, 250)
   }, [prospects])
 
@@ -426,10 +428,13 @@ export default function InboxPage() {
                     ) : null}
                   </div>
                   <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Matched Prospect</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Matched Company / Prospect</p>
                     {item.prospect ? (
                       <div className="mt-2 space-y-1">
-                        <p className="text-sm font-semibold text-slate-950">{item.prospect.name || 'Untitled prospect'}</p>
+                        <p className="text-sm font-semibold text-slate-950">{item.prospect.contactCompany || item.prospect.businessName || item.prospect.name || 'Untitled prospect'}</p>
+                        {(item.prospect.contactCompany || item.prospect.businessName) && item.prospect.name ? (
+                          <p className="text-xs text-slate-600">{item.prospect.name}</p>
+                        ) : null}
                         <p className="text-xs text-slate-600">{item.prospect.address || 'No address'}</p>
                         <Badge variant="outline" className="mt-1 bg-white text-slate-700">{item.prospect.status}</Badge>
                       </div>
@@ -446,7 +451,7 @@ export default function InboxPage() {
                           <SelectContent>
                             {prospectOptions.map((prospect) => (
                               <SelectItem key={prospect.id} value={prospect.id}>
-                                {prospect.name || prospect.businessName || 'Untitled prospect'}
+                                {prospect.contactCompany || prospect.businessName || prospect.name || 'Untitled prospect'}
                               </SelectItem>
                             ))}
                           </SelectContent>
