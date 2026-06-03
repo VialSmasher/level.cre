@@ -86,10 +86,10 @@ type InboundEmailConfig = {
 
 const statusLabels: Record<EmailReviewStatus, string> = {
   needs_context: 'Needs Context',
-  pending_review: 'Context Attached',
+  pending_review: 'Ready to Log',
   auto_logged: 'Logged',
   approved: 'Approved',
-  ignored: 'Ignored',
+  ignored: 'Archived',
   rejected: 'Rejected',
   all: 'All',
 }
@@ -104,7 +104,7 @@ function formatEmailDate(item: EmailReviewItem) {
 
 export default function InboxPage() {
   const queryClient = useQueryClient()
-  const [status, setStatus] = useState<EmailReviewStatus>('needs_context')
+  const [status, setStatus] = useState<EmailReviewStatus>('all')
   const [search, setSearch] = useState('')
   const [prospectDrafts, setProspectDrafts] = useState<Record<string, string>>({})
 
@@ -145,12 +145,19 @@ export default function InboxPage() {
     })
   }, [items, search])
 
-  const capturedCount = (counts?.needsContext ?? 0) + (counts?.pendingReview ?? 0) + (counts?.autoLogged ?? 0) + (counts?.approved ?? 0)
+  const capturedCount = (
+    (counts?.needsContext ?? 0) +
+    (counts?.pendingReview ?? 0) +
+    (counts?.autoLogged ?? 0) +
+    (counts?.approved ?? 0) +
+    (counts?.ignored ?? 0) +
+    (counts?.rejected ?? 0)
+  )
   const estimatedEmailXp = capturedCount * 10
   const dashboardCards = [
     { label: 'Captured', value: capturedCount, helper: 'BCC email activity', tone: 'text-slate-950' },
     { label: 'Needs Context', value: counts?.needsContext ?? 0, helper: 'Optional cleanup', tone: 'text-amber-700' },
-    { label: 'Attached', value: (counts?.pendingReview ?? 0) + (counts?.autoLogged ?? 0), helper: 'Linked to context', tone: 'text-emerald-700' },
+    { label: 'Logged', value: counts?.autoLogged ?? 0, helper: 'Prospect interactions', tone: 'text-emerald-700' },
     { label: 'Email XP', value: estimatedEmailXp, helper: 'Captured activity value', tone: 'text-blue-700' },
   ]
 
@@ -254,13 +261,11 @@ export default function InboxPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="needs_context">Needs Context</SelectItem>
-                  <SelectItem value="pending_review">Context Attached</SelectItem>
-                  <SelectItem value="auto_logged">Logged</SelectItem>
-                  <SelectItem value="approved">Approved</SelectItem>
-                  <SelectItem value="ignored">Ignored</SelectItem>
-                  <SelectItem value="rejected">Rejected</SelectItem>
                   <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="needs_context">Needs Context</SelectItem>
+                  <SelectItem value="pending_review">Ready to Log</SelectItem>
+                  <SelectItem value="auto_logged">Logged</SelectItem>
+                  <SelectItem value="ignored">Archived</SelectItem>
                 </SelectContent>
               </Select>
               <Button variant="outline" size="icon" onClick={invalidate} aria-label="Refresh">
@@ -368,7 +373,7 @@ export default function InboxPage() {
                           variant="outline"
                           className={item.prospect ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-600 border-slate-200'}
                         >
-                          {item.prospect ? 'Manual context' : 'Unattached'}
+                          {item.prospect ? 'Context attached' : 'Unattached'}
                         </Badge>
                         {item.matchStatus === 'needs_context' ? (
                           <Badge variant="outline" className="bg-blue-50 text-blue-700">
@@ -402,7 +407,7 @@ export default function InboxPage() {
                         onClick={() => updateStatusMutation.mutate({ id: item.id, matchStatus: 'ignored' })}
                       >
                         <Archive className="mr-2 h-4 w-4" />
-                        Ignore
+                        Archive
                       </Button>
                       <Button
                         size="sm"
