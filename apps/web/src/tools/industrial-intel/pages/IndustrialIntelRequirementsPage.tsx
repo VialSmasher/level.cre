@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, ClipboardList, ExternalLink, MapPin, Mic, MicOff, Ruler, Sparkles, Wand2 } from "lucide-react";
+import { AlertTriangle, Building2, CheckCircle2, ClipboardList, DollarSign, Edit3, ExternalLink, Filter, MapPin, Mic, MicOff, Ruler, Save, Sparkles, Target, Wand2, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +51,7 @@ type IntelListing = {
   totalPrice: number | null;
   pricePerAcre: number | null;
   leaseRatePsf: number | null;
+  clearHeightFt?: number | null;
   brochureUrl: string | null;
   sourceUrl: string | null;
   removedAt: string | null;
@@ -122,6 +123,33 @@ const EMPTY_FORM: RequirementFormState = {
   isOffMarketSearchEnabled: false,
 };
 
+const MARKET_OPTIONS = ["Edmonton", "Calgary", "Central Alberta", "Northern Alberta"] as const;
+const SUBMARKET_OPTIONS = [
+  "Acheson",
+  "Calgary",
+  "Edmonton",
+  "Fort Saskatchewan",
+  "Leduc",
+  "Nisku",
+  "Northwest Edmonton",
+  "Sherwood Park",
+  "South Edmonton",
+  "Southeast Edmonton",
+  "St. Albert",
+  "West Edmonton",
+] as const;
+
+const TIMING_OPTIONS = [
+  "Immediate",
+  "30-60 days",
+  "90 days",
+  "Q1",
+  "Q2",
+  "Q3",
+  "Q4",
+  "Flexible",
+] as const;
+
 type SpeechRecognitionCtor = new () => {
   continuous: boolean;
   interimResults: boolean;
@@ -179,6 +207,101 @@ function formatListingValue(listing: IntelListing) {
   return null;
 }
 
+function formatSizeRange(requirement: Pick<IntelRequirement, "minSf" | "maxSf">) {
+  if (requirement.minSf && requirement.maxSf) return `${formatNumber(requirement.minSf)} - ${formatNumber(requirement.maxSf)} SF`;
+  if (requirement.minSf) return `${formatNumber(requirement.minSf)}+ SF`;
+  if (requirement.maxSf) return `Up to ${formatNumber(requirement.maxSf)} SF`;
+  return "Size TBD";
+}
+
+function formatRequirementArea(requirement: Pick<IntelRequirement, "market" | "submarket">) {
+  return [requirement.submarket, requirement.market].filter(Boolean).join(", ") || "Area TBD";
+}
+
+function formFromRequirement(requirement: IntelRequirement): RequirementFormState {
+  return {
+    title: requirement.title || "",
+    clientName: requirement.clientName || "",
+    status: requirement.status || "draft",
+    dealType: requirement.dealType || "lease",
+    market: requirement.market || "",
+    submarket: requirement.submarket || "",
+    minSf: requirement.minSf ? String(requirement.minSf) : "",
+    maxSf: requirement.maxSf ? String(requirement.maxSf) : "",
+    minClearHeightFt: requirement.minClearHeightFt ? String(requirement.minClearHeightFt) : "",
+    maxBudgetPsf: requirement.maxBudgetPsf ? String(requirement.maxBudgetPsf) : "",
+    requiredDockDoors: requirement.requiredDockDoors ? String(requirement.requiredDockDoors) : "",
+    requiredGradeDoors: requirement.requiredGradeDoors ? String(requirement.requiredGradeDoors) : "",
+    minYardAcres: requirement.minYardAcres ? String(requirement.minYardAcres) : "",
+    powerNotes: requirement.powerNotes || "",
+    officeNotes: requirement.officeNotes || "",
+    timingNotes: requirement.timingNotes || "",
+    specialNotes: requirement.specialNotes || "",
+    isOffMarketSearchEnabled: Boolean(requirement.isOffMarketSearchEnabled),
+  };
+}
+
+function buildRequirementPayload(form: RequirementFormState) {
+  return {
+    title: form.title.trim(),
+    clientName: form.clientName.trim() || null,
+    status: form.status,
+    dealType: form.dealType,
+    market: form.market.trim() || null,
+    submarket: form.submarket.trim() || null,
+    minSf: toNullableNumber(form.minSf),
+    maxSf: toNullableNumber(form.maxSf),
+    minClearHeightFt: toNullableNumber(form.minClearHeightFt),
+    maxBudgetPsf: toNullableNumber(form.maxBudgetPsf),
+    requiredDockDoors: toNullableNumber(form.requiredDockDoors),
+    requiredGradeDoors: toNullableNumber(form.requiredGradeDoors),
+    minYardAcres: toNullableNumber(form.minYardAcres),
+    powerNotes: form.powerNotes.trim() || null,
+    officeNotes: form.officeNotes.trim() || null,
+    timingNotes: form.timingNotes.trim() || null,
+    specialNotes: form.specialNotes.trim() || null,
+    isOffMarketSearchEnabled: form.isOffMarketSearchEnabled,
+  };
+}
+
+function getRequirementCompleteness(requirement: IntelRequirement) {
+  const items = [
+    Boolean(requirement.clientName),
+    Boolean(requirement.dealType),
+    Boolean(requirement.market || requirement.submarket),
+    Boolean(requirement.minSf || requirement.maxSf || requirement.minYardAcres),
+    Boolean(requirement.minClearHeightFt || requirement.maxBudgetPsf || requirement.requiredDockDoors || requirement.requiredGradeDoors),
+    Boolean(requirement.timingNotes || requirement.specialNotes || requirement.powerNotes || requirement.officeNotes),
+  ];
+  const complete = items.filter(Boolean).length;
+  return {
+    complete,
+    total: items.length,
+    percent: Math.round((complete / items.length) * 100),
+  };
+}
+
+function getMissingRequirementFields(requirement: IntelRequirement) {
+  return [
+    !requirement.clientName ? "client" : "",
+    !(requirement.market || requirement.submarket) ? "area" : "",
+    !(requirement.minSf || requirement.maxSf || requirement.minYardAcres) ? "size" : "",
+    !(requirement.minClearHeightFt || requirement.maxBudgetPsf || requirement.requiredDockDoors || requirement.requiredGradeDoors) ? "building constraints" : "",
+  ].filter(Boolean);
+}
+
+function getRequirementConstraintChips(requirement: IntelRequirement) {
+  return [
+    requirement.minClearHeightFt ? `${requirement.minClearHeightFt}' clear` : "",
+    requirement.maxBudgetPsf ? `${formatPsf(requirement.maxBudgetPsf)} max` : "",
+    requirement.requiredDockDoors ? `${requirement.requiredDockDoors} dock` : "",
+    requirement.requiredGradeDoors ? `${requirement.requiredGradeDoors} grade` : "",
+    requirement.minYardAcres ? `${requirement.minYardAcres} ac yard` : "",
+    requirement.powerNotes ? "power noted" : "",
+    requirement.officeNotes ? "office noted" : "",
+  ].filter(Boolean);
+}
+
 function normalizeMatchText(value: string | null | undefined) {
   return (value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -232,6 +355,7 @@ function scoreListingForRequirement(requirement: IntelRequirement, listing: Inte
   const dealType = normalizeMatchText(requirement.dealType);
   const listingType = normalizeMatchText(listing.listingType);
   const areaTokens = getRequirementAreaTokens(requirement);
+  const listingText = normalizeMatchText([listing.title, listing.address, listing.submarket, listing.market, listing.sourceName].filter(Boolean).join(" "));
 
   if (dealType === "either" || dealType === listingType || (dealType === "lease" && listingType === "sublease")) {
     score += 22;
@@ -246,6 +370,9 @@ function scoreListingForRequirement(requirement: IntelRequirement, listing: Inte
   } else if (requirement.submarket || requirement.specialNotes) {
     score += 6;
     warnings.push("Target geography needs broker review");
+  } else {
+    score += 8;
+    warnings.push("Requirement area is not structured yet");
   }
 
   if (listing.availableSf && (requirement.minSf || requirement.maxSf)) {
@@ -274,8 +401,48 @@ function scoreListingForRequirement(requirement: IntelRequirement, listing: Inte
     warnings.push("Size data is missing or incomplete");
   }
 
+  if (requirement.maxBudgetPsf) {
+    if (listing.leaseRatePsf && listing.leaseRatePsf <= requirement.maxBudgetPsf) {
+      score += 8;
+      reasons.push(`Lease rate is within budget at ${formatPsf(listing.leaseRatePsf)}`);
+    } else if (listing.leaseRatePsf) {
+      warnings.push(`Lease rate exceeds budget at ${formatPsf(listing.leaseRatePsf)}`);
+    } else if (dealType !== "sale") {
+      warnings.push("Lease rate is missing");
+    }
+  }
+
+  if (requirement.minClearHeightFt) {
+    if (listing.clearHeightFt && listing.clearHeightFt >= requirement.minClearHeightFt) {
+      score += 8;
+      reasons.push(`Clear height meets target at ${listing.clearHeightFt}'`);
+    } else if (listing.clearHeightFt) {
+      warnings.push(`Clear height is below target at ${listing.clearHeightFt}'`);
+    } else {
+      warnings.push("Clear height needs verification");
+    }
+  }
+
+  if (requirement.minYardAcres && listing.assetType !== "land") {
+    if (listing.landAcres && listing.landAcres >= requirement.minYardAcres) {
+      score += 7;
+      reasons.push(`Yard/land area supports ${requirement.minYardAcres} ac need`);
+    } else {
+      warnings.push("Yard requirement needs verification");
+    }
+  }
+
+  if (requirement.requiredDockDoors || requirement.requiredGradeDoors) {
+    const loadingLanguage = ["dock", "loading", "grade", "drive in", "drive-in"].some((term) => listingText.includes(term));
+    if (loadingLanguage) {
+      score += 5;
+      reasons.push("Listing language references loading access");
+    } else {
+      warnings.push("Door count/loading needs verification");
+    }
+  }
+
   if (requirement.powerNotes) {
-    const listingText = normalizeMatchText([listing.title, listing.address, listing.submarket, listing.sourceName].filter(Boolean).join(" "));
     if (listingText.includes("power") || listingText.includes("manufacturing") || listingText.includes("shop")) {
       score += 8;
       reasons.push("Listing language may support power/manufacturing use");
@@ -301,6 +468,11 @@ function scoreListingForRequirement(requirement: IntelRequirement, listing: Inte
   if (listing.dataQualityStatus === "review") {
     score -= 8;
     warnings.push("Listing is flagged for data review");
+  }
+
+  if (requirement.isOffMarketSearchEnabled && score < 45) {
+    score += 4;
+    warnings.push("May be useful as off-market comp context");
   }
 
   const boundedScore = Math.max(0, Math.min(100, score));
@@ -668,6 +840,25 @@ function MatchCard({
         <span className="rounded-full bg-white/80 px-2.5 py-1 text-slate-700">{match.listing.submarket || match.listing.market || "Unassigned"}</span>
       </div>
 
+      <div className="mt-3 grid gap-2 text-sm text-slate-700 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2">
+          <Building2 className="h-4 w-4 text-slate-400" />
+          <span>{match.listing.clearHeightFt ? `${match.listing.clearHeightFt}' clear` : "Clear TBD"}</span>
+        </div>
+        <div className="flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2">
+          <DollarSign className="h-4 w-4 text-slate-400" />
+          <span>{formatPsf(match.listing.leaseRatePsf)}</span>
+        </div>
+        <div className="flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2">
+          <Target className="h-4 w-4 text-slate-400" />
+          <span>{match.listing.landAcres ? `${match.listing.landAcres.toLocaleString()} ac` : "Land TBD"}</span>
+        </div>
+        <div className="flex items-center gap-2 rounded-xl bg-white/70 px-3 py-2">
+          <MapPin className="h-4 w-4 text-slate-400" />
+          <span>{formatMapReadiness(match.listing)}</span>
+        </div>
+      </div>
+
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <div className="rounded-xl border border-white/80 bg-white/70 p-3">
           <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">
@@ -726,6 +917,9 @@ export default function IndustrialIntelRequirementsPage() {
   const [isListening, setIsListening] = useState(false);
   const [recognition, setRecognition] = useState<InstanceType<SpeechRecognitionCtor> | null>(null);
   const [selectedRequirementId, setSelectedRequirementId] = useState<string | null>(null);
+  const [editingRequirementId, setEditingRequirementId] = useState<string | null>(null);
+  const [matchTierFilter, setMatchTierFilter] = useState<"all" | RequirementMatch["tier"]>("all");
+  const isEditing = Boolean(editingRequirementId);
 
   const { data: requirements = [], isLoading } = useQuery<IntelRequirement[]>({
     queryKey: ["/api/intel/requirements"],
@@ -757,7 +951,11 @@ export default function IndustrialIntelRequirementsPage() {
       .sort((left, right) => right.score - left.score);
   }, [listings, selectedRequirement]);
 
-  const matches = useMemo(() => scoredMatches.slice(0, 24), [scoredMatches]);
+  const filteredMatches = useMemo(() => (
+    matchTierFilter === "all" ? scoredMatches : scoredMatches.filter((match) => match.tier === matchTierFilter)
+  ), [matchTierFilter, scoredMatches]);
+
+  const matches = useMemo(() => filteredMatches.slice(0, 24), [filteredMatches]);
 
   const matchGroups = useMemo(() => ({
     strong: matches.filter((match) => match.tier === "strong"),
@@ -766,6 +964,8 @@ export default function IndustrialIntelRequirementsPage() {
   }), [matches]);
 
   const dictationInsights = useMemo(() => getDictationInsights(dictationText), [dictationText]);
+  const activeRequirementsCount = requirements.filter((requirement) => requirement.status === "active").length;
+  const selectedCompleteness = selectedRequirement ? getRequirementCompleteness(selectedRequirement) : null;
 
   const saveDecisionMutation = useMutation({
     mutationFn: async ({ requirementId, match, decision }: { requirementId: string; match: RequirementMatch; decision: DecisionValue }) => {
@@ -799,38 +999,24 @@ export default function IndustrialIntelRequirementsPage() {
     saveDecisionMutation.mutate({ requirementId: selectedRequirement.id, match, decision });
   };
 
-  const createRequirementMutation = useMutation({
+  const saveRequirementMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest("POST", "/api/intel/requirements", {
-        title: form.title.trim(),
-        clientName: form.clientName.trim() || null,
-        status: form.status,
-        dealType: form.dealType,
-        market: form.market.trim() || null,
-        submarket: form.submarket.trim() || null,
-        minSf: toNullableNumber(form.minSf),
-        maxSf: toNullableNumber(form.maxSf),
-        minClearHeightFt: toNullableNumber(form.minClearHeightFt),
-        maxBudgetPsf: toNullableNumber(form.maxBudgetPsf),
-        requiredDockDoors: toNullableNumber(form.requiredDockDoors),
-        requiredGradeDoors: toNullableNumber(form.requiredGradeDoors),
-        minYardAcres: toNullableNumber(form.minYardAcres),
-        powerNotes: form.powerNotes.trim() || null,
-        officeNotes: form.officeNotes.trim() || null,
-        timingNotes: form.timingNotes.trim() || null,
-        specialNotes: form.specialNotes.trim() || null,
-        isOffMarketSearchEnabled: form.isOffMarketSearchEnabled,
-      });
+      const payload = buildRequirementPayload(form);
+      const response = editingRequirementId
+        ? await apiRequest("PATCH", `/api/intel/requirements/${editingRequirementId}`, payload)
+        : await apiRequest("POST", "/api/intel/requirements", payload);
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (requirement: IntelRequirement) => {
       queryClient.invalidateQueries({ queryKey: ["/api/intel/requirements"] });
       setForm(EMPTY_FORM);
-      toast({ title: "Industrial Intel requirement created" });
+      setEditingRequirementId(null);
+      setSelectedRequirementId(requirement.id);
+      toast({ title: isEditing ? "Industrial Intel requirement updated" : "Industrial Intel requirement created" });
     },
     onError: (error: any) => {
       toast({
-        title: "Failed to create requirement",
+        title: isEditing ? "Failed to update requirement" : "Failed to create requirement",
         description: error?.message || "Please try again.",
         variant: "destructive",
       });
@@ -847,7 +1033,7 @@ export default function IndustrialIntelRequirementsPage() {
       });
       return;
     }
-    createRequirementMutation.mutate();
+    saveRequirementMutation.mutate();
   };
 
   const updateField = <K extends keyof RequirementFormState>(key: K, value: RequirementFormState[K]) => {
@@ -863,6 +1049,17 @@ export default function IndustrialIntelRequirementsPage() {
       ),
     }));
     toast({ title: "Requirement draft filled", description: "Review the fields, then save when ready." });
+  };
+
+  const startEditingRequirement = (requirement: IntelRequirement) => {
+    setSelectedRequirementId(requirement.id);
+    setEditingRequirementId(requirement.id);
+    setForm(formFromRequirement(requirement));
+  };
+
+  const cancelEditingRequirement = () => {
+    setEditingRequirementId(null);
+    setForm(EMPTY_FORM);
   };
 
   const toggleDictation = async () => {
@@ -952,10 +1149,29 @@ export default function IndustrialIntelRequirementsPage() {
         </div>
       </section>
 
+      <section className="grid gap-3 md:grid-cols-4">
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Saved demand</p>
+          <p className="mt-1 text-2xl font-semibold text-slate-950">{requirements.length}</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Active searches</p>
+          <p className="mt-1 text-2xl font-semibold text-slate-950">{activeRequirementsCount}</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tool B inventory</p>
+          <p className="mt-1 text-2xl font-semibold text-slate-950">{listings.filter((listing) => !listing.removedAt && listing.status !== "removed").length}</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Selected readiness</p>
+          <p className="mt-1 text-2xl font-semibold text-slate-950">{selectedCompleteness ? `${selectedCompleteness.percent}%` : "-"}</p>
+        </div>
+      </section>
+
       <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
         <Card>
           <CardHeader>
-            <CardTitle>Create requirement</CardTitle>
+            <CardTitle>{isEditing ? "Update requirement" : "Create requirement"}</CardTitle>
           </CardHeader>
           <CardContent>
             <form className="space-y-4" onSubmit={handleSubmit}>
@@ -1032,18 +1248,24 @@ export default function IndustrialIntelRequirementsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="market">Market</Label>
-                  <Input id="market" value={form.market} onChange={(e) => updateField("market", e.target.value)} placeholder="Edmonton" />
+                  <Input id="market" list="intel-market-options" value={form.market} onChange={(e) => updateField("market", e.target.value)} placeholder="Edmonton" />
+                  <datalist id="intel-market-options">
+                    {MARKET_OPTIONS.map((option) => <option key={option} value={option} />)}
+                  </datalist>
                 </div>
               </div>
 
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label htmlFor="submarket">Submarket</Label>
-                  <Input id="submarket" value={form.submarket} onChange={(e) => updateField("submarket", e.target.value)} placeholder="West Edmonton" />
+                  <Input id="submarket" list="intel-submarket-options" value={form.submarket} onChange={(e) => updateField("submarket", e.target.value)} placeholder="West Edmonton" />
+                  <datalist id="intel-submarket-options">
+                    {SUBMARKET_OPTIONS.map((option) => <option key={option} value={option} />)}
+                  </datalist>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="status">Status</Label>
-                  <select id="status" value={form.status} onChange={(e) => updateField("status", e.target.value)} className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+                  <Label htmlFor="status">Pipeline status</Label>
+                  <select id="status" value={form.status} onChange={(e) => updateField("status", e.target.value)} className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm capitalize">
                     {STATUS_OPTIONS.map((option) => (
                       <option key={option} value={option}>{option}</option>
                     ))}
@@ -1051,7 +1273,7 @@ export default function IndustrialIntelRequirementsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="dealType">Deal type</Label>
-                  <select id="dealType" value={form.dealType} onChange={(e) => updateField("dealType", e.target.value)} className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+                  <select id="dealType" value={form.dealType} onChange={(e) => updateField("dealType", e.target.value)} className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm capitalize">
                     {DEAL_TYPE_OPTIONS.map((option) => (
                       <option key={option} value={option}>{option}</option>
                     ))}
@@ -1120,8 +1342,11 @@ export default function IndustrialIntelRequirementsPage() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="timingNotes">Timing notes</Label>
-                  <Textarea id="timingNotes" value={form.timingNotes} onChange={(e) => updateField("timingNotes", e.target.value)} placeholder="Need occupancy by Q3" />
+                  <Label htmlFor="timingNotesQuick">Timing notes</Label>
+                  <Input id="timingNotesQuick" list="intel-timing-options" value={form.timingNotes} onChange={(e) => updateField("timingNotes", e.target.value)} placeholder="Need occupancy by Q3" />
+                  <datalist id="intel-timing-options">
+                    {TIMING_OPTIONS.map((option) => <option key={option} value={option} />)}
+                  </datalist>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="specialNotes">Special notes</Label>
@@ -1136,9 +1361,26 @@ export default function IndustrialIntelRequirementsPage() {
 
               </div>
 
-              <Button type="submit" disabled={createRequirementMutation.isPending} className="bg-slate-950 text-white hover:bg-slate-800">
-                {createRequirementMutation.isPending ? "Saving..." : "Create requirement"}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="submit" disabled={saveRequirementMutation.isPending} className="bg-slate-950 text-white hover:bg-slate-800">
+                  {saveRequirementMutation.isPending ? (
+                    "Saving..."
+                  ) : isEditing ? (
+                    <>
+                      <Save className="mr-2 h-4 w-4" />
+                      Update requirement
+                    </>
+                  ) : (
+                    "Create requirement"
+                  )}
+                </Button>
+                {isEditing && (
+                  <Button type="button" variant="outline" onClick={cancelEditingRequirement}>
+                    <X className="mr-2 h-4 w-4" />
+                    Cancel edit
+                  </Button>
+                )}
+              </div>
             </form>
           </CardContent>
         </Card>
@@ -1162,48 +1404,81 @@ export default function IndustrialIntelRequirementsPage() {
                 <div className="grid gap-3 lg:grid-cols-2">
                   {requirements.map((requirement) => {
                     const isSelected = selectedRequirement?.id === requirement.id;
+                    const completeness = getRequirementCompleteness(requirement);
+                    const missingFields = getMissingRequirementFields(requirement);
+                    const constraintChips = getRequirementConstraintChips(requirement);
                     return (
-                      <button
+                      <div
                         key={requirement.id}
-                        type="button"
-                        onClick={() => setSelectedRequirementId(requirement.id)}
                         className={`rounded-2xl border p-4 text-left transition ${
                           isSelected
                             ? "border-blue-300 bg-blue-50/80 shadow-sm"
                             : "border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50"
                         }`}
                       >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
+                        <button type="button" onClick={() => setSelectedRequirementId(requirement.id)} className="w-full text-left">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
                             <p className="text-base font-semibold text-slate-950">{requirement.title}</p>
                             <p className="mt-1 text-sm text-slate-600">
                               {requirement.clientName || "No client name yet"}
                             </p>
-                          </div>
-                          <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                            </div>
+                            <div className="flex flex-wrap gap-2 text-xs font-semibold">
                             <span className="rounded-full bg-white px-2.5 py-1 text-slate-700">{requirement.dealType}</span>
                             <span className="rounded-full bg-blue-100 px-2.5 py-1 text-blue-700">{requirement.status}</span>
                             {requirement.isOffMarketSearchEnabled && (
                               <span className="rounded-full bg-amber-100 px-2.5 py-1 text-amber-700">off-market on</span>
                             )}
+                            </div>
                           </div>
-                        </div>
 
-                        <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
-                          <p className="flex items-center gap-2">
+                          <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
+                            <p className="flex items-center gap-2">
                             <MapPin className="h-4 w-4 text-slate-400" />
-                            {requirement.submarket || requirement.market || "Unspecified"}
-                          </p>
-                          <p className="flex items-center gap-2">
+                            {formatRequirementArea(requirement)}
+                            </p>
+                            <p className="flex items-center gap-2">
                             <Ruler className="h-4 w-4 text-slate-400" />
-                            {formatNumber(requirement.minSf)} - {formatNumber(requirement.maxSf)} SF
-                          </p>
-                        </div>
+                            {formatSizeRange(requirement)}
+                            </p>
+                          </div>
 
-                        <p className="mt-3 text-xs text-slate-500">
+                          <div className="mt-3">
+                            <div className="flex items-center justify-between gap-3 text-xs font-semibold text-slate-600">
+                              <span>Intake completeness</span>
+                              <span>{completeness.complete}/{completeness.total}</span>
+                            </div>
+                            <div className="mt-1 h-2 overflow-hidden rounded-full bg-white">
+                              <div className="h-full rounded-full bg-blue-600" style={{ width: `${completeness.percent}%` }} />
+                            </div>
+                          </div>
+
+                          {constraintChips.length > 0 && (
+                            <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+                              {constraintChips.slice(0, 5).map((chip) => (
+                                <span key={chip} className="rounded-full bg-white px-2.5 py-1 text-slate-700">{chip}</span>
+                              ))}
+                            </div>
+                          )}
+
+                          {missingFields.length > 0 && (
+                            <p className="mt-3 text-xs text-amber-700">
+                              Needs {missingFields.slice(0, 3).join(", ")} for stronger matching.
+                            </p>
+                          )}
+
+                          <p className="mt-3 text-xs text-slate-500">
                           Updated {formatDateTime(requirement.updatedAt)}
-                        </p>
-                      </button>
+                          </p>
+                        </button>
+                        <div className="mt-3 flex justify-end">
+                          <Button type="button" size="sm" variant="outline" onClick={() => startEditingRequirement(requirement)}>
+                            <Edit3 className="mr-2 h-4 w-4" />
+                            Edit
+                          </Button>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
@@ -1219,11 +1494,29 @@ export default function IndustrialIntelRequirementsPage() {
                         Ranked against current Industrial Intel inventory. Use decisions to stage a client shortlist.
                       </p>
                     </div>
-                    <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                    <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-1.5 text-slate-700">
+                        <Filter className="h-3.5 w-3.5" />
+                        {filteredMatches.length} shown
+                      </span>
                       <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-emerald-800">{matchGroups.strong.length} strong</span>
                       <span className="rounded-full bg-blue-100 px-3 py-1.5 text-blue-800">{matchGroups.adjacent.length} adjacent</span>
                       <span className="rounded-full bg-slate-100 px-3 py-1.5 text-slate-700">{matchGroups.review.length} review</span>
                     </div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {(["all", "strong", "adjacent", "review"] as const).map((tier) => (
+                      <Button
+                        key={tier}
+                        type="button"
+                        size="sm"
+                        variant={matchTierFilter === tier ? "default" : "outline"}
+                        onClick={() => setMatchTierFilter(tier)}
+                        className={matchTierFilter === tier ? "bg-slate-950 text-white hover:bg-slate-800" : ""}
+                      >
+                        {tier === "all" ? "All matches" : tier}
+                      </Button>
+                    ))}
                   </div>
 
                   {isLoadingListings ? (

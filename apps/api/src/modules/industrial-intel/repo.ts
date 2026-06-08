@@ -57,6 +57,7 @@ export type IntelListingListItem = {
   totalPrice: number | null;
   pricePerAcre: number | null;
   leaseRatePsf: number | null;
+  clearHeightFt?: number | null;
   brochureUrl: string | null;
   sourceUrl: string | null;
   lastSeenAt: string | null;
@@ -912,6 +913,7 @@ export class IndustrialIntelRepository {
         land_acres: string | null;
         total_price: string | null;
         price_per_acre: string | null;
+        clear_height_ft: string | null;
         raw_payload: Record<string, unknown> | null;
         brochure_url: string | null;
         source_url: string | null;
@@ -941,6 +943,7 @@ export class IndustrialIntelRepository {
             listings.land_acres,
             listings.total_price,
             listings.price_per_acre,
+            listings.clear_height_ft,
             listings.raw_payload,
             listings.brochure_url,
             listings.source_url,
@@ -976,6 +979,7 @@ export class IndustrialIntelRepository {
         land_acres: string | null;
         total_price: string | null;
         price_per_acre: string | null;
+        clear_height_ft: string | null;
         raw_payload: Record<string, unknown> | null;
         brochure_url: string | null;
         source_url: string | null;
@@ -1004,6 +1008,7 @@ export class IndustrialIntelRepository {
         totalPrice: numOrNull(row.total_price),
         pricePerAcre: numOrNull(row.price_per_acre),
         leaseRatePsf: numOrNull(row.raw_payload?.leaseRatePsf),
+        clearHeightFt: numOrNull(row.clear_height_ft),
         brochureUrl: row.brochure_url,
         sourceUrl: row.source_url,
         lastSeenAt: isoOrNull(row.last_seen_at),
