@@ -29,6 +29,7 @@ type UseTerraDrawGoogleMapsOptions = {
 
 const TERRA_DRAW_EVENT_LAYER_CLASS = 'level-cre-terra-draw-event-layer';
 const RECTANGLE_DRAG_THRESHOLD_PX = 8;
+const DRAW_LAYER_WHEEL_ZOOM_INTERVAL_MS = 80;
 
 type LngLat = { lng: number; lat: number };
 
@@ -226,7 +227,8 @@ export function useTerraDrawGoogleMaps({
 
     let disposed = false;
     let idleListener: google.maps.MapsEventListener | null = null;
-    let removeDragRectangleListeners: (() => void) | null = null;
+    let removeDrawLayerListeners: (() => void) | null = null;
+    let lastWheelZoomAt = 0;
 
     const resetMapInteraction = () => {
       try {
@@ -376,13 +378,37 @@ export function useTerraDrawGoogleMaps({
           })();
         };
 
+        const handleWheel = (event: WheelEvent) => {
+          if (activeModeRef.current === 'select') return;
+
+          event.preventDefault();
+          event.stopPropagation();
+
+          const now = performance.now();
+          if (now - lastWheelZoomAt < DRAW_LAYER_WHEEL_ZOOM_INTERVAL_MS) return;
+          lastWheelZoomAt = now;
+
+          const currentZoom = map.getZoom() ?? 11;
+          const rawMinZoom = Number(map.get('minZoom'));
+          const rawMaxZoom = Number(map.get('maxZoom'));
+          const minZoom = Number.isFinite(rawMinZoom) ? rawMinZoom : 0;
+          const maxZoom = Number.isFinite(rawMaxZoom) ? rawMaxZoom : 22;
+          const direction = event.deltaY < 0 ? 1 : -1;
+          const nextZoom = Math.max(minZoom, Math.min(maxZoom, currentZoom + direction));
+          if (nextZoom !== currentZoom) {
+            map.setZoom(nextZoom);
+          }
+        };
+
         eventLayer.addEventListener('pointerdown', handleRectanglePointerDown);
         eventLayer.addEventListener('pointermove', handleRectanglePointerMove);
         eventLayer.addEventListener('pointerup', handleRectanglePointerUp);
-        removeDragRectangleListeners = () => {
+        eventLayer.addEventListener('wheel', handleWheel, { passive: false });
+        removeDrawLayerListeners = () => {
           eventLayer.removeEventListener('pointerdown', handleRectanglePointerDown);
           eventLayer.removeEventListener('pointermove', handleRectanglePointerMove);
           eventLayer.removeEventListener('pointerup', handleRectanglePointerUp);
+          eventLayer.removeEventListener('wheel', handleWheel);
         };
       } catch (error) {
         setIsReady(false);
@@ -399,7 +425,7 @@ export function useTerraDrawGoogleMaps({
     return () => {
       disposed = true;
       idleListener?.remove();
-      removeDragRectangleListeners?.();
+      removeDrawLayerListeners?.();
       setIsReady(false);
       setModeState('select');
       try { drawRef.current?.stop(); } catch {}
