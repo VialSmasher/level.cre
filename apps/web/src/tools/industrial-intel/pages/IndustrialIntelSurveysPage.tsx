@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, InfoWindowF, useJsApiLoader } from "@react-google-maps/api";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ArrowDown, ArrowUp, Bot, CheckCircle2, Copy, ExternalLink, Eye, EyeOff, FileText, MapPin, Plus, Share2, Trash2, Upload } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { getGoogleMapsApiKey, GOOGLE_MAPS_API_KEY_HELP_TEXT } from "@/lib/googleMapsApiKey";
+import { getGoogleMapsApiKey, getGoogleMapsMapId, GOOGLE_MAPS_API_KEY_HELP_TEXT } from "@/lib/googleMapsApiKey";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { AdvancedMapMarker } from "@/features/map/AdvancedMapMarker";
 
 type IntelListing = {
   id: string;
@@ -254,6 +255,8 @@ function itemPatch(item: IntelSurveyItem, patch: Partial<IntelSurveyItem>) {
 }
 
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
+const GOOGLE_MAPS_MAP_ID = getGoogleMapsMapId();
+const GOOGLE_MAPS_LIBRARIES: any = ["marker"];
 const DEFAULT_MAP_CENTER = { lat: 53.5461, lng: -113.4938 };
 const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
 
@@ -313,6 +316,8 @@ export default function IndustrialIntelSurveysPage() {
   const { isLoaded: isMapLoaded, loadError: mapLoadError } = useJsApiLoader({
     id: "industrial-intel-survey-map",
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+    libraries: GOOGLE_MAPS_LIBRARIES,
+    mapIds: [GOOGLE_MAPS_MAP_ID],
   });
 
   const shortlistQueryKey = selectedSurvey?.requirementId
@@ -1035,15 +1040,19 @@ export default function IndustrialIntelSurveysPage() {
                               mapTypeControl: false,
                               fullscreenControl: true,
                               gestureHandling: "greedy",
+                              mapId: GOOGLE_MAPS_MAP_ID,
                             }}
                           >
                             {mappableSurveyItems.map((item) => {
                               const optionNumber = visibleItems.findIndex((visibleItem) => visibleItem.id === item.id) + 1;
                               return (
-                                <MarkerF
+                                <AdvancedMapMarker
                                   key={item.id}
                                   position={{ lat: item.listing.latitude, lng: item.listing.longitude }}
-                                  label={{ text: String(optionNumber), color: "#ffffff", fontWeight: "700" }}
+                                  title={item.listing.title}
+                                  label={String(optionNumber)}
+                                  color="#2563eb"
+                                  scale={10}
                                   onClick={() => setSelectedMapItemId(item.id)}
                                 />
                               );

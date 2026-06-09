@@ -60,7 +60,6 @@
     "tailwindcss-animate": "^1.0.7",
     "terra-draw": "^1.15.0",
     "terra-draw-google-maps-adapter": "^1.0.4",
-    "use-places-autocomplete": "^4.0.1",
     "vaul": "^1.1.2",
     "wouter": "^3.3.5",
     "xlsx": "^0.18.5",

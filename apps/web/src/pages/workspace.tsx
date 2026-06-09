@@ -29,9 +29,10 @@ import { StatusLegend } from '@/features/map/StatusLegend';
 import { MapContextMenu } from '@/features/map/MapContextMenu';
 import { useTerraDrawGoogleMaps, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
 import { useGeocode } from '@/hooks/useGeocode';
-import { GOOGLE_MAPS_API_KEY_HELP_TEXT, getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
+import { GOOGLE_MAPS_API_KEY_HELP_TEXT, getGoogleMapsApiKey, getGoogleMapsMapId } from '@/lib/googleMapsApiKey';
 import { nsKey, readJSON, removeKey, writeJSON } from '@/lib/storage';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
+import { clearAdvancedMarker, type AdvancedAssetMarker } from '@/features/map/advancedMarkers';
 // Note: Avoid importing AlertDialog to prevent a circular-import bundle bug
 
 type Listing = {
@@ -44,10 +45,11 @@ type Listing = {
   submarket?: string | null;
 };
 
-const libraries: any = ['geometry', 'places'];
+const libraries: any = ['geometry', 'places', 'marker'];
 const FIELD_BUFFER_DELAY = 600;
 const AUTO_NAME_REGEX = /^New\s+(polygon|rectangle|point|marker)/i;
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
+const GOOGLE_MAPS_MAP_ID = getGoogleMapsMapId();
 const getDisplayAddressValue = (name?: string | null) => {
   if (!name) return '';
   return AUTO_NAME_REGEX.test(name) ? '' : name;
@@ -188,6 +190,7 @@ export default function Workspace() {
     id: 'google-map-script',
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
     libraries,
+    mapIds: [GOOGLE_MAPS_MAP_ID],
   });
 
   const linkedProspectsErrorMessage = linkedProspectsError instanceof Error
@@ -245,9 +248,9 @@ export default function Workspace() {
     // Keep a reference to the map instance; initial center/zoom are set via defaultCenter/defaultZoom
     setMap(m);
   }, []);
-  const customAssetMarkersRef = useRef<google.maps.Marker[]>([]);
-  const subjectMarkerRef = useRef<google.maps.Marker | null>(null);
-  const searchMarkerRef = useRef<google.maps.Marker | null>(null);
+  const customAssetMarkersRef = useRef<AdvancedAssetMarker[]>([]);
+  const subjectMarkerRef = useRef<AdvancedAssetMarker | null>(null);
+  const searchMarkerRef = useRef<AdvancedAssetMarker | null>(null);
 
   // Ensure tiles render by forcing a recenter once loaded
   useEffect(() => {
@@ -419,43 +422,46 @@ export default function Workspace() {
   useEffect(() => {
     if (!map) return;
 
-    customAssetMarkersRef.current.forEach((marker) => marker.setMap(null));
+    customAssetMarkersRef.current.forEach(clearAdvancedMarker);
     customAssetMarkersRef.current = [];
 
-    const nextMarkers: google.maps.Marker[] = [];
+    let disposed = false;
+    const nextMarkers: AdvancedAssetMarker[] = [];
 
-    filteredLinkedProspects.forEach((p) => {
-      if (p.geometry.type !== 'Point') return;
-      const [lng, lat] = p.geometry.coordinates as [number, number];
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      try {
-        const circlePath = window.google?.maps?.SymbolPath?.CIRCLE ?? google.maps.SymbolPath.CIRCLE;
-        const color = STATUS_META[p.status as ProspectStatusType]?.color || '#3B82F6';
-        const marker = createCustomAssetMarker(map, {
-          lat,
-          lng,
-          title: p.name || 'Custom Asset',
-          markerOptions: {
-            icon: {
-              path: circlePath,
-              fillColor: color,
-              fillOpacity: 1,
-              strokeWeight: 2,
-              strokeColor: '#ffffff',
-              scale: 8,
-            } as google.maps.Symbol,
-          },
-        });
-        nextMarkers.push(marker);
-      } catch (err) {
-        console.error('Failed to create custom asset marker', err);
+    void (async () => {
+      for (const p of filteredLinkedProspects) {
+        if (disposed || p.geometry.type !== 'Point') continue;
+        const [lng, lat] = p.geometry.coordinates as [number, number];
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        try {
+          const color = STATUS_META[p.status as ProspectStatusType]?.color || '#3B82F6';
+          const marker = await createCustomAssetMarker(map, {
+            lat,
+            lng,
+            title: p.name || 'Custom Asset',
+            color,
+            scale: 8,
+          });
+          if (disposed) {
+            clearAdvancedMarker(marker);
+          } else {
+            nextMarkers.push(marker);
+          }
+        } catch (err) {
+          if (!disposed) {
+            console.error('Failed to create custom asset marker', err);
+          }
+        }
       }
-    });
 
-    customAssetMarkersRef.current = nextMarkers;
+      if (!disposed) {
+        customAssetMarkersRef.current = nextMarkers;
+      }
+    })();
 
     return () => {
-      nextMarkers.forEach((marker) => marker.setMap(null));
+      disposed = true;
+      nextMarkers.forEach(clearAdvancedMarker);
       if (customAssetMarkersRef.current === nextMarkers) {
         customAssetMarkersRef.current = [];
       }
@@ -465,41 +471,44 @@ export default function Workspace() {
   useEffect(() => {
     if (!map) {
       if (subjectMarkerRef.current) {
-        subjectMarkerRef.current.setMap(null);
+        clearAdvancedMarker(subjectMarkerRef.current);
         subjectMarkerRef.current = null;
       }
       return;
     }
 
-    subjectMarkerRef.current?.setMap(null);
+    clearAdvancedMarker(subjectMarkerRef.current);
     subjectMarkerRef.current = null;
 
     if (!subjectPosition) return;
 
-    let nextMarker: google.maps.Marker | null = null;
-    try {
-      const circlePath = window.google?.maps?.SymbolPath?.CIRCLE ?? google.maps.SymbolPath.CIRCLE;
-      const subjectIcon = {
-        path: circlePath,
-        fillColor: '#ef4444',
-        fillOpacity: 1,
-        strokeWeight: 2,
-        strokeColor: '#ffffff',
-        scale: 10,
-      } as google.maps.Symbol;
-      nextMarker = createCustomAssetMarker(map, {
-        lat: subjectPosition.lat,
-        lng: subjectPosition.lng,
-        title: listing?.title || 'Subject Property',
-        markerOptions: { icon: subjectIcon },
-      });
-      subjectMarkerRef.current = nextMarker;
-    } catch (err) {
-      console.error('Failed to create subject marker', err);
-    }
+    let disposed = false;
+    let nextMarker: AdvancedAssetMarker | null = null;
+
+    void (async () => {
+      try {
+        nextMarker = await createCustomAssetMarker(map, {
+          lat: subjectPosition.lat,
+          lng: subjectPosition.lng,
+          title: listing?.title || 'Subject Property',
+          color: '#ef4444',
+          scale: 10,
+        });
+        if (disposed) {
+          clearAdvancedMarker(nextMarker);
+        } else {
+          subjectMarkerRef.current = nextMarker;
+        }
+      } catch (err) {
+        if (!disposed) {
+          console.error('Failed to create subject marker', err);
+        }
+      }
+    })();
 
     return () => {
-      nextMarker?.setMap(null);
+      disposed = true;
+      clearAdvancedMarker(nextMarker);
       if (subjectMarkerRef.current === nextMarker) {
         subjectMarkerRef.current = null;
       }
@@ -509,41 +518,44 @@ export default function Workspace() {
   useEffect(() => {
     if (!map) {
       if (searchMarkerRef.current) {
-        searchMarkerRef.current.setMap(null);
+        clearAdvancedMarker(searchMarkerRef.current);
         searchMarkerRef.current = null;
       }
       return;
     }
 
-    searchMarkerRef.current?.setMap(null);
+    clearAdvancedMarker(searchMarkerRef.current);
     searchMarkerRef.current = null;
 
     if (!searchPin) return;
 
-    let nextMarker: google.maps.Marker | null = null;
-    try {
-      const circlePath = window.google?.maps?.SymbolPath?.CIRCLE ?? google.maps.SymbolPath.CIRCLE;
-      const searchIcon = {
-        path: circlePath,
-        fillColor: '#7C3AED',
-        fillOpacity: 1,
-        strokeWeight: 2,
-        strokeColor: '#ffffff',
-        scale: 8,
-      } as google.maps.Symbol;
-      nextMarker = createCustomAssetMarker(map, {
-        lat: searchPin.lat,
-        lng: searchPin.lng,
-        title: searchPin.address || 'Search Pin',
-        markerOptions: { icon: searchIcon },
-      });
-      searchMarkerRef.current = nextMarker;
-    } catch (err) {
-      console.error('Failed to create search marker', err);
-    }
+    let disposed = false;
+    let nextMarker: AdvancedAssetMarker | null = null;
+
+    void (async () => {
+      try {
+        nextMarker = await createCustomAssetMarker(map, {
+          lat: searchPin.lat,
+          lng: searchPin.lng,
+          title: searchPin.address || 'Search Pin',
+          color: '#7C3AED',
+          scale: 8,
+        });
+        if (disposed) {
+          clearAdvancedMarker(nextMarker);
+        } else {
+          searchMarkerRef.current = nextMarker;
+        }
+      } catch (err) {
+        if (!disposed) {
+          console.error('Failed to create search marker', err);
+        }
+      }
+    })();
 
     return () => {
-      nextMarker?.setMap(null);
+      disposed = true;
+      clearAdvancedMarker(nextMarker);
       if (searchMarkerRef.current === nextMarker) {
         searchMarkerRef.current = null;
       }
@@ -1374,7 +1386,8 @@ export default function Workspace() {
                 fullscreenControl: false,
                 gestureHandling: 'greedy',
                 clickableIcons: false,
-                mapTypeId: mapType
+                mapTypeId: mapType,
+                mapId: GOOGLE_MAPS_MAP_ID,
               }}
               onIdle={() => {
                 if (!map) return;

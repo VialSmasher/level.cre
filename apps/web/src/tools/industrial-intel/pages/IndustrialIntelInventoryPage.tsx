@@ -1,15 +1,16 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, InfoWindowF, useJsApiLoader } from "@react-google-maps/api";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getGoogleMapsApiKey } from "@/lib/googleMapsApiKey";
+import { getGoogleMapsApiKey, getGoogleMapsMapId } from "@/lib/googleMapsApiKey";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { AdvancedMapMarker } from "@/features/map/AdvancedMapMarker";
 
 type IntelListing = {
   id: string;
@@ -102,6 +103,8 @@ type UploadListingRecord = {
 };
 
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
+const GOOGLE_MAPS_MAP_ID = getGoogleMapsMapId();
+const GOOGLE_MAPS_LIBRARIES: any = ["marker"];
 const DEFAULT_MAP_CENTER = { lat: 53.5461, lng: -113.4938 };
 const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
 
@@ -298,6 +301,8 @@ function IndustrialIntelListingMap({
   const { isLoaded: isMapLoaded, loadError: mapLoadError } = useJsApiLoader({
     id: "industrial-intel-map",
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+    libraries: GOOGLE_MAPS_LIBRARIES,
+    mapIds: [GOOGLE_MAPS_MAP_ID],
   });
 
   return (
@@ -357,12 +362,16 @@ function IndustrialIntelListingMap({
                   mapTypeControl: false,
                   fullscreenControl: true,
                   gestureHandling: "greedy",
+                  mapId: GOOGLE_MAPS_MAP_ID,
                 }}
               >
                 {mappableListings.map((listing) => (
-                  <MarkerF
+                  <AdvancedMapMarker
                     key={listing.id}
                     position={{ lat: listing.latitude, lng: listing.longitude }}
+                    title={listing.title}
+                    color="#2563eb"
+                    scale={9}
                     onClick={() => onSelectListing(listing.id)}
                   />
                 ))}

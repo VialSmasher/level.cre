@@ -1,27 +1,45 @@
+import {
+  type AdvancedAssetMarker,
+  createCircleMarkerContent,
+  loadAdvancedMarkerLibrary,
+} from './advancedMarkers';
+
 export type CustomAsset = {
   id?: string | number;
   title?: string;
   lat: number;
   lng: number;
-  markerOptions?: google.maps.MarkerOptions;
+  color?: string;
+  borderColor?: string;
+  label?: string;
+  scale?: number;
 };
 
 /**
  * Adds a custom asset marker and wires up an InfoWindow with copy + external link actions.
  * Uses DOM nodes (not strings) so that event listeners remain intact after sanitization.
  */
-export function createCustomAssetMarker(map: google.maps.Map, asset: CustomAsset): google.maps.Marker {
+export async function createCustomAssetMarker(map: google.maps.Map, asset: CustomAsset): Promise<AdvancedAssetMarker> {
   if (!map || !asset) {
     throw new Error('Map instance and asset data are required.');
   }
 
-  const { lat, lng, title = 'Custom Asset', markerOptions } = asset;
+  const {
+    lat,
+    lng,
+    title = 'Custom Asset',
+    color = '#3B82F6',
+    borderColor = '#ffffff',
+    label,
+    scale = 8,
+  } = asset;
 
-  const marker = new google.maps.Marker({
+  const { AdvancedMarkerElement } = await loadAdvancedMarkerLibrary();
+  const marker = new AdvancedMarkerElement({
     position: { lat, lng },
     map,
     title,
-    ...(markerOptions ?? {}),
+    content: createCircleMarkerContent({ color, borderColor, label, scale }),
   });
 
   const infoWindow = new google.maps.InfoWindow();
@@ -77,7 +95,6 @@ export function createCustomAssetMarker(map: google.maps.Map, asset: CustomAsset
     wrap.appendChild(coordsRow);
 
     const mapsLink = document.createElement('a');
-    // The standard, reliable Google Maps Search URL
     mapsLink.href = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
     mapsLink.target = '_blank';
     mapsLink.rel = 'noopener noreferrer';

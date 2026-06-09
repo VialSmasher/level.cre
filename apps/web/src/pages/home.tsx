@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
-import { GoogleMap, useJsApiLoader, Marker, Polygon, InfoWindow } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, Polygon, InfoWindow } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PhoneInput } from '@/components/ui/phone-input';
@@ -23,7 +23,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { nsKey, readJSON, removeKey, writeJSON } from '@/lib/storage';
-import { getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
+import { getGoogleMapsApiKey, getGoogleMapsMapId } from '@/lib/googleMapsApiKey';
 import { getProspectDisplayName } from '@/lib/prospectDisplay';
 import { quickLogSpecFor, type QuickLogType } from '@/lib/gamificationUi';
 import { logBrokerActivity } from '@/lib/brokerActions';
@@ -35,6 +35,7 @@ import { Badge } from '@/components/ui/badge';
 import { STATUS_META } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
 import { useTerraDrawGoogleMaps, type MapDrawMode, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
+import { AdvancedMapMarker } from '@/features/map/AdvancedMapMarker';
 
 // Import all necessary types and data
 import type { 
@@ -45,8 +46,10 @@ import type {
   Touch 
 } from '@level-cre/shared/schema';
 
-const libraries: any = ['geometry', 'places'];
+const libraries: any = ['geometry', 'places', 'marker'];
 const MAP_CONTAINER_STYLE = { width: '100%', height: '100%' } as const;
+const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
+const GOOGLE_MAPS_MAP_ID = getGoogleMapsMapId();
 const MAP_OPTIONS: google.maps.MapOptions = {
   disableDefaultUI: true,
   zoomControl: true,
@@ -57,10 +60,10 @@ const MAP_OPTIONS: google.maps.MapOptions = {
   fullscreenControl: true,
   gestureHandling: 'greedy',
   clickableIcons: false,
+  mapId: GOOGLE_MAPS_MAP_ID,
 };
 const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton
 const DEFAULT_ZOOM = 11;
-const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 const EMPTY_PROSPECTS: Prospect[] = [];
 const DEMO_MAP_RESET_VERSION = '2026-06-terradraw-clean-map-v1';
 const DEMO_MAP_RESET_KEY = 'levelcre:demoMapResetVersion';
@@ -138,14 +141,12 @@ const MapOverlayLayer = memo(function MapOverlayLayer({
   editingProspectId,
   onProspectClick,
   polygonRefs,
-  getPointMarkerIcon,
 }: {
   renderableProspects: RenderableProspectEntry[];
   terraMode: string;
   editingProspectId: string | null;
   onProspectClick: (prospect: Prospect) => void;
   polygonRefs: { current: Map<string, google.maps.Polygon> };
-  getPointMarkerIcon: (color: string) => google.maps.Symbol;
 }) {
   const savedOverlaysInteractive = terraMode === 'select';
 
@@ -154,12 +155,13 @@ const MapOverlayLayer = memo(function MapOverlayLayer({
       {renderableProspects.map((entry) => {
         if (entry.kind === 'point') {
           return (
-            <Marker
+            <AdvancedMapMarker
               key={entry.id}
               position={entry.position}
+              title={getProspectDisplayName(entry.prospect)}
+              color={entry.color}
+              scale={8}
               onClick={savedOverlaysInteractive ? () => onProspectClick(entry.prospect) : undefined}
-              clickable={savedOverlaysInteractive}
-              icon={getPointMarkerIcon(entry.color)}
             />
           );
         }
@@ -363,6 +365,7 @@ export default function HomePage() {
     id: 'google-map-script',
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
     libraries,
+    mapIds: [GOOGLE_MAPS_MAP_ID],
   });
   useEffect(() => {
     const settings = readJSON<any>(nsKey(currentUser?.id, 'userSettings'), null) || {};
@@ -649,15 +652,6 @@ export default function HomePage() {
       return null;
     }).filter(Boolean) as RenderableProspectEntry[];
   }, [filteredProspects]);
-
-  const getPointMarkerIcon = useCallback((color: string): google.maps.Symbol => ({
-    path: window.google?.maps?.SymbolPath?.CIRCLE,
-    fillColor: color,
-    fillOpacity: 1,
-    strokeWeight: 2,
-    strokeColor: '#ffffff',
-    scale: 8,
-  }), []);
 
   const clearPolygonPathListeners = useCallback((prospectId?: string) => {
     if (prospectId) {
@@ -1839,22 +1833,17 @@ export default function HomePage() {
             editingProspectId={editingProspectId}
             onProspectClick={handleProspectClick}
             polygonRefs={polygonRefs}
-            getPointMarkerIcon={getPointMarkerIcon}
           />
 
           {/* Search Pin */}
           {searchPin && (
             <>
-              <Marker
+              <AdvancedMapMarker
                 position={{ lat: searchPin.lat, lng: searchPin.lng }}
-                icon={{
-                  path: window.google?.maps?.SymbolPath?.CIRCLE,
-                  fillColor: '#FF6B35',
-                  fillOpacity: 1,
-                  strokeWeight: 3,
-                  strokeColor: '#ffffff',
-                  scale: 12,
-                }}
+                title={searchPin.address}
+                color="#FF6B35"
+                scale={12}
+                zIndex={3}
               />
               <InfoWindow
                 position={{ lat: searchPin.lat, lng: searchPin.lng }}

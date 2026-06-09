@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
-import { GoogleMap, InfoWindowF, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import { GoogleMap, InfoWindowF, useJsApiLoader } from "@react-google-maps/api";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, FileText, MapPin, Printer } from "lucide-react";
 import { useRoute } from "wouter";
 import { apiUrl } from "@/lib/api";
-import { getGoogleMapsApiKey, GOOGLE_MAPS_API_KEY_HELP_TEXT } from "@/lib/googleMapsApiKey";
+import { getGoogleMapsApiKey, getGoogleMapsMapId, GOOGLE_MAPS_API_KEY_HELP_TEXT } from "@/lib/googleMapsApiKey";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AdvancedMapMarker } from "@/features/map/AdvancedMapMarker";
 
 type IntelListing = {
   id: string;
@@ -61,6 +62,8 @@ type MappableSurveyItem = IntelSurveyItem & {
 };
 
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
+const GOOGLE_MAPS_MAP_ID = getGoogleMapsMapId();
+const GOOGLE_MAPS_LIBRARIES: any = ["marker"];
 const DEFAULT_MAP_CENTER = { lat: 53.5461, lng: -113.4938 };
 const MAP_CONTAINER_STYLE = { width: "100%", height: "100%" };
 
@@ -148,6 +151,8 @@ export default function IndustrialIntelSurveyClientPage() {
   const { isLoaded: isMapLoaded, loadError: mapLoadError } = useJsApiLoader({
     id: "industrial-intel-client-survey-map",
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+    libraries: GOOGLE_MAPS_LIBRARIES,
+    mapIds: [GOOGLE_MAPS_MAP_ID],
   });
 
   const orderedItems = useMemo(
@@ -279,15 +284,19 @@ export default function IndustrialIntelSurveyClientPage() {
                   mapTypeControl: false,
                   fullscreenControl: true,
                   gestureHandling: "greedy",
+                  mapId: GOOGLE_MAPS_MAP_ID,
                 }}
               >
                 {mappableItems.map((item) => {
                   const optionNumber = orderedItems.findIndex((candidate) => candidate.id === item.id) + 1;
                   return (
-                    <MarkerF
+                    <AdvancedMapMarker
                       key={item.id}
                       position={{ lat: item.listing.latitude, lng: item.listing.longitude }}
-                      label={{ text: String(optionNumber), color: "#ffffff", fontWeight: "700" }}
+                      title={item.listing.title}
+                      label={String(optionNumber)}
+                      color="#2563eb"
+                      scale={10}
                       onClick={() => setSelectedItemId(item.id)}
                     />
                   );

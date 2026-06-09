@@ -1,11 +1,7 @@
-import { useRef, useState, useMemo, useEffect } from 'react';
+import { useRef, useState, useMemo, useEffect, useCallback } from 'react';
 import { Search, Square, Star } from 'lucide-react';
 import type { Prospect } from '@level-cre/shared/schema';
 import { getProspectDisplayName, getProspectSecondaryName, isPlaceholderProspectName } from '@/lib/prospectDisplay';
-import usePlacesAutocomplete, {
-  getGeocode,
-  getLatLng,
-} from 'use-places-autocomplete';
 
 interface SearchBarProps {
   onSearch: (location: { lat: number; lng: number; address: string; businessName?: string | null; websiteUrl?: string | null }) => void;
@@ -17,9 +13,22 @@ interface SearchBarProps {
   clearSignal?: number;
 }
 
+type GoogleSearchItem = {
+  type: 'google';
+  key: string;
+  suggestion: google.maps.places.AutocompleteSuggestion;
+  prediction: google.maps.places.PlacePrediction;
+  label: string;
+  secondary?: string;
+  description: string;
+};
+
 type CombinedSearchItem =
   | { type: 'local'; key: string; prospect: Prospect; label: string; secondary?: string }
-  | { type: 'google'; key: string; suggestion: google.maps.places.AutocompletePrediction };
+  | GoogleSearchItem;
+
+const FALLBACK_RADIUS_METERS = 50000;
+const PLACES_DEBOUNCE_MS = 300;
 
 export function SearchBar({
   onSearch,
@@ -31,44 +40,117 @@ export function SearchBar({
 }: SearchBarProps) {
   const [strictBounds, setStrictBounds] = useState(false);
   const [activeIndex, setActiveIndex] = useState<number>(-1);
+  const [ready, setReady] = useState(false);
+  const [value, setValue] = useState('');
+  const [googleSuggestions, setGoogleSuggestions] = useState<google.maps.places.AutocompleteSuggestion[]>([]);
+  const requestIdRef = useRef(0);
+  const suppressNextFetchRef = useRef(false);
+  const sessionTokenRef = useRef<google.maps.places.AutocompleteSessionToken | null>(null);
+  const ref = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const listboxId = 'places-suggestions-listbox';
+  const normalizedInput = value.trim().toLowerCase();
 
-  // Build dynamic request options based on current map bounds
-  const requestOptions = useMemo(() => {
-    const FALLBACK_RADIUS_METERS = 50000; // 50km bias around Edmonton if no bounds
-    const base: Partial<google.maps.places.AutocompletionRequest> = {
-      // Restrict suggestions to Canada
-      componentRestrictions: { country: 'ca' },
+  const requestOptions = useMemo((): Omit<google.maps.places.AutocompleteRequest, 'input'> => {
+    const base: Omit<google.maps.places.AutocompleteRequest, 'input'> = {
+      includedRegionCodes: ['ca'],
       region: 'ca',
     };
 
     if (bounds) {
       if (strictBounds) {
-        // Hard restrict to visible bounds
-        return { ...base, locationRestriction: bounds } as google.maps.places.AutocompletionRequest;
+        return { ...base, locationRestriction: bounds };
       }
-      // Bias towards visible bounds
-      return { ...base, locationBias: bounds } as google.maps.places.AutocompletionRequest;
+      return { ...base, locationBias: bounds };
     }
 
-    // Fallback: bias around Edmonton center with radius
     return {
       ...base,
       locationBias: { center: defaultCenter, radius: FALLBACK_RADIUS_METERS } as google.maps.CircleLiteral,
-    } as google.maps.places.AutocompletionRequest;
+    };
   }, [bounds, strictBounds, defaultCenter]);
 
-  const {
-    ready,
-    value,
-    suggestions: { status, data },
-    setValue,
-    clearSuggestions,
-  } = usePlacesAutocomplete({ requestOptions, debounce: 300 });
-  
-  const ref = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
-  const listboxId = 'places-suggestions-listbox';
-  const normalizedInput = value.trim().toLowerCase();
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        if (!window.google?.maps?.importLibrary) {
+          if (!cancelled) setReady(false);
+          return;
+        }
+        await window.google.maps.importLibrary('places');
+        if (!cancelled) setReady(true);
+      } catch (error) {
+        console.error('Failed to load Google Places autocomplete library', error);
+        if (!cancelled) setReady(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const clearSuggestions = useCallback(() => {
+    setGoogleSuggestions([]);
+    requestIdRef.current += 1;
+  }, []);
+
+  const setValueWithoutFetch = useCallback((nextValue: string) => {
+    if (nextValue !== value) {
+      suppressNextFetchRef.current = true;
+    }
+    setValue(nextValue);
+  }, [value]);
+
+  useEffect(() => {
+    const input = value.trim();
+    if (!ready || !input) {
+      clearSuggestions();
+      if (!input) {
+        sessionTokenRef.current = null;
+      }
+      return undefined;
+    }
+
+    if (suppressNextFetchRef.current) {
+      suppressNextFetchRef.current = false;
+      clearSuggestions();
+      return undefined;
+    }
+
+    let cancelled = false;
+    const requestId = ++requestIdRef.current;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const places = await window.google.maps.importLibrary('places') as google.maps.PlacesLibrary;
+          if (!sessionTokenRef.current) {
+            sessionTokenRef.current = new places.AutocompleteSessionToken();
+          }
+          const { suggestions } = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+            ...requestOptions,
+            input,
+            sessionToken: sessionTokenRef.current,
+          });
+          if (!cancelled && requestId === requestIdRef.current) {
+            setGoogleSuggestions(suggestions.filter((suggestion) => suggestion.placePrediction));
+          }
+        } catch (error) {
+          if (!cancelled && requestId === requestIdRef.current) {
+            console.error('Failed to fetch Google Places suggestions', error);
+            setGoogleSuggestions([]);
+          }
+        }
+      })();
+    }, PLACES_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [clearSuggestions, ready, requestOptions, value]);
 
   const localResults = useMemo(() => {
     if (!normalizedInput) return [] as Prospect[];
@@ -91,73 +173,102 @@ export function SearchBar({
         secondary: getProspectSecondaryName(prospect),
       };
     });
-    const googleItems: CombinedSearchItem[] = data.map((suggestion, idx) => ({
-      type: 'google',
-      key: suggestion.place_id ? `google-${suggestion.place_id}` : `google-${idx}-${suggestion.description}`,
-      suggestion,
-    }));
+    const googleItems: CombinedSearchItem[] = googleSuggestions.flatMap((suggestion, idx) => {
+      const prediction = suggestion.placePrediction;
+      if (!prediction) return [];
+      const description = prediction.text.text;
+      return [{
+        type: 'google' as const,
+        key: prediction.placeId ? `google-${prediction.placeId}` : `google-${idx}-${description}`,
+        suggestion,
+        prediction,
+        label: prediction.mainText?.text || description,
+        secondary: prediction.secondaryText?.text || undefined,
+        description,
+      }];
+    });
     return [...localItems, ...googleItems];
-  }, [data, localResults]);
+  }, [googleSuggestions, localResults]);
 
   // Reset highlight when suggestions update
   useEffect(() => {
     setActiveIndex(-1);
-  }, [status, combinedResults.length]);
+  }, [combinedResults.length]);
 
   // Clear input when parent signals (e.g., after saving a prospect)
   useEffect(() => {
     if (typeof clearSignal === 'number') {
-      setValue('', false);
+      setValue('');
       clearSuggestions();
+      sessionTokenRef.current = null;
       setActiveIndex(-1);
     }
-  }, [clearSignal, setValue, clearSuggestions]);
+  }, [clearSignal, clearSuggestions]);
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     setValue(e.target.value);
   };
 
   const handleLocalSelect = (prospect: Prospect) => () => {
-    setValue(getProspectDisplayName(prospect), false);
+    setValueWithoutFetch(getProspectDisplayName(prospect));
     clearSuggestions();
+    sessionTokenRef.current = null;
     setActiveIndex(-1);
     onProspectClick?.(prospect);
   };
 
-  const handleSelect =
-    (suggestion: { description: string; place_id?: string }) =>
-    () => {
-      const { description, place_id } = suggestion;
-      // When user selects a place, we can replace the keyword without request data from API
-      // by setting the second parameter to "false"
-      setValue(description, false);
-      clearSuggestions();
-
-      // Resolve lat/lng first
-      getGeocode({ address: description }).then(async (results) => {
-        const { lat, lng } = getLatLng(results[0]);
-        let businessName: string | null | undefined = undefined;
-        let websiteUrl: string | null | undefined = undefined;
-
-        // Try to fetch Place Details for name/website if available
-        if (place_id && (window as any).google?.maps?.places?.PlacesService) {
-          try {
-            const svc = new window.google.maps.places.PlacesService(document.createElement('div'));
-            const place = await new Promise<google.maps.places.PlaceResult | null>((resolve) => {
-              svc.getDetails({ placeId: place_id, fields: ['name', 'website'] }, (p, status) => {
-                if (status === window.google.maps.places.PlacesServiceStatus.OK) resolve(p || null);
-                else resolve(null);
-              });
-            });
-            businessName = place?.name ?? undefined;
-            websiteUrl = (place as any)?.website ?? undefined;
-          } catch (e) {
-            // ignore details failure; fallback to address only
-          }
+  const geocodeAddress = useCallback(async (address: string) => {
+    const geocoder = new window.google.maps.Geocoder();
+    const results = await new Promise<google.maps.GeocoderResult[]>((resolve, reject) => {
+      geocoder.geocode({ address, componentRestrictions: { country: 'CA' } }, (data, status) => {
+        if (status === 'OK' && data?.[0]) {
+          resolve(data);
+          return;
         }
-
-        onSearch({ lat, lng, address: description, businessName, websiteUrl });
+        reject(status);
       });
+    });
+    const location = results[0].geometry.location;
+    return {
+      lat: location.lat(),
+      lng: location.lng(),
+      address: results[0].formatted_address || address,
+    };
+  }, []);
+
+  const handleSelect =
+    (item: GoogleSearchItem) =>
+    () => {
+      const { description, prediction } = item;
+      setValueWithoutFetch(description);
+      clearSuggestions();
+      setActiveIndex(-1);
+
+      void (async () => {
+        try {
+          const place = prediction.toPlace();
+          await place.fetchFields({ fields: ['displayName', 'formattedAddress', 'location', 'websiteURI'] });
+          if (!place.location) {
+            throw new Error('Selected place did not include a location.');
+          }
+          onSearch({
+            lat: place.location.lat(),
+            lng: place.location.lng(),
+            address: place.formattedAddress || description,
+            businessName: place.displayName ?? undefined,
+            websiteUrl: place.websiteURI ?? undefined,
+          });
+        } catch (error) {
+          try {
+            const fallback = await geocodeAddress(description);
+            onSearch({ ...fallback, businessName: undefined, websiteUrl: undefined });
+          } catch (fallbackError) {
+            console.error('Failed to resolve selected Google Places suggestion', error, fallbackError);
+          }
+        } finally {
+          sessionTokenRef.current = null;
+        }
+      })();
     };
 
   const renderSuggestions = () => {
@@ -190,20 +301,17 @@ export function SearchBar({
               </li>
             );
           }
-          const {
-            structured_formatting: { main_text, secondary_text },
-          } = item.suggestion;
           return (
             <li
               key={item.key}
               id={`places-option-${idx}`}
               role="option"
               aria-selected={activeIndex === idx}
-              onClick={handleSelect(item.suggestion)}
+              onClick={handleSelect(item)}
               onMouseEnter={() => setActiveIndex(idx)}
               className={`p-2 cursor-pointer ${activeIndex === idx ? 'bg-gray-100' : 'hover:bg-gray-100'}`}
             >
-              <strong>{main_text}</strong> <small>{secondary_text}</small>
+              <strong>{item.label}</strong> {item.secondary && <small>{item.secondary}</small>}
             </li>
           );
         })}
@@ -224,7 +332,6 @@ export function SearchBar({
               e.preventDefault();
               setActiveIndex((prev) => {
                 const next = Math.min(prev + 1, combinedResults.length - 1);
-                // Scroll highlighted item into view
                 const el = listRef.current?.querySelector(`#places-option-${next}`) as HTMLElement | null;
                 el?.scrollIntoView({ block: 'nearest' });
                 return next;
@@ -246,7 +353,7 @@ export function SearchBar({
                 if (item.type === 'local') {
                   handleLocalSelect(item.prospect)();
                 } else {
-                  handleSelect(item.suggestion)();
+                  handleSelect(item)();
                 }
               } else if (combinedResults.length > 0) {
                 e.preventDefault();
@@ -254,7 +361,7 @@ export function SearchBar({
                 if (first.type === 'local') {
                   handleLocalSelect(first.prospect)();
                 } else {
-                  handleSelect(first.suggestion)();
+                  handleSelect(first)();
                 }
               }
             } else if (e.key === 'Escape') {
@@ -291,7 +398,7 @@ export function SearchBar({
               if (first.type === 'local') {
                 handleLocalSelect(first.prospect)();
               } else {
-                handleSelect(first.suggestion)();
+                handleSelect(first)();
               }
             }
           }}

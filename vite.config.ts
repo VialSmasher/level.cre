@@ -16,6 +16,11 @@ export default defineConfig(async ({ mode }) => {
     env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ||
     env.GOOGLE_MAPS_API_KEY?.trim() ||
     '';
+  const googleMapsMapId =
+    env.VITE_GOOGLE_MAPS_MAP_ID?.trim() ||
+    env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID?.trim() ||
+    env.GOOGLE_MAPS_MAP_ID?.trim() ||
+    '';
   const isProd = (env.NODE_ENV || process.env.NODE_ENV) === 'production' || mode === 'production';
   const overlayEnabled = !isProd && !['0', 'false', 'off'].includes(String(env.VITE_RUNTIME_OVERLAY || '').toLowerCase());
 
@@ -28,6 +33,7 @@ export default defineConfig(async ({ mode }) => {
     // rename injected secrets to a Vite-prefixed variable.
     define: {
       'import.meta.env.GOOGLE_MAPS_API_KEY': JSON.stringify(googleMapsApiKey),
+      'import.meta.env.GOOGLE_MAPS_MAP_ID': JSON.stringify(googleMapsMapId),
     },
     // Let Vite auto-discover the nearest PostCSS config (apps/web/postcss.config.cjs)
     // to avoid any subtle context issues with content scanning in Tailwind.
