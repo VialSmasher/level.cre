@@ -22,7 +22,7 @@ import { useGeocode } from '@/hooks/useGeocode';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
-import { nsKey, readJSON, writeJSON } from '@/lib/storage';
+import { nsKey, readJSON, removeKey, writeJSON } from '@/lib/storage';
 import { getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
 import { getProspectDisplayName } from '@/lib/prospectDisplay';
 import { quickLogSpecFor, type QuickLogType } from '@/lib/gamificationUi';
@@ -62,6 +62,8 @@ const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton
 const DEFAULT_ZOOM = 11;
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 const EMPTY_PROSPECTS: Prospect[] = [];
+const DEMO_MAP_RESET_VERSION = '2026-06-terradraw-clean-map-v1';
+const DEMO_MAP_RESET_KEY = 'levelcre:demoMapResetVersion';
 
 type ContextMenuState = {
   lat: number;
@@ -130,6 +132,8 @@ const MapOverlayLayer = memo(function MapOverlayLayer({
   polygonRefs: { current: Map<string, google.maps.Polygon> };
   getPointMarkerIcon: (color: string) => google.maps.Symbol;
 }) {
+  const savedOverlaysInteractive = terraMode === 'select';
+
   return (
     <>
       {renderableProspects.map((entry) => {
@@ -138,8 +142,8 @@ const MapOverlayLayer = memo(function MapOverlayLayer({
             <Marker
               key={entry.id}
               position={entry.position}
-              onClick={() => onProspectClick(entry.prospect)}
-              clickable={terraMode === 'select'}
+              onClick={savedOverlaysInteractive ? () => onProspectClick(entry.prospect) : undefined}
+              clickable={savedOverlaysInteractive}
               icon={getPointMarkerIcon(entry.color)}
             />
           );
@@ -148,7 +152,7 @@ const MapOverlayLayer = memo(function MapOverlayLayer({
           <Polygon
             key={entry.id}
             paths={entry.paths}
-            onClick={() => onProspectClick(entry.prospect)}
+            onClick={savedOverlaysInteractive ? () => onProspectClick(entry.prospect) : undefined}
             onLoad={(polygon) => {
               polygonRefs.current.set(entry.id, polygon);
             }}
@@ -158,9 +162,9 @@ const MapOverlayLayer = memo(function MapOverlayLayer({
               strokeColor: entry.color,
               strokeWeight: editingProspectId === entry.id ? 3 : 2,
               strokeOpacity: 0.8,
-              clickable: true,
-              editable: editingProspectId === entry.id,
-              draggable: editingProspectId === entry.id,
+              clickable: savedOverlaysInteractive,
+              editable: savedOverlaysInteractive && editingProspectId === entry.id,
+              draggable: savedOverlaysInteractive && editingProspectId === entry.id,
               zIndex: editingProspectId === entry.id ? 2 : 1,
             }}
           />
@@ -423,6 +427,19 @@ export default function HomePage() {
     enabled: !!currentUser && !isDemoMode,
     retry: false,
   });
+
+  useEffect(() => {
+    if (!isDemoMode || currentUser?.id !== 'demo-user') return;
+    try {
+      if (readJSON<string | null>(DEMO_MAP_RESET_KEY, null) === DEMO_MAP_RESET_VERSION) return;
+      removeKey(nsKey(currentUser.id, 'mapData'));
+      removeKey(nsKey(null, 'mapData'));
+      queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], []);
+      setProspects([]);
+      setTouches([]);
+      writeJSON(DEMO_MAP_RESET_KEY, DEMO_MAP_RESET_VERSION);
+    } catch {}
+  }, [isDemoMode, currentUser?.id]);
   
   // Remove submarkets query - we'll use profile submarkets instead
   

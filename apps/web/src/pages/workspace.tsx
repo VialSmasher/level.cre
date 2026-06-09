@@ -30,7 +30,7 @@ import { MapContextMenu } from '@/features/map/MapContextMenu';
 import { useTerraDrawGoogleMaps, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
 import { useGeocode } from '@/hooks/useGeocode';
 import { GOOGLE_MAPS_API_KEY_HELP_TEXT, getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
-import { nsKey, readJSON, writeJSON } from '@/lib/storage';
+import { nsKey, readJSON, removeKey, writeJSON } from '@/lib/storage';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 // Note: Avoid importing AlertDialog to prevent a circular-import bundle bug
 
@@ -78,6 +78,8 @@ type WorkspaceMember = { userId: string; role: 'owner'|'editor'|'viewer'; email?
 
 const EMPTY_PROSPECTS: Prospect[] = [];
 const EMPTY_MEMBERS: WorkspaceMember[] = [];
+const DEMO_MAP_RESET_VERSION = '2026-06-terradraw-clean-map-v1';
+const DEMO_MAP_RESET_KEY = 'levelcre:demoMapResetVersion';
 
 export default function Workspace() {
   const [, params] = useRoute('/app/workspaces/:id');
@@ -118,6 +120,20 @@ export default function Workspace() {
       } catch {}
     }
   }, [listingId]);
+
+  useEffect(() => {
+    if (!isDemoMode || user?.id !== 'demo-user') return;
+    try {
+      if (readJSON<string | null>(DEMO_MAP_RESET_KEY, null) === DEMO_MAP_RESET_VERSION) return;
+      removeKey(nsKey(user.id, 'mapData'));
+      removeKey(nsKey(null, 'mapData'));
+      queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], []);
+      if (listingId) {
+        queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], []);
+      }
+      writeJSON(DEMO_MAP_RESET_KEY, DEMO_MAP_RESET_VERSION);
+    } catch {}
+  }, [isDemoMode, listingId, queryClient, user?.id]);
 
   // Demo: seed listing detail from localStorage if cache empty
   useEffect(() => {
@@ -1365,6 +1381,7 @@ export default function Workspace() {
               if (p.geometry.type !== 'Polygon' && p.geometry.type !== 'Rectangle') {
                 return null;
               }
+              const overlaysInteractive = drawMode === 'select';
               const color = STATUS_META[p.status as ProspectStatusType]?.color || '#3B82F6';
               const coords = p.geometry.coordinates as [number, number][][] | [number, number][];
               const ring = Array.isArray(coords[0]) && Array.isArray((coords as any)[0][0])
@@ -1374,7 +1391,7 @@ export default function Workspace() {
                 <Polygon
                   key={p.id}
                   paths={ring.map(([lng, lat]) => ({ lat, lng }))}
-                  onClick={() => { setSelectedProspect(p); setIsEditPanelOpen(true); }}
+                  onClick={overlaysInteractive ? () => { setSelectedProspect(p); setIsEditPanelOpen(true); } : undefined}
                   onLoad={(poly) => { polygonRefs.current.set(p.id, poly); }}
                   options={{
                     fillColor: color,
@@ -1382,6 +1399,7 @@ export default function Workspace() {
                     strokeColor: color,
                     strokeOpacity: 0.8,
                     strokeWeight: 2,
+                    clickable: overlaysInteractive,
                   }}
                 />
               );
