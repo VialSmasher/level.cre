@@ -668,7 +668,7 @@ export default function Workspace() {
     setDrawingForProspect(null);
     // Reset drawing mode and map interactions
     try { setDrawMode('select'); } catch {}
-    try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false }); } catch {}
+    try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false, clickableIcons: false }); } catch {}
   }, [editingProspectId, savePolygonChanges, flushAutoSave, cancelAutoSave, map]);
 
   // Close Edit Panel on Escape key (flush + reset draw state). Works while editing.
@@ -1115,7 +1115,7 @@ export default function Workspace() {
         setDrawingForProspect(null);
         setIsEditPanelOpen(true);
         setDrawMode('select');
-        map?.setOptions({ draggable: true, disableDoubleClickZoom: false });
+        map?.setOptions({ draggable: true, disableDoubleClickZoom: false, clickableIcons: false });
       }
       return;
     }
@@ -1342,6 +1342,7 @@ export default function Workspace() {
                 rotateControl: false,
                 fullscreenControl: false,
                 gestureHandling: 'greedy',
+                clickableIcons: false,
                 mapTypeId: mapType
               }}
               onIdle={() => {

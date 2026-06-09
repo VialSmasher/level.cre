@@ -160,7 +160,7 @@ export function useTerraDrawGoogleMaps({
 
     const resetMapInteraction = () => {
       try {
-        map.setOptions({ draggable: true, disableDoubleClickZoom: false });
+        map.setOptions({ draggable: true, disableDoubleClickZoom: false, clickableIcons: false });
       } catch {}
     };
 
@@ -246,6 +246,7 @@ export function useTerraDrawGoogleMaps({
       map?.setOptions({
         draggable: nextMode === 'select',
         disableDoubleClickZoom: nextMode !== 'select',
+        clickableIcons: false,
       });
       return true;
     } catch (error) {

@@ -56,6 +56,7 @@ const MAP_OPTIONS: google.maps.MapOptions = {
   rotateControl: false,
   fullscreenControl: true,
   gestureHandling: 'greedy',
+  clickableIcons: false,
 };
 const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton
 const DEFAULT_ZOOM = 11;
@@ -1672,7 +1673,7 @@ export default function HomePage() {
     setDrawingForProspect(null);
     // Reset drawing tools
     try { setTerraModeSafe('select'); } catch {}
-    try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false } as google.maps.MapOptions); } catch {}
+    try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false, clickableIcons: false } as google.maps.MapOptions); } catch {}
   }, [editingProspectId, savePolygonChanges, flushHomeQueuedSave, setTerraModeSafe, map, clearPolygonPathListeners]);
 
   useEffect(() => {
