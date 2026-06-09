@@ -104,7 +104,7 @@ export default function MapToolsTestPage() {
                 options={{ streetViewControl: false, mapTypeControl: true, fullscreenControl: false, gestureHandling: "greedy" }}
               />
             ) : (
-              <div className="h-full flex items-center justify-center text-gray-500">Loading map…</div>
+              <div className="h-full flex items-center justify-center text-gray-500">Loading map...</div>
             )}
           </div>
 

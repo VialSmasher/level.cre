@@ -86,6 +86,7 @@ function OnboardingCheck({ children }: { children: React.ReactNode }) {
 
 function Router() {
   const { user, loading } = useAuth()
+  const [location] = useLocation()
   // Always allow the OAuth callback route to render so it can exchange the code,
   // even while global auth state is still "loading".
   const [isAuthCallback] = useRoute('/auth/callback')
@@ -103,6 +104,7 @@ function Router() {
 
   return (
     <Suspense fallback={<Spinner />}>
+    <RouteErrorBoundary key={location}>
     <Switch>
       {/* Public routes */}
       {(String(import.meta.env.NEXT_PUBLIC_ADMIN_DIAG_ENABLED ?? '').toLowerCase() === 'true' ||
@@ -471,6 +473,7 @@ function Router() {
         </Suspense>
       )} />
     </Switch>
+    </RouteErrorBoundary>
     </Suspense>
   )
 }

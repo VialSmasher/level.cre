@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useRoute } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { GoogleMap, Polygon, DrawingManager, useJsApiLoader } from '@react-google-maps/api';
+import { GoogleMap, Polygon, useJsApiLoader } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
 // Drawer controls not used in workspace; edit panel opens directly
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -21,12 +21,13 @@ import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { ArrowLeft, Briefcase, Save, X, Edit3, Trash2, Share2 } from 'lucide-react';
 import { Modal, ModalContent, ModalHeader, ModalFooter, ModalTitle, ModalDescription, ModalClose } from '@/components/primitives/Modal';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-// Using Google DrawingManager (not Terra) to match main map behavior
+// TerraDraw handles new map asset creation; saved assets continue to render as Google map overlays.
 import { ShareWorkspaceDialog } from '@/components/ShareWorkspaceDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { STATUS_META, type ProspectStatusType } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
 import { MapContextMenu } from '@/features/map/MapContextMenu';
+import { useTerraDrawGoogleMaps, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
 import { useGeocode } from '@/hooks/useGeocode';
 import { GOOGLE_MAPS_API_KEY_HELP_TEXT, getGoogleMapsApiKey } from '@/lib/googleMapsApiKey';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
@@ -43,7 +44,7 @@ type Listing = {
   submarket?: string | null;
 };
 
-const libraries: any = ['drawing', 'geometry', 'places'];
+const libraries: any = ['geometry', 'places'];
 const FIELD_BUFFER_DELAY = 600;
 const AUTO_NAME_REGEX = /^New\s+(polygon|rectangle|point|marker)/i;
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
@@ -61,6 +62,7 @@ type CreateProspectVariables = {
     businessName?: string;
     websiteUrl?: string;
     contactCompany?: string;
+    lotSizeAcres?: number;
   };
   source?: 'search' | 'context-menu';
 };
@@ -181,10 +183,9 @@ export default function Workspace() {
     return addMonthsSafe(anchor, months).toISOString();
   };
 
-  // DrawingManager state
+  // Drawing state
   type DrawMode = 'select' | 'point' | 'polygon' | 'rectangle';
   const [drawMode, setDrawMode] = useState<DrawMode>('select');
-  const drawingManagerRef = useRef<google.maps.drawing.DrawingManager | null>(null);
 
   // Track when user is drawing a polygon to attach to an existing prospect (like /app)
   const [drawingForProspect, setDrawingForProspect] = useState<Prospect | null>(null);
@@ -666,7 +667,6 @@ export default function Workspace() {
     lastEditedIdRef.current = null;
     setDrawingForProspect(null);
     // Reset drawing mode and map interactions
-    try { drawingManagerRef.current?.setDrawingMode(null); } catch {}
     try { setDrawMode('select'); } catch {}
     try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false }); } catch {}
   }, [editingProspectId, savePolygonChanges, flushAutoSave, cancelAutoSave, map]);
@@ -1074,6 +1074,107 @@ export default function Workspace() {
     },
   });
 
+  const handleTerraDrawFinish = useCallback(async ({ geometry, mode }: TerraDrawFinishPayload) => {
+    if (!can.edit) return;
+
+    const acres = geometry.type === 'Polygon' ? calculatePolygonAcres(geometry) : null;
+    const target = drawingForProspectRef.current;
+
+    if (target && geometry.type === 'Polygon') {
+      try {
+        manualLotOverrideRef.current.delete(target.id);
+
+        if (isDemoMode) {
+          const patch: Partial<Prospect> = { geometry, lotSizeAcres: acres ?? undefined };
+          queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) =>
+            Array.isArray(prev) ? prev.map((p) => (p.id === target.id ? { ...p, ...patch } as Prospect : p)) : prev
+          );
+          queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) =>
+            Array.isArray(prev) ? prev.map((p) => (p.id === target.id ? { ...p, ...patch } as Prospect : p)) : prev
+          );
+          const all = (queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || []) as Prospect[];
+          persistProspectsGlobal(all);
+          setSelectedProspect((prev) => (prev && prev.id === target.id ? ({ ...prev, ...patch } as Prospect) : prev));
+        } else {
+          const response = await apiRequest('PATCH', `/api/prospects/${target.id}`, {
+            geometry,
+            lotSizeAcres: acres ?? undefined,
+          });
+          const saved = await response.json();
+          setSelectedProspect((prev) => (prev && prev.id === saved.id ? saved : prev));
+          queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) =>
+            Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev
+          );
+          queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) =>
+            Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev
+          );
+        }
+
+        toast({ title: 'Area saved', description: acres ? `${acres.toFixed(2)} acres` : 'Polygon saved' });
+      } finally {
+        setDrawingForProspect(null);
+        setIsEditPanelOpen(true);
+        setDrawMode('select');
+        map?.setOptions({ draggable: true, disableDoubleClickZoom: false });
+      }
+      return;
+    }
+
+    await createProspectMutation.mutateAsync({
+      payload: {
+        name: mode === 'point' ? 'Dropped pin' : 'Mapped area',
+        status: 'prospect',
+        notes: '',
+        geometry,
+        lotSizeAcres: acres ?? undefined,
+      },
+    });
+  }, [
+    calculatePolygonAcres,
+    can.edit,
+    createProspectMutation,
+    isDemoMode,
+    listingId,
+    map,
+    persistProspectsGlobal,
+    queryClient,
+    toast,
+  ]);
+
+  const notifyTerraDrawUnavailable = useCallback(() => {
+    toast({
+      title: 'Drawing tools are still loading',
+      description: 'Wait for the map to finish loading, then choose a drawing tool again.',
+      variant: 'destructive',
+    });
+  }, [toast]);
+
+  const handleTerraDrawError = useCallback((error: unknown) => {
+    console.error('TerraDraw error:', error);
+    toast({
+      title: 'Drawing tool failed',
+      description: 'The map stayed open, but the drawing action did not complete. Try the tool again.',
+      variant: 'destructive',
+    });
+  }, [toast]);
+
+  const {
+    mode: terraDrawMode,
+    setMode: setTerraDrawMode,
+  } = useTerraDrawGoogleMaps({
+    map,
+    enabled: isLoaded && !!GOOGLE_MAPS_API_KEY,
+    onFinish: handleTerraDrawFinish,
+    onUnavailable: notifyTerraDrawUnavailable,
+    onError: handleTerraDrawError,
+  });
+
+  const activateTerraDrawMode = useCallback((mode: DrawMode) => {
+    if (mode !== 'select' && !can.edit) return;
+    const activated = setTerraDrawMode(mode);
+    setDrawMode(activated ? mode : 'select');
+  }, [can.edit, setTerraDrawMode]);
+
   const formatCoordinates = useCallback((lat: number, lng: number) => `${lat.toFixed(6)}, ${lng.toFixed(6)}`, []);
 
   const handleCopyCoordinates = useCallback(async (lat: number, lng: number) => {
@@ -1253,136 +1354,6 @@ export default function Workspace() {
                 }
               }}
             >
-            <DrawingManager
-              onLoad={(dm) => { drawingManagerRef.current = dm; }}
-              onOverlayComplete={async (e: google.maps.drawing.OverlayCompleteEvent) => {
-                try {
-                  const type = e.type?.toString().toLowerCase();
-                  let geometry: any = null;
-                  if (type === 'marker' && (e as any).overlay?.getPosition) {
-                    const pos = (e as any).overlay.getPosition();
-                    geometry = { type: 'Point', coordinates: [pos.lng(), pos.lat()] as [number, number] };
-                  } else if (type === 'polygon' && (e as any).overlay?.getPath) {
-                    const path = (e as any).overlay.getPath();
-                    const coords: [number, number][] = [];
-                    for (let i = 0; i < path.getLength(); i++) {
-                      const pt = path.getAt(i);
-                      coords.push([pt.lng(), pt.lat()]);
-                    }
-                    if (coords.length > 0) coords.push(coords[0]);
-                    geometry = { type: 'Polygon', coordinates: [coords] };
-                  } else if (type === 'rectangle' && (e as any).overlay?.getBounds) {
-                    const bounds = (e as any).overlay.getBounds();
-                    const ne = bounds.getNorthEast();
-                    const sw = bounds.getSouthWest();
-                    const nw = new google.maps.LatLng(ne.lat(), sw.lng());
-                    const se = new google.maps.LatLng(sw.lat(), ne.lng());
-                    const ring: [number, number][] = [
-                      [nw.lng(), nw.lat()],
-                      [ne.lng(), ne.lat()],
-                      [se.lng(), se.lat()],
-                      [sw.lng(), sw.lat()],
-                      [nw.lng(), nw.lat()],
-                    ];
-                    geometry = { type: 'Polygon', coordinates: [ring] };
-                  }
-                  // remove the temp overlay
-                  try { (e as any).overlay?.setMap(null); } catch {}
-
-                  if (!geometry) return;
-
-                  // Calculate acres for polygon/rectangle cases (to match /app)
-                  const acres = geometry?.type === 'Polygon' ? calculatePolygonAcres(geometry) : null;
-
-                  // If user was drawing an area for an existing prospect, update that one instead of creating new
-                  const target = drawingForProspectRef.current;
-                  if (target && geometry.type === 'Polygon') {
-                    try {
-                      manualLotOverrideRef.current.delete(target.id);
-                      if (isDemoMode) {
-                        const patch: Partial<Prospect> = { geometry, lotSizeAcres: acres };
-                        // Update caches
-                        queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === target.id ? { ...p, ...patch } as Prospect : p)) : prev);
-                        queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === target.id ? { ...p, ...patch } as Prospect : p)) : prev);
-                        const all = (queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || []) as Prospect[];
-                        persistProspectsGlobal(all);
-                        setSelectedProspect((prev) => (prev && prev.id === target.id) ? ({ ...prev, ...patch } as Prospect) : prev);
-                      } else {
-                        const r = await apiRequest('PATCH', `/api/prospects/${target.id}`, { geometry, lotSizeAcres: acres });
-                        const saved = await r.json();
-                        setSelectedProspect((prev) => (prev && prev.id === saved.id ? saved : prev));
-                        queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev);
-                        queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? prev.map((p) => (p.id === saved.id ? saved : p)) : prev);
-                      }
-                      toast({ title: 'Area saved', description: acres ? `${acres.toFixed(2)} acres` : 'Polygon saved' });
-                    } finally {
-                      setDrawingForProspect(null);
-                      drawingManagerRef.current?.setDrawingMode(null);
-                      setDrawMode('select');
-                      map?.setOptions({ draggable: true, disableDoubleClickZoom: false });
-                    }
-                    return;
-                  }
-
-                  // Otherwise, create a brand-new prospect and link it
-                  if (isDemoMode) {
-                    // Start with empty name so the Address field placeholder shows and editing is smooth
-                    const saved = buildLocalProspect({ name: '', status: 'prospect' as ProspectStatusType, notes: '', geometry, lotSizeAcres: acres } as any);
-                    // Update caches for both listing and global
-                    queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
-                    queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
-                    // Persist globally so the main map sees it in demo mode
-                    const all = queryClient.getQueryData<Prospect[] | undefined>(['/api/prospects']) || [];
-                    persistProspectsGlobal(all);
-                    if (listingId) addProspectToWorkspace(listingId, saved.id);
-                    // Bump cached count for demo listings grid
-                    queryClient.setQueryData<any[] | undefined>(['/api/listings'], (prev) => {
-                      if (!Array.isArray(prev)) return prev;
-                      return prev.map((l: any) => (l?.id === listingId) ? { ...l, prospectCount: Math.max(0, (l?.prospectCount ?? 0) + 1) } : l);
-                    });
-                    toast({ title: 'Prospect created (demo)', description: 'Linked to workspace locally' });
-                    // reset to select
-                    drawingManagerRef.current?.setDrawingMode(null);
-                    setDrawMode('select');
-                    map?.setOptions({ draggable: true, disableDoubleClickZoom: false });
-                    // Open the edit panel for the new prospect
-                    setSelectedProspect(saved);
-                    setIsEditPanelOpen(true);
-                    return;
-                  }
-                  // Use a non-empty default for server validation; user can edit in the panel
-                  const res = await apiRequest('POST', '/api/prospects', { name: type === 'marker' ? 'Dropped pin' : 'Mapped area', status: 'prospect', notes: '', geometry, lotSizeAcres: acres });
-                  const saved = await res.json();
-                  await apiRequest('POST', `/api/listings/${listingId}/prospects`, { prospectId: saved.id });
-                  queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], (prev) => Array.isArray(prev) ? [...prev, saved] : [saved]);
-                  // Bump cached count for the listings grid and mark it stale
-                  queryClient.setQueryData<any[] | undefined>(['/api/listings'], (prev) => {
-                    if (!Array.isArray(prev)) return prev;
-                    return prev.map((l: any) => (l?.id === listingId) ? { ...l, prospectCount: Math.max(0, (l?.prospectCount ?? 0) + 1) } : l);
-                  });
-                  queryClient.invalidateQueries({ queryKey: ['/api/listings'], refetchType: 'inactive' });
-                  queryClient.invalidateQueries({ queryKey: ['/api/listings', listingId, 'prospects'], refetchType: 'active' });
-                  refetchLinked();
-                  toast({ title: 'Prospect created', description: 'Linked to workspace' });
-                  // reset to select
-                  drawingManagerRef.current?.setDrawingMode(null);
-                  setDrawMode('select');
-                  map?.setOptions({ draggable: true, disableDoubleClickZoom: false });
-                  // Open the edit panel for the new prospect
-                  setSelectedProspect(saved);
-                  setIsEditPanelOpen(true);
-                } catch (err) {
-                  console.error('overlay complete error', err);
-                  toast({ title: 'Error', description: 'Failed to save prospect', variant: 'destructive' });
-                }
-              }}
-              options={{
-                drawingControl: false,
-                markerOptions: { draggable: false },
-                polygonOptions: { fillColor: '#3B82F6', fillOpacity: 0.15, strokeColor: '#3B82F6', strokeWeight: 2 },
-                rectangleOptions: { fillColor: '#059669', fillOpacity: 0.15, strokeColor: '#059669', strokeWeight: 2 },
-              }}
-            />
             {/* Linked prospects (filtered by status) */}
             {filteredLinkedProspects.map((p) => {
               if (p.geometry.type !== 'Polygon' && p.geometry.type !== 'Rectangle') {
@@ -1439,11 +1410,11 @@ export default function Workspace() {
               bounds={bounds}
               defaultCenter={DEFAULT_CENTER}
               clearSearchSignal={clearSearchSignal}
-              onPolygon={() => { try { drawingManagerRef.current?.setDrawingMode(window.google.maps.drawing.OverlayType.POLYGON); setDrawMode('polygon'); map?.setOptions({ draggable: false, disableDoubleClickZoom: true }); } catch {} }}
-              onRectangle={() => { try { drawingManagerRef.current?.setDrawingMode(window.google.maps.drawing.OverlayType.RECTANGLE); setDrawMode('rectangle'); map?.setOptions({ draggable: false, disableDoubleClickZoom: true }); } catch {} }}
-              onPin={() => { try { drawingManagerRef.current?.setDrawingMode(window.google.maps.drawing.OverlayType.MARKER); setDrawMode('point'); map?.setOptions({ draggable: false, disableDoubleClickZoom: true }); } catch {} }}
-              onSelect={() => { try { drawingManagerRef.current?.setDrawingMode(null); setDrawMode('select'); map?.setOptions({ draggable: true, disableDoubleClickZoom: false }); } catch {} }}
-              onPan={() => { try { drawingManagerRef.current?.setDrawingMode(null); setDrawMode('select'); map?.setOptions({ draggable: true, disableDoubleClickZoom: false }); } catch {} }}
+              onPolygon={() => activateTerraDrawMode('polygon')}
+              onRectangle={() => activateTerraDrawMode('rectangle')}
+              onPin={() => activateTerraDrawMode('point')}
+              onSelect={() => activateTerraDrawMode('select')}
+              onPan={() => activateTerraDrawMode('select')}
               onMyLocation={() => {
                 if (!map || !navigator.geolocation) return;
                 navigator.geolocation.getCurrentPosition((pos) => {
@@ -1453,7 +1424,7 @@ export default function Workspace() {
               }}
               mapType={mapType}
               onMapTypeChange={(t) => { setMapType(t); try { map?.setMapTypeId(t); } catch {} }}
-              activeTerraMode={drawMode}
+              activeTerraMode={terraDrawMode}
             />
 
             {/* Confirm search selection */}
@@ -1786,11 +1757,7 @@ export default function Workspace() {
                         if (!can.edit || !selectedProspect) return;
                         // Mark this prospect as the target for the next drawn polygon
                         setDrawingForProspect(selectedProspect);
-                        try {
-                          drawingManagerRef.current?.setDrawingMode(window.google.maps.drawing.OverlayType.POLYGON);
-                          setDrawMode('polygon');
-                          map?.setOptions({ draggable: false, disableDoubleClickZoom: true });
-                        } catch {}
+                        activateTerraDrawMode('polygon');
                       }}
                       variant="outline"
                       className="h-8 w-8 p-0"

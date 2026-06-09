@@ -1,17 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
-import { GoogleMap, useJsApiLoader, DrawingManager, Marker, Polygon, InfoWindow } from '@react-google-maps/api';
-import {
-  TerraDraw,
-  TerraDrawSelectMode,
-  TerraDrawPointMode,
-  TerraDrawLineStringMode,
-  TerraDrawFreehandLineStringMode,
-  TerraDrawPolygonMode,
-  TerraDrawRectangleMode,
-  TerraDrawCircleMode,
-  type GeoJSONStoreFeatures,
-} from 'terra-draw';
-import { TerraDrawGoogleMapsAdapter } from 'terra-draw-google-maps-adapter';
+import { GoogleMap, useJsApiLoader, Marker, Polygon, InfoWindow } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PhoneInput } from '@/components/ui/phone-input';
@@ -46,6 +34,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { STATUS_META } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
+import { useTerraDrawGoogleMaps, type MapDrawMode, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
 
 // Import all necessary types and data
 import type { 
@@ -56,7 +45,7 @@ import type {
   Touch 
 } from '@level-cre/shared/schema';
 
-const libraries: any = ['drawing', 'geometry', 'places'];
+const libraries: any = ['geometry', 'places'];
 const MAP_CONTAINER_STYLE = { width: '100%', height: '100%' } as const;
 const MAP_OPTIONS: google.maps.MapOptions = {
   disableDefaultUI: true,
@@ -284,15 +273,10 @@ export default function HomePage() {
   });
   const [bounds, setBounds] = useState<google.maps.LatLngBoundsLiteral | null>(null);
 
-  // Terra Draw state
-  const terraDrawRef = useRef<TerraDraw | null>(null);
-  const terraAdapterRef = useRef<any | null>(null);
-  const terraStartedRef = useRef<boolean>(false);
-  const terraBridgeAttachedRef = useRef<boolean>(false);
-  const terraReboundDoneRef = useRef<boolean>(false);
-  type TerraMode = 'select' | 'point' | 'linestring' | 'freehand-linestring' | 'polygon' | 'rectangle' | 'circle';
+  // TerraDraw controls the creation of new map assets. Existing saved assets
+  // still render from Prospect.geometry via Google overlays below.
+  type TerraMode = MapDrawMode;
   const [terraMode, setTerraMode] = useState<TerraMode>('select');
-  const [terraFeatures, setTerraFeatures] = useState<GeoJSONStoreFeatures[]>([]);
   
   // Data state
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -346,7 +330,6 @@ export default function HomePage() {
   const [clearSearchSignal, setClearSearchSignal] = useState(0);
   
   // Drawing state
-  const drawingManagerRef = useRef<google.maps.drawing.DrawingManager | null>(null);
   const [drawingForProspect, setDrawingForProspect] = useState<Prospect | null>(null);
   const drawingForProspectRef = useRef<Prospect | null>(null);
   useEffect(() => { drawingForProspectRef.current = drawingForProspect; }, [drawingForProspect]);
@@ -357,7 +340,6 @@ export default function HomePage() {
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
     libraries,
   });
-
   useEffect(() => {
     const settings = readJSON<any>(nsKey(currentUser?.id, 'userSettings'), null) || {};
     writeJSON(nsKey(currentUser?.id, 'userSettings'), {
@@ -678,305 +660,11 @@ export default function HomePage() {
   // Map event handlers
   const onMapLoad = useCallback((map: google.maps.Map) => {
     setMap(map);
-
-    // Initialise Terra Draw (non-invasive test layer)
-    try {
-      console.log('[Terra] Initialising on map load');
-      const adapter = new TerraDrawGoogleMapsAdapter({ lib: google.maps, map });
-      // Adapter will bind to Google's interactive pane on 'ready' below
-      const draw = new TerraDraw({
-        adapter,
-        modes: [
-          new TerraDrawSelectMode(),
-          new TerraDrawPointMode(),
-          new TerraDrawLineStringMode(),
-          new TerraDrawFreehandLineStringMode(),
-          new TerraDrawPolygonMode(),
-          new TerraDrawRectangleMode(),
-          new TerraDrawCircleMode(),
-        ],
-      });
-      draw.on('ready', () => {
-        if (terraReboundDoneRef.current) return;
-        try {
-          const root = map.getDiv() as HTMLDivElement;
-          // @ts-ignore ensure events come from a stable element
-          adapter.getMapEventElement = () => root;
-          draw.stop();
-          draw.start();
-          draw.setMode('select');
-          terraReboundDoneRef.current = true;
-          console.log('[Terra] rebound to map root');
-        } catch (e) {
-          console.warn('[Terra] unable to bind to map root', e);
-        }
-      });
-      draw.on('finish', async (id) => {
-        const feature = draw.getSnapshotFeature(id as any);
-        const snap = draw.getSnapshot();
-        console.log('[Terra] finish', feature);
-        setTerraFeatures(snap);
-
-        // If we are drawing for a selected prospect and it's a polygon, save it
-        const target = drawingForProspectRef.current;
-        if (target && feature && feature.geometry && feature.geometry.type === 'Polygon') {
-          try {
-            const newGeom = {
-              type: 'Polygon' as const,
-              coordinates: feature.geometry.coordinates as [number, number][][],
-            };
-            const acres = calculatePolygonAcres(newGeom);
-            manualLotOverrideRef.current.delete(target.id);
-            const response = await apiRequest('PATCH', `/api/prospects/${target.id}` , {
-              geometry: newGeom,
-              lotSizeAcres: acres,
-            });
-            const payload = await response.json();
-            const { prospect: saved, newXpGained } = parseProspectPatchResponse(payload);
-            setProspects(prev => prev.map(p => p.id === saved.id ? saved : p));
-            if (selectedProspect && selectedProspect.id === saved.id) {
-              setSelectedProspect(saved);
-            }
-            if (newXpGained > 0) {
-              bumpLocalSkillXp(newXpGained, 'followUp');
-              triggerXpFeedback(newXpGained);
-            }
-            toast({ title: 'Area saved', description: acres ? `${acres.toFixed(2)} acres` : 'Polygon saved' });
-          } catch (err) {
-            console.error('Failed to save polygon from Terra', err);
-            toast({ title: 'Save failed', description: 'Could not save polygon to prospect', variant: 'destructive' });
-          } finally {
-            setDrawingForProspect(null);
-            setTerraModeSafe('select');
-          }
-        }
-      });
-      draw.on('change', () => {
-        const snap = draw.getSnapshot();
-        console.log('[Terra] change', snap);
-        setTerraFeatures(snap);
-      });
-      // Defer starting Terra until map projection/bounds are ready (first idle)
-      terraDrawRef.current = draw;
-      terraAdapterRef.current = adapter;
-      setTerraMode('select');
-      // Styles will be applied after Terra starts (onIdle)
-
-      // expose for debugging
-      // @ts-expect-error
-      (window as any).__terra = draw;
-      console.log('[Terra] mode:', draw.getMode(), 'state:', draw.getModeState());
-
-      // Terra prepared
-    } catch (err) {
-      console.error('Terra Draw init failed:', err);
-    }
   }, []);
 
   const onMapUnmount = useCallback(() => {
-    try { terraDrawRef.current?.stop(); } catch {}
-    terraDrawRef.current = null;
-    terraAdapterRef.current = null;
-    terraStartedRef.current = false;
-    terraBridgeAttachedRef.current = false;
-    terraReboundDoneRef.current = false;
     setMap(null);
   }, []);
-
-  const onDrawingManagerLoad = useCallback((drawingManager: google.maps.drawing.DrawingManager) => {
-    drawingManagerRef.current = drawingManager;
-  }, []);
-
-  const onOverlayComplete = useCallback(async (e: google.maps.drawing.OverlayCompleteEvent) => {
-    let geometry: any;
-
-    if (e.type === 'marker') {
-      const marker = e.overlay as google.maps.Marker;
-      const position = marker.getPosition();
-      if (position) {
-        geometry = {
-          type: 'Point' as const,
-          coordinates: [position.lng(), position.lat()] as [number, number]
-        };
-      }
-      marker.setMap(null); // Remove the temporary overlay
-    } else if (e.type === 'polygon') {
-      const polygon = e.overlay as google.maps.Polygon;
-      const path = polygon.getPath();
-      const coordinates: [number, number][] = [];
-      
-      for (let i = 0; i < path.getLength(); i++) {
-        const point = path.getAt(i);
-        coordinates.push([point.lng(), point.lat()]);
-      }
-      
-      // Close the polygon by adding first point at the end
-      if (coordinates.length > 0) {
-        coordinates.push(coordinates[0]);
-      }
-      
-      geometry = {
-        type: 'Polygon' as const,
-        coordinates: [coordinates]
-      };
-      
-      polygon.setMap(null); // Remove the temporary overlay
-    } else if (e.type === 'rectangle') {
-      const rect = e.overlay as google.maps.Rectangle;
-      const bounds = rect.getBounds();
-      if (bounds) {
-        const ne = bounds.getNorthEast();
-        const sw = bounds.getSouthWest();
-        const nw = new google.maps.LatLng(ne.lat(), sw.lng());
-        const se = new google.maps.LatLng(sw.lat(), ne.lng());
-        const ring: [number, number][] = [
-          [nw.lng(), nw.lat()],
-          [ne.lng(), ne.lat()],
-          [se.lng(), se.lat()],
-          [sw.lng(), sw.lat()],
-          [nw.lng(), nw.lat()],
-        ];
-        geometry = { type: 'Polygon' as const, coordinates: [ring] };
-      }
-      rect.setMap(null);
-    }
-
-    const acres = calculatePolygonAcres(geometry);
-
-    try {
-      if (drawingForProspect && e.type === 'polygon') {
-        // Update existing prospect with polygon geometry
-        manualLotOverrideRef.current.delete(drawingForProspect.id);
-        const updateData = {
-          geometry,
-          lotSizeAcres: acres
-        };
-
-        if (drawingForProspect.id === 'temp-prospect') {
-          // Create new prospect for search pin
-          const newProspectData = {
-            name: drawingForProspect.name,
-            status: drawingForProspect.status,
-            notes: drawingForProspect.notes,
-            geometry,
-            lotSizeAcres: acres,
-            submarketId: drawingForProspect.submarketId
-          };
-
-          if (isDemoMode) {
-            const localProspect = buildLocalProspect({
-              name: newProspectData.name,
-              status: newProspectData.status,
-              notes: newProspectData.notes,
-              geometry: newProspectData.geometry,
-              lotSizeAcres: newProspectData.lotSizeAcres,
-              submarketId: newProspectData.submarketId,
-            } as any);
-            const next = [...prospects, localProspect];
-            persistProspects(next);
-            setSelectedProspect(localProspect);
-          } else {
-            const response = await apiRequest('POST', '/api/prospects', newProspectData);
-            const savedProspect = await response.json();
-            setProspects(prev => [...prev, savedProspect]);
-            setSelectedProspect(savedProspect);
-            upsertProspectInCache(savedProspect);
-          }
-        } else {
-          // Update existing prospect
-          if (isDemoMode) {
-            const updated = prospects.map(p => p.id === drawingForProspect.id ? { ...p, ...updateData } as Prospect : p);
-            persistProspects(updated);
-            const sel = updated.find(p => p.id === drawingForProspect.id) || null;
-            setSelectedProspect(sel);
-          } else {
-            const response = await apiRequest('PATCH', `/api/prospects/${drawingForProspect.id}`, updateData);
-            const payload = await response.json();
-            const { prospect: savedProspect, newXpGained } = parseProspectPatchResponse(payload);
-            setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
-            setSelectedProspect(savedProspect);
-            upsertProspectInCache(savedProspect);
-            if (newXpGained > 0) {
-              bumpLocalSkillXp(newXpGained, 'followUp');
-              triggerXpFeedback(newXpGained);
-            }
-          }
-        }
-        
-        toast({
-          title: "Polygon Added",
-          description: `Polygon area added to prospect${acres ? ` (${acres.toFixed(2)} acres)` : ''}`,
-        });
-
-        // Reset drawing state and reopen edit panel
-        setDrawingForProspect(null);
-        setIsEditPanelOpen(true);
-      } else {
-        // Create new prospect (original behavior)
-        if (isDemoMode) {
-          const newProspectData = {
-            // Leave name empty in demo so the Address field placeholder shows and editing is smooth
-            name: '',
-            status: 'prospect' as ProspectStatusType,
-            notes: '',
-            geometry,
-            lotSizeAcres: acres
-          };
-          const localProspect = buildLocalProspect({
-            name: newProspectData.name,
-            status: newProspectData.status,
-            notes: newProspectData.notes,
-            geometry: newProspectData.geometry,
-            lotSizeAcres: newProspectData.lotSizeAcres,
-          } as any);
-          const next = [...prospects, localProspect];
-          persistProspects(next);
-          setSelectedProspect(localProspect);
-          setIsEditPanelOpen(true);
-          toast({ title: 'Prospect Saved', description: `New ${e.type} added locally (demo).` });
-        } else {
-          // Server requires non-empty name; send a placeholder then clear locally for smooth editing
-          const payload = {
-            name: e.type === 'marker'
-              ? `Dropped pin`
-              : 'Mapped area',
-            status: 'prospect' as ProspectStatusType,
-            notes: '',
-            geometry,
-            lotSizeAcres: acres
-          };
-          const response = await apiRequest('POST', '/api/prospects', payload);
-          const savedProspect = await response.json();
-          setProspects(prev => [...prev, savedProspect]);
-          setSelectedProspect({ ...savedProspect, name: '' });
-          setIsEditPanelOpen(true);
-          
-          queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => {
-            const list = Array.isArray(prev) ? prev : [];
-            if (list.some((p) => p.id === savedProspect.id)) return list;
-            return [...list, savedProspect];
-          });
-          
-          toast({
-            title: "Prospect Saved",
-            description: `New ${e.type} prospect saved to your profile`,
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Error saving prospect:', error);
-      toast({
-        title: "Error",
-        description: "Failed to save prospect. Please try again.",
-        variant: "destructive"
-      });
-    }
-
-    // Reset drawing manager to selection mode after placing asset
-    if (drawingManagerRef.current) {
-      drawingManagerRef.current.setDrawingMode(null);
-    }
-  }, [drawingForProspect, toast, isDemoMode, prospects, selectedProspect, upsertProspectInCache]);
 
   // CSV import handler - save all imported prospects to database
   const handleProspectsImport = useCallback(async (newProspects: Prospect[]) => {
@@ -1400,10 +1088,170 @@ export default function HomePage() {
     createProspectFromContext.mutate({ lat, lng, address });
   }, [canCreateProspects, createProspectFromContext, geocode]);
 
+  const handleTerraDrawFinish = useCallback(async ({ geometry, mode }: TerraDrawFinishPayload) => {
+    const eventType = mode === 'point' ? 'marker' : mode;
+    const acres = calculatePolygonAcres(geometry);
+    const target = drawingForProspectRef.current;
+
+    try {
+      if (target && geometry.type === 'Polygon') {
+        manualLotOverrideRef.current.delete(target.id);
+        const updateData = {
+          geometry,
+          lotSizeAcres: acres ?? undefined,
+        };
+
+        if (target.id === 'temp-prospect') {
+          const newProspectData = {
+            name: target.name,
+            status: target.status,
+            notes: target.notes,
+            geometry,
+            lotSizeAcres: acres ?? undefined,
+            submarketId: target.submarketId,
+          };
+
+          if (isDemoMode) {
+            const localProspect = buildLocalProspect(newProspectData as any);
+            const next = [...prospects, localProspect];
+            persistProspects(next);
+            setSelectedProspect(localProspect);
+          } else {
+            const response = await apiRequest('POST', '/api/prospects', newProspectData);
+            const savedProspect = await response.json();
+            setProspects((prev) => [...prev, savedProspect]);
+            setSelectedProspect(savedProspect);
+            upsertProspectInCache(savedProspect);
+          }
+        } else if (isDemoMode) {
+          const updated = prospects.map((p) => (p.id === target.id ? { ...p, ...updateData } as Prospect : p));
+          persistProspects(updated);
+          const selected = updated.find((p) => p.id === target.id) || null;
+          setSelectedProspect(selected);
+        } else {
+          const response = await apiRequest('PATCH', `/api/prospects/${target.id}`, updateData);
+          const payload = await response.json();
+          const { prospect: savedProspect, newXpGained } = parseProspectPatchResponse(payload);
+          setProspects((prev) => prev.map((p) => (p.id === savedProspect.id ? savedProspect : p)));
+          setSelectedProspect(savedProspect);
+          upsertProspectInCache(savedProspect);
+          if (newXpGained > 0) {
+            bumpLocalSkillXp(newXpGained, 'followUp');
+            triggerXpFeedback(newXpGained);
+          }
+        }
+
+        toast({
+          title: 'Polygon added',
+          description: `Polygon area added to prospect${acres ? ` (${acres.toFixed(2)} acres)` : ''}`,
+        });
+
+        setDrawingForProspect(null);
+        setIsEditPanelOpen(true);
+        return;
+      }
+
+      if (isDemoMode) {
+        const localProspect = buildLocalProspect({
+          name: '',
+          status: 'prospect',
+          notes: '',
+          geometry,
+          lotSizeAcres: acres ?? undefined,
+        } as any);
+        const next = [...prospects, localProspect];
+        persistProspects(next);
+        setSelectedProspect(localProspect);
+        setIsEditPanelOpen(true);
+        toast({ title: 'Prospect saved', description: `New ${eventType} added locally (demo).` });
+      } else {
+        const payload = {
+          name: eventType === 'marker' ? 'Dropped pin' : 'Mapped area',
+          status: 'prospect' as ProspectStatusType,
+          notes: '',
+          geometry,
+          lotSizeAcres: acres ?? undefined,
+        };
+        const response = await apiRequest('POST', '/api/prospects', payload);
+        const savedProspect = await response.json();
+        setProspects((prev) => [...prev, savedProspect]);
+        setSelectedProspect({ ...savedProspect, name: '' });
+        setIsEditPanelOpen(true);
+
+        queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => {
+          const list = Array.isArray(prev) ? prev : [];
+          if (list.some((p) => p.id === savedProspect.id)) return list;
+          return [...list, savedProspect];
+        });
+
+        toast({
+          title: 'Prospect saved',
+          description: `New ${eventType} prospect saved to your profile`,
+        });
+      }
+    } catch (error) {
+      console.error('Error saving TerraDraw prospect:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to save prospect. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setDrawingForProspect(null);
+    }
+  }, [
+    buildLocalProspect,
+    bumpLocalSkillXp,
+    isDemoMode,
+    parseProspectPatchResponse,
+    persistProspects,
+    prospects,
+    queryClient,
+    toast,
+    triggerXpFeedback,
+    upsertProspectInCache,
+  ]);
+
+  const notifyTerraDrawUnavailable = useCallback(() => {
+    toast({
+      title: 'Drawing tools are still loading',
+      description: 'Wait for the map to finish loading, then choose a drawing tool again.',
+      variant: 'destructive',
+    });
+  }, [toast]);
+
+  const handleTerraDrawError = useCallback((error: unknown) => {
+    console.error('TerraDraw error:', error);
+    toast({
+      title: 'Drawing tool failed',
+      description: 'The map stayed open, but the drawing action did not complete. Try the tool again.',
+      variant: 'destructive',
+    });
+  }, [toast]);
+
+  const {
+    clear: clearTerraDraw,
+    mode: terraDrawMode,
+    setMode: setTerraDrawMode,
+  } = useTerraDrawGoogleMaps({
+    map,
+    enabled: isLoaded && !!GOOGLE_MAPS_API_KEY,
+    onFinish: handleTerraDrawFinish,
+    onUnavailable: notifyTerraDrawUnavailable,
+    onError: handleTerraDrawError,
+  });
+
+  useEffect(() => {
+    setTerraMode(terraDrawMode);
+  }, [terraDrawMode]);
+
+  const activateTerraDrawMode = useCallback((mode: TerraMode) => {
+    const activated = setTerraDrawMode(mode);
+    setTerraMode(activated ? mode : 'select');
+  }, [setTerraDrawMode]);
+
   // Handle drawing polygon for point prospects
   const handleDrawPolygon = useCallback(() => {
-    if (!drawingManagerRef.current) return;
-
     if (selectedProspect) {
       // If a prospect is selected, we are drawing for it.
       setDrawingForProspect(selectedProspect);
@@ -1414,38 +1262,19 @@ export default function HomePage() {
       });
     }
     
-    // Set drawing mode to polygon
-    drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.POLYGON);
+    activateTerraDrawMode('polygon');
     
-  }, [selectedProspect, toast]);
+  }, [activateTerraDrawMode, selectedProspect, toast]);
 
   // Terra Draw handlers
   const setTerraModeSafe = useCallback((mode: TerraMode) => {
-    // Disable Google DrawingManager when using Terra Draw to avoid conflicts
-    drawingManagerRef.current?.setDrawingMode(null);
-    if (!terraDrawRef.current) return;
-    try {
-      console.log('[Terra] setMode', mode);
-      terraDrawRef.current.setMode(mode);
-      setTerraMode(mode);
-      // Adjust map interactions to prioritise drawing
-      if (map) {
-        const drawing = mode !== 'select';
-        map.setOptions({
-          draggable: !drawing,
-          disableDoubleClickZoom: drawing,
-        } as google.maps.MapOptions);
-      }
-    } catch (e) {
-      console.error('Failed to set Terra mode', e);
-    }
-  }, [map]);
+    activateTerraDrawMode(mode);
+  }, [activateTerraDrawMode]);
 
   const clearTerra = useCallback(() => {
-    try { terraDrawRef.current?.clear(); } catch {}
-    setTerraFeatures([]);
+    clearTerraDraw();
     setTerraModeSafe('select');
-  }, [setTerraModeSafe]);
+  }, [clearTerraDraw, setTerraModeSafe]);
 
   // Enable polygon editing
   const enablePolygonEditing = useCallback((prospectId: string) => {
@@ -1842,7 +1671,6 @@ export default function HomePage() {
     setSelectedProspect(null);
     setDrawingForProspect(null);
     // Reset drawing tools
-    try { drawingManagerRef.current?.setDrawingMode(null); } catch {}
     try { setTerraModeSafe('select'); } catch {}
     try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false } as google.maps.MapOptions); } catch {}
   }, [editingProspectId, savePolygonChanges, flushHomeQueuedSave, setTerraModeSafe, map, clearPolygonPathListeners]);
@@ -1883,23 +1711,17 @@ export default function HomePage() {
       setDrawingForProspect(selectedProspect);
       toast({ title: 'Draw Mode', description: `Draw an area for ${getProspectDisplayName(selectedProspect)}.` });
     }
-    if (drawingManagerRef.current) {
-      drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.POLYGON);
-    }
-  }, [selectedProspect, toast]);
+    setTerraModeSafe('polygon');
+  }, [selectedProspect, setTerraModeSafe, toast]);
 
   const handleMapPinTool = useCallback(() => {
-    if (drawingManagerRef.current) {
-      drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.MARKER);
-    }
-  }, []);
+    setTerraModeSafe('point');
+  }, [setTerraModeSafe]);
 
   const handleMapPanTool = useCallback(() => {
-    if (drawingManagerRef.current) {
-      drawingManagerRef.current.setDrawingMode(null);
-    }
+    setTerraModeSafe('select');
     toast({ title: 'Pan Tool', description: 'Pan/hand tool selected. You can now move the map.' });
-  }, [toast]);
+  }, [setTerraModeSafe, toast]);
 
   const handleMapResetViewport = useCallback(() => {
     if (map) {
@@ -1912,10 +1734,8 @@ export default function HomePage() {
   }, [map, currentUser?.id, DEFAULT_CENTER, DEFAULT_ZOOM]);
 
   const handleMapRectangleTool = useCallback(() => {
-    if (drawingManagerRef.current) {
-      drawingManagerRef.current.setDrawingMode(window.google?.maps?.drawing?.OverlayType?.RECTANGLE);
-    }
-  }, []);
+    setTerraModeSafe('rectangle');
+  }, [setTerraModeSafe]);
 
   const prospectsErrorMessage = prospectsError instanceof Error
     ? prospectsError.message
@@ -1978,89 +1798,8 @@ export default function HomePage() {
                   : { ...nextBounds }
               ));
             }
-            // Start Terra once after projection/bounds are ready
-            if (!terraStartedRef.current && terraDrawRef.current) {
-              try {
-                const draw = terraDrawRef.current;
-                draw.start();
-                draw.setMode('select');
-                // Apply high-contrast styles now that Terra is enabled
-                try {
-                  draw.updateModeOptions('polygon', {
-                    styles: {
-                      fillColor: '#2563EB',
-                      fillOpacity: 0.2,
-                      outlineColor: '#2563EB',
-                      outlineWidth: 2,
-                      closingPointColor: '#2563EB',
-                      closingPointOutlineColor: '#ffffff',
-                      closingPointOutlineWidth: 2,
-                      closingPointWidth: 6,
-                      editedPointColor: '#10B981',
-                      editedPointOutlineColor: '#ffffff',
-                      editedPointOutlineWidth: 2,
-                      editedPointWidth: 6,
-                      coordinatePointColor: '#2563EB',
-                      coordinatePointOutlineColor: '#ffffff',
-                      coordinatePointOutlineWidth: 2,
-                      coordinatePointWidth: 5,
-                      snappingPointColor: '#F59E0B',
-                      snappingPointOutlineColor: '#ffffff',
-                      snappingPointOutlineWidth: 2,
-                      snappingPointWidth: 6,
-                    },
-                  } as any);
-                  draw.updateModeOptions('rectangle', {
-                    styles: {
-                      fillColor: '#059669',
-                      fillOpacity: 0.2,
-                      outlineColor: '#059669',
-                      outlineWidth: 2,
-                    },
-                  } as any);
-                } catch (styleErr) {
-                  console.warn('[Terra] Failed to set styles after start', styleErr);
-                }
-                terraStartedRef.current = true;
-                console.log('[Terra] started after idle');
-              } catch (e) {
-                console.warn('[Terra] failed to start after idle', e);
-              }
-            }
           }}
         >
-          {/* Google DrawingManager re-enabled */}
-          {isLoaded && (
-            <DrawingManager
-              onLoad={onDrawingManagerLoad}
-              onOverlayComplete={onOverlayComplete}
-              options={{
-                drawingControl: false,
-                polygonOptions: {
-                  fillColor: '#3B82F6',
-                  fillOpacity: 0.15,
-                  strokeWeight: 2,
-                  strokeColor: '#3B82F6',
-                  clickable: true,
-                  editable: false,
-                  zIndex: 1,
-                },
-                markerOptions: {
-                  draggable: false,
-                },
-                rectangleOptions: {
-                  fillColor: '#059669',
-                  fillOpacity: 0.15,
-                  strokeWeight: 2,
-                  strokeColor: '#059669',
-                  clickable: true,
-                  editable: false,
-                  zIndex: 1,
-                },
-              }}
-            />
-          )}
-
           {/* Render Prospects */}
           <MapOverlayLayer
             renderableProspects={renderableProspects}
