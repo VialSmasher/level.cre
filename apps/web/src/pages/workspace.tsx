@@ -74,6 +74,11 @@ type ContextMenuState = {
   viewportY: number;
 };
 
+type WorkspaceMember = { userId: string; role: 'owner'|'editor'|'viewer'; email?: string|null };
+
+const EMPTY_PROSPECTS: Prospect[] = [];
+const EMPTY_MEMBERS: WorkspaceMember[] = [];
+
 export default function Workspace() {
   const [, params] = useRoute('/app/workspaces/:id');
   const listingId = params?.id as string;
@@ -84,13 +89,13 @@ export default function Workspace() {
 
   const { data: listing } = useQuery<Listing>({ queryKey: ['/api/listings', listingId], enabled: !!listingId });
   const {
-    data: linkedProspects = [],
+    data: linkedProspects = EMPTY_PROSPECTS,
     refetch: refetchLinked,
     error: linkedProspectsError,
     isLoading: isLinkedProspectsLoading,
   } = useQuery<Prospect[]>({ queryKey: ['/api/listings', listingId, 'prospects'], enabled: !!listingId });
-  const { data: allProspects = [] } = useQuery<Prospect[]>({ queryKey: ['/api/prospects'] });
-  const { data: members = [] } = useQuery<{ userId: string; role: 'owner'|'editor'|'viewer'; email?: string|null }[]>({ queryKey: ['/api/listings', listingId, 'members'], enabled: !!listingId });
+  const { data: allProspects = EMPTY_PROSPECTS } = useQuery<Prospect[]>({ queryKey: ['/api/prospects'] });
+  const { data: members = EMPTY_MEMBERS } = useQuery<WorkspaceMember[]>({ queryKey: ['/api/listings', listingId, 'members'], enabled: !!listingId });
   const geocode = useGeocode();
 
   const isOwner = !!(listing && user && listing.userId === user.id);

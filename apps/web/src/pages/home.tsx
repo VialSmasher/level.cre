@@ -61,6 +61,7 @@ const MAP_OPTIONS: google.maps.MapOptions = {
 const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton
 const DEFAULT_ZOOM = 11;
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
+const EMPTY_PROSPECTS: Prospect[] = [];
 
 type ContextMenuState = {
   lat: number;
@@ -413,7 +414,7 @@ export default function HomePage() {
 
   // Use React Query for authenticated data fetching
   const {
-    data: prospectsData = [],
+    data: prospectsData = EMPTY_PROSPECTS,
     refetch: refetchProspects,
     error: prospectsError,
     isLoading: isProspectsLoading,
