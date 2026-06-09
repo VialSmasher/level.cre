@@ -28,6 +28,17 @@ type UseTerraDrawGoogleMapsOptions = {
 };
 
 const TERRA_DRAW_EVENT_LAYER_CLASS = 'level-cre-terra-draw-event-layer';
+const RECTANGLE_DRAG_THRESHOLD_PX = 8;
+
+type LngLat = { lng: number; lat: number };
+
+type DragRectangleState = {
+  start: LngLat;
+  startClientX: number;
+  startClientY: number;
+  isDragging: boolean;
+  preview: google.maps.Polygon | null;
+};
 
 const isLngLat = (coordinate: unknown): coordinate is [number, number] => {
   return (
@@ -71,6 +82,28 @@ export function prospectGeometryFromTerraFeature(feature: GeoJSONStoreFeatures):
   }
 
   return null;
+}
+
+function buildRectangleGeometry(start: LngLat, end: LngLat): Extract<ProspectGeometryType, { type: 'Polygon' }> {
+  const west = Math.min(start.lng, end.lng);
+  const east = Math.max(start.lng, end.lng);
+  const south = Math.min(start.lat, end.lat);
+  const north = Math.max(start.lat, end.lat);
+  const ring: [number, number][] = [
+    [west, north],
+    [east, north],
+    [east, south],
+    [west, south],
+    [west, north],
+  ];
+  return {
+    type: 'Polygon',
+    coordinates: [ring],
+  };
+}
+
+function rectanglePathFromGeometry(geometry: Extract<ProspectGeometryType, { type: 'Polygon' }>) {
+  return geometry.coordinates[0].map(([lng, lat]) => ({ lng, lat }));
 }
 
 export function createTerraDrawEventLayer(mapDiv: HTMLDivElement) {
@@ -166,6 +199,8 @@ export function useTerraDrawGoogleMaps({
 }: UseTerraDrawGoogleMapsOptions) {
   const drawRef = useRef<TerraDraw | null>(null);
   const eventLayerRef = useRef<HTMLDivElement | null>(null);
+  const activeModeRef = useRef<MapDrawMode>('select');
+  const dragRectangleRef = useRef<DragRectangleState | null>(null);
   const onFinishRef = useRef(onFinish);
   const onUnavailableRef = useRef(onUnavailable);
   const onErrorRef = useRef(onError);
@@ -191,12 +226,16 @@ export function useTerraDrawGoogleMaps({
 
     let disposed = false;
     let idleListener: google.maps.MapsEventListener | null = null;
+    let removeDragRectangleListeners: (() => void) | null = null;
 
     const resetMapInteraction = () => {
       try {
         map.setOptions({ draggable: true, disableDoubleClickZoom: false, clickableIcons: false });
       } catch {}
       setTerraDrawEventLayerActive(eventLayerRef.current, false);
+      activeModeRef.current = 'select';
+      dragRectangleRef.current?.preview?.setMap(null);
+      dragRectangleRef.current = null;
     };
 
     const initialise = () => {
@@ -219,6 +258,7 @@ export function useTerraDrawGoogleMaps({
         draw.on('ready', () => {
           if (disposed) return;
           setIsReady(true);
+          activeModeRef.current = 'select';
           setModeState('select');
         });
         draw.on('finish', async (id) => {
@@ -251,6 +291,99 @@ export function useTerraDrawGoogleMaps({
         draw.start();
         draw.setMode('select');
         drawRef.current = draw;
+
+        const getDragEventLngLat = (event: PointerEvent) => {
+          try {
+            return adapter.getLngLatFromEvent(event);
+          } catch {
+            return null;
+          }
+        };
+
+        const handleRectanglePointerDown = (event: PointerEvent) => {
+          if (activeModeRef.current !== 'rectangle' || event.button !== 0 || !event.isPrimary) return;
+          const start = getDragEventLngLat(event);
+          if (!start) return;
+          dragRectangleRef.current = {
+            start,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            isDragging: false,
+            preview: null,
+          };
+        };
+
+        const handleRectanglePointerMove = (event: PointerEvent) => {
+          const state = dragRectangleRef.current;
+          if (activeModeRef.current !== 'rectangle' || !state || !event.isPrimary) return;
+          const distance = Math.hypot(event.clientX - state.startClientX, event.clientY - state.startClientY);
+          if (!state.isDragging && distance < RECTANGLE_DRAG_THRESHOLD_PX) return;
+          const end = getDragEventLngLat(event);
+          if (!end) return;
+
+          state.isDragging = true;
+          const geometry = buildRectangleGeometry(state.start, end);
+          const path = rectanglePathFromGeometry(geometry);
+          if (!state.preview) {
+            state.preview = new window.google.maps.Polygon({
+              map,
+              paths: path,
+              clickable: false,
+              fillColor: '#059669',
+              fillOpacity: 0.15,
+              strokeColor: '#059669',
+              strokeOpacity: 0.9,
+              strokeWeight: 2,
+              zIndex: 1000,
+            });
+          } else {
+            state.preview.setPath(path);
+          }
+        };
+
+        const handleRectanglePointerUp = (event: PointerEvent) => {
+          const state = dragRectangleRef.current;
+          dragRectangleRef.current = null;
+          if (activeModeRef.current !== 'rectangle' || !state || !state.isDragging || !event.isPrimary) {
+            state?.preview?.setMap(null);
+            return;
+          }
+
+          event.preventDefault();
+          const end = getDragEventLngLat(event);
+          state.preview?.setMap(null);
+          if (!end) return;
+
+          const geometry = buildRectangleGeometry(state.start, end);
+          const id = `drag-rectangle-${Date.now()}`;
+          const feature = {
+            id,
+            type: 'Feature',
+            properties: { mode: 'rectangle' },
+            geometry,
+          } as GeoJSONStoreFeatures;
+
+          void (async () => {
+            try {
+              await onFinishRef.current({ id, mode: 'rectangle', feature, geometry });
+            } catch (error) {
+              onErrorRef.current?.(error);
+            } finally {
+              try { draw.setMode('select'); } catch {}
+              resetMapInteraction();
+              setModeState('select');
+            }
+          })();
+        };
+
+        eventLayer.addEventListener('pointerdown', handleRectanglePointerDown);
+        eventLayer.addEventListener('pointermove', handleRectanglePointerMove);
+        eventLayer.addEventListener('pointerup', handleRectanglePointerUp);
+        removeDragRectangleListeners = () => {
+          eventLayer.removeEventListener('pointerdown', handleRectanglePointerDown);
+          eventLayer.removeEventListener('pointermove', handleRectanglePointerMove);
+          eventLayer.removeEventListener('pointerup', handleRectanglePointerUp);
+        };
       } catch (error) {
         setIsReady(false);
         onErrorRef.current?.(error);
@@ -266,6 +399,7 @@ export function useTerraDrawGoogleMaps({
     return () => {
       disposed = true;
       idleListener?.remove();
+      removeDragRectangleListeners?.();
       setIsReady(false);
       setModeState('select');
       try { drawRef.current?.stop(); } catch {}
@@ -286,6 +420,7 @@ export function useTerraDrawGoogleMaps({
     try {
       setTerraDrawEventLayerActive(eventLayerRef.current, nextMode !== 'select');
       draw.setMode(nextMode);
+      activeModeRef.current = nextMode;
       setModeState(nextMode);
       map?.setOptions({
         draggable: nextMode === 'select',
