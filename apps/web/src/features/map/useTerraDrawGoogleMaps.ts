@@ -169,8 +169,10 @@ export function useTerraDrawGoogleMaps({
 
       try {
         const adapter = new TerraDrawGoogleMapsAdapter({ lib: window.google.maps, map });
-        const mapRoot = map.getDiv() as HTMLDivElement;
-        (adapter as unknown as { getMapEventElement: () => HTMLDivElement }).getMapEventElement = () => mapRoot;
+        const getMapEventElement = adapter.getMapEventElement.bind(adapter);
+        (adapter as unknown as { getMapEventElement: () => HTMLDivElement }).getMapEventElement = () => {
+          return getMapEventElement() || (map.getDiv() as HTMLDivElement);
+        };
 
         const draw = createTerraDraw(adapter);
         draw.on('ready', () => {
