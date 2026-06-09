@@ -42,7 +42,7 @@ export function MapControls({
   activeTerraMode = null,
 }: MapControlsProps) {
   return (
-    <div className={`absolute top-4 left-4 z-50 flex flex-col gap-3 ${className}`}>
+    <div className={`absolute left-3 right-3 top-3 z-[60] flex max-w-[calc(100vw-1.5rem)] flex-col gap-2 sm:left-4 sm:right-auto sm:top-4 sm:max-w-none sm:gap-3 ${className}`}>
       <SearchBar
         onSearch={onSearch}
         prospects={prospects}

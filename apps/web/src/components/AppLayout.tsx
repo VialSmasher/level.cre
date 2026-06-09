@@ -91,18 +91,18 @@ export function AppLayout({ children }: AppLayoutProps) {
     <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
       {/* Top Navigation */}
       <nav className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex h-14 items-center justify-between sm:h-16">
             {/* Logo */}
             <div className="flex items-center min-w-0 gap-4">
               <Link
                 href="/app"
-                className="text-2xl font-black tracking-tight text-slate-900 dark:text-gray-100"
+                className="text-xl font-black tracking-tight text-slate-900 dark:text-gray-100 sm:text-2xl"
                 aria-label="Go to dashboard"
               >
                 <span className="inline-flex items-center gap-1">
                   level CRE
-                  <ChartSpline size={20} className="-mt-px" />
+                  <ChartSpline size={18} className="-mt-px sm:h-5 sm:w-5" />
                 </span>
               </Link>
             </div>
@@ -158,7 +158,7 @@ export function AppLayout({ children }: AppLayoutProps) {
               {/* Profile Dropdown */}
               <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="flex max-w-[260px] items-center space-x-2 rounded-full px-2">
+                <Button variant="ghost" className="flex max-w-[260px] items-center space-x-1 rounded-full px-1.5 sm:space-x-2 sm:px-2">
                   <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
                     {user?.user_metadata?.avatar_url ? (
                       <img 

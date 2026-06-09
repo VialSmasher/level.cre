@@ -1311,7 +1311,7 @@ export default function Workspace() {
           </div>
         )}
         {isLoaded && apiKey && (
-          <div style={{ position: 'absolute', inset: 0 }}>
+          <div className="absolute inset-0 z-0">
             {(isLinkedProspectsLoading || linkedProspectsErrorMessage) && (
               <div className="absolute left-4 top-28 z-[1001] max-w-md rounded-md border bg-white/95 px-3 py-2 text-sm shadow-lg backdrop-blur-sm md:top-16">
                 <div className="font-medium text-gray-900">
@@ -1324,8 +1324,7 @@ export default function Workspace() {
             )}
             {/* Floating workspace actions (top-right) */}
             <div
-              className="absolute top-4 z-[1000] flex items-center gap-1 rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm"
-              style={{ right: isEditPanelOpen ? 352 : 16 }}
+              className={`absolute right-3 top-[7.25rem] z-[65] flex max-w-[calc(100vw-1.5rem)] items-center gap-1 rounded-lg border border-slate-200 bg-white/95 p-1.5 shadow-lg backdrop-blur-sm sm:top-4 ${isEditPanelOpen ? 'md:right-[22rem]' : 'md:right-4'}`}
             >
               <div className="flex min-w-0 items-center gap-2 px-2">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
@@ -1333,7 +1332,7 @@ export default function Workspace() {
                 </div>
                 <div className="min-w-0">
                   <p className="hidden text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:block">Workspace</p>
-                  <p className="max-w-[220px] truncate text-sm font-semibold text-slate-950" title={listing?.title || listing?.address || 'Workspace'}>
+                  <p className="max-w-[150px] truncate text-sm font-semibold text-slate-950 sm:max-w-[220px]" title={listing?.title || listing?.address || 'Workspace'}>
                     {listing?.title || listing?.address || 'Workspace'}
                   </p>
                 </div>
@@ -1464,7 +1463,7 @@ export default function Workspace() {
 
             {/* Confirm search selection */}
             {searchPin && (
-              <div style={{ position: 'absolute', top: 76, left: 16, zIndex: 50 }}>
+              <div className="absolute left-3 right-3 top-[10.5rem] z-[60] sm:left-4 sm:right-auto sm:top-[76px]">
                 <div className="bg-white p-2 rounded shadow border">
                   <div className="text-sm mb-2">{searchPin.address}</div>
                   <Button
@@ -1508,7 +1507,7 @@ export default function Workspace() {
       </div>
 
       {/* Status Legend / Filters (bottom-left) */}
-      <div className="absolute bottom-4 left-4 z-20" style={{ pointerEvents: 'auto' }}>
+      <div className="absolute bottom-3 left-3 z-40 sm:bottom-4 sm:left-4" style={{ pointerEvents: 'auto' }}>
         <StatusLegend
           selected={statusFilters}
           onToggle={(key) => {
@@ -1522,7 +1521,7 @@ export default function Workspace() {
 
       {/* Removed legacy Drawer UI */}
       {isEditPanelOpen && selectedProspect && prospectDraft && (
-        <div className="absolute top-0 right-0 w-80 max-h-[90vh] flex flex-col bg-white shadow-xl border-l border-gray-200 z-50 overflow-y-auto" style={{ pointerEvents: 'auto' }}>
+        <div className="absolute bottom-2 left-2 right-2 z-[80] flex max-h-[74dvh] flex-col overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-xl md:left-auto md:right-0 md:top-0 md:bottom-auto md:w-80 md:max-h-[90vh] md:rounded-none md:border-y-0 md:border-r-0 md:border-l" style={{ pointerEvents: 'auto' }}>
           <div className="sticky top-0 z-10 bg-white border-b px-4 pt-3 pb-2">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-gray-800">Edit Prospect</h2>
@@ -1836,7 +1835,7 @@ export default function Workspace() {
               className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
               aria-label="Close"
             >
-              <span aria-hidden className="inline-block h-4 w-4">✕</span>
+              <span aria-hidden className="inline-block h-4 w-4">x</span>
             </button>
           </ModalClose>
         </ModalContent>

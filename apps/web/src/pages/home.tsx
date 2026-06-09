@@ -1785,9 +1785,9 @@ export default function HomePage() {
   }
 
   return (
-    <div style={{ position: 'relative', height: 'calc(100vh - 4rem)', width: '100%', overflow: 'hidden' }}>
+    <div className="relative min-h-0 flex-1 overflow-hidden">
       {/* Map Canvas */}
-      <div style={{ position: 'absolute', inset: 0 }} ref={mapContainerRef}>
+      <div className="absolute inset-0 z-0" ref={mapContainerRef}>
         {(isProspectsLoading || prospectsErrorMessage) && (
           <div className="absolute left-4 top-4 z-50 max-w-md rounded-md border bg-white/95 px-3 py-2 text-sm shadow-lg backdrop-blur-sm">
             <div className="font-medium text-gray-900">
@@ -1873,7 +1873,7 @@ export default function HomePage() {
                       onClick={() => setSearchPin(null)}
                       className="px-2 py-1.5 text-gray-500 hover:text-gray-700 text-xs"
                     >
-                      ✕
+                      x
                     </button>
                   </div>
                 </div>
@@ -1934,7 +1934,7 @@ export default function HomePage() {
 
       {/* Developer Settings - Keep at bottom right but with margin */}
       <div 
-        className="absolute bottom-4 right-4"
+        className="absolute bottom-4 right-4 z-30 hidden sm:block"
         style={{ pointerEvents: 'auto' }}
       >
         <DeveloperSettings />
@@ -1943,7 +1943,7 @@ export default function HomePage() {
       {/* Control Panel - Slides in from left */}
       {isControlPanelOpen && (
         <div 
-          className="absolute top-0 left-0 h-full w-80 bg-white shadow-xl border-r border-gray-200 z-40"
+          className="absolute inset-x-2 inset-y-2 z-[70] rounded-lg border border-gray-200 bg-white shadow-xl md:inset-y-0 md:left-0 md:right-auto md:h-full md:w-80 md:rounded-none md:border-y-0 md:border-l-0 md:border-r"
           style={{ pointerEvents: 'auto', transform: 'translateX(0)', transition: 'transform 0.3s ease-in-out' }}
         >
           <div className="flex flex-col h-full">
@@ -2005,7 +2005,7 @@ export default function HomePage() {
       {/* Edit Panel - Content-Sized with Proper Scrolling */}
       {isEditPanelOpen && selectedProspect && (
         <div 
-          className="absolute top-0 right-0 w-80 h-auto max-h-[90vh] flex flex-col bg-white shadow-xl border-l border-gray-200 z-50 overflow-y-auto"
+          className="absolute bottom-2 left-2 right-2 z-[80] flex max-h-[74dvh] flex-col overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-xl md:left-auto md:right-0 md:top-0 md:bottom-auto md:w-80 md:max-h-[90vh] md:rounded-none md:border-y-0 md:border-r-0 md:border-l"
           style={{ pointerEvents: 'auto' }}
         >
           {/* Header - Sticky */}
@@ -2449,7 +2449,7 @@ export default function HomePage() {
         </div>
       )}
       {/* Status Legend (bottom-left) with built-in chevron */}
-      <div className="absolute bottom-4 left-4 z-20" style={{ pointerEvents: 'auto' }}>
+      <div className="absolute bottom-3 left-3 z-40 sm:bottom-4 sm:left-4" style={{ pointerEvents: 'auto' }}>
         <StatusLegend
           selected={statusFilters}
           onToggle={(key) => {

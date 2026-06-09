@@ -212,8 +212,8 @@ export function SearchBar({
   };
 
   return (
-    <div className="relative w-[min(85vw,420px)]">
-      <div className="flex items-center gap-2 bg-white/95 shadow-sm border border-gray-200 px-2 py-1.5">
+    <div className="relative w-full sm:w-[min(85vw,420px)]">
+      <div className="flex items-center gap-2 rounded-md border border-gray-200 bg-white/95 px-2 py-2 shadow-sm sm:py-1.5">
         <input
           ref={ref}
           value={value}
@@ -263,7 +263,7 @@ export function SearchBar({
             }
           }}
           disabled={!ready}
-          className="flex-1 bg-transparent text-sm placeholder:text-gray-400 text-gray-800 focus:outline-none"
+          className="min-w-0 flex-1 bg-transparent text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none"
           placeholder="Search..."
           aria-label="Search"
           role="combobox"
@@ -276,7 +276,7 @@ export function SearchBar({
           type="button"
           aria-label="Strict bounds"
           title={strictBounds ? 'Strict bounds: on' : 'Strict bounds: off'}
-          className={`h-7 w-7 grid place-items-center text-xs ${strictBounds ? 'bg-indigo-600 text-white hover:bg-indigo-500' : 'text-gray-700 hover:bg-gray-100'}`}
+          className={`grid h-9 w-9 shrink-0 place-items-center rounded text-xs sm:h-7 sm:w-7 ${strictBounds ? 'bg-indigo-600 text-white hover:bg-indigo-500' : 'text-gray-700 hover:bg-gray-100'}`}
           onClick={() => setStrictBounds((v) => !v)}
         >
           <Square className="w-4 h-4" />
@@ -284,7 +284,7 @@ export function SearchBar({
         <button
           type="button"
           aria-label="Search"
-          className="h-7 w-7 grid place-items-center bg-indigo-600 text-white text-xs hover:bg-indigo-500 active:scale-95"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded bg-indigo-600 text-xs text-white hover:bg-indigo-500 active:scale-95 sm:h-7 sm:w-7"
           onClick={() => {
             if (combinedResults.length > 0) {
               const first = combinedResults[0];
@@ -304,7 +304,7 @@ export function SearchBar({
           id={listboxId}
           role="listbox"
           ref={listRef}
-          className="absolute z-10 w-full bg-white shadow-lg rounded-lg mt-1 max-h-60 overflow-y-auto"
+          className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg bg-white shadow-lg"
         >
           {renderSuggestions()}
         </ul>

@@ -23,13 +23,17 @@ export function MapTools({
   onSelect,
   activeTerraMode = null,
 }: MapToolsProps) {
+  const buttonClass = 'grid h-10 w-10 shrink-0 place-items-center rounded text-[15px] active:scale-95 sm:h-7 sm:w-7';
+  const inactiveClass = 'text-gray-700 hover:bg-gray-100';
+  const activeClass = 'bg-gray-100 text-gray-900';
+
   // Wire these to your actual handlers as props or context
   return (
-    <div className="flex items-center gap-1.5 bg-white/95 shadow-sm border border-gray-200 px-2 py-1 w-fit">
+    <div className="flex w-fit max-w-full items-center gap-1.5 overflow-x-auto rounded-md border border-gray-200 bg-white/95 px-2 py-1.5 shadow-sm sm:py-1">
       <button
         aria-label="Toggle Map Type"
         title={mapType === 'hybrid' ? 'Map' : 'Hybrid'}
-        className="h-7 w-7 grid place-items-center text-gray-700 hover:bg-gray-100 active:scale-95 text-[15px]"
+        className={`${buttonClass} ${inactiveClass}`}
         onClick={() => onMapTypeChange?.(mapType === 'roadmap' ? 'hybrid' : 'roadmap')}
       >
         {mapType === 'hybrid' ? (
@@ -38,18 +42,19 @@ export function MapTools({
           <Satellite className="w-4 h-4" strokeWidth={1.5} />
         )}
       </button>
-      <button aria-label="Pan" title="Pan" className={`h-7 w-7 grid place-items-center ${activeTerraMode === 'select' ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-100'} active:scale-95 text-[15px]`} onClick={onSelect}>
+      <button aria-label="Pan" title="Pan" className={`${buttonClass} ${activeTerraMode === 'select' ? activeClass : inactiveClass}`} onClick={onSelect}>
         <MousePointer className="w-4 h-4" strokeWidth={1.5} />
       </button>
-      <button aria-label="Drop Pin" title="Point" className={`h-7 w-7 grid place-items-center ${activeTerraMode === 'point' ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-100'} active:scale-95 text-[15px]`} onClick={onPin}>
+      <button aria-label="Drop Pin" title="Point" className={`${buttonClass} ${activeTerraMode === 'point' ? activeClass : inactiveClass}`} onClick={onPin}>
         <MapPin className="w-4 h-4" strokeWidth={1.5} />
       </button>
-      <button aria-label="Draw Polygon" title="Polygon" className={`h-7 w-7 grid place-items-center ${activeTerraMode === 'polygon' ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-100'} active:scale-95 text-[15px]`} onClick={onPolygon}>
+      <button aria-label="Draw Polygon" title="Polygon" className={`${buttonClass} ${activeTerraMode === 'polygon' ? activeClass : inactiveClass}`} onClick={onPolygon}>
         <Shapes className="w-4 h-4" strokeWidth={1.5} />
       </button>
-      <button aria-label="Draw Rectangle" title="Rectangle" className={`h-7 w-7 grid place-items-center ${activeTerraMode === 'rectangle' ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-100'} active:scale-95 text-[15px]`} onClick={onRectangle}>
+      <button aria-label="Draw Rectangle" title="Rectangle" className={`${buttonClass} ${activeTerraMode === 'rectangle' ? activeClass : inactiveClass}`} onClick={onRectangle}>
         <Square className="w-4 h-4" strokeWidth={1.5} />
-      </button>      <button aria-label="My Location" title="My Location" className="h-7 w-7 grid place-items-center text-gray-700 hover:bg-gray-100 active:scale-95 text-[15px]" onClick={onMyLocation}>
+      </button>
+      <button aria-label="My Location" title="My Location" className={`${buttonClass} ${inactiveClass}`} onClick={onMyLocation}>
         <LocateFixed className="w-4 h-4" strokeWidth={1.5} />
       </button>
     </div>
