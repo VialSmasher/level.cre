@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
 import { User, Settings, Palette, Bell, Shield, Download, Upload, Plus, X, Mail, Copy, RefreshCcw } from "lucide-react";
-import { Prospect, Submarket } from "@level-cre/shared/schema";
+import { Prospect, Submarket, STATUS_META, type ProspectStatusType } from "@level-cre/shared/schema";
+import { MAP_STATUS_KEYS, createStatusFilterSet } from "@/features/map/statusFilters";
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -74,7 +75,7 @@ export default function ProfilePage() {
   });
 
   // Control Panel State
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
+  const [selectedStatuses, setSelectedStatuses] = useState<ProspectStatusType[]>([]);
   const [isControlPanelCollapsed, setIsControlPanelCollapsed] = useState(false);
 
   // Settings State
@@ -90,11 +91,10 @@ export default function ProfilePage() {
   useEffect(() => {
     // Load saved settings from localStorage
     const savedFilters = readJSON<any>(nsKey(user?.id, 'mapFilters'), null);
+    const savedMapStatuses = readJSON<unknown>(nsKey(user?.id, 'mapStatusFilters'), null);
     const savedSettings = readJSON<any>(nsKey(user?.id, 'userSettings'), null);
 
-    if (savedFilters) {
-      setSelectedStatuses(savedFilters.selectedStatuses || []);
-    }
+    setSelectedStatuses(Array.from(createStatusFilterSet(savedMapStatuses ?? savedFilters?.selectedStatuses)));
     if (savedSettings) {
       setEmailNotifications(savedSettings.emailNotifications ?? true);
       setDarkMode(savedSettings.darkMode ?? false);
@@ -116,6 +116,8 @@ export default function ProfilePage() {
       soundEffects,
     };
     writeJSON(nsKey(user?.id, 'userSettings'), settings);
+    writeJSON(nsKey(user?.id, 'mapStatusFilters'), selectedStatuses);
+    writeJSON(nsKey(user?.id, 'mapFilters'), { selectedStatuses });
   };
 
   const exportData = () => {
@@ -190,14 +192,13 @@ export default function ProfilePage() {
     });
   };
 
-  const statusOptions = [
-    { value: 'prospect', label: 'Prospect', color: 'bg-gray-500' },
-    { value: 'contacted', label: 'Contacted', color: 'bg-blue-500' },
-    { value: 'followup', label: 'Follow-up', color: 'bg-yellow-500' },
-    { value: 'listing', label: 'Listing', color: 'bg-purple-500' },
-    { value: 'client', label: 'Client', color: 'bg-green-500' },
-    { value: 'no_go', label: 'No Go', color: 'bg-red-500' }
-  ];
+  const toggleSelectedStatus = (status: ProspectStatusType) => {
+    setSelectedStatuses((current) => (
+      current.includes(status)
+        ? current.filter((item) => item !== status)
+        : [...current, status]
+    ));
+  };
 
   if (!user) {
     return (
@@ -377,27 +378,24 @@ export default function ProfilePage() {
                 <Label className="text-base font-medium">Status Filters</Label>
                 <p className="text-sm text-gray-600 mb-3">Select which prospect statuses to display on the map</p>
                 <div className="grid grid-cols-2 gap-2">
-                  {statusOptions.map((status) => (
-                    <div key={status.value} className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        id={status.value}
-                        checked={selectedStatuses.includes(status.value)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedStatuses([...selectedStatuses, status.value]);
-                          } else {
-                            setSelectedStatuses(selectedStatuses.filter(s => s !== status.value));
-                          }
-                        }}
-                        className="rounded"
-                      />
-                      <label htmlFor={status.value} className="flex items-center gap-2 text-sm">
-                        <div className={`w-3 h-3 rounded-full ${status.color}`}></div>
-                        {status.label}
-                      </label>
-                    </div>
-                  ))}
+                  {MAP_STATUS_KEYS.map((status) => {
+                    const meta = STATUS_META[status];
+                    return (
+                      <div key={status} className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id={`map-status-${status}`}
+                          checked={selectedStatuses.includes(status)}
+                          onChange={() => toggleSelectedStatus(status)}
+                          className="rounded"
+                        />
+                        <label htmlFor={`map-status-${status}`} className="flex items-center gap-2 text-sm">
+                          <div className="h-3 w-3 rounded-full" style={{ backgroundColor: meta.color }}></div>
+                          {meta.label}
+                        </label>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

@@ -37,6 +37,7 @@ import { StatusLegend } from '@/features/map/StatusLegend';
 import { useTerraDrawGoogleMaps, type MapDrawMode, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
 import { AdvancedMapMarker } from '@/features/map/AdvancedMapMarker';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
+import { createStatusFilterSet, getStatusCounts } from '@/features/map/statusFilters';
 
 // Import all necessary types and data
 import type { 
@@ -317,9 +318,11 @@ export default function HomePage() {
   }, [touches]);
   
   // Filter state
-  const [statusFilters, setStatusFilters] = useState<Set<ProspectStatusType>>(
-    new Set(Object.keys(STATUS_META) as ProspectStatusType[])
-  );
+  const statusFilterStorageKey = nsKey(currentUser?.id, 'mapStatusFilters');
+  const skipNextStatusFilterPersistRef = useRef(false);
+  const [statusFilters, setStatusFilters] = useState<Set<ProspectStatusType>>(() => {
+    return createStatusFilterSet(readJSON<unknown>(statusFilterStorageKey, null));
+  });
   
   // Add submarket filter state
   const [selectedSubmarkets, setSelectedSubmarkets] = useState<Set<string>>(() => {
@@ -533,6 +536,20 @@ export default function HomePage() {
     writeJSON(nsKey(currentUser?.id, 'controlPanelOpen'), isControlPanelOpen);
   }, [isControlPanelOpen, currentUser?.id]);
 
+  useEffect(() => {
+    skipNextStatusFilterPersistRef.current = true;
+    setStatusFilters(createStatusFilterSet(readJSON<unknown>(statusFilterStorageKey, null)));
+  }, [statusFilterStorageKey]);
+
+  useEffect(() => {
+    if (skipNextStatusFilterPersistRef.current) {
+      skipNextStatusFilterPersistRef.current = false;
+      return;
+    }
+
+    writeJSON(statusFilterStorageKey, Array.from(statusFilters));
+  }, [statusFilters, statusFilterStorageKey]);
+
   // No longer persisting legend open state
   
   // Save submarket filter state
@@ -625,6 +642,8 @@ export default function HomePage() {
       return passesStatus && passesSubmarket;
     });
   }, [prospects, statusFilters, selectedSubmarkets]);
+
+  const statusCounts = useMemo(() => getStatusCounts(prospects), [prospects]);
 
   const renderableProspects = useMemo(() => {
     return filteredProspects.map((prospect) => {
@@ -2467,6 +2486,8 @@ export default function HomePage() {
       <div className="absolute bottom-3 left-3 z-40 sm:bottom-4 sm:left-4" style={{ pointerEvents: 'auto' }}>
         <StatusLegend
           selected={statusFilters}
+          counts={statusCounts}
+          onChange={setStatusFilters}
           onToggle={(key) => {
             const next = new Set(statusFilters);
             if (next.has(key)) next.delete(key); else next.add(key);

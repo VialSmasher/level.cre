@@ -34,6 +34,7 @@ import { nsKey, readJSON, removeKey, writeJSON } from '@/lib/storage';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { clearAdvancedMarker, type AdvancedAssetMarker } from '@/features/map/advancedMarkers';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
+import { createAllStatusFilterSet, createStatusFilterSet, getStatusCounts } from '@/features/map/statusFilters';
 // Note: Avoid importing AlertDialog to prevent a circular-import bundle bug
 
 type Listing = {
@@ -418,11 +419,14 @@ export default function Workspace() {
   // Status filter UI: default to all statuses visible
   type StatusKey = ProspectStatusType;
   const [statusFilters, setStatusFilters] = useState<Set<StatusKey>>(() => {
-    return new Set(Object.keys(STATUS_META) as StatusKey[]);
+    return createAllStatusFilterSet();
   });
+  const workspaceStatusFilterStorageKey = listingId ? `workspaceStatusFilters:${listingId}` : null;
+  const skipNextWorkspaceStatusPersistRef = useRef(false);
   const filteredLinkedProspects = useMemo(() => {
     return linkedProspects.filter((p) => statusFilters.has(p.status as StatusKey));
   }, [linkedProspects, statusFilters]);
+  const statusCounts = useMemo(() => getStatusCounts(linkedProspects), [linkedProspects]);
 
   useEffect(() => {
     if (!map) return;
@@ -569,21 +573,22 @@ export default function Workspace() {
 
   // Persist status filters per workspace id
   useEffect(() => {
-    if (!listingId) return;
+    if (!workspaceStatusFilterStorageKey) return;
     try {
-      const raw = localStorage.getItem(`workspaceStatusFilters:${listingId}`);
-      if (raw) {
-        const arr = JSON.parse(raw) as StatusKey[];
-        if (Array.isArray(arr) && arr.length > 0) {
-          setStatusFilters(new Set(arr));
-        }
-      }
+      skipNextWorkspaceStatusPersistRef.current = true;
+      const raw = localStorage.getItem(workspaceStatusFilterStorageKey);
+      setStatusFilters(raw ? createStatusFilterSet(JSON.parse(raw)) : createAllStatusFilterSet());
     } catch {}
-  }, [listingId]);
+  }, [workspaceStatusFilterStorageKey]);
   useEffect(() => {
-    if (!listingId) return;
-    try { localStorage.setItem(`workspaceStatusFilters:${listingId}`, JSON.stringify(Array.from(statusFilters))); } catch {}
-  }, [statusFilters, listingId]);
+    if (!workspaceStatusFilterStorageKey) return;
+    if (skipNextWorkspaceStatusPersistRef.current) {
+      skipNextWorkspaceStatusPersistRef.current = false;
+      return;
+    }
+
+    try { localStorage.setItem(workspaceStatusFilterStorageKey, JSON.stringify(Array.from(statusFilters))); } catch {}
+  }, [statusFilters, workspaceStatusFilterStorageKey]);
 
   // Reuse profile submarkets for dropdowns (normalized + de-duped)
   const { profile } = useProfile();
@@ -1548,6 +1553,8 @@ export default function Workspace() {
       <div className="absolute bottom-3 left-3 z-40 sm:bottom-4 sm:left-4" style={{ pointerEvents: 'auto' }}>
         <StatusLegend
           selected={statusFilters}
+          counts={statusCounts}
+          onChange={setStatusFilters}
           onToggle={(key) => {
             const k = key as StatusKey;
             const next = new Set(statusFilters);
