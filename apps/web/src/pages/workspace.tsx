@@ -33,6 +33,7 @@ import { GOOGLE_MAPS_API_KEY_HELP_TEXT, getGoogleMapsApiKey, getGoogleMapsMapId 
 import { nsKey, readJSON, removeKey, writeJSON } from '@/lib/storage';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { clearAdvancedMarker, type AdvancedAssetMarker } from '@/features/map/advancedMarkers';
+import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
 // Note: Avoid importing AlertDialog to prevent a circular-import bundle bug
 
 type Listing = {
@@ -64,6 +65,8 @@ type CreateProspectVariables = {
     businessName?: string;
     websiteUrl?: string;
     contactCompany?: string;
+    contactPhone?: string;
+    aiMetadata?: Record<string, unknown>;
     lotSizeAcres?: number;
   };
   source?: 'search' | 'context-menu';
@@ -77,6 +80,7 @@ type ContextMenuState = {
 };
 
 type WorkspaceMember = { userId: string; role: 'owner'|'editor'|'viewer'; email?: string|null };
+type SearchPin = MapSearchLocation;
 
 const EMPTY_PROSPECTS: Prospect[] = [];
 const EMPTY_MEMBERS: WorkspaceMember[] = [];
@@ -307,7 +311,7 @@ export default function Workspace() {
     };
   }, [contextMenu, closeContextMenu]);
 
-  const [searchPin, setSearchPin] = useState<{ lat: number; lng: number; address: string; businessName?: string | null; websiteUrl?: string | null } | null>(null);
+  const [searchPin, setSearchPin] = useState<SearchPin | null>(null);
   // Signal to clear the SearchBar input when a prospect is added
   const [clearSearchSignal, setClearSearchSignal] = useState(0);
   const [mapType, setMapType] = useState<'roadmap' | 'hybrid'>('roadmap');
@@ -360,6 +364,7 @@ export default function Workspace() {
     contactCompany: data.contactCompany,
     buildingSf: data.buildingSf,
     lotSizeAcres: data.lotSizeAcres,
+    aiMetadata: data.aiMetadata,
     businessName: (data as any).businessName,
     websiteUrl: (data as any).websiteUrl,
     // required
@@ -537,7 +542,7 @@ export default function Workspace() {
         nextMarker = await createCustomAssetMarker(map, {
           lat: searchPin.lat,
           lng: searchPin.lng,
-          title: searchPin.address || 'Search Pin',
+          title: searchPin.businessName || searchPin.address || 'Search Pin',
           color: '#7C3AED',
           scale: 8,
         });
@@ -1053,7 +1058,7 @@ export default function Workspace() {
   // Linking existing prospects via drawer removed
 
   const createProspectMutation = useMutation<Prospect, Error, CreateProspectVariables>({
-    mutationFn: async ({ payload }) => {
+    mutationFn: async ({ payload, source }) => {
       const normalized = {
         ...payload,
         status: (payload.status ?? 'prospect') as ProspectStatusType,
@@ -1064,10 +1069,22 @@ export default function Workspace() {
         return buildLocalProspect(normalized as any);
       }
 
-      const res = await apiRequest('POST', '/api/prospects', normalized);
-      const created = await res.json();
+      const { businessName, websiteUrl, contactCompany, contactPhone, aiMetadata, ...initialPayload } = normalized;
+      const enrichmentPatch = { businessName, websiteUrl, contactCompany, contactPhone, aiMetadata };
+      const hasEnrichmentPatch = source === 'search' && Object.values(enrichmentPatch).some((value) => value !== undefined);
+
+      const res = await apiRequest('POST', '/api/prospects', source === 'search' ? initialPayload : normalized);
+      let created = await res.json();
       if (listingId) {
         await apiRequest('POST', `/api/listings/${listingId}/prospects`, { prospectId: created.id });
+      }
+      if (hasEnrichmentPatch) {
+        try {
+          const patchRes = await apiRequest('PATCH', `/api/prospects/${created.id}`, enrichmentPatch);
+          created = await patchRes.json();
+        } catch (enrichmentError) {
+          console.warn('Prospect created, but Google Places enrichment could not be applied', enrichmentError);
+        }
       }
       return created;
     },
@@ -1478,12 +1495,22 @@ export default function Workspace() {
             {searchPin && (
               <div className="absolute left-3 right-3 top-[10.5rem] z-[60] sm:left-4 sm:right-auto sm:top-[76px]">
                 <div className="bg-white p-2 rounded shadow border">
-                  <div className="text-sm mb-2">{searchPin.address}</div>
+                  <div className="text-sm font-medium">{searchPin.businessName || searchPin.address}</div>
+                  {searchPin.businessName && (
+                    <div className="mb-2 text-xs text-slate-600">{searchPin.address}</div>
+                  )}
+                  {(searchPin.contactPhone || searchPin.websiteUrl) && (
+                    <div className="mb-2 space-y-0.5 text-xs text-slate-600">
+                      {searchPin.contactPhone && <div>{searchPin.contactPhone}</div>}
+                      {searchPin.websiteUrl && <div className="max-w-xs truncate">{searchPin.websiteUrl}</div>}
+                    </div>
+                  )}
                   <Button
                     size="sm"
                     onClick={() => {
                       if (!searchPin || !can.edit) return;
-                      const name = (searchPin.businessName?.trim() || searchPin.address || 'New Prospect').trim() || 'New Prospect';
+                      const prospectDetails = searchLocationToProspectDetails(searchPin);
+                      const name = (searchPin.address || searchPin.businessName?.trim() || 'New Prospect').trim() || 'New Prospect';
                       createProspectMutation.mutate({
                         source: 'search',
                         payload: {
@@ -1491,9 +1518,7 @@ export default function Workspace() {
                           geometry: { type: 'Point', coordinates: [searchPin.lng, searchPin.lat] as [number, number] },
                           status: 'prospect',
                           notes: '',
-                          businessName: searchPin.businessName || undefined,
-                          websiteUrl: searchPin.websiteUrl || undefined,
-                          contactCompany: searchPin.businessName || undefined,
+                          ...prospectDetails,
                         },
                       });
                     }}

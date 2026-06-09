@@ -2,9 +2,10 @@ import { useRef, useState, useMemo, useEffect, useCallback } from 'react';
 import { Search, Square, Star } from 'lucide-react';
 import type { Prospect } from '@level-cre/shared/schema';
 import { getProspectDisplayName, getProspectSecondaryName, isPlaceholderProspectName } from '@/lib/prospectDisplay';
+import type { MapSearchLocation } from './searchTypes';
 
 interface SearchBarProps {
-  onSearch: (location: { lat: number; lng: number; address: string; businessName?: string | null; websiteUrl?: string | null }) => void;
+  onSearch: (location: MapSearchLocation) => void;
   prospects?: Prospect[];
   onProspectClick?: (prospect: Prospect) => void;
   bounds?: google.maps.LatLngBoundsLiteral | null;
@@ -247,7 +248,17 @@ export function SearchBar({
       void (async () => {
         try {
           const place = prediction.toPlace();
-          await place.fetchFields({ fields: ['displayName', 'formattedAddress', 'location', 'websiteURI'] });
+          await place.fetchFields({
+            fields: [
+              'displayName',
+              'formattedAddress',
+              'location',
+              'websiteURI',
+              'nationalPhoneNumber',
+              'internationalPhoneNumber',
+              'googleMapsURI',
+            ],
+          });
           if (!place.location) {
             throw new Error('Selected place did not include a location.');
           }
@@ -257,6 +268,9 @@ export function SearchBar({
             address: place.formattedAddress || description,
             businessName: place.displayName ?? undefined,
             websiteUrl: place.websiteURI ?? undefined,
+            contactPhone: place.nationalPhoneNumber ?? place.internationalPhoneNumber ?? undefined,
+            placeId: prediction.placeId,
+            googleMapsUrl: place.googleMapsURI ?? undefined,
           });
         } catch (error) {
           try {

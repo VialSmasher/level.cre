@@ -36,6 +36,7 @@ import { STATUS_META } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
 import { useTerraDrawGoogleMaps, type MapDrawMode, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
 import { AdvancedMapMarker } from '@/features/map/AdvancedMapMarker';
+import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
 
 // Import all necessary types and data
 import type { 
@@ -134,6 +135,8 @@ interface MapData {
 type RenderableProspectEntry =
   | { id: string; prospect: Prospect; color: string; kind: 'point'; position: { lat: number; lng: number } }
   | { id: string; prospect: Prospect; color: string; kind: 'polygon'; paths: Array<{ lat: number; lng: number }> };
+
+type SearchPin = MapSearchLocation & { id: 'temp-search' };
 
 const MapOverlayLayer = memo(function MapOverlayLayer({
   renderableProspects,
@@ -351,7 +354,7 @@ export default function HomePage() {
   // Note: Escape key close handler moved below to avoid TDZ on closeEditPanel
   
   // Search pin state
-  const [searchPin, setSearchPin] = useState<{ id: 'temp-search', lat: number, lng: number, address: string, businessName?: string | null, websiteUrl?: string | null } | null>(null);
+  const [searchPin, setSearchPin] = useState<SearchPin | null>(null);
   // Signal to clear the SearchBar input when a prospect is added
   const [clearSearchSignal, setClearSearchSignal] = useState(0);
   
@@ -800,7 +803,7 @@ export default function HomePage() {
   }, []);
 
   // Handle location found from search
-  const handleLocationFound = useCallback((location: { lat: number; lng: number; address: string; businessName?: string | null; websiteUrl?: string | null }) => {
+  const handleLocationFound = useCallback((location: MapSearchLocation) => {
     console.log('Creating search pin at:', location);
     setSearchPin({
       id: 'temp-search',
@@ -808,7 +811,10 @@ export default function HomePage() {
       lng: location.lng,
       address: location.address,
       businessName: location.businessName,
-      websiteUrl: location.websiteUrl
+      websiteUrl: location.websiteUrl,
+      contactPhone: location.contactPhone,
+      placeId: location.placeId,
+      googleMapsUrl: location.googleMapsUrl,
     });
   }, []);
 
@@ -971,6 +977,7 @@ export default function HomePage() {
     if (!searchPin) return;
     
     try {
+      const prospectDetails = searchLocationToProspectDetails(searchPin);
       const newProspectData = {
         // Map address to Property tab (Address field is `name`)
         name: searchPin.address,
@@ -981,11 +988,11 @@ export default function HomePage() {
         status: 'prospect' as ProspectStatusType,
         notes: '',
         submarketId: inferSubmarketFromPoint(searchPin) || '',
-        // Also persist business metadata and map company to Contact tab
-        businessName: searchPin.businessName || undefined,
-        contactCompany: searchPin.businessName || undefined,
-        websiteUrl: searchPin.websiteUrl || undefined
+        ...prospectDetails,
       };
+      const { businessName, websiteUrl, contactCompany, contactPhone, aiMetadata, ...initialProspectData } = newProspectData;
+      const enrichmentPatch = { businessName, websiteUrl, contactCompany, contactPhone, aiMetadata };
+      const hasEnrichmentPatch = Object.values(enrichmentPatch).some((value) => value !== undefined);
 
       console.log('Saving search pin as prospect:', newProspectData);
 
@@ -998,7 +1005,9 @@ export default function HomePage() {
           submarketId: newProspectData.submarketId,
           businessName: newProspectData.businessName,
           contactCompany: newProspectData.contactCompany,
+          contactPhone: newProspectData.contactPhone,
           websiteUrl: newProspectData.websiteUrl,
+          aiMetadata: newProspectData.aiMetadata,
         } as any);
         const next = [...prospects, localProspect];
         persistProspects(next);
@@ -1010,8 +1019,16 @@ export default function HomePage() {
         toast({ title: 'Prospect saved (demo)', description: `"${getProspectDisplayName(localProspect)}" added locally.` });
       } else {
         // Save directly to database
-        const response = await apiRequest('POST', '/api/prospects', newProspectData);
-        const savedProspect = await response.json();
+        const response = await apiRequest('POST', '/api/prospects', initialProspectData);
+        let savedProspect = await response.json();
+        if (hasEnrichmentPatch) {
+          try {
+            const patchResponse = await apiRequest('PATCH', `/api/prospects/${savedProspect.id}`, enrichmentPatch);
+            savedProspect = await patchResponse.json();
+          } catch (enrichmentError) {
+            console.warn('Prospect saved, but Google Places enrichment could not be applied', enrichmentError);
+          }
+        }
         
         // Add to prospects list
         setProspects(prev => [...prev, savedProspect]);
@@ -1722,7 +1739,7 @@ export default function HomePage() {
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [isEditPanelOpen, editingProspectId, closeEditPanel]);
 
-  const handleMapSearch = useCallback((location: { lat: number; lng: number; address: string; businessName?: string | null; websiteUrl?: string | null }) => {
+  const handleMapSearch = useCallback((location: MapSearchLocation) => {
     handleLocationFound(location);
     if (map) {
       map.panTo({ lat: location.lat, lng: location.lng });
@@ -1840,7 +1857,7 @@ export default function HomePage() {
             <>
               <AdvancedMapMarker
                 position={{ lat: searchPin.lat, lng: searchPin.lng }}
-                title={searchPin.address}
+                title={searchPin.businessName || searchPin.address}
                 color="#FF6B35"
                 scale={12}
                 zIndex={3}
@@ -1850,7 +1867,16 @@ export default function HomePage() {
                 onCloseClick={() => setSearchPin(null)}
               >
                 <div className="p-2 max-w-xs">
-                  <h3 className="font-medium text-sm mb-2">{searchPin.address}</h3>
+                  <h3 className="font-medium text-sm">{searchPin.businessName || searchPin.address}</h3>
+                  {searchPin.businessName && (
+                    <p className="mb-2 text-xs text-gray-600">{searchPin.address}</p>
+                  )}
+                  {(searchPin.contactPhone || searchPin.websiteUrl) && (
+                    <div className="mb-2 space-y-0.5 text-xs text-gray-600">
+                      {searchPin.contactPhone && <div>{searchPin.contactPhone}</div>}
+                      {searchPin.websiteUrl && <div className="truncate">{searchPin.websiteUrl}</div>}
+                    </div>
+                  )}
                   <div className="flex gap-2">
                     <button
                       onClick={handleSaveSearchPin}

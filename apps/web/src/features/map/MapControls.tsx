@@ -1,10 +1,11 @@
 import { SearchBar } from './SearchBar';
 import { MapTools } from './MapTools';
 import type { Prospect } from '@level-cre/shared/schema';
+import type { MapSearchLocation } from './searchTypes';
 
 interface MapControlsProps {
   className?: string;
-  onSearch: (location: { lat: number; lng: number; address: string; businessName?: string | null; websiteUrl?: string | null }) => void;
+  onSearch: (location: MapSearchLocation) => void;
   prospects?: Prospect[];
   onProspectClick?: (prospect: Prospect) => void;
   bounds?: google.maps.LatLngBoundsLiteral | null;
