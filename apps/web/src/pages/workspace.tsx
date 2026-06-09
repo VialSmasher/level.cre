@@ -81,6 +81,21 @@ const EMPTY_MEMBERS: WorkspaceMember[] = [];
 const DEMO_MAP_RESET_VERSION = '2026-06-terradraw-clean-map-v1';
 const DEMO_MAP_RESET_KEY = 'levelcre:demoMapResetVersion';
 
+const clearLegacyDemoMapData = () => {
+  if (typeof window === 'undefined') return false;
+  try {
+    const demoRequested = localStorage.getItem('demo-mode') === 'true';
+    if (!demoRequested) return false;
+    if (readJSON<string | null>(DEMO_MAP_RESET_KEY, null) === DEMO_MAP_RESET_VERSION) return false;
+    removeKey(nsKey('demo-user', 'mapData'));
+    removeKey(nsKey(null, 'mapData'));
+    writeJSON(DEMO_MAP_RESET_KEY, DEMO_MAP_RESET_VERSION);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export default function Workspace() {
   const [, params] = useRoute('/app/workspaces/:id');
   const listingId = params?.id as string;
@@ -88,6 +103,7 @@ export default function Workspace() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { user, isDemoMode } = useAuth();
+  const [clearedLegacyDemoMapData] = useState(() => clearLegacyDemoMapData());
 
   const { data: listing } = useQuery<Listing>({ queryKey: ['/api/listings', listingId], enabled: !!listingId });
   const {
@@ -122,18 +138,13 @@ export default function Workspace() {
   }, [listingId]);
 
   useEffect(() => {
-    if (!isDemoMode || user?.id !== 'demo-user') return;
-    try {
-      if (readJSON<string | null>(DEMO_MAP_RESET_KEY, null) === DEMO_MAP_RESET_VERSION) return;
-      removeKey(nsKey(user.id, 'mapData'));
-      removeKey(nsKey(null, 'mapData'));
+    if (clearedLegacyDemoMapData || clearLegacyDemoMapData()) {
       queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], []);
       if (listingId) {
         queryClient.setQueryData<Prospect[] | undefined>(['/api/listings', listingId, 'prospects'], []);
       }
-      writeJSON(DEMO_MAP_RESET_KEY, DEMO_MAP_RESET_VERSION);
-    } catch {}
-  }, [isDemoMode, listingId, queryClient, user?.id]);
+    }
+  }, [clearedLegacyDemoMapData, isDemoMode, listingId, queryClient]);
 
   // Demo: seed listing detail from localStorage if cache empty
   useEffect(() => {

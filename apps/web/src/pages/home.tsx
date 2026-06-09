@@ -65,6 +65,21 @@ const EMPTY_PROSPECTS: Prospect[] = [];
 const DEMO_MAP_RESET_VERSION = '2026-06-terradraw-clean-map-v1';
 const DEMO_MAP_RESET_KEY = 'levelcre:demoMapResetVersion';
 
+const clearLegacyDemoMapData = () => {
+  if (typeof window === 'undefined') return false;
+  try {
+    const demoRequested = localStorage.getItem('demo-mode') === 'true';
+    if (!demoRequested) return false;
+    if (readJSON<string | null>(DEMO_MAP_RESET_KEY, null) === DEMO_MAP_RESET_VERSION) return false;
+    removeKey(nsKey('demo-user', 'mapData'));
+    removeKey(nsKey(null, 'mapData'));
+    writeJSON(DEMO_MAP_RESET_KEY, DEMO_MAP_RESET_VERSION);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 type ContextMenuState = {
   lat: number;
   lng: number;
@@ -285,7 +300,10 @@ export default function HomePage() {
   const [terraMode, setTerraMode] = useState<TerraMode>('select');
   
   // Data state
-  const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [prospects, setProspects] = useState<Prospect[]>(() => {
+    clearLegacyDemoMapData();
+    return [];
+  });
   const [submarkets, setSubmarkets] = useState<Submarket[]>([]);
   const [touches, setTouches] = useState<Touch[]>([]);
   const touchesRef = useRef<Touch[]>([]);
@@ -429,17 +447,12 @@ export default function HomePage() {
   });
 
   useEffect(() => {
-    if (!isDemoMode || currentUser?.id !== 'demo-user') return;
-    try {
-      if (readJSON<string | null>(DEMO_MAP_RESET_KEY, null) === DEMO_MAP_RESET_VERSION) return;
-      removeKey(nsKey(currentUser.id, 'mapData'));
-      removeKey(nsKey(null, 'mapData'));
+    if (clearLegacyDemoMapData()) {
       queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], []);
       setProspects([]);
       setTouches([]);
-      writeJSON(DEMO_MAP_RESET_KEY, DEMO_MAP_RESET_VERSION);
-    } catch {}
-  }, [isDemoMode, currentUser?.id]);
+    }
+  }, [isDemoMode]);
   
   // Remove submarkets query - we'll use profile submarkets instead
   

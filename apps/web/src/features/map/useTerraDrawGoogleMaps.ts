@@ -27,6 +27,8 @@ type UseTerraDrawGoogleMapsOptions = {
   onError?: (error: unknown) => void;
 };
 
+const TERRA_DRAW_EVENT_LAYER_CLASS = 'level-cre-terra-draw-event-layer';
+
 const isLngLat = (coordinate: unknown): coordinate is [number, number] => {
   return (
     Array.isArray(coordinate) &&
@@ -69,6 +71,37 @@ export function prospectGeometryFromTerraFeature(feature: GeoJSONStoreFeatures):
   }
 
   return null;
+}
+
+export function createTerraDrawEventLayer(mapDiv: HTMLDivElement) {
+  const existing = mapDiv.querySelector<HTMLDivElement>(`.${TERRA_DRAW_EVENT_LAYER_CLASS}`);
+  if (existing) return existing;
+
+  const layer = document.createElement('div');
+  layer.className = TERRA_DRAW_EVENT_LAYER_CLASS;
+  layer.tabIndex = -1;
+  layer.setAttribute('aria-label', 'Map drawing surface');
+  Object.assign(layer.style, {
+    position: 'absolute',
+    inset: '0',
+    width: '100%',
+    height: '100%',
+    zIndex: '1000000',
+    pointerEvents: 'none',
+    touchAction: 'none',
+    outline: 'none',
+    background: 'transparent',
+  });
+  mapDiv.appendChild(layer);
+  return layer;
+}
+
+export function setTerraDrawEventLayerActive(layer: HTMLDivElement | null, active: boolean) {
+  if (!layer) return;
+  layer.style.pointerEvents = active ? 'auto' : 'none';
+  if (active) {
+    try { layer.focus({ preventScroll: true }); } catch {}
+  }
 }
 
 function createTerraDraw(adapter: TerraDrawGoogleMapsAdapter) {
@@ -132,6 +165,7 @@ export function useTerraDrawGoogleMaps({
   onError,
 }: UseTerraDrawGoogleMapsOptions) {
   const drawRef = useRef<TerraDraw | null>(null);
+  const eventLayerRef = useRef<HTMLDivElement | null>(null);
   const onFinishRef = useRef(onFinish);
   const onUnavailableRef = useRef(onUnavailable);
   const onErrorRef = useRef(onError);
@@ -162,6 +196,7 @@ export function useTerraDrawGoogleMaps({
       try {
         map.setOptions({ draggable: true, disableDoubleClickZoom: false, clickableIcons: false });
       } catch {}
+      setTerraDrawEventLayerActive(eventLayerRef.current, false);
     };
 
     const initialise = () => {
@@ -169,9 +204,15 @@ export function useTerraDrawGoogleMaps({
 
       try {
         const adapter = new TerraDrawGoogleMapsAdapter({ lib: window.google.maps, map });
-        const getMapEventElement = adapter.getMapEventElement.bind(adapter);
+        const eventLayer = createTerraDrawEventLayer(map.getDiv() as HTMLDivElement);
+        eventLayerRef.current = eventLayer;
         (adapter as unknown as { getMapEventElement: () => HTMLDivElement }).getMapEventElement = () => {
-          return getMapEventElement() || (map.getDiv() as HTMLDivElement);
+          return eventLayer;
+        };
+        const setCursor = adapter.setCursor.bind(adapter);
+        (adapter as unknown as { setCursor: TerraDrawGoogleMapsAdapter['setCursor'] }).setCursor = (cursor) => {
+          eventLayer.style.cursor = cursor === 'unset' ? '' : cursor;
+          setCursor(cursor);
         };
 
         const draw = createTerraDraw(adapter);
@@ -230,6 +271,8 @@ export function useTerraDrawGoogleMaps({
       try { drawRef.current?.stop(); } catch {}
       drawRef.current = null;
       resetMapInteraction();
+      eventLayerRef.current?.remove();
+      eventLayerRef.current = null;
     };
   }, [enabled, map]);
 
@@ -241,6 +284,7 @@ export function useTerraDrawGoogleMaps({
     }
 
     try {
+      setTerraDrawEventLayerActive(eventLayerRef.current, nextMode !== 'select');
       draw.setMode(nextMode);
       setModeState(nextMode);
       map?.setOptions({
@@ -250,6 +294,7 @@ export function useTerraDrawGoogleMaps({
       });
       return true;
     } catch (error) {
+      setTerraDrawEventLayerActive(eventLayerRef.current, false);
       onErrorRef.current?.(error);
       return false;
     }
