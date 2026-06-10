@@ -240,6 +240,37 @@ export function SearchBar({
     };
   }, []);
 
+  const resolvePlacePrediction = useCallback(async (
+    prediction: google.maps.places.PlacePrediction,
+    description: string,
+  ): Promise<MapSearchLocation> => {
+    const place = prediction.toPlace();
+    await place.fetchFields({
+      fields: [
+        'displayName',
+        'formattedAddress',
+        'location',
+        'websiteURI',
+        'nationalPhoneNumber',
+        'internationalPhoneNumber',
+        'googleMapsURI',
+      ],
+    });
+    if (!place.location) {
+      throw new Error('Selected place did not include a location.');
+    }
+    return {
+      lat: place.location.lat(),
+      lng: place.location.lng(),
+      address: place.formattedAddress || description,
+      businessName: place.displayName ?? undefined,
+      websiteUrl: place.websiteURI ?? undefined,
+      contactPhone: place.nationalPhoneNumber ?? place.internationalPhoneNumber ?? undefined,
+      placeId: prediction.placeId,
+      googleMapsUrl: place.googleMapsURI ?? undefined,
+    };
+  }, []);
+
   const handleSelect =
     (item: GoogleSearchItem) =>
     () => {
@@ -250,31 +281,7 @@ export function SearchBar({
 
       void (async () => {
         try {
-          const place = prediction.toPlace();
-          await place.fetchFields({
-            fields: [
-              'displayName',
-              'formattedAddress',
-              'location',
-              'websiteURI',
-              'nationalPhoneNumber',
-              'internationalPhoneNumber',
-              'googleMapsURI',
-            ],
-          });
-          if (!place.location) {
-            throw new Error('Selected place did not include a location.');
-          }
-          onSearch({
-            lat: place.location.lat(),
-            lng: place.location.lng(),
-            address: place.formattedAddress || description,
-            businessName: place.displayName ?? undefined,
-            websiteUrl: place.websiteURI ?? undefined,
-            contactPhone: place.nationalPhoneNumber ?? place.internationalPhoneNumber ?? undefined,
-            placeId: prediction.placeId,
-            googleMapsUrl: place.googleMapsURI ?? undefined,
-          });
+          onSearch(await resolvePlacePrediction(prediction, description));
         } catch (error) {
           try {
             const fallback = await geocodeAddress(description);
@@ -287,6 +294,56 @@ export function SearchBar({
         }
       })();
     };
+
+  const submitFreeformSearch = useCallback(() => {
+    const query = value.trim();
+    if (!query || !ready) return;
+
+    setValueWithoutFetch(query);
+    clearSuggestions();
+    setActiveIndex(-1);
+
+    void (async () => {
+      try {
+        const places = await window.google.maps.importLibrary('places') as google.maps.PlacesLibrary;
+        const token = sessionTokenRef.current ?? new places.AutocompleteSessionToken();
+        const { suggestions } = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+          ...requestOptions,
+          input: query,
+          sessionToken: token,
+        });
+        const prediction = suggestions.find((suggestion) => suggestion.placePrediction)?.placePrediction;
+        if (!prediction) {
+          throw new Error('No Google Places prediction found for freeform search.');
+        }
+        const description = predictionTextToString(prediction.text) || query;
+        setValueWithoutFetch(description);
+        onSearch(await resolvePlacePrediction(prediction, description));
+      } catch (error) {
+        try {
+          const fallback = await geocodeAddress(query);
+          onSearch({ ...fallback, businessName: undefined, websiteUrl: undefined });
+        } catch (fallbackError) {
+          console.error('Failed to resolve freeform Google search', error, fallbackError);
+        }
+      } finally {
+        sessionTokenRef.current = null;
+      }
+    })();
+  }, [clearSuggestions, geocodeAddress, onSearch, ready, requestOptions, resolvePlacePrediction, setValueWithoutFetch, value]);
+
+  const submitFirstResultOrFreeform = useCallback(() => {
+    if (combinedResults.length > 0) {
+      const first = combinedResults[0];
+      if (first.type === 'local') {
+        handleLocalSelect(first.prospect)();
+      } else {
+        handleSelect(first)();
+      }
+      return;
+    }
+    submitFreeformSearch();
+  }, [combinedResults, handleLocalSelect, handleSelect, submitFreeformSearch]);
 
   const renderSuggestions = () => {
     const localCount = localResults.length;
@@ -344,8 +401,8 @@ export function SearchBar({
           value={value}
           onChange={handleInput}
           onKeyDown={(e) => {
-            if (combinedResults.length === 0) return;
             if (e.key === 'ArrowDown') {
+              if (combinedResults.length === 0) return;
               e.preventDefault();
               setActiveIndex((prev) => {
                 const next = Math.min(prev + 1, combinedResults.length - 1);
@@ -354,6 +411,7 @@ export function SearchBar({
                 return next;
               });
             } else if (e.key === 'ArrowUp') {
+              if (combinedResults.length === 0) return;
               e.preventDefault();
               setActiveIndex((prev) => {
                 const next = Math.max(prev - 1, -1);
@@ -364,22 +422,16 @@ export function SearchBar({
                 return next;
               });
             } else if (e.key === 'Enter') {
+              e.preventDefault();
               if (activeIndex >= 0 && activeIndex < combinedResults.length) {
-                e.preventDefault();
                 const item = combinedResults[activeIndex];
                 if (item.type === 'local') {
                   handleLocalSelect(item.prospect)();
                 } else {
                   handleSelect(item)();
                 }
-              } else if (combinedResults.length > 0) {
-                e.preventDefault();
-                const first = combinedResults[0];
-                if (first.type === 'local') {
-                  handleLocalSelect(first.prospect)();
-                } else {
-                  handleSelect(first)();
-                }
+              } else {
+                submitFirstResultOrFreeform();
               }
             } else if (e.key === 'Escape') {
               clearSuggestions();
@@ -409,16 +461,7 @@ export function SearchBar({
           type="button"
           aria-label="Search"
           className="grid h-9 w-9 shrink-0 place-items-center rounded bg-indigo-600 text-xs text-white hover:bg-indigo-500 active:scale-95 sm:h-7 sm:w-7"
-          onClick={() => {
-            if (combinedResults.length > 0) {
-              const first = combinedResults[0];
-              if (first.type === 'local') {
-                handleLocalSelect(first.prospect)();
-              } else {
-                handleSelect(first)();
-              }
-            }
-          }}
+          onClick={submitFirstResultOrFreeform}
         >
           <Search className="w-4 h-4" strokeWidth={2.5} />
         </button>
