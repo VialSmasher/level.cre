@@ -15,15 +15,27 @@ interface SearchBarProps {
   clearSignal?: number;
 }
 
-type GoogleSearchItem = {
+type NewGoogleSearchItem = {
   type: 'google';
+  api: 'new';
   key: string;
-  suggestion: google.maps.places.AutocompleteSuggestion;
   prediction: google.maps.places.PlacePrediction;
   label: string;
   secondary?: string;
   description: string;
 };
+
+type LegacyGoogleSearchItem = {
+  type: 'google';
+  api: 'legacy';
+  key: string;
+  prediction: google.maps.places.AutocompletePrediction;
+  label: string;
+  secondary?: string;
+  description: string;
+};
+
+type GoogleSearchItem = NewGoogleSearchItem | LegacyGoogleSearchItem;
 
 type CombinedSearchItem =
   | { type: 'local'; key: string; prospect: Prospect; label: string; secondary?: string }
@@ -61,12 +73,19 @@ const withMarketLocation = (query: string, marketLocation: string) => {
   return `${trimmedQuery}, ${trimmedMarket}`;
 };
 
-const getLoadedPlacesLibrary = () => {
-  const places = window.google?.maps?.places as unknown as google.maps.PlacesLibrary | undefined;
-  if (places?.AutocompleteSuggestion && places?.AutocompleteSessionToken) {
-    return places;
-  }
-  return null;
+const getPlacesNamespace = () => window.google?.maps?.places;
+
+const hasNewAutocompleteApi = (places?: typeof google.maps.places) => {
+  const maybePlaces = places as unknown as google.maps.PlacesLibrary | undefined;
+  return Boolean(maybePlaces?.AutocompleteSuggestion && maybePlaces?.AutocompleteSessionToken);
+};
+
+const makeBounds = (bounds?: google.maps.LatLngBoundsLiteral | null) => {
+  if (!bounds || !window.google?.maps?.LatLngBounds) return undefined;
+  return new window.google.maps.LatLngBounds(
+    { lat: bounds.south, lng: bounds.west },
+    { lat: bounds.north, lng: bounds.east },
+  );
 };
 
 export function SearchBar({
@@ -82,12 +101,13 @@ export function SearchBar({
   const [activeIndex, setActiveIndex] = useState<number>(-1);
   const [ready, setReady] = useState(false);
   const [value, setValue] = useState('');
-  const [googleSuggestions, setGoogleSuggestions] = useState<google.maps.places.AutocompleteSuggestion[]>([]);
+  const [googleResults, setGoogleResults] = useState<GoogleSearchItem[]>([]);
   const requestIdRef = useRef(0);
   const suppressNextFetchRef = useRef(false);
   const sessionTokenRef = useRef<google.maps.places.AutocompleteSessionToken | null>(null);
   const ref = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const placesServiceRef = useRef<google.maps.places.PlacesService | null>(null);
   const listboxId = 'places-suggestions-listbox';
   const normalizedInput = value.trim().toLowerCase();
   const marketQuery = useCallback((query: string) => withMarketLocation(query, marketLocation), [marketLocation]);
@@ -116,11 +136,12 @@ export function SearchBar({
   }, [bounds, strictBounds, defaultCenter]);
 
   useEffect(() => {
-    setReady(Boolean(getLoadedPlacesLibrary()));
+    const places = getPlacesNamespace();
+    setReady(Boolean(places && (hasNewAutocompleteApi(places) || places.AutocompleteService)));
   }, []);
 
   const clearSuggestions = useCallback(() => {
-    setGoogleSuggestions([]);
+    setGoogleResults([]);
     requestIdRef.current += 1;
   }, []);
 
@@ -130,6 +151,80 @@ export function SearchBar({
     }
     setValue(nextValue);
   }, [value]);
+
+  const fetchGoogleResults = useCallback(async (input: string): Promise<GoogleSearchItem[]> => {
+    const places = getPlacesNamespace();
+    if (!places) {
+      throw new Error('Google Places library is not loaded.');
+    }
+
+    if (hasNewAutocompleteApi(places)) {
+      const placesLibrary = places as unknown as google.maps.PlacesLibrary;
+      if (!sessionTokenRef.current) {
+        sessionTokenRef.current = new placesLibrary.AutocompleteSessionToken();
+      }
+      const { suggestions } = await placesLibrary.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+        ...requestOptions,
+        input,
+        sessionToken: sessionTokenRef.current,
+      });
+      return suggestions.flatMap((suggestion, idx) => {
+        const prediction = suggestion.placePrediction;
+        if (!prediction) return [];
+        const description = predictionTextToString(prediction.text);
+        return [{
+          type: 'google' as const,
+          api: 'new' as const,
+          key: prediction.placeId ? `google-new-${prediction.placeId}` : `google-new-${idx}-${description}`,
+          prediction,
+          label: predictionTextToString(prediction.mainText) || description,
+          secondary: predictionTextToString(prediction.secondaryText) || undefined,
+          description,
+        }];
+      });
+    }
+
+    if (!places.AutocompleteService) {
+      throw new Error('Google Places autocomplete service is not loaded.');
+    }
+
+    const service = new places.AutocompleteService();
+    const searchBounds = makeBounds(bounds || (strictBounds ? DEFAULT_MARKET_BOUNDS : null));
+    const fallbackLocation = new window.google.maps.LatLng(defaultCenter.lat, defaultCenter.lng);
+    const predictions = await new Promise<google.maps.places.AutocompletePrediction[]>((resolve, reject) => {
+      service.getPlacePredictions({
+        input,
+        componentRestrictions: { country: 'ca' },
+        bounds: searchBounds,
+        strictBounds: Boolean(strictBounds && searchBounds),
+        location: searchBounds ? undefined : fallbackLocation,
+        radius: searchBounds ? undefined : FALLBACK_RADIUS_METERS,
+      }, (results, status) => {
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
+          resolve(results);
+          return;
+        }
+        if (status === window.google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+          resolve([]);
+          return;
+        }
+        reject(status);
+      });
+    });
+
+    return predictions.map((prediction, idx) => {
+      const description = prediction.description;
+      return {
+        type: 'google' as const,
+        api: 'legacy' as const,
+        key: prediction.place_id ? `google-legacy-${prediction.place_id}` : `google-legacy-${idx}-${description}`,
+        prediction,
+        label: prediction.structured_formatting?.main_text || description,
+        secondary: prediction.structured_formatting?.secondary_text || undefined,
+        description,
+      };
+    });
+  }, [bounds, defaultCenter, requestOptions, strictBounds]);
 
   useEffect(() => {
     const input = value.trim();
@@ -152,25 +247,14 @@ export function SearchBar({
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const places = getLoadedPlacesLibrary();
-          if (!places) {
-            throw new Error('Google Places library is not loaded.');
-          }
-          if (!sessionTokenRef.current) {
-            sessionTokenRef.current = new places.AutocompleteSessionToken();
-          }
-          const { suggestions } = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
-            ...requestOptions,
-            input: marketQuery(input),
-            sessionToken: sessionTokenRef.current,
-          });
+          const results = await fetchGoogleResults(marketQuery(input));
           if (!cancelled && requestId === requestIdRef.current) {
-            setGoogleSuggestions(suggestions.filter((suggestion) => suggestion.placePrediction));
+            setGoogleResults(results);
           }
         } catch (error) {
           if (!cancelled && requestId === requestIdRef.current) {
             console.error('Failed to fetch Google Places suggestions', error);
-            setGoogleSuggestions([]);
+            setGoogleResults([]);
           }
         }
       })();
@@ -180,7 +264,7 @@ export function SearchBar({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [clearSuggestions, marketQuery, ready, requestOptions, value]);
+  }, [clearSuggestions, fetchGoogleResults, marketQuery, ready, value]);
 
   const localResults = useMemo(() => {
     if (!normalizedInput) return [] as Prospect[];
@@ -203,22 +287,8 @@ export function SearchBar({
         secondary: getProspectSecondaryName(prospect),
       };
     });
-    const googleItems: CombinedSearchItem[] = googleSuggestions.flatMap((suggestion, idx) => {
-      const prediction = suggestion.placePrediction;
-      if (!prediction) return [];
-      const description = predictionTextToString(prediction.text);
-      return [{
-        type: 'google' as const,
-        key: prediction.placeId ? `google-${prediction.placeId}` : `google-${idx}-${description}`,
-        suggestion,
-        prediction,
-        label: predictionTextToString(prediction.mainText) || description,
-        secondary: predictionTextToString(prediction.secondaryText) || undefined,
-        description,
-      }];
-    });
-    return [...localItems, ...googleItems];
-  }, [googleSuggestions, localResults]);
+    return [...localItems, ...googleResults];
+  }, [googleResults, localResults]);
 
   // Reset highlight when suggestions update
   useEffect(() => {
@@ -266,7 +336,7 @@ export function SearchBar({
     };
   }, []);
 
-  const resolvePlacePrediction = useCallback(async (
+  const resolveNewPlacePrediction = useCallback(async (
     prediction: google.maps.places.PlacePrediction,
     description: string,
   ): Promise<MapSearchLocation> => {
@@ -297,17 +367,76 @@ export function SearchBar({
     };
   }, []);
 
+  const resolveLegacyPlacePrediction = useCallback(async (
+    prediction: google.maps.places.AutocompletePrediction,
+    description: string,
+  ): Promise<MapSearchLocation> => {
+    const places = getPlacesNamespace();
+    if (!places?.PlacesService || !prediction.place_id) {
+      throw new Error('Google Places details service is not loaded.');
+    }
+
+    if (!placesServiceRef.current) {
+      placesServiceRef.current = new places.PlacesService(document.createElement('div'));
+    }
+
+    const place = await new Promise<google.maps.places.PlaceResult>((resolve, reject) => {
+      placesServiceRef.current?.getDetails({
+        placeId: prediction.place_id,
+        fields: [
+          'name',
+          'formatted_address',
+          'geometry',
+          'website',
+          'formatted_phone_number',
+          'international_phone_number',
+          'url',
+          'place_id',
+        ],
+      }, (result, status) => {
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && result) {
+          resolve(result);
+          return;
+        }
+        reject(status);
+      });
+    });
+
+    const location = place.geometry?.location;
+    if (!location) {
+      throw new Error('Selected place did not include a location.');
+    }
+
+    return {
+      lat: location.lat(),
+      lng: location.lng(),
+      address: place.formatted_address || description,
+      businessName: place.name ?? undefined,
+      websiteUrl: place.website ?? undefined,
+      contactPhone: place.formatted_phone_number ?? place.international_phone_number ?? undefined,
+      placeId: place.place_id || prediction.place_id,
+      googleMapsUrl: place.url ?? undefined,
+    };
+  }, []);
+
+  const resolveGoogleItem = useCallback((item: GoogleSearchItem) => {
+    if (item.api === 'new') {
+      return resolveNewPlacePrediction(item.prediction, item.description);
+    }
+    return resolveLegacyPlacePrediction(item.prediction, item.description);
+  }, [resolveLegacyPlacePrediction, resolveNewPlacePrediction]);
+
   const handleSelect =
     (item: GoogleSearchItem) =>
     () => {
-      const { description, prediction } = item;
+      const { description } = item;
       setValueWithoutFetch(description);
       clearSuggestions();
       setActiveIndex(-1);
 
       void (async () => {
         try {
-          onSearch(await resolvePlacePrediction(prediction, description));
+          onSearch(await resolveGoogleItem(item));
         } catch (error) {
           try {
             const fallback = await geocodeAddress(marketQuery(description));
@@ -332,23 +461,13 @@ export function SearchBar({
     void (async () => {
       const searchQuery = marketQuery(query);
       try {
-        const places = getLoadedPlacesLibrary();
-        if (!places) {
-          throw new Error('Google Places library is not loaded.');
-        }
-        const token = sessionTokenRef.current ?? new places.AutocompleteSessionToken();
-        const { suggestions } = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
-          ...requestOptions,
-          input: searchQuery,
-          sessionToken: token,
-        });
-        const prediction = suggestions.find((suggestion) => suggestion.placePrediction)?.placePrediction;
-        if (!prediction) {
+        const results = await fetchGoogleResults(searchQuery);
+        const first = results[0];
+        if (!first) {
           throw new Error('No Google Places prediction found for freeform search.');
         }
-        const description = predictionTextToString(prediction.text) || query;
-        setValueWithoutFetch(description);
-        onSearch(await resolvePlacePrediction(prediction, description));
+        setValueWithoutFetch(first.description);
+        onSearch(await resolveGoogleItem(first));
       } catch (error) {
         try {
           const fallback = await geocodeAddress(searchQuery);
@@ -360,7 +479,7 @@ export function SearchBar({
         sessionTokenRef.current = null;
       }
     })();
-  }, [clearSuggestions, geocodeAddress, marketQuery, onSearch, ready, requestOptions, resolvePlacePrediction, setValueWithoutFetch, value]);
+  }, [clearSuggestions, fetchGoogleResults, geocodeAddress, marketQuery, onSearch, ready, resolveGoogleItem, setValueWithoutFetch, value]);
 
   const submitFirstResultOrFreeform = useCallback(() => {
     if (combinedResults.length > 0) {
