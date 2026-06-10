@@ -61,6 +61,14 @@ const withMarketLocation = (query: string, marketLocation: string) => {
   return `${trimmedQuery}, ${trimmedMarket}`;
 };
 
+const getLoadedPlacesLibrary = () => {
+  const places = window.google?.maps?.places as unknown as google.maps.PlacesLibrary | undefined;
+  if (places?.AutocompleteSuggestion && places?.AutocompleteSessionToken) {
+    return places;
+  }
+  return null;
+};
+
 export function SearchBar({
   onSearch,
   prospects = [],
@@ -108,25 +116,7 @@ export function SearchBar({
   }, [bounds, strictBounds, defaultCenter]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        if (!window.google?.maps?.importLibrary) {
-          if (!cancelled) setReady(false);
-          return;
-        }
-        await window.google.maps.importLibrary('places');
-        if (!cancelled) setReady(true);
-      } catch (error) {
-        console.error('Failed to load Google Places autocomplete library', error);
-        if (!cancelled) setReady(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    setReady(Boolean(getLoadedPlacesLibrary()));
   }, []);
 
   const clearSuggestions = useCallback(() => {
@@ -162,7 +152,10 @@ export function SearchBar({
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const places = await window.google.maps.importLibrary('places') as google.maps.PlacesLibrary;
+          const places = getLoadedPlacesLibrary();
+          if (!places) {
+            throw new Error('Google Places library is not loaded.');
+          }
           if (!sessionTokenRef.current) {
             sessionTokenRef.current = new places.AutocompleteSessionToken();
           }
@@ -339,7 +332,10 @@ export function SearchBar({
     void (async () => {
       const searchQuery = marketQuery(query);
       try {
-        const places = await window.google.maps.importLibrary('places') as google.maps.PlacesLibrary;
+        const places = getLoadedPlacesLibrary();
+        if (!places) {
+          throw new Error('Google Places library is not loaded.');
+        }
         const token = sessionTokenRef.current ?? new places.AutocompleteSessionToken();
         const { suggestions } = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
           ...requestOptions,
