@@ -10,6 +10,7 @@ interface SearchBarProps {
   onProspectClick?: (prospect: Prospect) => void;
   bounds?: google.maps.LatLngBoundsLiteral | null;
   defaultCenter?: { lat: number; lng: number };
+  marketLocation?: string;
   // When this value changes, the input clears (used after adding a prospect)
   clearSignal?: number;
 }
@@ -31,8 +32,34 @@ type CombinedSearchItem =
 const FALLBACK_RADIUS_METERS = 50000;
 const PLACES_DEBOUNCE_MS = 300;
 const DEFAULT_SEARCH_CENTER = { lat: 53.5461, lng: -113.4938 } as const;
+const DEFAULT_MARKET_LOCATION = 'Edmonton, Alberta, Canada';
+const DEFAULT_MARKET_BOUNDS = {
+  north: 53.85,
+  east: -112.85,
+  south: 53.2,
+  west: -114.25,
+} as const;
 
 const predictionTextToString = (text?: google.maps.places.PredictionText) => text?.toString() || text?.text || '';
+
+const withMarketLocation = (query: string, marketLocation: string) => {
+  const trimmedQuery = query.trim();
+  const trimmedMarket = marketLocation.trim();
+  if (!trimmedQuery || !trimmedMarket) return trimmedQuery;
+
+  const normalizedQuery = trimmedQuery.toLowerCase();
+  const marketParts = trimmedMarket
+    .toLowerCase()
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (marketParts.some((part) => normalizedQuery.includes(part))) {
+    return trimmedQuery;
+  }
+
+  return `${trimmedQuery}, ${trimmedMarket}`;
+};
 
 export function SearchBar({
   onSearch,
@@ -40,6 +67,7 @@ export function SearchBar({
   onProspectClick,
   bounds,
   defaultCenter = DEFAULT_SEARCH_CENTER,
+  marketLocation = DEFAULT_MARKET_LOCATION,
   clearSignal,
 }: SearchBarProps) {
   const [strictBounds, setStrictBounds] = useState(false);
@@ -54,6 +82,7 @@ export function SearchBar({
   const listRef = useRef<HTMLUListElement>(null);
   const listboxId = 'places-suggestions-listbox';
   const normalizedInput = value.trim().toLowerCase();
+  const marketQuery = useCallback((query: string) => withMarketLocation(query, marketLocation), [marketLocation]);
 
   const requestOptions = useMemo((): Omit<google.maps.places.AutocompleteRequest, 'input'> => {
     const base: Omit<google.maps.places.AutocompleteRequest, 'input'> = {
@@ -66,6 +95,10 @@ export function SearchBar({
         return { ...base, locationRestriction: bounds };
       }
       return { ...base, locationBias: bounds };
+    }
+
+    if (strictBounds) {
+      return { ...base, locationRestriction: DEFAULT_MARKET_BOUNDS };
     }
 
     return {
@@ -135,7 +168,7 @@ export function SearchBar({
           }
           const { suggestions } = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
             ...requestOptions,
-            input,
+            input: marketQuery(input),
             sessionToken: sessionTokenRef.current,
           });
           if (!cancelled && requestId === requestIdRef.current) {
@@ -154,7 +187,7 @@ export function SearchBar({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [clearSuggestions, ready, requestOptions, value]);
+  }, [clearSuggestions, marketQuery, ready, requestOptions, value]);
 
   const localResults = useMemo(() => {
     if (!normalizedInput) return [] as Prospect[];
@@ -284,7 +317,7 @@ export function SearchBar({
           onSearch(await resolvePlacePrediction(prediction, description));
         } catch (error) {
           try {
-            const fallback = await geocodeAddress(description);
+            const fallback = await geocodeAddress(marketQuery(description));
             onSearch({ ...fallback, businessName: undefined, websiteUrl: undefined });
           } catch (fallbackError) {
             console.error('Failed to resolve selected Google Places suggestion', error, fallbackError);
@@ -304,12 +337,13 @@ export function SearchBar({
     setActiveIndex(-1);
 
     void (async () => {
+      const searchQuery = marketQuery(query);
       try {
         const places = await window.google.maps.importLibrary('places') as google.maps.PlacesLibrary;
         const token = sessionTokenRef.current ?? new places.AutocompleteSessionToken();
         const { suggestions } = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
           ...requestOptions,
-          input: query,
+          input: searchQuery,
           sessionToken: token,
         });
         const prediction = suggestions.find((suggestion) => suggestion.placePrediction)?.placePrediction;
@@ -321,7 +355,7 @@ export function SearchBar({
         onSearch(await resolvePlacePrediction(prediction, description));
       } catch (error) {
         try {
-          const fallback = await geocodeAddress(query);
+          const fallback = await geocodeAddress(searchQuery);
           onSearch({ ...fallback, businessName: undefined, websiteUrl: undefined });
         } catch (fallbackError) {
           console.error('Failed to resolve freeform Google search', error, fallbackError);
@@ -330,7 +364,7 @@ export function SearchBar({
         sessionTokenRef.current = null;
       }
     })();
-  }, [clearSuggestions, geocodeAddress, onSearch, ready, requestOptions, resolvePlacePrediction, setValueWithoutFetch, value]);
+  }, [clearSuggestions, geocodeAddress, marketQuery, onSearch, ready, requestOptions, resolvePlacePrediction, setValueWithoutFetch, value]);
 
   const submitFirstResultOrFreeform = useCallback(() => {
     if (combinedResults.length > 0) {
