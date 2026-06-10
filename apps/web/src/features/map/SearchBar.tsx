@@ -30,13 +30,16 @@ type CombinedSearchItem =
 
 const FALLBACK_RADIUS_METERS = 50000;
 const PLACES_DEBOUNCE_MS = 300;
+const DEFAULT_SEARCH_CENTER = { lat: 53.5461, lng: -113.4938 } as const;
+
+const predictionTextToString = (text?: google.maps.places.PredictionText) => text?.toString() || text?.text || '';
 
 export function SearchBar({
   onSearch,
   prospects = [],
   onProspectClick,
   bounds,
-  defaultCenter = { lat: 53.5461, lng: -113.4938 },
+  defaultCenter = DEFAULT_SEARCH_CENTER,
   clearSignal,
 }: SearchBarProps) {
   const [strictBounds, setStrictBounds] = useState(false);
@@ -177,14 +180,14 @@ export function SearchBar({
     const googleItems: CombinedSearchItem[] = googleSuggestions.flatMap((suggestion, idx) => {
       const prediction = suggestion.placePrediction;
       if (!prediction) return [];
-      const description = prediction.text.text;
+      const description = predictionTextToString(prediction.text);
       return [{
         type: 'google' as const,
         key: prediction.placeId ? `google-${prediction.placeId}` : `google-${idx}-${description}`,
         suggestion,
         prediction,
-        label: prediction.mainText?.text || description,
-        secondary: prediction.secondaryText?.text || undefined,
+        label: predictionTextToString(prediction.mainText) || description,
+        secondary: predictionTextToString(prediction.secondaryText) || undefined,
         description,
       }];
     });
