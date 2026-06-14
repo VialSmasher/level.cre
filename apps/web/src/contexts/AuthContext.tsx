@@ -30,7 +30,7 @@ const defaultAuthContext: AuthContextType = {
   signInWithGoogle: async (_redirectPath?: string) => {
     try { window.location.assign('/api/auth/google') } catch {}
   },
-  signInWithEmail: async () => { throw new Error('Magic link disabled') },
+  signInWithEmail: async () => { throw new Error('Email sign-in unavailable') },
   signOut: async () => { try { localStorage.removeItem('demo-mode') } catch {}; window.location.replace('/') },
   setNeedsOnboarding: () => {},
   resetClientState: () => {},
@@ -309,6 +309,32 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }
 
+  const signInWithEmail = async (email: string) => {
+    if (!supabase) {
+      throw new Error('Supabase auth is not configured')
+    }
+
+    const normalizedEmail = email.trim()
+    if (!normalizedEmail) {
+      throw new Error('Email is required')
+    }
+
+    try {
+      localStorage.removeItem('demo-mode')
+      const redirectTo = `${window.location.origin}/auth/callback`
+      const { error } = await supabase.auth.signInWithOtp({
+        email: normalizedEmail,
+        options: {
+          emailRedirectTo: redirectTo,
+        },
+      })
+      if (error) throw error
+    } catch (error: any) {
+      console.error('Email sign-in error:', error)
+      throw new Error(error?.message || 'Failed to send sign-in email')
+    }
+  }
+
   const signingOutRef = useRef(false)
   const signOut = async () => {
     if (signingOutRef.current) return
@@ -350,8 +376,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     needsOnboarding,
     isDemoMode,
     signInWithGoogle,
-    // Magic Link removed; we will rely on Google OAuth
-    signInWithEmail: async (_email: string) => { throw new Error('Magic link disabled') },
+    signInWithEmail,
     signOut,
     setNeedsOnboarding,
     resetClientState,
