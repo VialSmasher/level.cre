@@ -47,6 +47,9 @@ const IndustrialIntelInventoryPage = lazy(
 const IndustrialIntelRequirementsPage = lazy(
   () => import("./tools/industrial-intel/pages/IndustrialIntelRequirementsPage"),
 );
+const IndustrialIntelDossiersPage = lazy(
+  () => import("./tools/industrial-intel/pages/IndustrialIntelDossiersPage"),
+);
 const IndustrialIntelSurveysPage = lazy(
   () => import("./tools/industrial-intel/pages/IndustrialIntelSurveysPage"),
 );
@@ -441,6 +444,18 @@ function Router() {
             <ToolLayout>
               <Suspense fallback={<Spinner />}>
                 <IndustrialIntelRequirementsPage />
+              </Suspense>
+            </ToolLayout>
+          </ProtectedRoute>
+        </Route>
+      )}
+
+      {INDUSTRIAL_INTEL_ENABLED && (
+        <Route path="/tools/industrial-intel/dossiers">
+          <ProtectedRoute>
+            <ToolLayout>
+              <Suspense fallback={<Spinner />}>
+                <IndustrialIntelDossiersPage />
               </Suspense>
             </ToolLayout>
           </ProtectedRoute>

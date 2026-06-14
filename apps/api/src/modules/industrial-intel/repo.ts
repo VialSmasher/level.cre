@@ -223,6 +223,85 @@ export type IntelSurveyListItem = {
 
 export type IntelSurveyListingBrief = IntelListingListItem;
 
+export type IntelDossierStatus = "active" | "draft" | "archived";
+export type IntelDossierFactStatus = "proposed" | "approved" | "rejected";
+
+export type IntelPropertyDossierListItem = {
+  id: string;
+  canonicalListingId: string | null;
+  title: string;
+  address: string | null;
+  normalizedAddress: string | null;
+  market: string | null;
+  submarket: string | null;
+  assetType: string | null;
+  listingType: string | null;
+  status: IntelDossierStatus;
+  latitude: number | null;
+  longitude: number | null;
+  dataCompletenessScore: number;
+  assetCount: number;
+  approvedFactCount: number;
+  proposedFactCount: number;
+  createdByUserId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type IntelDossierFact = {
+  id: string;
+  dossierId: string;
+  sourceAssetId: string | null;
+  factKey: string;
+  label: string;
+  valueText: string | null;
+  valueNumber: number | null;
+  valueBoolean: boolean | null;
+  valueJson: Record<string, unknown> | null;
+  confidence: number;
+  status: IntelDossierFactStatus;
+  source: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+export type IntelPropertyDossierDetail = IntelPropertyDossierListItem & {
+  facts: IntelDossierFact[];
+  assets: IntelListingAssetWithUrl[];
+  listing: IntelListingListItem | null;
+};
+
+export type CreateIntelPropertyDossierInput = {
+  canonicalListingId?: string | null;
+  title: string;
+  address?: string | null;
+  normalizedAddress?: string | null;
+  market?: string | null;
+  submarket?: string | null;
+  assetType?: string | null;
+  listingType?: string | null;
+  status?: IntelDossierStatus | null;
+  latitude?: number | null;
+  longitude?: number | null;
+};
+
+export type UpdateIntelPropertyDossierInput = Partial<CreateIntelPropertyDossierInput>;
+
+export type UpsertIntelDossierFactInput = {
+  sourceAssetId?: string | null;
+  factKey: string;
+  label?: string | null;
+  valueText?: string | null;
+  valueNumber?: number | null;
+  valueBoolean?: boolean | null;
+  valueJson?: Record<string, unknown> | null;
+  confidence?: number | null;
+  status?: IntelDossierFactStatus | null;
+  source?: string | null;
+};
+
+export type UpdateIntelDossierFactInput = Partial<UpsertIntelDossierFactInput>;
+
 export type IntelSurveyItem = {
   id: string;
   surveyId: string;
@@ -259,6 +338,7 @@ export type IntelListingAssetStatus = "pending" | "active" | "failed" | "archive
 
 export type IntelListingAsset = {
   id: string;
+  dossierId: string | null;
   listingId: string | null;
   surveyId: string | null;
   surveyItemId: string | null;
@@ -282,7 +362,8 @@ export type IntelListingAssetWithUrl = IntelListingAsset & {
 
 export type CreateIntelListingAssetInput = {
   id: string;
-  listingId: string;
+  dossierId?: string | null;
+  listingId?: string | null;
   surveyId?: string | null;
   surveyItemId?: string | null;
   assetType?: IntelListingAssetType | null;
@@ -358,6 +439,11 @@ const LISTING_ASSET_TABLES = [
   "intel_listing_assets",
 ] as const;
 
+const DOSSIER_TABLES = [
+  "intel_property_dossiers",
+  "intel_dossier_facts",
+] as const;
+
 function isoOrNull(value: unknown): string | null {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(String(value));
@@ -394,6 +480,7 @@ function boolOrNull(value: unknown): boolean | null {
 
 function listingAssetFromRow(row: {
   id: string;
+  dossier_id?: string | null;
   listing_id: string | null;
   survey_id: string | null;
   survey_item_id: string | null;
@@ -412,6 +499,7 @@ function listingAssetFromRow(row: {
 }): IntelListingAsset {
   return {
     id: row.id,
+    dossierId: row.dossier_id || null,
     listingId: row.listing_id,
     surveyId: row.survey_id,
     surveyItemId: row.survey_item_id,
@@ -425,6 +513,84 @@ function listingAssetFromRow(row: {
     status: row.status,
     isPrimary: Boolean(row.is_primary),
     createdByUserId: row.created_by_user_id,
+    createdAt: isoOrNull(row.created_at),
+    updatedAt: isoOrNull(row.updated_at),
+  };
+}
+
+function dossierFromRow(row: {
+  id: string;
+  canonical_listing_id: string | null;
+  title: string;
+  address: string | null;
+  normalized_address: string | null;
+  market: string | null;
+  submarket: string | null;
+  asset_type: string | null;
+  listing_type: string | null;
+  status: IntelDossierStatus;
+  lat: string | number | null;
+  lng: string | number | null;
+  data_completeness_score: string | number | null;
+  asset_count?: string | number | null;
+  approved_fact_count?: string | number | null;
+  proposed_fact_count?: string | number | null;
+  created_by_user_id: string | null;
+  created_at: Date | null;
+  updated_at: Date | null;
+}): IntelPropertyDossierListItem {
+  return {
+    id: row.id,
+    canonicalListingId: row.canonical_listing_id,
+    title: row.title,
+    address: row.address,
+    normalizedAddress: row.normalized_address,
+    market: row.market,
+    submarket: row.submarket,
+    assetType: row.asset_type,
+    listingType: row.listing_type,
+    status: row.status,
+    latitude: numOrNull(row.lat),
+    longitude: numOrNull(row.lng),
+    dataCompletenessScore: intOrZero(row.data_completeness_score),
+    assetCount: intOrZero(row.asset_count),
+    approvedFactCount: intOrZero(row.approved_fact_count),
+    proposedFactCount: intOrZero(row.proposed_fact_count),
+    createdByUserId: row.created_by_user_id,
+    createdAt: isoOrNull(row.created_at),
+    updatedAt: isoOrNull(row.updated_at),
+  };
+}
+
+function dossierFactFromRow(row: {
+  id: string;
+  dossier_id: string;
+  source_asset_id: string | null;
+  fact_key: string;
+  label: string;
+  value_text: string | null;
+  value_number: string | number | null;
+  value_boolean: boolean | null;
+  value_json: Record<string, unknown> | null;
+  confidence: string | number | null;
+  status: IntelDossierFactStatus;
+  source: string;
+  created_at: Date | null;
+  updated_at: Date | null;
+}): IntelDossierFact {
+  return {
+    id: row.id,
+    dossierId: row.dossier_id,
+    sourceAssetId: row.source_asset_id,
+    factKey: row.fact_key,
+    label: row.label,
+    valueText: row.value_text,
+    valueNumber: numOrNull(row.value_number),
+    valueBoolean: boolOrNull(row.value_boolean),
+    valueJson: row.value_json,
+    confidence: intOrZero(row.confidence),
+    status: row.status,
+    source: row.source,
     createdAt: isoOrNull(row.created_at),
     updatedAt: isoOrNull(row.updated_at),
   };
@@ -517,6 +683,106 @@ export class IndustrialIntelRepository {
 
     const found = new Set(result.rows.map((row: { table_name: string }) => row.table_name));
     return LISTING_ASSET_TABLES.every((name) => found.has(name));
+  }
+
+  async hasDossierTables(): Promise<boolean> {
+    const result = await pool.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('intel_property_dossiers', 'intel_dossier_facts')
+    `);
+
+    const found = new Set(result.rows.map((row: { table_name: string }) => row.table_name));
+    return DOSSIER_TABLES.every((name) => found.has(name));
+  }
+
+  async ensureDossierTables(): Promise<void> {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.intel_property_dossiers (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        canonical_listing_id varchar REFERENCES public.intel_listings(id) ON DELETE SET NULL,
+        title varchar NOT NULL,
+        address text,
+        normalized_address text,
+        market varchar,
+        submarket varchar,
+        asset_type varchar,
+        listing_type varchar,
+        status varchar NOT NULL DEFAULT 'active',
+        lat numeric,
+        lng numeric,
+        data_completeness_score integer NOT NULL DEFAULT 0,
+        created_by_user_id varchar REFERENCES public.users(id) ON DELETE SET NULL,
+        created_at timestamp DEFAULT now(),
+        updated_at timestamp DEFAULT now(),
+        CONSTRAINT chk_intel_property_dossiers_status
+          CHECK (status IN ('active', 'draft', 'archived'))
+      )
+    `);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_intel_property_dossiers_user_listing
+        ON public.intel_property_dossiers (created_by_user_id, canonical_listing_id)
+        WHERE canonical_listing_id IS NOT NULL
+    `);
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_intel_property_dossiers_user_address
+        ON public.intel_property_dossiers (created_by_user_id, normalized_address)
+        WHERE normalized_address IS NOT NULL
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_property_dossiers_user
+        ON public.intel_property_dossiers (created_by_user_id)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_property_dossiers_status
+        ON public.intel_property_dossiers (status)
+    `);
+
+    await this.ensureListingAssetTables();
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.intel_dossier_facts (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        dossier_id varchar NOT NULL REFERENCES public.intel_property_dossiers(id) ON DELETE CASCADE,
+        source_asset_id varchar REFERENCES public.intel_listing_assets(id) ON DELETE SET NULL,
+        fact_key varchar NOT NULL,
+        label varchar NOT NULL,
+        value_text text,
+        value_number numeric,
+        value_boolean boolean,
+        value_json jsonb,
+        confidence integer NOT NULL DEFAULT 50,
+        status varchar NOT NULL DEFAULT 'proposed',
+        source varchar NOT NULL DEFAULT 'manual',
+        created_at timestamp DEFAULT now(),
+        updated_at timestamp DEFAULT now(),
+        CONSTRAINT chk_intel_dossier_facts_status
+          CHECK (status IN ('proposed', 'approved', 'rejected')),
+        CONSTRAINT chk_intel_dossier_facts_confidence
+          CHECK (confidence >= 0 AND confidence <= 100)
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_dossier_facts_dossier
+        ON public.intel_dossier_facts (dossier_id)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_dossier_facts_status
+        ON public.intel_dossier_facts (status)
+    `);
+
+    await pool.query(`
+      ALTER TABLE public.intel_listing_assets
+      ADD COLUMN IF NOT EXISTS dossier_id varchar REFERENCES public.intel_property_dossiers(id) ON DELETE CASCADE
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_listing_assets_dossier
+        ON public.intel_listing_assets (dossier_id)
+    `);
+    await pool.query(`ALTER TABLE public.intel_property_dossiers ENABLE ROW LEVEL SECURITY`);
+    await pool.query(`ALTER TABLE public.intel_dossier_facts ENABLE ROW LEVEL SECURITY`);
   }
 
   async ensureListingAssetTables(): Promise<void> {
@@ -1120,6 +1386,425 @@ export class IndustrialIntelRepository {
       lastSeenAt: isoOrNull(row.last_seen_at),
       removedAt: isoOrNull(row.removed_at),
     };
+  }
+
+  async seedDossiersFromListings(userId: string, limit = 250): Promise<number> {
+    await this.ensureDossierTables();
+    if (!(await this.hasCoreTables())) return 0;
+
+    const result = await pool.query(
+      `
+        INSERT INTO public.intel_property_dossiers (
+          canonical_listing_id,
+          title,
+          address,
+          normalized_address,
+          market,
+          submarket,
+          asset_type,
+          listing_type,
+          status,
+          lat,
+          lng,
+          data_completeness_score,
+          created_by_user_id,
+          updated_at
+        )
+        SELECT
+          listings.id,
+          listings.title,
+          listings.address,
+          COALESCE(listings.normalized_address, listings.address),
+          listings.market,
+          listings.submarket,
+          listings.asset_type,
+          listings.listing_type,
+          CASE WHEN listings.removed_at IS NULL THEN 'active' ELSE 'archived' END,
+          listings.lat,
+          listings.lng,
+          LEAST(
+            100,
+            (CASE WHEN listings.address IS NOT NULL THEN 15 ELSE 0 END) +
+            (CASE WHEN listings.lat IS NOT NULL AND listings.lng IS NOT NULL THEN 20 ELSE 0 END) +
+            (CASE WHEN listings.available_sf IS NOT NULL OR listings.land_acres IS NOT NULL THEN 15 ELSE 0 END) +
+            (CASE WHEN listings.total_price IS NOT NULL OR listings.price_per_acre IS NOT NULL THEN 10 ELSE 0 END) +
+            (CASE WHEN listings.brochure_url IS NOT NULL OR listings.source_url IS NOT NULL THEN 15 ELSE 0 END)
+          ),
+          $1,
+          now()
+        FROM public.intel_listings listings
+        WHERE listings.removed_at IS NULL
+        ORDER BY listings.last_seen_at DESC NULLS LAST, listings.created_at DESC NULLS LAST
+        LIMIT $2
+        ON CONFLICT (created_by_user_id, canonical_listing_id)
+          WHERE canonical_listing_id IS NOT NULL
+        DO UPDATE SET
+          title = EXCLUDED.title,
+          address = COALESCE(public.intel_property_dossiers.address, EXCLUDED.address),
+          normalized_address = COALESCE(public.intel_property_dossiers.normalized_address, EXCLUDED.normalized_address),
+          market = COALESCE(public.intel_property_dossiers.market, EXCLUDED.market),
+          submarket = COALESCE(public.intel_property_dossiers.submarket, EXCLUDED.submarket),
+          asset_type = COALESCE(public.intel_property_dossiers.asset_type, EXCLUDED.asset_type),
+          listing_type = COALESCE(public.intel_property_dossiers.listing_type, EXCLUDED.listing_type),
+          lat = COALESCE(public.intel_property_dossiers.lat, EXCLUDED.lat),
+          lng = COALESCE(public.intel_property_dossiers.lng, EXCLUDED.lng),
+          data_completeness_score = GREATEST(public.intel_property_dossiers.data_completeness_score, EXCLUDED.data_completeness_score),
+          updated_at = now()
+      `,
+      [userId, limit],
+    );
+
+    return result.rowCount || 0;
+  }
+
+  async getDossiers(userId: string, limit = 250): Promise<IntelPropertyDossierListItem[]> {
+    try {
+      await this.seedDossiersFromListings(userId, limit);
+
+      const result = await pool.query(
+        `
+          SELECT
+            dossiers.*,
+            COUNT(DISTINCT assets.id) FILTER (WHERE assets.status = 'active')::int AS asset_count,
+            COUNT(DISTINCT facts.id) FILTER (WHERE facts.status = 'approved')::int AS approved_fact_count,
+            COUNT(DISTINCT facts.id) FILTER (WHERE facts.status = 'proposed')::int AS proposed_fact_count
+          FROM public.intel_property_dossiers dossiers
+          LEFT JOIN public.intel_listing_assets assets ON assets.dossier_id = dossiers.id
+          LEFT JOIN public.intel_dossier_facts facts ON facts.dossier_id = dossiers.id
+          WHERE dossiers.created_by_user_id = $1
+            AND dossiers.status <> 'archived'
+          GROUP BY dossiers.id
+          ORDER BY
+            dossiers.updated_at DESC NULLS LAST,
+            dossiers.created_at DESC NULLS LAST
+          LIMIT $2
+        `,
+        [userId, limit],
+      );
+
+      return result.rows.map(dossierFromRow);
+    } catch (error) {
+      if (isRecoverableIntelSchemaError(error)) return [];
+      throw error;
+    }
+  }
+
+  async getDossierById(userId: string, id: string): Promise<IntelPropertyDossierDetail | null> {
+    try {
+      await this.ensureDossierTables();
+      const result = await pool.query(
+        `
+          SELECT
+            dossiers.*,
+            COUNT(DISTINCT assets.id) FILTER (WHERE assets.status = 'active')::int AS asset_count,
+            COUNT(DISTINCT facts.id) FILTER (WHERE facts.status = 'approved')::int AS approved_fact_count,
+            COUNT(DISTINCT facts.id) FILTER (WHERE facts.status = 'proposed')::int AS proposed_fact_count
+          FROM public.intel_property_dossiers dossiers
+          LEFT JOIN public.intel_listing_assets assets ON assets.dossier_id = dossiers.id
+          LEFT JOIN public.intel_dossier_facts facts ON facts.dossier_id = dossiers.id
+          WHERE dossiers.created_by_user_id = $1
+            AND dossiers.id = $2
+          GROUP BY dossiers.id
+          LIMIT 1
+        `,
+        [userId, id],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      const dossier = dossierFromRow(row);
+      const [facts, assets, listing] = await Promise.all([
+        this.getDossierFacts(userId, id),
+        this.getDossierAssets(userId, id),
+        dossier.canonicalListingId ? this.getListingById(dossier.canonicalListingId) : Promise.resolve(null),
+      ]);
+      return { ...dossier, facts, assets: assets as IntelListingAssetWithUrl[], listing };
+    } catch (error) {
+      if (isRecoverableIntelSchemaError(error)) return null;
+      throw error;
+    }
+  }
+
+  async createDossier(userId: string, input: CreateIntelPropertyDossierInput): Promise<IntelPropertyDossierDetail> {
+    await this.ensureDossierTables();
+    const result = await pool.query(
+      `
+        INSERT INTO public.intel_property_dossiers (
+          canonical_listing_id,
+          title,
+          address,
+          normalized_address,
+          market,
+          submarket,
+          asset_type,
+          listing_type,
+          status,
+          lat,
+          lng,
+          created_by_user_id,
+          updated_at
+        ) VALUES (
+          $1, $2, $3, COALESCE($4, $3), $5, $6, $7, $8, COALESCE($9, 'draft'), $10, $11, $12, now()
+        )
+        RETURNING id
+      `,
+      [
+        input.canonicalListingId ?? null,
+        input.title,
+        input.address ?? null,
+        input.normalizedAddress ?? null,
+        input.market ?? null,
+        input.submarket ?? null,
+        input.assetType ?? null,
+        input.listingType ?? null,
+        input.status ?? null,
+        input.latitude ?? null,
+        input.longitude ?? null,
+        userId,
+      ],
+    );
+    const created = await this.getDossierById(userId, result.rows[0].id);
+    if (!created) throw new Error("Failed to load created industrial intel dossier");
+    return created;
+  }
+
+  async updateDossier(
+    userId: string,
+    id: string,
+    input: UpdateIntelPropertyDossierInput,
+  ): Promise<IntelPropertyDossierDetail | null> {
+    await this.ensureDossierTables();
+    const existing = await this.getDossierById(userId, id);
+    if (!existing) return null;
+    await pool.query(
+      `
+        UPDATE public.intel_property_dossiers
+        SET
+          canonical_listing_id = COALESCE($3, canonical_listing_id),
+          title = COALESCE($4, title),
+          address = COALESCE($5, address),
+          normalized_address = COALESCE($6, normalized_address),
+          market = COALESCE($7, market),
+          submarket = COALESCE($8, submarket),
+          asset_type = COALESCE($9, asset_type),
+          listing_type = COALESCE($10, listing_type),
+          status = COALESCE($11, status),
+          lat = COALESCE($12, lat),
+          lng = COALESCE($13, lng),
+          updated_at = now()
+        WHERE created_by_user_id = $1 AND id = $2
+      `,
+      [
+        userId,
+        id,
+        input.canonicalListingId ?? null,
+        input.title ?? null,
+        input.address ?? null,
+        input.normalizedAddress ?? null,
+        input.market ?? null,
+        input.submarket ?? null,
+        input.assetType ?? null,
+        input.listingType ?? null,
+        input.status ?? null,
+        input.latitude ?? null,
+        input.longitude ?? null,
+      ],
+    );
+    return this.getDossierById(userId, id);
+  }
+
+  async createDossierAsset(
+    userId: string,
+    dossierId: string,
+    input: CreateIntelListingAssetInput,
+  ): Promise<IntelListingAsset | null> {
+    await this.ensureDossierTables();
+    const dossier = await this.getDossierById(userId, dossierId);
+    if (!dossier) return null;
+
+    const result = await pool.query(
+      `
+        INSERT INTO public.intel_listing_assets (
+          id,
+          dossier_id,
+          listing_id,
+          asset_type,
+          file_name,
+          content_type,
+          file_size,
+          storage_bucket,
+          storage_path,
+          source,
+          status,
+          is_primary,
+          created_by_user_id,
+          updated_at
+        ) VALUES (
+          $1, $2, $3, COALESCE($4, 'brochure'), $5, $6, $7, $8, $9,
+          COALESCE($10, 'upload'), COALESCE($11, 'pending'), COALESCE($12, false), $13, now()
+        )
+        RETURNING *
+      `,
+      [
+        input.id,
+        dossierId,
+        input.listingId ?? dossier.canonicalListingId,
+        input.assetType ?? null,
+        input.fileName,
+        input.contentType,
+        input.fileSize,
+        input.storageBucket,
+        input.storagePath,
+        input.source ?? null,
+        input.status ?? null,
+        input.isPrimary ?? null,
+        userId,
+      ],
+    );
+
+    await pool.query(`UPDATE public.intel_property_dossiers SET updated_at = now() WHERE id = $1`, [dossierId]);
+    return listingAssetFromRow(result.rows[0]);
+  }
+
+  async getDossierAssets(userId: string, dossierId: string): Promise<IntelListingAsset[]> {
+    await this.ensureDossierTables();
+    const result = await pool.query(
+      `
+        SELECT *
+        FROM public.intel_listing_assets
+        WHERE dossier_id = $1
+          AND created_by_user_id = $2
+          AND status = 'active'
+        ORDER BY is_primary DESC, created_at DESC NULLS LAST
+      `,
+      [dossierId, userId],
+    );
+    return result.rows.map(listingAssetFromRow);
+  }
+
+  async getDossierFacts(userId: string, dossierId: string): Promise<IntelDossierFact[]> {
+    await this.ensureDossierTables();
+    const dossier = await pool.query(
+      `SELECT id FROM public.intel_property_dossiers WHERE id = $1 AND created_by_user_id = $2 LIMIT 1`,
+      [dossierId, userId],
+    );
+    if (!dossier.rows[0]) return [];
+    const result = await pool.query(
+      `
+        SELECT *
+        FROM public.intel_dossier_facts
+        WHERE dossier_id = $1
+        ORDER BY
+          CASE status WHEN 'approved' THEN 0 WHEN 'proposed' THEN 1 ELSE 2 END,
+          fact_key ASC,
+          updated_at DESC NULLS LAST
+      `,
+      [dossierId],
+    );
+    return result.rows.map(dossierFactFromRow);
+  }
+
+  async upsertDossierFact(
+    userId: string,
+    dossierId: string,
+    input: UpsertIntelDossierFactInput,
+  ): Promise<IntelDossierFact | null> {
+    await this.ensureDossierTables();
+    const dossier = await this.getDossierById(userId, dossierId);
+    if (!dossier) return null;
+    const result = await pool.query(
+      `
+        INSERT INTO public.intel_dossier_facts (
+          dossier_id,
+          source_asset_id,
+          fact_key,
+          label,
+          value_text,
+          value_number,
+          value_boolean,
+          value_json,
+          confidence,
+          status,
+          source,
+          updated_at
+        ) VALUES (
+          $1,
+          $2,
+          $3::varchar,
+          COALESCE($4::varchar, $3::varchar),
+          $5,
+          $6,
+          $7,
+          $8::jsonb,
+          COALESCE($9, 70),
+          COALESCE($10, 'proposed'),
+          COALESCE($11, 'manual'),
+          now()
+        )
+        RETURNING *
+      `,
+      [
+        dossierId,
+        input.sourceAssetId ?? null,
+        input.factKey,
+        input.label ?? null,
+        input.valueText ?? null,
+        input.valueNumber ?? null,
+        input.valueBoolean ?? null,
+        input.valueJson ? JSON.stringify(input.valueJson) : null,
+        input.confidence ?? null,
+        input.status ?? null,
+        input.source ?? null,
+      ],
+    );
+    await pool.query(`UPDATE public.intel_property_dossiers SET updated_at = now() WHERE id = $1`, [dossierId]);
+    return dossierFactFromRow(result.rows[0]);
+  }
+
+  async updateDossierFact(
+    userId: string,
+    dossierId: string,
+    factId: string,
+    input: UpdateIntelDossierFactInput,
+  ): Promise<IntelDossierFact | null> {
+    await this.ensureDossierTables();
+    const dossier = await this.getDossierById(userId, dossierId);
+    if (!dossier) return null;
+    const result = await pool.query(
+      `
+        UPDATE public.intel_dossier_facts
+        SET
+          source_asset_id = COALESCE($3, source_asset_id),
+          fact_key = COALESCE($4, fact_key),
+          label = COALESCE($5, label),
+          value_text = COALESCE($6, value_text),
+          value_number = COALESCE($7, value_number),
+          value_boolean = COALESCE($8, value_boolean),
+          value_json = COALESCE($9::jsonb, value_json),
+          confidence = COALESCE($10, confidence),
+          status = COALESCE($11, status),
+          source = COALESCE($12, source),
+          updated_at = now()
+        WHERE dossier_id = $1 AND id = $2
+        RETURNING *
+      `,
+      [
+        dossierId,
+        factId,
+        input.sourceAssetId ?? null,
+        input.factKey ?? null,
+        input.label ?? null,
+        input.valueText ?? null,
+        input.valueNumber ?? null,
+        input.valueBoolean ?? null,
+        input.valueJson ? JSON.stringify(input.valueJson) : null,
+        input.confidence ?? null,
+        input.status ?? null,
+        input.source ?? null,
+      ],
+    );
+    if (!result.rows[0]) return null;
+    await pool.query(`UPDATE public.intel_property_dossiers SET updated_at = now() WHERE id = $1`, [dossierId]);
+    return dossierFactFromRow(result.rows[0]);
   }
 
   async getPublicLinkCandidates(listingId: string): Promise<IntelPublicLinkCandidate[]> {
@@ -2733,6 +3418,7 @@ export class IndustrialIntelRepository {
       await this.ensureListingAssetTables();
       const survey = await this.getSurveyById(userId, surveyId);
       if (!survey) return [];
+      const listingIds = Array.from(new Set(survey.items.map((item) => item.listingId)));
 
       const result = await pool.query<{
         id: string;
@@ -2755,12 +3441,18 @@ export class IndustrialIntelRepository {
         `
           SELECT *
           FROM public.intel_listing_assets
-          WHERE survey_id = $1
+          WHERE (
+              survey_id = $1
+              OR (
+                survey_id IS NULL
+                AND listing_id = ANY($3::varchar[])
+              )
+            )
             AND created_by_user_id = $2
             AND status = 'active'
           ORDER BY is_primary DESC, created_at DESC NULLS LAST
         `,
-        [surveyId, userId],
+        [surveyId, userId, listingIds],
       );
 
       return result.rows.map(listingAssetFromRow);
@@ -2792,6 +3484,7 @@ export class IndustrialIntelRepository {
       const sharedSurvey = await this.getSurveyByShareToken(token);
       if (!sharedSurvey) return [];
       const visibleItemIds = sharedSurvey.items.map((item) => item.id);
+      const visibleListingIds = Array.from(new Set(sharedSurvey.items.map((item) => item.listingId)));
       if (visibleItemIds.length === 0) return [];
 
       const result = await pool.query<{
@@ -2815,12 +3508,20 @@ export class IndustrialIntelRepository {
         `
           SELECT *
           FROM public.intel_listing_assets
-          WHERE survey_id = $1
-            AND survey_item_id = ANY($2::varchar[])
+          WHERE (
+              (
+                survey_id = $1
+                AND survey_item_id = ANY($2::varchar[])
+              )
+              OR (
+                survey_id IS NULL
+                AND listing_id = ANY($3::varchar[])
+              )
+            )
             AND status = 'active'
           ORDER BY is_primary DESC, created_at DESC NULLS LAST
         `,
-        [survey.id, visibleItemIds],
+        [survey.id, visibleItemIds, visibleListingIds],
       );
 
       return result.rows.map(listingAssetFromRow);

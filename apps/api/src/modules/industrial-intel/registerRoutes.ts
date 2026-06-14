@@ -117,6 +117,37 @@ const intelSurveyAssetUploadSchema = z.object({
   assetType: z.enum(["brochure", "flyer", "aerial", "site_plan", "photo", "survey_page", "other"]).nullable().optional(),
 });
 
+const intelDossierSchema = z.object({
+  canonicalListingId: z.string().trim().min(1).nullable().optional(),
+  title: z.string().trim().min(1),
+  address: z.string().trim().nullable().optional(),
+  normalizedAddress: z.string().trim().nullable().optional(),
+  market: z.string().trim().nullable().optional(),
+  submarket: z.string().trim().nullable().optional(),
+  assetType: z.string().trim().nullable().optional(),
+  listingType: z.string().trim().nullable().optional(),
+  status: z.enum(["active", "draft", "archived"]).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+});
+
+const intelDossierUpdateSchema = intelDossierSchema.partial();
+
+const intelDossierFactSchema = z.object({
+  sourceAssetId: z.string().trim().min(1).nullable().optional(),
+  factKey: z.string().trim().min(1),
+  label: z.string().trim().min(1).nullable().optional(),
+  valueText: z.string().trim().nullable().optional(),
+  valueNumber: z.number().nullable().optional(),
+  valueBoolean: z.boolean().nullable().optional(),
+  valueJson: z.record(z.unknown()).nullable().optional(),
+  confidence: z.number().int().min(0).max(100).nullable().optional(),
+  status: z.enum(["proposed", "approved", "rejected"]).nullable().optional(),
+  source: z.string().trim().min(1).nullable().optional(),
+});
+
+const intelDossierFactUpdateSchema = intelDossierFactSchema.partial();
+
 async function ensureIntelActor(req: Request) {
   if (req.headers["x-demo-mode"] === "true") return;
   await ensureUser(getUserId(req), (req as any)?.user?.email || null);
@@ -180,6 +211,130 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     } catch (error) {
       console.error("Error fetching industrial intel listing duplicates:", error);
       res.status(500).json({ message: "Failed to fetch industrial intel listing duplicates" });
+    }
+  });
+
+  app.get("/api/intel/dossiers", requireAuth, async (req, res) => {
+    try {
+      await ensureIntelActor(req);
+      const dossiers = await industrialIntelService.getDossiers(getUserId(req));
+      res.json(dossiers);
+    } catch (error) {
+      console.error("Error fetching industrial intel dossiers:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel dossiers" });
+    }
+  });
+
+  app.post("/api/intel/dossiers", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelDossierSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel dossier", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const dossier = await industrialIntelService.createDossier(getUserId(req), parsed.data);
+      res.status(201).json(dossier);
+    } catch (error) {
+      console.error("Error creating industrial intel dossier:", error);
+      res.status(500).json({ message: "Failed to create industrial intel dossier" });
+    }
+  });
+
+  app.get("/api/intel/dossiers/:id", requireAuth, async (req, res) => {
+    try {
+      const dossier = await industrialIntelService.getDossierById(getUserId(req), req.params.id);
+      if (!dossier) {
+        return res.status(404).json({ message: "Industrial intel dossier not found" });
+      }
+      res.json(dossier);
+    } catch (error) {
+      console.error("Error fetching industrial intel dossier:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel dossier" });
+    }
+  });
+
+  app.patch("/api/intel/dossiers/:id", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelDossierUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel dossier update", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const dossier = await industrialIntelService.updateDossier(getUserId(req), req.params.id, parsed.data);
+      if (!dossier) {
+        return res.status(404).json({ message: "Industrial intel dossier not found" });
+      }
+      res.json(dossier);
+    } catch (error) {
+      console.error("Error updating industrial intel dossier:", error);
+      res.status(500).json({ message: "Failed to update industrial intel dossier" });
+    }
+  });
+
+  app.get("/api/intel/dossiers/:id/assets", requireAuth, async (req, res) => {
+    try {
+      const assets = await industrialIntelService.getDossierAssets(getUserId(req), req.params.id);
+      res.json(assets);
+    } catch (error) {
+      console.error("Error fetching industrial intel dossier assets:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel dossier assets" });
+    }
+  });
+
+  app.post("/api/intel/dossiers/:id/assets/upload-url", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelSurveyAssetUploadSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel asset upload", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const result = await industrialIntelService.createDossierAssetUpload(getUserId(req), req.params.id, parsed.data);
+      if (!result) {
+        return res.status(404).json({ message: "Industrial intel dossier not found" });
+      }
+      res.status(201).json(result);
+    } catch (error: any) {
+      console.error("Error creating industrial intel dossier asset upload:", error);
+      res.status(500).json({
+        message: "Failed to create industrial intel dossier asset upload",
+        detail: String(error?.message || error || "Unknown upload failure"),
+      });
+    }
+  });
+
+  app.post("/api/intel/dossiers/:id/facts", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelDossierFactSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel dossier fact", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const fact = await industrialIntelService.upsertDossierFact(getUserId(req), req.params.id, parsed.data);
+      if (!fact) {
+        return res.status(404).json({ message: "Industrial intel dossier not found" });
+      }
+      res.status(201).json(fact);
+    } catch (error) {
+      console.error("Error creating industrial intel dossier fact:", error);
+      res.status(500).json({ message: "Failed to create industrial intel dossier fact" });
+    }
+  });
+
+  app.patch("/api/intel/dossiers/:id/facts/:factId", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelDossierFactUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel dossier fact update", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const fact = await industrialIntelService.updateDossierFact(getUserId(req), req.params.id, req.params.factId, parsed.data);
+      if (!fact) {
+        return res.status(404).json({ message: "Industrial intel dossier fact not found" });
+      }
+      res.json(fact);
+    } catch (error) {
+      console.error("Error updating industrial intel dossier fact:", error);
+      res.status(500).json({ message: "Failed to update industrial intel dossier fact" });
     }
   });
 

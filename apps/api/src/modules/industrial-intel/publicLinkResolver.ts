@@ -103,8 +103,8 @@ function domainFromUrl(value: string, fallback?: string) {
 
 function cleanSnippet(value: string | null | undefined) {
   const trimmed = String(value || "").trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith("```") || trimmed.startsWith("{") || trimmed.startsWith("[")) return null;
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith("```") || trimmed.startsWith("{") || trimmed.startsWith("[")) return undefined;
   return trimmed.replace(/\s+/g, " ").slice(0, 260);
 }
 
@@ -313,7 +313,6 @@ function parseVertexJsonCandidates(text: string): GoogleSearchItem[] {
     return urlMatches.map((match) => ({
       link: match[0],
       title: domainFromUrl(match[0]),
-      snippet: null,
       displayLink: domainFromUrl(match[0]),
     }));
   } catch {

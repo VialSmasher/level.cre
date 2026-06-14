@@ -1,5 +1,6 @@
 import {
   type CreateIntelListingAssetInput,
+  type CreateIntelPropertyDossierInput,
   type CreateIntelRequirementInput,
   type CreateIntelSurveyInput,
   type CreateIntelSurveyItemInput,
@@ -17,14 +18,19 @@ import {
   type IntelListingListItem,
   type IntelListingAssetWithUrl,
   type IntelListingAssetType,
+  type IntelPropertyDossierDetail,
+  type IntelPropertyDossierListItem,
   type IntelDuplicateGroup,
   type IntelRunListItem,
   type IntelSourceListItem,
   type IntelSummary,
   type ReplaceIntelRequirementPreferencesInput,
   type UpdateIntelRequirementInput,
+  type UpdateIntelPropertyDossierInput,
   type UpdateIntelSurveyInput,
   type UpdateIntelSurveyItemInput,
+  type UpsertIntelDossierFactInput,
+  type UpdateIntelDossierFactInput,
 } from "./repo";
 import { randomUUID } from "crypto";
 import {
@@ -55,6 +61,8 @@ export type CreateManualPublicLinkInput = {
   snippet?: string | null;
 };
 
+export type CreateDossierAssetUploadInput = CreateSurveyItemAssetUploadInput;
+
 function sanitizeFileName(fileName: string) {
   return fileName
     .trim()
@@ -83,6 +91,80 @@ export class IndustrialIntelService {
 
   async getListingDuplicates(): Promise<IntelDuplicateGroup[]> {
     return industrialIntelRepository.getListingDuplicates();
+  }
+
+  async getDossiers(userId: string): Promise<IntelPropertyDossierListItem[]> {
+    return industrialIntelRepository.getDossiers(userId);
+  }
+
+  async getDossierById(userId: string, id: string): Promise<IntelPropertyDossierDetail | null> {
+    const dossier = await industrialIntelRepository.getDossierById(userId, id);
+    if (!dossier) return null;
+    return {
+      ...dossier,
+      assets: await signIntelListingAssets(dossier.assets),
+    };
+  }
+
+  async createDossier(userId: string, input: CreateIntelPropertyDossierInput): Promise<IntelPropertyDossierDetail> {
+    const dossier = await industrialIntelRepository.createDossier(userId, input);
+    return {
+      ...dossier,
+      assets: await signIntelListingAssets(dossier.assets),
+    };
+  }
+
+  async updateDossier(
+    userId: string,
+    id: string,
+    input: UpdateIntelPropertyDossierInput,
+  ): Promise<IntelPropertyDossierDetail | null> {
+    const dossier = await industrialIntelRepository.updateDossier(userId, id, input);
+    if (!dossier) return null;
+    return {
+      ...dossier,
+      assets: await signIntelListingAssets(dossier.assets),
+    };
+  }
+
+  async createDossierAssetUpload(userId: string, dossierId: string, input: CreateDossierAssetUploadInput) {
+    const dossier = await industrialIntelRepository.getDossierById(userId, dossierId);
+    if (!dossier) return null;
+
+    const assetId = randomUUID();
+    const fileName = sanitizeFileName(input.fileName);
+    const storagePath = `dossiers/${dossierId}/${assetId}-${fileName}`;
+    const upload = await createIntelAssetSignedUpload(storagePath);
+    const assetInput: CreateIntelListingAssetInput = {
+      id: assetId,
+      dossierId,
+      listingId: dossier.canonicalListingId,
+      assetType: input.assetType || (input.contentType === "application/pdf" ? "brochure" : "photo"),
+      fileName,
+      contentType: input.contentType,
+      fileSize: input.fileSize,
+      storageBucket: upload.bucket || getIntelAssetBucket(),
+      storagePath: upload.path || storagePath,
+      source: "upload",
+      status: "pending",
+    };
+
+    const asset = await industrialIntelRepository.createDossierAsset(userId, dossierId, assetInput);
+    if (!asset) return null;
+    return { asset, upload };
+  }
+
+  async getDossierAssets(userId: string, dossierId: string): Promise<IntelListingAssetWithUrl[]> {
+    const assets = await industrialIntelRepository.getDossierAssets(userId, dossierId);
+    return signIntelListingAssets(assets);
+  }
+
+  async upsertDossierFact(userId: string, dossierId: string, input: UpsertIntelDossierFactInput) {
+    return industrialIntelRepository.upsertDossierFact(userId, dossierId, input);
+  }
+
+  async updateDossierFact(userId: string, dossierId: string, factId: string, input: UpdateIntelDossierFactInput) {
+    return industrialIntelRepository.updateDossierFact(userId, dossierId, factId, input);
   }
 
   async archiveDuplicateListings(keepId: string, duplicateIds: string[]) {
