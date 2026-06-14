@@ -313,7 +313,6 @@ function parseVertexJsonCandidates(text: string): GoogleSearchItem[] {
     return urlMatches.map((match) => ({
       link: match[0],
       title: domainFromUrl(match[0]),
-      snippet: null,
       displayLink: domainFromUrl(match[0]),
     }));
   } catch {
@@ -382,7 +381,7 @@ async function runVertexGroundedSearch(listing: IntelListingListItem): Promise<G
       byUrl.set(resolvedUrl, {
         ...item,
         link: resolvedUrl,
-        snippet: cleanSnippet(item.snippet),
+        snippet: cleanSnippet(item.snippet) || undefined,
         displayLink: domainFromUrl(resolvedUrl, item.displayLink),
       });
     }
@@ -393,7 +392,7 @@ async function runVertexGroundedSearch(listing: IntelListingListItem): Promise<G
       byUrl.set(url, {
         link: url,
         title: chunk.web.title,
-        snippet: cleanSnippet(text),
+        snippet: cleanSnippet(text) || undefined,
         displayLink: domainFromUrl(url),
       });
     }

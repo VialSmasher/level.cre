@@ -10,11 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
 import { User, Settings, Palette, Bell, Shield, Download, Upload, Plus, X, Mail, Copy, RefreshCcw } from "lucide-react";
-import { Prospect, Submarket, STATUS_META, type ProspectStatusType } from "@level-cre/shared/schema";
-import { MAP_STATUS_KEYS, createStatusFilterSet } from "@/features/map/statusFilters";
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { STATUS_META, type ProspectStatusType } from "@level-cre/shared/schema";
+import { MAP_STATUS_KEYS, createStatusFilterSet } from "@/features/map/statusFilters";
 
 type OutlookConfig = {
   configured: boolean;
@@ -39,15 +39,6 @@ export default function ProfilePage() {
   const { user } = useAuth();
   const { profile, updateSubmarkets, isUpdating } = useProfile();
   const { toast } = useToast();
-
-  // Fetch data from database
-  const { data: prospects = [] } = useQuery<Prospect[]>({
-    queryKey: ['/api/prospects'],
-  });
-
-  const { data: submarkets = [] } = useQuery<Submarket[]>({
-    queryKey: ['/api/submarkets'],
-  });
 
   const { data: outlookConfig } = useQuery<OutlookConfig>({
     queryKey: ['/api/email/outlook/config'],
@@ -83,6 +74,7 @@ export default function ProfilePage() {
   const [darkMode, setDarkMode] = useState(false);
   const [autoSave, setAutoSave] = useState(true);
   const [soundEffects, setSoundEffects] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
   
   // Submarket Management State
   const [newSubmarket, setNewSubmarket] = useState("");
@@ -120,23 +112,36 @@ export default function ProfilePage() {
     writeJSON(nsKey(user?.id, 'mapFilters'), { selectedStatuses });
   };
 
-  const exportData = () => {
-    const data = {
-      prospects,
-      submarkets,
-      filters: { selectedStatuses },
-      timestamp: new Date().toISOString()
-    };
-    
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `prospect-data-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+  const exportData = async () => {
+    setIsExporting(true);
+    try {
+      const response = await apiRequest('GET', '/api/account/export');
+      const blob = await response.blob();
+      const disposition = response.headers.get('content-disposition') || '';
+      const filenameMatch = disposition.match(/filename="?([^"]+)"?/i);
+      const filename = filenameMatch?.[1] || `level-cre-account-export-${new Date().toISOString().split('T')[0]}.json`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({
+        title: "Export ready",
+        description: "Your account data export has been downloaded.",
+      });
+    } catch (error) {
+      console.error('Error exporting account data:', error);
+      toast({
+        title: "Export failed",
+        description: "Could not generate your account data export.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const importData = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -381,19 +386,19 @@ export default function ProfilePage() {
                   {MAP_STATUS_KEYS.map((status) => {
                     const meta = STATUS_META[status];
                     return (
-                      <div key={status} className="flex items-center space-x-2">
-                        <input
-                          type="checkbox"
-                          id={`map-status-${status}`}
-                          checked={selectedStatuses.includes(status)}
-                          onChange={() => toggleSelectedStatus(status)}
-                          className="rounded"
-                        />
-                        <label htmlFor={`map-status-${status}`} className="flex items-center gap-2 text-sm">
-                          <div className="h-3 w-3 rounded-full" style={{ backgroundColor: meta.color }}></div>
-                          {meta.label}
-                        </label>
-                      </div>
+                    <div key={status} className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id={`map-status-${status}`}
+                        checked={selectedStatuses.includes(status)}
+                        onChange={() => toggleSelectedStatus(status)}
+                        className="rounded"
+                      />
+                      <label htmlFor={`map-status-${status}`} className="flex items-center gap-2 text-sm">
+                        <div className="h-3 w-3 rounded-full" style={{ backgroundColor: meta.color }}></div>
+                        {meta.label}
+                      </label>
+                    </div>
                     );
                   })}
                 </div>
@@ -459,9 +464,9 @@ export default function ProfilePage() {
                     />
                   </div>
                   <div className="flex gap-2">
-                    <Button onClick={exportData} variant="outline" size="sm">
+                    <Button onClick={exportData} variant="outline" size="sm" disabled={isExporting}>
                       <Download className="h-4 w-4 mr-2" />
-                      Export Data
+                      {isExporting ? "Exporting..." : "Export Data"}
                     </Button>
                     <Button variant="outline" size="sm" asChild>
                       <label>

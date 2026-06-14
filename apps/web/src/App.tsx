@@ -38,6 +38,8 @@ const BrokerStats = lazy(() => import("./pages/broker-stats"));
 const Leaderboard = lazy(() => import("./pages/leaderboard"));
 const Badges = lazy(() => import("./pages/badges"));
 const TrackRecord = lazy(() => import("./pages/track-record"));
+const ResidentLoyalty = lazy(() => import("./pages/resident-loyalty"));
+const ResidentLoyaltyResidentDemo = lazy(() => import("./pages/resident-loyalty-resident-demo"));
 const IndustrialIntelHomePage = lazy(
   () => import("./tools/industrial-intel/pages/IndustrialIntelHomePage"),
 );
@@ -143,6 +145,12 @@ function Router() {
           <Pricing />
         </Suspense>
       )} />
+
+      <Route path="/resident-loyalty/resident-demo" component={() => (
+        <Suspense fallback={<Spinner />}>
+          <ResidentLoyaltyResidentDemo />
+        </Suspense>
+      )} />
       
       {/* Onboarding route - only for authenticated users */}
       <Route path="/onboarding">
@@ -168,6 +176,18 @@ function Router() {
               <Launcher />
             </Suspense>
           </RouteErrorBoundary>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/resident-loyalty">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <Suspense fallback={<Spinner />}>
+                <ResidentLoyalty />
+              </Suspense>
+            </AppLayout>
+          </OnboardingCheck>
         </ProtectedRoute>
       </Route>
 
