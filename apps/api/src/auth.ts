@@ -1,7 +1,9 @@
 import { Request, Response, NextFunction } from 'express'
 // storage import intentionally omitted in dev/demo to avoid DB calls in restricted environments
-import { jwtVerify, JWTPayload } from 'jose'
+import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose'
 import { timingSafeEqual } from 'crypto'
+
+let supabaseRemoteJwks: ReturnType<typeof createRemoteJWKSet> | null = null
 
 function safeTokenEquals(left: string, right: string): boolean {
   const leftBuffer = Buffer.from(left)
@@ -28,30 +30,47 @@ function getConfiguredAgentUser(req: Request): { id: string; email?: string; age
   }
 }
 
+function getSupabaseIssuer() {
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
+  if (!supabaseUrl) return undefined
+  return supabaseUrl.replace(/\/$/, '') + '/auth/v1'
+}
+
 // Verify JWT using Supabase shared secret (HS256)
 async function verifyBearerJWT(token: string): Promise<JWTPayload | null> {
-  try {
-    const secret = process.env.SUPABASE_JWT_SECRET
-    if (!secret) {
-      console.error('JWT verify failed: SUPABASE_JWT_SECRET is not set')
-      return null
-    }
+  const issuer = getSupabaseIssuer()
+  const secret = process.env.SUPABASE_JWT_SECRET
 
-    const issuer = (() => {
-      const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL
-      if (!supabaseUrl) return undefined
-      return supabaseUrl.replace(/\/$/, '') + '/auth/v1'
-    })()
-
+  if (secret) {
     const secretKey = new TextEncoder().encode(secret)
-    const { payload } = await jwtVerify(token, secretKey, {
-      issuer, // optional issuer check if env present
-      algorithms: ['HS256'],
-      // audience optional; Supabase uses aud: 'authenticated'
+    try {
+      const { payload } = await jwtVerify(token, secretKey, {
+        issuer, // optional issuer check if env present
+        algorithms: ['HS256'],
+        // audience optional; Supabase uses aud: 'authenticated'
+      })
+      return payload
+    } catch (err) {
+      // Fresh Supabase projects may sign access tokens with asymmetric JWT keys.
+      // Fall through to JWKS verification when a project URL is configured.
+      console.warn('JWT verify failed (HS256), trying JWKS if configured:', (err as Error).message)
+    }
+  }
+
+  if (!issuer) {
+    console.error('JWT verify failed: Supabase URL is not set')
+    return null
+  }
+
+  try {
+    supabaseRemoteJwks ??= createRemoteJWKSet(new URL(`${issuer}/.well-known/jwks.json`))
+    const { payload } = await jwtVerify(token, supabaseRemoteJwks, {
+      issuer,
+      algorithms: ['ES256', 'RS256'],
     })
     return payload
   } catch (err) {
-    console.error('JWT verify failed (HS256):', (err as Error).message)
+    console.error('JWT verify failed (JWKS):', (err as Error).message)
     return null
   }
 }

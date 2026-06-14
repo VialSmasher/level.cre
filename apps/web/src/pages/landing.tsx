@@ -1,10 +1,11 @@
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { useAuth } from '@/contexts/AuthContext'
 import { getOAuthCallbackPath } from '@/lib/authUtils'
 import { supabase } from '@/lib/supabase'
 import { useLocation } from 'wouter'
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { Loader2, ArrowRight, CheckCircle, ChartSpline, CreditCard } from 'lucide-react'
+import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react'
+import { Loader2, ArrowRight, CheckCircle, ChartSpline, CreditCard, Mail } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import {
   clearStoredPostAuthRedirect,
@@ -17,9 +18,11 @@ import {
 const FeatureCards = lazy(() => import('../components/FeatureCards'))
 
 export default function Landing() {
-  const { user, loading, signInWithGoogle } = useAuth()
+  const { user, loading, signInWithGoogle, signInWithEmail } = useAuth()
   const [, setLocation] = useLocation()
   const [isSigningIn, setIsSigningIn] = useState(false)
+  const [email, setEmail] = useState('')
+  const [isSendingEmail, setIsSendingEmail] = useState(false)
   const [isDemoMode, setIsDemoMode] = useState(false)
   const { toast } = useToast()
   const hasPrefetched = useRef(false)
@@ -166,6 +169,28 @@ export default function Landing() {
     }
   }
 
+  const handleEmailSignIn = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (isSendingEmail || isSigningIn || isDemoMode) return
+    setIsSendingEmail(true)
+    try {
+      setStoredPostAuthRedirect(getStoredPostAuthRedirect() || '/launcher')
+      await signInWithEmail(email)
+      toast({
+        title: 'Check your email',
+        description: 'We sent a sign-in link. Open it in this browser to continue.',
+      })
+    } catch (err: any) {
+      toast({
+        title: 'Email sign-in unavailable',
+        description: err?.message || 'Please try again later.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsSendingEmail(false)
+    }
+  }
+
   const handleDemoMode = () => {
     if (isDemoMode) return // Prevent double-clicks
     setIsDemoMode(true)
@@ -237,6 +262,35 @@ export default function Landing() {
                 </>
               ) : (
                 <>
+                  <form onSubmit={handleEmailSignIn} className="flex w-full max-w-xl flex-col gap-2 sm:flex-row">
+                    <Input
+                      type="email"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      placeholder="you@company.com"
+                      autoComplete="email"
+                      disabled={isSendingEmail || isSigningIn || isDemoMode}
+                      className="h-11 bg-white"
+                    />
+                    <Button
+                      type="submit"
+                      onMouseEnter={prefetchApp}
+                      disabled={isSendingEmail || isSigningIn || isDemoMode || !email.trim()}
+                      className="h-11 bg-slate-950 px-5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      {isSendingEmail ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Sending...
+                        </>
+                      ) : (
+                        <>
+                          <Mail className="mr-2 h-4 w-4" />
+                          Email link
+                        </>
+                      )}
+                    </Button>
+                  </form>
                   <div className="flex flex-wrap gap-3 items-center">
                     {ENABLE_GOOGLE && (
                       <Button

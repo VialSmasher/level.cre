@@ -8,6 +8,7 @@ export default defineConfig({
   out: "./drizzle",
   schema: "./packages/shared/src/schema.ts",
   dialect: "postgresql",
+  extensionsFilters: ["postgis"],
   dbCredentials: {
     url: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false }
