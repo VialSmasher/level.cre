@@ -408,11 +408,19 @@ export default function IndustrialIntelSurveysPage() {
   const visibleItemIdsWithAssets = useMemo(() => {
     const ids = new Set<string>();
     for (const asset of surveyAssets) {
-      if (asset.status !== "active" || !asset.surveyItemId) continue;
-      ids.add(asset.surveyItemId);
+      if (asset.status !== "active") continue;
+      if (asset.surveyItemId) {
+        ids.add(asset.surveyItemId);
+        continue;
+      }
+      if (asset.listingId) {
+        visibleItems
+          .filter((item) => item.listingId === asset.listingId)
+          .forEach((item) => ids.add(item.id));
+      }
     }
     return ids;
-  }, [surveyAssets]);
+  }, [surveyAssets, visibleItems]);
   const visibleWithLinksCount = useMemo(
     () => visibleItems.filter((item) => Boolean(firstLink(item.listing)) || visibleItemIdsWithAssets.has(item.id)).length,
     [visibleItemIdsWithAssets, visibleItems],
@@ -936,6 +944,7 @@ export default function IndustrialIntelSurveysPage() {
                     <Label htmlFor="selectedSurveyTitle">Survey title</Label>
                     <Input
                       id="selectedSurveyTitle"
+                      key={`survey-title-${selectedSurvey.id}`}
                       defaultValue={selectedSurveySummary?.title ?? selectedSurvey.title}
                       onBlur={(event) => {
                         if (event.target.value !== selectedSurvey.title) {
@@ -948,6 +957,7 @@ export default function IndustrialIntelSurveysPage() {
                     <Label htmlFor="selectedSurveyClient">Client</Label>
                     <Input
                       id="selectedSurveyClient"
+                      key={`survey-client-${selectedSurvey.id}`}
                       defaultValue={selectedSurveySummary?.clientName ?? selectedSurvey.clientName ?? ""}
                       onBlur={(event) => {
                         const nextClientName = event.target.value || null;

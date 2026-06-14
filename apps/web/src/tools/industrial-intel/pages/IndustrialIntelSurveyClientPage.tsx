@@ -179,11 +179,20 @@ export default function IndustrialIntelSurveyClientPage() {
   const assetsByItemId = useMemo(() => {
     const grouped = new Map<string, IntelListingAsset[]>();
     assets.forEach((asset) => {
-      if (!asset.surveyItemId) return;
-      grouped.set(asset.surveyItemId, [...(grouped.get(asset.surveyItemId) || []), asset]);
+      if (asset.surveyItemId) {
+        grouped.set(asset.surveyItemId, [...(grouped.get(asset.surveyItemId) || []), asset]);
+        return;
+      }
+      if (asset.listingId) {
+        orderedItems
+          .filter((item) => item.listing.id === asset.listingId)
+          .forEach((item) => {
+            grouped.set(item.id, [...(grouped.get(item.id) || []), asset]);
+          });
+      }
     });
     return grouped;
-  }, [assets]);
+  }, [assets, orderedItems]);
 
   const mapCenter = selectedMapItem
     ? { lat: selectedMapItem.listing.latitude, lng: selectedMapItem.listing.longitude }
@@ -369,7 +378,7 @@ export default function IndustrialIntelSurveyClientPage() {
 
                 {item.clientNotes && <p className="mt-4 text-sm leading-6 text-slate-700">{item.clientNotes}</p>}
 
-                <div className="mt-4 flex flex-wrap gap-3 print:hidden">
+                <div className="mt-4 flex flex-wrap gap-3">
                   {primaryAsset?.signedUrl && (
                     <a
                       href={primaryAsset.signedUrl}

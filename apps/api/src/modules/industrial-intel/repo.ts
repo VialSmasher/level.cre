@@ -3521,9 +3521,10 @@ export class IndustrialIntelRepository {
               )
             )
             AND status = 'active'
+            AND created_by_user_id = $4
           ORDER BY is_primary DESC, created_at DESC NULLS LAST
         `,
-        [survey.id, visibleItemIds, visibleListingIds],
+        [survey.id, visibleItemIds, visibleListingIds, survey.created_by_user_id],
       );
 
       return result.rows.map(listingAssetFromRow);
