@@ -331,8 +331,11 @@ const rewards: RewardOption[] = [
   { id: 'reward-grocery-25', label: 'Grocery gift card', category: 'gift_card', milestoneMonths: 6, valueLabel: '$25' },
   { id: 'reward-rent-credit-100', label: 'Rent credit', category: 'rent_credit', milestoneMonths: 12, valueLabel: '$100' },
   { id: 'reward-coffee-5', label: 'Coffee gift card', category: 'gift_card', pointCost: 500, valueLabel: '$5' },
-  { id: 'reward-uber-15', label: 'Uber Eats credit', category: 'gift_card', pointCost: 1200, valueLabel: '$15' },
-  { id: 'reward-amazon-25', label: 'Amazon gift card', category: 'gift_card', pointCost: 1800, valueLabel: '$25' },
+  { id: 'reward-dining-15', label: 'Neighborhood dining credit', category: 'dining', pointCost: 1000, valueLabel: '$15' },
+  { id: 'reward-rideshare-15', label: 'Rideshare credit', category: 'gift_card', pointCost: 1200, valueLabel: '$15' },
+  { id: 'reward-home-25', label: 'Home goods credit', category: 'home', pointCost: 1800, valueLabel: '$25' },
+  { id: 'reward-travel-transfer', label: 'Mock travel transfer', category: 'travel', pointCost: 2200, valueLabel: '1:1 partner' },
+  { id: 'reward-fitness-class', label: 'Fitness class pass', category: 'fitness', pointCost: 900, valueLabel: '1 class' },
   { id: 'reward-parking-perk', label: 'Reserved parking perk', category: 'perk', pointCost: 2500, valueLabel: '1 month' },
   { id: 'reward-key-fob-waiver', label: 'Extra key fob waiver', category: 'fee_waiver', pointCost: 900, valueLabel: '$35 waiver' },
   { id: 'reward-elevator-priority', label: 'Priority elevator booking', category: 'perk', pointCost: 700, valueLabel: '1 booking' },
@@ -386,4 +389,3 @@ export function createResidentLoyaltyDemoState(): ResidentLoyaltyDemoState {
     renewals: renewals.map((renewal) => ({ ...renewal })),
   };
 }
-

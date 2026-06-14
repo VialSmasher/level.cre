@@ -104,7 +104,7 @@ export type RenewalStatus = {
 export type RewardOption = {
   id: string;
   label: string;
-  category: 'rent_credit' | 'gift_card' | 'perk' | 'fee_waiver';
+  category: 'rent_credit' | 'gift_card' | 'perk' | 'fee_waiver' | 'travel' | 'dining' | 'fitness' | 'home';
   pointCost?: number;
   milestoneMonths?: number;
   valueLabel: string;
@@ -147,4 +147,3 @@ export type ResidentLoyaltyDemoState = {
   notices: BuildingNotice[];
   renewals: RenewalStatus[];
 };
-
