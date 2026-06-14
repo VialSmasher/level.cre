@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Archive, Check, CircleAlert, FileText, Image, Library, Plus, Search, Upload } from "lucide-react";
+import { Bot, Check, CircleAlert, FileText, Image, Library, Plus, Search, Upload } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
@@ -158,6 +158,30 @@ export default function IndustrialIntelDossiersPage() {
   const pdfAssets = selectedDossier?.assets.filter((asset) => asset.contentType === "application/pdf") || [];
   const photoAssets = selectedDossier?.assets.filter((asset) => asset.contentType !== "application/pdf") || [];
   const activeListing = selectedDossier?.listing;
+  const surveySyncRows = selectedDossier
+    ? [
+        {
+          label: "Source files",
+          value: selectedDossier.assets.length,
+          ready: selectedDossier.assets.length > 0,
+        },
+        {
+          label: "Review queue",
+          value: proposedFacts.length,
+          ready: proposedFacts.length === 0,
+        },
+        {
+          label: "Approved facts",
+          value: approvedFacts.length,
+          ready: approvedFacts.length >= 3,
+        },
+        {
+          label: "Map ready",
+          value: selectedDossier.latitude && selectedDossier.longitude ? "Yes" : "No",
+          ready: Boolean(selectedDossier.latitude && selectedDossier.longitude),
+        },
+      ]
+    : [];
 
   const createDossierMutation = useMutation({
     mutationFn: async () => {
@@ -398,7 +422,7 @@ export default function IndustrialIntelDossiersPage() {
                         <div className="flex flex-wrap items-center justify-between gap-4">
                           <div>
                             <p className="text-sm font-semibold text-slate-950">Drop brochures, surveys, site plans, and photos</p>
-                            <p className="mt-1 text-sm text-slate-600">Files become reusable source material for future surveys and agent extraction jobs.</p>
+                            <p className="mt-1 text-sm text-slate-600">Stored once here, reused across map cards, survey links, and export packages.</p>
                           </div>
                           <label className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700">
                             <Upload className="h-4 w-4" />
@@ -468,7 +492,7 @@ export default function IndustrialIntelDossiersPage() {
                           <Badge variant="outline" className="bg-white">{proposedFacts.length} need review</Badge>
                         </div>
                         {proposedFacts.length === 0 ? (
-                          <p className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">Agent extraction suggestions will appear here for broker approval.</p>
+                          <p className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">No facts waiting for review.</p>
                         ) : (
                           <div className="space-y-2">
                             {proposedFacts.map((fact) => (
@@ -514,7 +538,7 @@ export default function IndustrialIntelDossiersPage() {
                                 <div className="flex items-start justify-between gap-3">
                                   <div>
                                     <p className="line-clamp-2 text-sm font-semibold text-slate-950">{asset.fileName}</p>
-                                    <p className="mt-1 text-xs text-slate-500">{asset.assetType} · {formatBytes(asset.fileSize)}</p>
+                                    <p className="mt-1 text-xs text-slate-500">{asset.assetType} - {formatBytes(asset.fileSize)}</p>
                                   </div>
                                   {asset.signedUrl && (
                                     <a href={asset.signedUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-blue-700">
@@ -560,31 +584,41 @@ export default function IndustrialIntelDossiersPage() {
         <aside className="space-y-4">
           <Card className="rounded-2xl border-slate-200 shadow-sm">
             <CardHeader>
-              <CardTitle>Agent-first workflow</CardTitle>
+              <div className="flex items-center justify-between gap-3">
+                <CardTitle>SurveySync</CardTitle>
+                <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
+                  API-ready
+                </span>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm text-slate-600">
-              <div className="rounded-xl border border-slate-200 bg-white p-3">
-                <p className="font-semibold text-slate-950">1. Attach source files</p>
-                <p className="mt-1">Brochures, old surveys, aerials, and photos live with the property, not a one-off survey.</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-white p-3">
-                <p className="font-semibold text-slate-950">2. Review extracted facts</p>
-                <p className="mt-1">AI suggestions stay proposed until a broker approves them for client use.</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-white p-3">
-                <p className="font-semibold text-slate-950">3. Reuse in surveys</p>
-                <p className="mt-1">The same dossier can power map cards, PDF one-pagers, and future client packages.</p>
-              </div>
+            <CardContent className="space-y-3">
+              {selectedDossier ? (
+                surveySyncRows.map((row) => (
+                  <div key={row.label} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="flex items-center gap-2">
+                      {row.ready ? (
+                        <Check className="h-4 w-4 text-emerald-600" />
+                      ) : (
+                        <CircleAlert className="h-4 w-4 text-amber-600" />
+                      )}
+                      <span className="text-sm font-semibold text-slate-950">{row.label}</span>
+                    </div>
+                    <span className="text-sm font-semibold text-slate-600">{row.value}</span>
+                  </div>
+                ))
+              ) : (
+                <p className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">Select a dossier to see intake status.</p>
+              )}
             </CardContent>
           </Card>
 
           <Card className="rounded-2xl border-slate-200 shadow-sm">
             <CardContent className="p-4">
               <div className="flex gap-3">
-                <Archive className="mt-0.5 h-5 w-5 text-blue-700" />
+                <Bot className="mt-0.5 h-5 w-5 text-blue-700" />
                 <div>
-                  <p className="text-sm font-semibold text-slate-950">This is the source of truth layer.</p>
-                  <p className="mt-1 text-sm text-slate-600">Survey Builder should pull from approved dossiers instead of relying on partial live imports.</p>
+                  <p className="text-sm font-semibold text-slate-950">Agent handoff</p>
+                  <p className="mt-1 text-sm text-slate-600">Create dossier, upload file, propose facts, await broker approval.</p>
                 </div>
               </div>
             </CardContent>

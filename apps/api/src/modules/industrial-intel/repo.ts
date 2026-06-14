@@ -1391,6 +1391,8 @@ export class IndustrialIntelRepository {
   async seedDossiersFromListings(userId: string, limit = 250): Promise<number> {
     await this.ensureDossierTables();
     if (!(await this.hasCoreTables())) return 0;
+    const userResult = await pool.query(`SELECT id FROM public.users WHERE id = $1 LIMIT 1`, [userId]);
+    if (!userResult.rows[0]) return 0;
 
     const result = await pool.query(
       `
