@@ -154,6 +154,12 @@ function Router() {
           <ResidentLoyaltyResidentDemo />
         </Suspense>
       )} />
+
+      <Route path="/resident-loyalty" component={() => (
+        <Suspense fallback={<Spinner />}>
+          <ResidentLoyalty />
+        </Suspense>
+      )} />
       
       {/* Onboarding route - only for authenticated users */}
       <Route path="/onboarding">
@@ -179,18 +185,6 @@ function Router() {
               <Launcher />
             </Suspense>
           </RouteErrorBoundary>
-        </ProtectedRoute>
-      </Route>
-
-      <Route path="/resident-loyalty">
-        <ProtectedRoute>
-          <OnboardingCheck>
-            <AppLayout>
-              <Suspense fallback={<Spinner />}>
-                <ResidentLoyalty />
-              </Suspense>
-            </AppLayout>
-          </OnboardingCheck>
         </ProtectedRoute>
       </Route>
 
