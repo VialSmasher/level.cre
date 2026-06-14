@@ -14,7 +14,7 @@ function isDemo(req: Request): boolean {
 }
 import { createClient } from '@supabase/supabase-js';
 import { pool, db } from './db';
-import { listings, listingMembers, listingInvites, users, profiles, listingProspects, contactInteractions } from '@level-cre/shared/schema';
+import { listings, listingMembers, listingInvites, users, profiles, listingProspects, contactInteractions, prospects } from '@level-cre/shared/schema';
 import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
@@ -132,6 +132,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (name && !isPlaceholderProspectName(name)) return name;
     if (company) return company;
     return geometryFallbackName(data.geometry);
+  }
+
+  function csvCell(value: unknown): string {
+    let text = value === null || value === undefined ? '' : String(value);
+    text = text.replace(/\r?\n/g, ' ');
+    if (/^[=+\-@]/.test(text.trimStart())) {
+      text = `'${text}`;
+    }
+    if (/[",\r\n]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  }
+
+  function csvRow(values: unknown[]): string {
+    return values.map(csvCell).join(',');
+  }
+
+  async function publicTableExists(tableName: string): Promise<boolean> {
+    const { rows } = await pool.query(`SELECT to_regclass('public.' || $1) AS oid`, [tableName]);
+    return Boolean(rows?.[0]?.oid);
+  }
+
+  async function publicTablesExist(tableNames: string[]): Promise<boolean> {
+    const present = await Promise.all(tableNames.map((tableName) => publicTableExists(tableName)));
+    return present.every(Boolean);
+  }
+
+  async function optionalRows<T = any>(tableNames: string | string[], query: string, params: unknown[] = []): Promise<T[]> {
+    const names = Array.isArray(tableNames) ? tableNames : [tableNames];
+    if (!(await publicTablesExist(names))) return [];
+    const result = await pool.query(query, params);
+    return result.rows as T[];
   }
 
   function requireSupabaseAdmin() {
@@ -919,6 +952,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     throw Object.assign(new Error('Forbidden'), { status: 403 });
   }
 
+  async function requireOwnedProspect(req: Request, prospectId: string): Promise<void> {
+    const userId = getUserId(req);
+    if (isDemo(req)) {
+      const owned = await demo.getProspects(userId);
+      if ((owned || []).some((prospect: any) => prospect.id === prospectId)) return;
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    }
+
+    const [row] = await db
+      .select({ id: prospects.id })
+      .from(prospects)
+      .where(and(eq(prospects.id, prospectId), eq(prospects.userId, userId)));
+    if (!row) throw Object.assign(new Error('Forbidden'), { status: 403 });
+  }
+
+  async function requireInteractionProspectAccess(req: Request, prospectId: string, listingId?: string | null): Promise<void> {
+    const userId = getUserId(req);
+    if (isDemo(req)) {
+      if (listingId) {
+        const links = await demo.getListingLinksAll(listingId);
+        if ((links || []).some((link: any) => link.prospectId === prospectId)) return;
+      }
+      return requireOwnedProspect(req, prospectId);
+    }
+
+    if (listingId) {
+      const [link] = await db
+        .select({ prospectId: listingProspects.prospectId })
+        .from(listingProspects)
+        .where(and(eq(listingProspects.listingId, listingId), eq(listingProspects.prospectId, prospectId)));
+      if (link) return;
+    }
+
+    const [owned] = await db
+      .select({ id: prospects.id })
+      .from(prospects)
+      .where(and(eq(prospects.id, prospectId), eq(prospects.userId, userId)));
+    if (!owned) throw Object.assign(new Error('Forbidden'), { status: 403 });
+  }
+
   function parsePositiveIntParam(value: unknown, fallback: number): number {
     const parsed = Number.parseInt(String(value ?? ''), 10);
     if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -1592,6 +1665,184 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: 'Failed to bootstrap' });
     }
   });
+
+  app.get('/api/account/export', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const exportedAt = new Date().toISOString();
+
+      if (isDemo(req)) {
+        const [profile, userProspects, userSubmarkets, userRequirements, userComps, userListings, interactions] = await Promise.all([
+          demo.getProfile(userId),
+          demo.getProspects(userId),
+          demo.getSubmarkets(userId),
+          demo.getRequirements(userId),
+          demo.getMarketComps(userId),
+          demo.getListings(userId),
+          demo.getInteractions(userId),
+        ]);
+        const payload = {
+          format: 'level-cre-account-export',
+          schemaVersion: 1,
+          exportedAt,
+          userId,
+          demo: true,
+          profile,
+          data: {
+            prospects: userProspects,
+            submarkets: userSubmarkets,
+            requirements: userRequirements,
+            marketComps: userComps,
+            ownedWorkspaces: userListings,
+            interactions,
+          },
+        };
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Disposition', `attachment; filename="level-cre-account-export-${exportedAt.slice(0, 10)}.json"`);
+        return res.json(payload);
+      }
+
+      const [
+        userRows,
+        profileRows,
+        userProspects,
+        submarketsRows,
+        requirementRows,
+        marketCompRows,
+        interactionRows,
+        brokerSkillRows,
+        skillActivityRows,
+        emailConnectionRows,
+        emailMessageRows,
+        emailMatchRows,
+        emailSyncRunRows,
+      ] = await Promise.all([
+        optionalRows('users', 'SELECT id, email, first_name, last_name, profile_image_url, created_at, updated_at FROM public.users WHERE id = $1', [userId]),
+        optionalRows('profiles', 'SELECT * FROM public.profiles WHERE id = $1', [userId]),
+        optionalRows('prospects', `
+          SELECT
+            id, user_id, name, status, notes, ST_AsGeoJSON(geometry)::jsonb AS geometry,
+            submarket_id, last_contact_date, follow_up_timeframe, follow_up_due_date,
+            contact_name, contact_email, contact_phone, contact_company,
+            building_sf, lot_size_acres, ai_metadata, business_name, website_url,
+            created_at, updated_at
+          FROM public.prospects
+          WHERE user_id = $1
+          ORDER BY created_at NULLS LAST, id
+        `, [userId]),
+        optionalRows('submarkets', 'SELECT * FROM public.submarkets WHERE user_id = $1 ORDER BY created_at NULLS LAST, id', [userId]),
+        optionalRows('requirements', 'SELECT * FROM public.requirements WHERE user_id = $1 ORDER BY created_at NULLS LAST, id', [userId]),
+        optionalRows('market_comps', 'SELECT * FROM public.market_comps WHERE user_id = $1 ORDER BY created_at NULLS LAST, id', [userId]),
+        optionalRows('contact_interactions', 'SELECT * FROM public.contact_interactions WHERE user_id = $1 ORDER BY created_at NULLS LAST, id', [userId]),
+        optionalRows('broker_skills', 'SELECT * FROM public.broker_skills WHERE user_id = $1', [userId]),
+        optionalRows('skill_activities', 'SELECT * FROM public.skill_activities WHERE user_id = $1 ORDER BY timestamp NULLS LAST, id', [userId]),
+        optionalRows('email_connections', `
+          SELECT
+            id, user_id, provider, provider_account_id, email_address, display_name,
+            status, scopes, token_expires_at, sync_sent, sync_received,
+            last_synced_at, error_message, created_at, updated_at
+          FROM public.email_connections
+          WHERE user_id = $1
+          ORDER BY created_at NULLS LAST, id
+        `, [userId]),
+        optionalRows('email_messages', 'SELECT * FROM public.email_messages WHERE user_id = $1 ORDER BY COALESCE(sent_at, received_at, created_at) NULLS LAST, id', [userId]),
+        optionalRows('email_prospect_matches', 'SELECT * FROM public.email_prospect_matches WHERE user_id = $1 ORDER BY created_at NULLS LAST, id', [userId]),
+        optionalRows('email_sync_runs', 'SELECT * FROM public.email_sync_runs WHERE user_id = $1 ORDER BY started_at NULLS LAST, id', [userId]),
+      ]);
+
+      const ownedWorkspaces = await optionalRows('listings', 'SELECT * FROM public.listings WHERE user_id = $1 ORDER BY created_at NULLS LAST, id', [userId]);
+      const ownedWorkspaceIds = ownedWorkspaces.map((row: any) => row.id).filter(Boolean);
+      const ownedWorkspaceProspectLinks = ownedWorkspaceIds.length > 0
+        ? await optionalRows('listing_prospects', 'SELECT * FROM public.listing_prospects WHERE listing_id = ANY($1::varchar[]) ORDER BY created_at NULLS LAST, id', [ownedWorkspaceIds])
+        : [];
+      const ownedWorkspaceMembers = ownedWorkspaceIds.length > 0
+        ? await optionalRows('listing_members', 'SELECT * FROM public.listing_members WHERE listing_id = ANY($1::varchar[]) ORDER BY created_at NULLS LAST, listing_id, user_id', [ownedWorkspaceIds])
+        : [];
+      const ownedWorkspaceInvites = ownedWorkspaceIds.length > 0
+        ? await optionalRows('listing_invites', 'SELECT * FROM public.listing_invites WHERE listing_id = ANY($1::varchar[]) ORDER BY created_at NULLS LAST, id', [ownedWorkspaceIds])
+        : [];
+      const workspaceMemberships = await optionalRows('listing_members', 'SELECT * FROM public.listing_members WHERE user_id = $1 ORDER BY created_at NULLS LAST, listing_id', [userId]);
+
+      const intelRequirements = await optionalRows('intel_requirements', 'SELECT * FROM public.intel_requirements WHERE created_by_user_id = $1 ORDER BY created_at NULLS LAST, id', [userId]);
+      const intelRequirementIds = intelRequirements.map((row: any) => row.id).filter(Boolean);
+      const intelRequirementPreferences = intelRequirementIds.length > 0
+        ? await optionalRows('intel_requirement_preferences', 'SELECT * FROM public.intel_requirement_preferences WHERE requirement_id = ANY($1::varchar[]) ORDER BY created_at NULLS LAST, id', [intelRequirementIds])
+        : [];
+      const intelRequirementDecisions = intelRequirementIds.length > 0
+        ? await optionalRows('intel_requirement_listing_decisions', 'SELECT * FROM public.intel_requirement_listing_decisions WHERE requirement_id = ANY($1::varchar[]) ORDER BY created_at NULLS LAST, requirement_id, listing_id', [intelRequirementIds])
+        : [];
+      const intelSurveys = await optionalRows('intel_surveys', 'SELECT * FROM public.intel_surveys WHERE created_by_user_id = $1 ORDER BY created_at NULLS LAST, id', [userId]);
+      const intelSurveyIds = intelSurveys.map((row: any) => row.id).filter(Boolean);
+      const intelSurveyItems = intelSurveyIds.length > 0
+        ? await optionalRows('intel_survey_items', 'SELECT * FROM public.intel_survey_items WHERE survey_id = ANY($1::varchar[]) ORDER BY sort_order, created_at NULLS LAST, id', [intelSurveyIds])
+        : [];
+      const intelSurveyEvents = intelSurveyIds.length > 0
+        ? await optionalRows('intel_survey_events', 'SELECT * FROM public.intel_survey_events WHERE survey_id = ANY($1::varchar[]) ORDER BY created_at NULLS LAST, id', [intelSurveyIds])
+        : [];
+      const intelSources = await optionalRows('intel_sources', 'SELECT * FROM public.intel_sources WHERE created_by_user_id = $1 ORDER BY created_at NULLS LAST, id', [userId]);
+      const intelIngestRuns = await optionalRows('intel_ingest_runs', 'SELECT * FROM public.intel_ingest_runs WHERE initiated_by_user_id = $1 ORDER BY started_at NULLS LAST, id', [userId]);
+      const intelListingAssets = await optionalRows('intel_listing_assets', `
+        SELECT
+          id, listing_id, survey_id, survey_item_id, asset_type, file_name,
+          content_type, file_size, storage_bucket, storage_path, source,
+          status, is_primary, created_by_user_id, created_at, updated_at
+        FROM public.intel_listing_assets
+        WHERE created_by_user_id = $1
+        ORDER BY created_at NULLS LAST, id
+      `, [userId]);
+
+      const payload = {
+        format: 'level-cre-account-export',
+        schemaVersion: 1,
+        exportedAt,
+        userId,
+        privacyNote: 'OAuth token ciphertext, refresh tokens, and server secrets are intentionally excluded.',
+        account: {
+          user: userRows[0] || null,
+          profile: profileRows[0] || null,
+        },
+        data: {
+          prospects: userProspects,
+          submarkets: submarketsRows,
+          requirements: requirementRows,
+          marketComps: marketCompRows,
+          contactInteractions: interactionRows,
+          ownedWorkspaces,
+          ownedWorkspaceProspectLinks,
+          ownedWorkspaceMembers,
+          ownedWorkspaceInvites,
+          workspaceMemberships,
+          brokerSkills: brokerSkillRows[0] || null,
+          skillActivities: skillActivityRows,
+          email: {
+            connections: emailConnectionRows,
+            messages: emailMessageRows,
+            prospectMatches: emailMatchRows,
+            syncRuns: emailSyncRunRows,
+          },
+          industrialIntel: {
+            sources: intelSources,
+            ingestRuns: intelIngestRuns,
+            requirements: intelRequirements,
+            requirementPreferences: intelRequirementPreferences,
+            requirementListingDecisions: intelRequirementDecisions,
+            surveys: intelSurveys,
+            surveyItems: intelSurveyItems,
+            surveyEvents: intelSurveyEvents,
+            listingAssets: intelListingAssets,
+          },
+        },
+      };
+
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="level-cre-account-export-${exportedAt.slice(0, 10)}.json"`);
+      res.json(payload);
+    } catch (error) {
+      console.error('Error exporting account data:', error);
+      res.status(500).json({ message: 'Failed to export account data' });
+    }
+  });
+
   // Profile routes
   app.get('/api/profile', requireAuth, async (req, res) => {
     try {
@@ -1799,15 +2050,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!prospectId) return res.status(400).json({ message: 'prospectId is required' });
       if (isDemo(req)) {
         const userId = getUserId(req);
+        await requireOwnedProspect(req, prospectId);
         await demo.linkProspect(userId, req.params.id, prospectId);
         return res.status(201).json({ ok: true });
       }
+      await requireOwnedProspect(req, prospectId);
       await storage.linkProspectToListingAny({ listingId: req.params.id, prospectId });
       res.status(201).json({ ok: true });
-    } catch (error) {
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
+      if ((error as any)?.code === '23505') return res.status(200).json({ ok: true });
       console.error('Error linking prospect:', error);
-      // Handle unique violation gracefully
-      return res.status(200).json({ ok: true });
+      res.status(500).json({ message: 'Failed to link prospect' });
     }
   });
 
@@ -1845,28 +2100,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         interactions.forEach((i: any) => { byType[i.type] = (byType[i.type] || 0) + 1; });
         const lines: string[] = [];
         lines.push('Summary');
-        lines.push('Type,Count');
-        Object.entries(byType).forEach(([t, c]) => lines.push(`${t},${c}`));
+        lines.push(csvRow(['Type', 'Count']));
+        Object.entries(byType).forEach(([t, c]) => lines.push(csvRow([t, c])));
         lines.push('');
         lines.push('Details');
-        lines.push('Date,Type,Prospect,Address,Notes,NextSteps');
+        lines.push(csvRow(['Date', 'Type', 'Prospect', 'Address', 'Notes', 'NextSteps']));
         interactions.forEach((i: any) => {
           const p: any = prospectMap.get(i.prospectId);
-          const name = p?.name?.replaceAll(',', ' ') || '';
-          const address = p?.name?.replaceAll(',', ' ') || '';
-          const notes = (i.notes || '').replaceAll('\n', ' ').replaceAll(',', ' ');
-          const next = (i.nextFollowUp || '').replaceAll(',', ' ');
-          lines.push(`${i.date},${i.type},${name},${address},${notes},${next}`);
+          const name = p?.name || '';
+          const address = p?.address || p?.name || '';
+          lines.push(csvRow([i.date, i.type, name, address, i.notes || '', i.nextFollowUp || '']));
         });
         const csv = lines.join('\n');
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', `attachment; filename="listing-${req.params.id}-export.csv"`);
         return res.send(csv);
       }
-      const listing = await storage.getListing(req.params.id, userId);
+      const listing = await storage.getListingAny(req.params.id);
       if (!listing) return res.status(404).json({ message: 'Listing not found' });
       const interactions = await storage.getContactInteractions(userId, undefined, req.params.id, start, end);
-      const lp = await storage.getListingProspects(req.params.id, userId);
+      const lp = await storage.getListingProspectsAny(req.params.id);
       const prospectMap = new Map(lp.map(p => [p.id, p]));
       const byType: Record<string, number> = {};
       interactions.forEach(i => { byType[i.type] = (byType[i.type] || 0) + 1; });
@@ -1874,24 +2127,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Build CSV
       const lines: string[] = [];
       lines.push('Summary');
-      lines.push('Type,Count');
-      summaryRows.forEach(r => lines.push(`${r.type},${r.count}`));
+      lines.push(csvRow(['Type', 'Count']));
+      summaryRows.forEach(r => lines.push(csvRow([r.type, r.count])));
       lines.push('');
       lines.push('Details');
-      lines.push('Date,Type,Prospect,Address,Notes,NextSteps');
+      lines.push(csvRow(['Date', 'Type', 'Prospect', 'Address', 'Notes', 'NextSteps']));
       interactions.forEach(i => {
         const p = prospectMap.get(i.prospectId as any);
-        const name = p?.name?.replaceAll(',', ' ') || '';
-        const address = p?.name?.replaceAll(',', ' ') || '';
-        const notes = (i.notes || '').replaceAll('\n', ' ').replaceAll(',', ' ');
-        const next = (i.nextFollowUp || '').replaceAll(',', ' ');
-        lines.push(`${i.date},${i.type},${name},${address},${notes},${next}`);
+        const name = p?.name || '';
+        const address = (p as any)?.address || p?.name || '';
+        lines.push(csvRow([i.date, i.type, name, address, i.notes || '', i.nextFollowUp || '']));
       });
       const csv = lines.join('\n');
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', `attachment; filename="listing-${req.params.id}-export.csv"`);
       res.send(csv);
-    } catch (error) {
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && (error as any).status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
       console.error('Error exporting listing CSV:', error);
       res.status(500).json({ message: 'Failed to export CSV' });
     }
@@ -2251,9 +2504,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { prospectId } = req.body || {};
       if (!prospectId) return res.status(400).json({ message: 'prospectId is required' });
       if (isDemo(req)) {
+        await requireOwnedProspect(req, prospectId);
         await demo.linkProspect(userId, req.params.id, prospectId);
         return res.status(201).json({ ok: true });
       }
+      await requireOwnedProspect(req, prospectId);
       await storage.linkProspectToListingAny({ listingId: req.params.id, prospectId });
       res.status(201).json({ ok: true });
     } catch (error: any) {
@@ -2300,18 +2555,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         interactions.forEach((i: any) => { byType[i.type] = (byType[i.type] || 0) + 1; });
         const lines: string[] = [];
         lines.push('Summary');
-        lines.push('Type,Count');
-        Object.entries(byType).forEach(([t, c]) => lines.push(`${t},${c}`));
+        lines.push(csvRow(['Type', 'Count']));
+        Object.entries(byType).forEach(([t, c]) => lines.push(csvRow([t, c])));
         lines.push('');
         lines.push('Details');
-        lines.push('Date,Type,Prospect,Address,Notes,NextSteps');
+        lines.push(csvRow(['Date', 'Type', 'Prospect', 'Address', 'Notes', 'NextSteps']));
         interactions.forEach((i: any) => {
           const p: any = prospectMap.get(i.prospectId);
-          const name = p?.name?.replaceAll(',', ' ') || '';
-          const address = p?.name?.replaceAll(',', ' ') || '';
-          const notes = (i.notes || '').replaceAll('\n', ' ').replaceAll(',', ' ');
-          const next = (i.nextFollowUp || '').replaceAll(',', ' ');
-          lines.push(`${i.date},${i.type},${name},${address},${notes},${next}`);
+          const name = p?.name || '';
+          const address = p?.address || p?.name || '';
+          lines.push(csvRow([i.date, i.type, name, address, i.notes || '', i.nextFollowUp || '']));
         });
         const csv = lines.join('\n');
         res.setHeader('Content-Type', 'text/csv');
@@ -2328,18 +2581,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const summaryRows = Object.entries(byType).map(([type, count]) => ({ type, count }));
       const lines: string[] = [];
       lines.push('Summary');
-      lines.push('Type,Count');
-      summaryRows.forEach(r => lines.push(`${r.type},${r.count}`));
+      lines.push(csvRow(['Type', 'Count']));
+      summaryRows.forEach(r => lines.push(csvRow([r.type, r.count])));
       lines.push('');
       lines.push('Details');
-      lines.push('Date,Type,Prospect,Address,Notes,NextSteps');
+      lines.push(csvRow(['Date', 'Type', 'Prospect', 'Address', 'Notes', 'NextSteps']));
       interactions.forEach(i => {
         const p = prospectMap.get(i.prospectId as any);
-        const name = p?.name?.replaceAll(',', ' ') || '';
-        const address = p?.name?.replaceAll(',', ' ') || '';
-        const notes = (i.notes || '').replaceAll('\n', ' ').replaceAll(',', ' ');
-        const next = (i.nextFollowUp || '').replaceAll(',', ' ');
-        lines.push(`${i.date},${i.type},${name},${address},${notes},${next}`);
+        const name = p?.name || '';
+        const address = (p as any)?.address || p?.name || '';
+        lines.push(csvRow([i.date, i.type, name, address, i.notes || '', i.nextFollowUp || '']));
       });
       const csv = lines.join('\n');
       res.setHeader('Content-Type', 'text/csv');
@@ -2923,6 +3174,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Require edit access when attaching to a listing
         await requireEditAccess(req, interactionData.listingId);
       }
+      await requireInteractionProspectAccess(req, interactionData.prospectId, interactionData.listingId);
       if (isDemo(req)) {
         const created = { id: randomUUID(), ...interactionData, createdAt: new Date().toISOString() };
         await demo.addInteraction(userId, created);
@@ -3882,7 +4134,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           if (await tableExists('prospects')) {
             const r = await pool.query(
-              `SELECT COUNT(*)::int AS c FROM prospects`
+              `SELECT COUNT(*)::int AS c FROM prospects WHERE user_id = $1`,
+              [userId]
             );
             assetsTracked = r?.rows?.[0]?.c ?? 0;
           }

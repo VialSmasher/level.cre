@@ -381,7 +381,7 @@ async function runVertexGroundedSearch(listing: IntelListingListItem): Promise<G
       byUrl.set(resolvedUrl, {
         ...item,
         link: resolvedUrl,
-        snippet: cleanSnippet(item.snippet),
+        snippet: cleanSnippet(item.snippet) || undefined,
         displayLink: domainFromUrl(resolvedUrl, item.displayLink),
       });
     }
@@ -392,7 +392,7 @@ async function runVertexGroundedSearch(listing: IntelListingListItem): Promise<G
       byUrl.set(url, {
         link: url,
         title: chunk.web.title,
-        snippet: cleanSnippet(text),
+        snippet: cleanSnippet(text) || undefined,
         displayLink: domainFromUrl(url),
       });
     }
