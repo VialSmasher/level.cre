@@ -290,8 +290,21 @@ export default function Landing() {
             </div>
           </div>
 
-          <div className="rounded-lg border border-white/10 bg-white/[0.07] p-4">
-            <div className="rounded-lg bg-[#fbf7ee] p-4 text-stone-950">
+          <div className="rounded-lg border border-white/10 bg-white/[0.07] p-3 shadow-2xl">
+            <div className="overflow-hidden rounded-lg bg-[#fbf7ee] text-stone-950">
+              <div className="relative h-40">
+                <img
+                  src="https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?auto=format&fit=crop&w=900&q=80"
+                  alt="Modern apartment living space"
+                  className="h-full w-full object-cover"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-stone-950/75 to-transparent" />
+                <div className="absolute bottom-4 left-4 right-4 text-white">
+                  <p className="text-xs font-semibold uppercase text-[#f6c451]">Connected home</p>
+                  <p className="mt-1 text-2xl font-black">Maclaren House</p>
+                </div>
+              </div>
+              <div className="p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-stone-500">Demo resident</p>
@@ -328,6 +341,7 @@ export default function Landing() {
                   <p className="mt-2 text-sm font-black">Renewal interest</p>
                   <p className="mt-1 text-xs text-stone-600">+500 points</p>
                 </div>
+              </div>
               </div>
             </div>
           </div>

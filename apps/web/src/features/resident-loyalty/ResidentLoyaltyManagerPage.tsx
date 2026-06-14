@@ -334,7 +334,14 @@ export default function ResidentLoyaltyManagerPage() {
 
       <main className="mx-auto max-w-7xl space-y-8 px-4 py-6 md:px-6 md:py-8">
         <section className="grid gap-5 lg:grid-cols-[1fr_380px] lg:items-stretch">
-          <div className="rounded-lg bg-[#111412] p-5 text-white shadow-xl md:p-8">
+          <div className="relative overflow-hidden rounded-lg bg-[#111412] p-5 text-white shadow-xl md:p-8">
+            <img
+              src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1500&q=80"
+              alt="Neighborhood restaurant amenity"
+              className="absolute inset-0 h-full w-full object-cover opacity-28"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-[#111412] via-[#111412]/90 to-[#111412]/55" />
+            <div className="relative">
             <div className="flex flex-wrap items-center gap-2">
               <Badge className="bg-[#f6c451] text-stone-950 hover:bg-[#f6c451]">Resident app first</Badge>
               <Badge variant="outline" className="border-white/20 bg-white/10 text-white">Demo network</Badge>
@@ -371,6 +378,7 @@ export default function ResidentLoyaltyManagerPage() {
               <Button variant="outline" className="border-white/20 bg-white/10 text-white hover:bg-white/15 hover:text-white" asChild>
                 <a href="#partner-console">View partner console</a>
               </Button>
+            </div>
             </div>
           </div>
 
