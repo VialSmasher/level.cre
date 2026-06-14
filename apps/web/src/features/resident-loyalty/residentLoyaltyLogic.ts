@@ -98,6 +98,10 @@ export function rewardCategoryLabel(category: RewardOption['category']) {
     gift_card: 'Gift card',
     perk: 'Building perk',
     fee_waiver: 'Fee waiver',
+    travel: 'Travel',
+    dining: 'Dining',
+    fitness: 'Fitness',
+    home: 'Home',
   };
   return labels[category];
 }
@@ -251,4 +255,3 @@ export function buildResidentEvent(
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, value));
 }
-

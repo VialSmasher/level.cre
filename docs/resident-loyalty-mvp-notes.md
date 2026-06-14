@@ -6,15 +6,18 @@ Date: 2026-06-09
 
 Built a contained frontend MVP prototype for a multifamily resident loyalty and operations layer. The prototype emphasizes operational efficiency for landlords and property managers, not rent-payment rewards alone.
 
+After Bilt-focused research on 2026-06-14, the prototype was reworked to feel less like Level CRE and more like a standalone resident rewards product. The current demo leads with a resident points wallet, monthly reward drop, neighborhood benefits, redemption marketplace, and earn missions. The manager surface remains, but it is now framed as a partner/operator console that proves operational lift.
+
 The MVP includes:
 
-- Manager dashboard for a mock multifamily building.
-- Resident-facing demo view.
+- Product/partner demo for a mock multifamily building.
+- Resident-facing wallet demo view.
 - Typed mock data for 1 landlord, 1 building, 16 units, 16 residents, resident events, rewards, maintenance requests, notices, and renewal statuses.
 - Resident behaviour event ledger.
 - Points and rent streak milestone logic.
-- Manager simulation actions for rent streaks, notices, access, renewal interest, maintenance review, and reward approval.
+- Operator simulation actions for rent streaks, notices, access, renewal interest, maintenance review, and reward approval.
 - Resident task completion and mock reward requests.
+- Root landing page rebranded around the resident loyalty MVP while preserving the existing sign-in path into the Level CRE workspace.
 
 ## How To Run Locally
 
@@ -43,12 +46,15 @@ $env:DOTENV_CONFIG_PATH = '../../.env'
 ## Routes Added
 
 - `/resident-loyalty`
-  - Manager dashboard.
-  - Protected by the existing `ProtectedRoute`, `OnboardingCheck`, and `AppLayout`.
+  - Public product/partner demo with resident app preview and operator console.
 
 - `/resident-loyalty/resident-demo`
   - Resident-facing demo route.
   - Public because it only uses local mock data.
+
+- `/`
+  - Rebranded Living Rewards landing page for the hosted MVP.
+  - Keeps email/Google sign-in for the existing protected workspace.
 
 ## Components And Files Added
 
@@ -60,11 +66,13 @@ $env:DOTENV_CONFIG_PATH = '../../.env'
 - `apps/web/src/pages/resident-loyalty.tsx`
 - `apps/web/src/pages/resident-loyalty-resident-demo.tsx`
 - `docs/resident-loyalty-architecture-audit.md`
+- `docs/resident-loyalty-bilt-research.md`
 - `docs/resident-loyalty-mvp-notes.md`
 
 Existing file updated:
 
 - `apps/web/src/App.tsx`
+- `apps/web/src/pages/landing.tsx`
 
 ## API Routes Added
 
@@ -128,10 +136,13 @@ The manager dashboard also calculates:
 Mocked:
 
 - All resident, building, unit, maintenance, notice, renewal, reward, and event data.
-- Manager actions and resident task completion.
+- Operator actions and resident task completion.
 - Reward approval and redemption requests.
 - Building Health Score.
 - Follow-ups avoided estimate.
+- Monthly reward drop.
+- Neighborhood benefits.
+- Travel-style reward transfer.
 
 Real/reused:
 
