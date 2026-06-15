@@ -315,6 +315,14 @@ export class IndustrialIntelService {
     return industrialIntelRepository.updateSurveyItem(userId, surveyId, itemId, input);
   }
 
+  async reorderSurveyItems(
+    userId: string,
+    surveyId: string,
+    orderedItemIds: string[],
+  ): Promise<IntelSurveyDetail | null> {
+    return industrialIntelRepository.reorderSurveyItems(userId, surveyId, orderedItemIds);
+  }
+
   async deleteSurveyItem(userId: string, surveyId: string, itemId: string): Promise<IntelSurveyDetail | null> {
     return industrialIntelRepository.deleteSurveyItem(userId, surveyId, itemId);
   }

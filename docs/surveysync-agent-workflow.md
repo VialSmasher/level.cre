@@ -70,3 +70,34 @@ Agent steps:
 - Property matching confidence records.
 - Asset page/image previews.
 - Survey export templates that consume approved dossier facts.
+
+## Agent Intake Contract To Add
+
+To let Codex, Claude CoWork, or another broker-controlled assistant populate Level CRE from PowerPoint decks and brokerage flyers, add a SurveySync job API:
+
+1. `POST /api/intel/surveysync/jobs`
+   - Accepts a job name, optional requirement or survey id, and a manifest of local files, email attachments, or cloud-file references.
+   - Returns a job id and upload targets for each file.
+
+2. `POST /api/intel/surveysync/jobs/:id/files/:fileId/complete`
+   - Marks each uploaded PowerPoint, PDF, image, or brochure as available for extraction.
+
+3. Worker step: extract properties and assets.
+   - PPTX: split slides by property section, preserve page images, detect address/title/price/size/zoning notes.
+   - PDF: split pages, store page previews, extract text and key facts.
+   - Images: store photos/aerials/site plans as property assets.
+
+4. Worker step: match or create property dossiers.
+   - Match first by normalized address.
+   - Then compare title, coordinates, municipality/submarket, and known listing ids.
+   - Store match confidence and require broker review below the confidence threshold.
+
+5. `POST /api/intel/dossiers/:id/facts/bulk`
+   - Writes proposed facts with source file/page references.
+   - Approved facts should only be written directly when the source is broker-authored or explicitly confirmed by the broker.
+
+6. `POST /api/intel/surveys/:id/items/from-dossiers`
+   - Adds matched dossiers/listings to a survey.
+   - Uses approved dossier facts and primary assets to populate the client card.
+
+The key rule: agents should be able to upload and propose, but the app should keep broker approval as the quality gate before anything becomes client-facing.

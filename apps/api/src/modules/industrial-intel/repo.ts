@@ -3266,6 +3266,50 @@ export class IndustrialIntelRepository {
     return updated;
   }
 
+  async reorderSurveyItems(userId: string, surveyId: string, orderedItemIds: string[]): Promise<IntelSurveyDetail | null> {
+    await this.ensureSurveyTables();
+
+    const survey = await this.getSurveyById(userId, surveyId);
+    if (!survey) return null;
+
+    const currentIds = new Set(survey.items.map((item) => item.id));
+    const nextIds = new Set(orderedItemIds);
+    if (orderedItemIds.length !== survey.items.length || nextIds.size !== orderedItemIds.length) return null;
+    if (orderedItemIds.some((itemId) => !currentIds.has(itemId))) return null;
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (let index = 0; index < orderedItemIds.length; index += 1) {
+        await client.query(
+          `
+            UPDATE public.intel_survey_items
+            SET sort_order = $3, updated_at = now()
+            WHERE survey_id = $1 AND id = $2
+          `,
+          [surveyId, orderedItemIds[index], (index + 1) * 10],
+        );
+      }
+      await client.query(`UPDATE public.intel_surveys SET updated_at = now() WHERE id = $1`, [surveyId]);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    const updated = await this.getSurveyById(userId, surveyId);
+    await this.logSurveyEvent({
+      surveyId,
+      actorId: userId,
+      action: "survey_items.reordered",
+      summary: "Reordered survey options",
+      payload: { orderedItemIds },
+    });
+    return updated;
+  }
+
   async deleteSurveyItem(userId: string, surveyId: string, itemId: string): Promise<IntelSurveyDetail | null> {
     await this.ensureSurveyTables();
 

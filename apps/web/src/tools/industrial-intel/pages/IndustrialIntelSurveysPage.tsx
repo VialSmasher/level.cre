@@ -559,6 +559,22 @@ export default function IndustrialIntelSurveysPage() {
     },
   });
 
+  const reorderItemsMutation = useMutation({
+    mutationFn: async (orderedItemIds: string[]) => {
+      if (!selectedSurveyId) throw new Error("No survey selected");
+      const response = await apiRequest("POST", `/api/intel/surveys/${selectedSurveyId}/items/reorder`, { orderedItemIds });
+      return response.json() as Promise<IntelSurveyDetail>;
+    },
+    onSuccess: (survey) => {
+      queryClient.setQueryData([`/api/intel/surveys/${survey.id}`], survey);
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/surveys"] });
+      queryClient.invalidateQueries({ queryKey: [`/api/intel/surveys/${survey.id}/events`] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to reorder listings", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
   const shareSurveyMutation = useMutation({
     mutationFn: async () => {
       if (!selectedSurveyId) throw new Error("No survey selected");
@@ -728,8 +744,10 @@ export default function IndustrialIntelSurveysPage() {
     if (index < 0 || swapWith < 0 || swapWith >= ordered.length) return;
 
     const other = ordered[swapWith];
-    updateItemMutation.mutate({ item, patch: { sortOrder: other.sortOrder } });
-    updateItemMutation.mutate({ item: other, patch: { sortOrder: item.sortOrder } });
+    const nextOrder = [...ordered];
+    nextOrder[index] = other;
+    nextOrder[swapWith] = item;
+    reorderItemsMutation.mutate(nextOrder.map((candidate) => candidate.id));
   };
 
   const canCreateSurvey = createForm.title.trim().length > 0 && !createSurveyMutation.isPending;
@@ -929,10 +947,10 @@ export default function IndustrialIntelSurveysPage() {
                           size="sm"
                           className="gap-2"
                           onClick={() => shareSurveyMutation.mutate()}
-                          disabled={shareSurveyMutation.isPending || visibleItems.length === 0}
+                          disabled={shareSurveyMutation.isPending || !isSurveyReady}
                         >
                           <Share2 className="h-4 w-4" />
-                          Create client link
+                          {visibleItems.length === 0 ? "Add options to share" : isSurveyReady ? "Create client link" : "Finish checks to share"}
                         </Button>
                       )}
                       <Badge className="bg-slate-950 text-white">{selectedSurvey.status}</Badge>
@@ -1548,10 +1566,10 @@ export default function IndustrialIntelSurveysPage() {
                                   <p className="mt-1 text-xs text-slate-500">{item.listing.normalizedAddress || item.listing.address || "Address pending"}</p>
                                 </div>
                                 <div className="flex items-center gap-1">
-                                  <Button type="button" size="icon" variant="outline" disabled={index === 0} onClick={(event) => { event.stopPropagation(); moveItem(item, "up"); }}>
+                                  <Button type="button" size="icon" variant="outline" disabled={index === 0 || reorderItemsMutation.isPending} onClick={(event) => { event.stopPropagation(); moveItem(item, "up"); }}>
                                     <ArrowUp className="h-4 w-4" />
                                   </Button>
-                                  <Button type="button" size="icon" variant="outline" disabled={index === selectedSurvey.items.length - 1} onClick={(event) => { event.stopPropagation(); moveItem(item, "down"); }}>
+                                  <Button type="button" size="icon" variant="outline" disabled={index === selectedSurvey.items.length - 1 || reorderItemsMutation.isPending} onClick={(event) => { event.stopPropagation(); moveItem(item, "down"); }}>
                                     <ArrowDown className="h-4 w-4" />
                                   </Button>
                                   <Button type="button" size="icon" variant="outline" onClick={(event) => { event.stopPropagation(); deleteItemMutation.mutate(item); }}>

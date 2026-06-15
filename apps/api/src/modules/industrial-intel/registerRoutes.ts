@@ -110,6 +110,10 @@ const intelSurveyItemSchema = z.object({
 
 const intelSurveyItemUpdateSchema = intelSurveyItemSchema.omit({ listingId: true }).partial();
 
+const intelSurveyItemReorderSchema = z.object({
+  orderedItemIds: z.array(z.string().trim().min(1)).min(1).max(250),
+});
+
 const intelSurveyAssetUploadSchema = z.object({
   fileName: z.string().trim().min(1).max(180),
   contentType: z.enum(["application/pdf", "image/jpeg", "image/png", "image/webp"]),
@@ -147,6 +151,57 @@ const intelDossierFactSchema = z.object({
 });
 
 const intelDossierFactUpdateSchema = intelDossierFactSchema.partial();
+
+type SurveyShareReadinessSurvey = {
+  items: Array<{
+    id: string;
+    listingId: string;
+    recommendationLabel: string | null;
+    clientNotes: string | null;
+    listing: {
+      latitude: number | null;
+      longitude: number | null;
+      sourceUrl: string | null;
+      brochureUrl: string | null;
+    };
+  }>;
+};
+
+type SurveyShareReadinessAsset = {
+  listingId: string | null;
+  surveyItemId: string | null;
+  status: string;
+};
+
+function getSurveyShareBlockingReasons(survey: SurveyShareReadinessSurvey, assets: SurveyShareReadinessAsset[]) {
+  if (survey.items.length === 0) return ["Survey has no included options."];
+
+  const activeAssetItemIds = new Set<string>();
+  for (const asset of assets) {
+    if (asset.status !== "active") continue;
+    if (asset.surveyItemId) {
+      activeAssetItemIds.add(asset.surveyItemId);
+      continue;
+    }
+    if (asset.listingId) {
+      survey.items
+        .filter((item) => item.listingId === asset.listingId)
+        .forEach((item) => activeAssetItemIds.add(item.id));
+    }
+  }
+
+  const missing = new Set<string>();
+  for (const item of survey.items) {
+    const hasMap = typeof item.listing.latitude === "number" && typeof item.listing.longitude === "number";
+    const hasLinkOrAsset = Boolean(item.listing.sourceUrl || item.listing.brochureUrl || activeAssetItemIds.has(item.id));
+    const hasClientNote = Boolean(item.clientNotes?.trim() || item.recommendationLabel?.trim());
+    if (!hasMap) missing.add("coordinates");
+    if (!hasLinkOrAsset) missing.add("verified link or uploaded asset");
+    if (!hasClientNote) missing.add("client note or recommendation");
+  }
+
+  return Array.from(missing).map((reason) => `Missing ${reason}.`);
+}
 
 async function ensureIntelActor(req: Request) {
   if (req.headers["x-demo-mode"] === "true") return;
@@ -544,6 +599,18 @@ export function registerIndustrialIntelRoutes(app: Express): void {
   app.post("/api/intel/surveys/:id/share", requireAuth, async (req, res) => {
     try {
       await ensureIntelActor(req);
+      const currentSurvey = await industrialIntelService.getSurveyById(getUserId(req), req.params.id);
+      if (!currentSurvey) {
+        return res.status(404).json({ message: "Industrial intel survey not found" });
+      }
+      const assets = await industrialIntelService.getSurveyAssets(getUserId(req), req.params.id);
+      const blockingReasons = getSurveyShareBlockingReasons(currentSurvey, assets);
+      if (blockingReasons.length > 0) {
+        return res.status(409).json({
+          message: "Survey is not ready to share",
+          issues: blockingReasons,
+        });
+      }
       const token = randomBytes(18).toString("base64url");
       const survey = await industrialIntelService.updateSurvey(getUserId(req), req.params.id, {
         status: "shared",
@@ -650,6 +717,24 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       }
       console.error("Error adding industrial intel survey item:", error);
       res.status(500).json({ message: "Failed to add industrial intel survey item" });
+    }
+  });
+
+  app.post("/api/intel/surveys/:id/items/reorder", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelSurveyItemReorderSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid industrial intel survey item order", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const survey = await industrialIntelService.reorderSurveyItems(getUserId(req), req.params.id, parsed.data.orderedItemIds);
+      if (!survey) {
+        return res.status(404).json({ message: "Industrial intel survey items not found" });
+      }
+      res.json(survey);
+    } catch (error) {
+      console.error("Error reordering industrial intel survey items:", error);
+      res.status(500).json({ message: "Failed to reorder industrial intel survey items" });
     }
   });
 
