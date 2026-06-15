@@ -31,6 +31,18 @@ export const industrialIntelAgentManifest = {
     "When extraction confidence is low or the property is an intersection/land parcel, keep address nullable and store location_description as a fact.",
   ],
   capabilities: {
+    agentOps: {
+      endpoints: [
+        { method: "GET", path: "/api/intel/agent-manifest", description: "Read the active agent contract." },
+        { method: "GET", path: "/api/intel/agent-events", description: "Read recent agent audit events for the authenticated actor." },
+        {
+          method: "POST",
+          path: "/api/intel/agent/surveysync-jobs",
+          description:
+            "Run a higher-level SurveySync job: create/select a survey, add listing options, create/match dossiers, propose facts, and prepare signed source-asset upload URLs.",
+        },
+      ],
+    },
     inventory: {
       endpoints: [
         { method: "GET", path: "/api/intel/listings", description: "List current inventory/listings." },
@@ -108,6 +120,7 @@ export const industrialIntelAgentManifest = {
   },
   recommendedSurveySyncFlow: [
     "GET /api/intel/agent-manifest to confirm contract.",
+    "POST /api/intel/agent/surveysync-jobs when a workflow can be expressed as one job instead of many low-level calls.",
     "GET /api/intel/dossiers and match by normalized address/title/market before creating anything.",
     "POST /api/intel/dossiers for unmatched properties.",
     "POST /api/intel/dossiers/:id/assets/upload-url for each source brochure/flyer/photo.",
@@ -121,8 +134,7 @@ export const industrialIntelAgentManifest = {
     "Only share the survey after readiness checks pass.",
   ],
   notYetImplemented: [
-    "service-token permission scopes and per-agent audit tables",
-    "bulk SurveySync job endpoint",
+    "service-token permission scopes",
     "PPTX parsing",
     "PDF page image previews",
     "direct dossier-to-survey item creation without inventory listing linkage",

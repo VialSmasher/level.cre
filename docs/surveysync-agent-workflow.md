@@ -11,6 +11,11 @@ Agents can already use the normal authenticated HTTP API to:
    - Use this as the first call in a new Codex/Hermes session.
    - It returns auth modes, supported upload types, endpoint paths, invariants, and the recommended SurveySync flow.
 
+1. Run a higher-level SurveySync job when the agent already has structured property/source-file intent.
+   - `POST /api/intel/agent/surveysync-jobs`
+   - This can create/select a survey, add inventory listing items, create or match property dossiers, add proposed facts, and return signed upload URLs for original brochures/flyers/photos.
+   - If a dossier does not have a canonical inventory listing, it is saved but not added to the survey map yet. Direct dossier-to-survey map items are still a planned capability.
+
 1. Create or update a property dossier.
    - `POST /api/intel/dossiers`
    - `PATCH /api/intel/dossiers/:id`
@@ -52,7 +57,31 @@ The agent sends either:
 - `Authorization: Bearer <INTEL_AGENT_API_KEY>`
 - or `X-LevelCRE-Agent-Key: <INTEL_AGENT_API_KEY>`
 
-The API treats requests as the configured `INTEL_AGENT_USER_ID`, so the agent sees and writes the same owner-scoped dossiers, surveys, requirements, and assets every time. This is intentionally simple for the current MVP. The next production hardening step is scoped agent tokens plus per-agent audit records.
+The API treats requests as the configured `INTEL_AGENT_USER_ID`, so the agent sees and writes the same owner-scoped dossiers, surveys, requirements, and assets every time. This is intentionally simple for the current MVP. The next production hardening step is scoped agent tokens, narrower permissions, and a review UI for audit events.
+
+## Agent Smoke Test
+
+After setting the production environment variables, run:
+
+```bash
+LEVELCRE_API_BASE_URL=https://<api-host> INTEL_AGENT_API_KEY=<key> npm run intel:agent-smoke
+```
+
+The smoke test calls:
+
+- `GET /api/intel/agent-manifest`
+- `GET /api/intel/dossiers`
+- `GET /api/intel/surveys`
+- `POST /api/intel/agent/surveysync-jobs` with `dryRun: true`
+- `GET /api/intel/agent-events`
+
+This is the first command a new Codex/Hermes setup should run before attempting file ingestion.
+
+## Agent Audit Events
+
+Authenticated agent-key calls under `/api/intel` are logged to `intel_agent_events`.
+
+The audit log stores request metadata only: user id, agent name, request id, method, path, action, status, duration, and small metadata such as query keys and content type. It does not store uploaded source material or full request bodies.
 
 ## Expected Agent Behavior
 

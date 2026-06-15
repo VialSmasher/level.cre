@@ -1,5 +1,5 @@
 import type { Express, Request } from "express";
-import { randomBytes } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import { z } from "zod";
 import { getUserId, requireAuth } from "../../auth";
 import { ensureUser } from "../../ensureUser";
@@ -153,6 +153,36 @@ const intelDossierFactSchema = z.object({
 
 const intelDossierFactUpdateSchema = intelDossierFactSchema.partial();
 
+const intelAgentSurveySyncJobSchema = z.object({
+  dryRun: z.boolean().optional(),
+  attachCanonicalListingsToSurvey: z.boolean().optional(),
+  survey: z
+    .object({
+      id: z.string().trim().min(1).nullable().optional(),
+      title: z.string().trim().min(1).nullable().optional(),
+      clientName: z.string().trim().nullable().optional(),
+      requirementId: z.string().trim().min(1).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+  listings: z.array(intelSurveyItemSchema).max(250).optional(),
+  dossiers: z
+    .array(
+      intelDossierSchema.partial().extend({
+        dossierId: z.string().trim().min(1).nullable().optional(),
+        facts: z.array(intelDossierFactSchema).max(250).optional(),
+        sourceAssets: z.array(intelSurveyAssetUploadSchema).max(25).optional(),
+        recommendationLabel: z.string().trim().nullable().optional(),
+        brokerNotes: z.string().trim().nullable().optional(),
+        clientNotes: z.string().trim().nullable().optional(),
+        hidden: z.boolean().nullable().optional(),
+        sortOrder: z.number().int().nonnegative().nullable().optional(),
+      }),
+    )
+    .max(100)
+    .optional(),
+});
+
 type SurveyShareReadinessSurvey = {
   items: Array<{
     id: string;
@@ -210,7 +240,39 @@ async function ensureIntelActor(req: Request) {
 }
 
 export function registerIndustrialIntelRoutes(app: Express): void {
+  app.use("/api/intel", (req, res, next) => {
+    const startedAt = Date.now();
+    const requestId = String(req.headers["x-request-id"] || randomUUID());
+    res.setHeader("X-Request-Id", requestId);
+    res.on("finish", () => {
+      const user = (req as any)?.user;
+      if (user?.role !== "agent") return;
+      const path = String(req.originalUrl || req.url || "").split("?")[0] || "/api/intel";
+      void (async () => {
+        await ensureUser(user.id, user.email || null);
+        await industrialIntelService.logAgentEvent({
+          userId: user.id,
+          agentName: user.agentName || null,
+          requestId,
+          method: req.method,
+          path,
+          action: "http_request",
+          statusCode: res.statusCode,
+          success: res.statusCode < 400,
+          durationMs: Date.now() - startedAt,
+          errorMessage: res.statusCode >= 400 ? res.statusMessage || "Request failed" : null,
+          metadata: {
+            queryKeys: Object.keys(req.query || {}),
+            contentType: req.headers["content-type"] || null,
+          },
+        });
+      })().catch((error) => console.error("Failed to log industrial intel agent event:", error));
+    });
+    next();
+  });
+
   app.get("/api/intel/agent-manifest", requireAuth, async (req, res) => {
+    await ensureIntelActor(req);
     res.json({
       ...industrialIntelAgentManifest,
       actor: {
@@ -219,6 +281,42 @@ export function registerIndustrialIntelRoutes(app: Express): void {
         agentName: (req as any)?.user?.agentName || null,
       },
     });
+  });
+
+  app.get("/api/intel/agent-events", requireAuth, async (req, res) => {
+    try {
+      await ensureIntelActor(req);
+      const limit = Math.min(Math.max(Number(req.query.limit || 100), 1), 250);
+      const events = await industrialIntelService.getAgentEvents(getUserId(req), limit);
+      res.json(events);
+    } catch (error) {
+      console.error("Error fetching industrial intel agent events:", error);
+      res.status(500).json({ message: "Failed to fetch industrial intel agent events" });
+    }
+  });
+
+  app.post("/api/intel/agent/surveysync-jobs", requireAuth, async (req, res) => {
+    try {
+      const parsed = intelAgentSurveySyncJobSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid SurveySync agent job", issues: parsed.error.flatten() });
+      }
+      const hasWork = (parsed.data.listings?.length || 0) > 0 || (parsed.data.dossiers?.length || 0) > 0;
+      if (!hasWork && !parsed.data.survey?.title && !parsed.data.survey?.id) {
+        return res.status(400).json({ message: "SurveySync agent job has no survey, listings, or dossiers to process" });
+      }
+      await ensureIntelActor(req);
+      const result = await industrialIntelService.runSurveySyncAgentJob(getUserId(req), parsed.data);
+      res.status(parsed.data.dryRun ? 200 : 201).json(result);
+    } catch (error: any) {
+      const message = String(error?.message || error || "Unknown SurveySync agent job failure");
+      const code = String(error?.code || "");
+      if (code === "23503") {
+        return res.status(404).json({ message: "Referenced requirement, listing, survey, or dossier was not found" });
+      }
+      console.error("Error running SurveySync agent job:", error);
+      res.status(500).json({ message: "Failed to run SurveySync agent job", detail: message });
+    }
   });
 
   app.get("/api/intel/summary", requireAuth, async (_req, res) => {

@@ -1,10 +1,12 @@
 import {
+  type CreateIntelAgentEventInput,
   type CreateIntelListingAssetInput,
   type CreateIntelPropertyDossierInput,
   type CreateIntelRequirementInput,
   type CreateIntelSurveyInput,
   type CreateIntelSurveyItemInput,
   type IntelChangeListItem,
+  type IntelAgentEvent,
   type IntelRequirementDetail,
   type IntelRequirementListItem,
   type IntelRequirementPreference,
@@ -73,6 +75,66 @@ export type SurveySyncDossierAssetExtraction = {
   dossier: IntelPropertyDossierDetail | null;
 };
 
+export type SurveySyncAgentJobInput = {
+  dryRun?: boolean;
+  attachCanonicalListingsToSurvey?: boolean;
+  survey?: {
+    id?: string | null;
+    title?: string | null;
+    clientName?: string | null;
+    requirementId?: string | null;
+  } | null;
+  listings?: Array<CreateIntelSurveyItemInput>;
+  dossiers?: Array<{
+    dossierId?: string | null;
+    canonicalListingId?: string | null;
+    title?: string | null;
+    address?: string | null;
+    normalizedAddress?: string | null;
+    market?: string | null;
+    submarket?: string | null;
+    assetType?: string | null;
+    listingType?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    facts?: UpsertIntelDossierFactInput[];
+    sourceAssets?: CreateDossierAssetUploadInput[];
+    recommendationLabel?: string | null;
+    brokerNotes?: string | null;
+    clientNotes?: string | null;
+    hidden?: boolean | null;
+    sortOrder?: number | null;
+  }>;
+};
+
+export type SurveySyncAgentJobResult = {
+  jobId: string;
+  status: "planned" | "completed";
+  dryRun: boolean;
+  survey: IntelSurveyDetail | null;
+  listings: Array<{
+    listingId: string;
+    status: "planned" | "added" | "skipped";
+    reason?: string;
+  }>;
+  dossiers: Array<{
+    dossierId: string | null;
+    status: "planned" | "matched" | "created" | "updated" | "skipped";
+    title: string | null;
+    canonicalListingId: string | null;
+    factCount: number;
+    uploadRequests: Array<{
+      assetId: string;
+      fileName: string;
+      contentType: string;
+      uploadUrl: string | null;
+      storagePath: string | null;
+    }>;
+  }>;
+  warnings: string[];
+  nextActions: string[];
+};
+
 function sanitizeFileName(fileName: string) {
   return fileName
     .trim()
@@ -80,6 +142,11 @@ function sanitizeFileName(fileName: string) {
     .replace(/[^a-zA-Z0-9._',!$@=;:+?()& -]/g, "-")
     .replace(/\s+/g, " ")
     .slice(0, 120) || "asset";
+}
+
+function normalizeSurveySyncAddress(value?: string | null): string | null {
+  const normalized = value?.trim().replace(/\s+/g, " ").toLowerCase();
+  return normalized || null;
 }
 
 export class IndustrialIntelService {
@@ -97,6 +164,14 @@ export class IndustrialIntelService {
 
   async getListings(): Promise<IntelListingListItem[]> {
     return industrialIntelRepository.getListings();
+  }
+
+  async logAgentEvent(input: CreateIntelAgentEventInput): Promise<IntelAgentEvent | null> {
+    return industrialIntelRepository.createAgentEvent(input);
+  }
+
+  async getAgentEvents(userId: string, limit = 100): Promise<IntelAgentEvent[]> {
+    return industrialIntelRepository.getAgentEvents(userId, limit);
   }
 
   async getListingDuplicates(): Promise<IntelDuplicateGroup[]> {
@@ -175,6 +250,252 @@ export class IndustrialIntelService {
 
   async updateDossierFact(userId: string, dossierId: string, factId: string, input: UpdateIntelDossierFactInput) {
     return industrialIntelRepository.updateDossierFact(userId, dossierId, factId, input);
+  }
+
+  private async findExistingDossierForAgentJob(
+    userId: string,
+    input: NonNullable<SurveySyncAgentJobInput["dossiers"]>[number],
+  ): Promise<IntelPropertyDossierDetail | null> {
+    if (input.dossierId) {
+      return this.getDossierById(userId, input.dossierId);
+    }
+
+    const dossiers = await industrialIntelRepository.getDossiers(userId, 500);
+    if (input.canonicalListingId) {
+      const byListing = dossiers.find((dossier) => dossier.canonicalListingId === input.canonicalListingId);
+      if (byListing) return this.getDossierById(userId, byListing.id);
+    }
+
+    const normalizedAddress = normalizeSurveySyncAddress(input.normalizedAddress || input.address);
+    if (normalizedAddress) {
+      const byAddress = dossiers.find(
+        (dossier) => normalizeSurveySyncAddress(dossier.normalizedAddress || dossier.address) === normalizedAddress,
+      );
+      if (byAddress) return this.getDossierById(userId, byAddress.id);
+    }
+
+    return null;
+  }
+
+  private async buildDossierCreateInput(
+    input: NonNullable<SurveySyncAgentJobInput["dossiers"]>[number],
+  ): Promise<CreateIntelPropertyDossierInput | null> {
+    const listing = input.canonicalListingId
+      ? await industrialIntelRepository.getListingById(input.canonicalListingId)
+      : null;
+    const title = input.title?.trim() || listing?.title || input.address?.trim();
+    if (!title) return null;
+
+    return {
+      canonicalListingId: input.canonicalListingId ?? null,
+      title,
+      address: input.address ?? listing?.address ?? null,
+      normalizedAddress: normalizeSurveySyncAddress(input.normalizedAddress || input.address || listing?.normalizedAddress),
+      market: input.market ?? listing?.market ?? null,
+      submarket: input.submarket ?? listing?.submarket ?? null,
+      assetType: input.assetType ?? listing?.assetType ?? null,
+      listingType: input.listingType ?? listing?.listingType ?? null,
+      status: "draft",
+      latitude: input.latitude ?? listing?.latitude ?? null,
+      longitude: input.longitude ?? listing?.longitude ?? null,
+    };
+  }
+
+  async runSurveySyncAgentJob(userId: string, input: SurveySyncAgentJobInput): Promise<SurveySyncAgentJobResult> {
+    const jobId = randomUUID();
+    const dryRun = Boolean(input.dryRun);
+    const warnings: string[] = [];
+    const nextActions = new Set<string>();
+    const listingResults: SurveySyncAgentJobResult["listings"] = [];
+    const dossierResults: SurveySyncAgentJobResult["dossiers"] = [];
+
+    let survey: IntelSurveyDetail | null = null;
+    if (input.survey?.id) {
+      survey = await this.getSurveyById(userId, input.survey.id);
+      if (!survey) warnings.push(`Survey ${input.survey.id} was not found; listing attachments were skipped.`);
+    } else if (input.survey?.title?.trim()) {
+      if (dryRun) {
+        warnings.push(`Dry run: survey "${input.survey.title.trim()}" would be created.`);
+      } else {
+        survey = await this.createSurvey(userId, {
+          title: input.survey.title.trim(),
+          clientName: input.survey.clientName ?? null,
+          requirementId: input.survey.requirementId ?? null,
+        });
+      }
+    }
+
+    const listingInputs = input.listings || [];
+    for (const listingInput of listingInputs) {
+      if (dryRun) {
+        listingResults.push({ listingId: listingInput.listingId, status: "planned" });
+        continue;
+      }
+      if (!survey) {
+        listingResults.push({
+          listingId: listingInput.listingId,
+          status: "skipped",
+          reason: "No survey was selected or created for this job.",
+        });
+        continue;
+      }
+      const updatedSurvey = await this.addSurveyItem(userId, survey.id, listingInput);
+      if (!updatedSurvey) {
+        listingResults.push({
+          listingId: listingInput.listingId,
+          status: "skipped",
+          reason: "Survey or listing was not found.",
+        });
+        continue;
+      }
+      survey = updatedSurvey;
+      listingResults.push({ listingId: listingInput.listingId, status: "added" });
+    }
+
+    const dossierInputs = input.dossiers || [];
+    for (const dossierInput of dossierInputs) {
+      if (dryRun) {
+        dossierResults.push({
+          dossierId: dossierInput.dossierId ?? null,
+          status: "planned",
+          title: dossierInput.title ?? dossierInput.address ?? null,
+          canonicalListingId: dossierInput.canonicalListingId ?? null,
+          factCount: dossierInput.facts?.length || 0,
+          uploadRequests: [],
+        });
+        continue;
+      }
+
+      let dossier = await this.findExistingDossierForAgentJob(userId, dossierInput);
+      let dossierStatus: SurveySyncAgentJobResult["dossiers"][number]["status"] = dossier ? "matched" : "created";
+      if (!dossier) {
+        const createInput = await this.buildDossierCreateInput(dossierInput);
+        if (!createInput) {
+          dossierResults.push({
+            dossierId: null,
+            status: "skipped",
+            title: dossierInput.title ?? null,
+            canonicalListingId: dossierInput.canonicalListingId ?? null,
+            factCount: 0,
+            uploadRequests: [],
+          });
+          warnings.push("Skipped dossier because it had no dossierId, listingId, title, or address.");
+          continue;
+        }
+
+        try {
+          dossier = await this.createDossier(userId, createInput);
+        } catch (error: any) {
+          if (String(error?.code || "") === "23505") {
+            dossier = await this.findExistingDossierForAgentJob(userId, dossierInput);
+            dossierStatus = dossier ? "matched" : "skipped";
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        const patch: UpdateIntelPropertyDossierInput = {};
+        if (dossierInput.title) patch.title = dossierInput.title;
+        if (dossierInput.address) patch.address = dossierInput.address;
+        if (dossierInput.normalizedAddress || dossierInput.address) {
+          patch.normalizedAddress = normalizeSurveySyncAddress(dossierInput.normalizedAddress || dossierInput.address);
+        }
+        if (dossierInput.market) patch.market = dossierInput.market;
+        if (dossierInput.submarket) patch.submarket = dossierInput.submarket;
+        if (dossierInput.assetType) patch.assetType = dossierInput.assetType;
+        if (dossierInput.listingType) patch.listingType = dossierInput.listingType;
+        if (dossierInput.latitude !== undefined) patch.latitude = dossierInput.latitude;
+        if (dossierInput.longitude !== undefined) patch.longitude = dossierInput.longitude;
+        if (Object.keys(patch).length > 0) {
+          const updated = await this.updateDossier(userId, dossier.id, patch);
+          if (updated) {
+            dossier = updated;
+            dossierStatus = "updated";
+          }
+        }
+      }
+
+      if (!dossier) {
+        dossierResults.push({
+          dossierId: null,
+          status: "skipped",
+          title: dossierInput.title ?? null,
+          canonicalListingId: dossierInput.canonicalListingId ?? null,
+          factCount: 0,
+          uploadRequests: [],
+        });
+        continue;
+      }
+
+      let factCount = 0;
+      for (const fact of dossierInput.facts || []) {
+        const saved = await this.upsertDossierFact(userId, dossier.id, fact);
+        if (saved) factCount += 1;
+      }
+
+      const uploadRequests: SurveySyncAgentJobResult["dossiers"][number]["uploadRequests"] = [];
+      for (const assetInput of dossierInput.sourceAssets || []) {
+        try {
+          const upload = await this.createDossierAssetUpload(userId, dossier.id, assetInput);
+          if (upload) {
+            uploadRequests.push({
+              assetId: upload.asset.id,
+              fileName: upload.asset.fileName,
+              contentType: upload.asset.contentType,
+              uploadUrl: upload.upload.signedUrl || null,
+              storagePath: upload.asset.storagePath,
+            });
+          }
+        } catch (error: any) {
+          warnings.push(`Could not create upload URL for ${assetInput.fileName}: ${String(error?.message || error)}`);
+        }
+      }
+      if (uploadRequests.length > 0) {
+        nextActions.add("Upload source bytes to each signed uploadUrl, then POST /api/intel/assets/:assetId/complete.");
+        nextActions.add("For uploaded PDFs, POST /api/intel/dossiers/:dossierId/assets/:assetId/extract after completion.");
+      }
+
+      const shouldAttachListing = input.attachCanonicalListingsToSurvey !== false;
+      if (survey && shouldAttachListing && dossier.canonicalListingId) {
+        const updatedSurvey = await this.addSurveyItem(userId, survey.id, {
+          listingId: dossier.canonicalListingId,
+          recommendationLabel: dossierInput.recommendationLabel ?? null,
+          brokerNotes: dossierInput.brokerNotes ?? null,
+          clientNotes: dossierInput.clientNotes ?? null,
+          hidden: dossierInput.hidden ?? null,
+          sortOrder: dossierInput.sortOrder ?? null,
+        });
+        if (updatedSurvey) {
+          survey = updatedSurvey;
+          listingResults.push({ listingId: dossier.canonicalListingId, status: "added" });
+        }
+      } else if (survey && shouldAttachListing && !dossier.canonicalListingId) {
+        warnings.push(
+          `Dossier ${dossier.id} was saved but not added to the survey because dossier-only survey items are not implemented yet.`,
+        );
+        nextActions.add("Link the dossier to an inventory listing or build dossier-to-survey item support.");
+      }
+
+      dossierResults.push({
+        dossierId: dossier.id,
+        status: dossierStatus,
+        title: dossier.title,
+        canonicalListingId: dossier.canonicalListingId,
+        factCount,
+        uploadRequests,
+      });
+    }
+
+    return {
+      jobId,
+      status: dryRun ? "planned" : "completed",
+      dryRun,
+      survey,
+      listings: listingResults,
+      dossiers: dossierResults,
+      warnings,
+      nextActions: Array.from(nextActions),
+    };
   }
 
   async extractDossierAsset(

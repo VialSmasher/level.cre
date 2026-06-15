@@ -386,6 +386,40 @@ export type CreateIntelSurveyEventInput = {
   payload?: Record<string, unknown>;
 };
 
+export type IntelAgentEvent = {
+  id: string;
+  userId: string | null;
+  agentName: string | null;
+  requestId: string | null;
+  method: string;
+  path: string;
+  action: string;
+  statusCode: number | null;
+  success: boolean;
+  durationMs: number | null;
+  entityType: string | null;
+  entityId: string | null;
+  errorMessage: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string | null;
+};
+
+export type CreateIntelAgentEventInput = {
+  userId?: string | null;
+  agentName?: string | null;
+  requestId?: string | null;
+  method: string;
+  path: string;
+  action: string;
+  statusCode?: number | null;
+  success?: boolean | null;
+  durationMs?: number | null;
+  entityType?: string | null;
+  entityId?: string | null;
+  errorMessage?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
 export type CreateIntelSurveyInput = {
   requirementId?: string | null;
   title: string;
@@ -442,6 +476,10 @@ const LISTING_ASSET_TABLES = [
 const DOSSIER_TABLES = [
   "intel_property_dossiers",
   "intel_dossier_facts",
+] as const;
+
+const AGENT_EVENT_TABLES = [
+  "intel_agent_events",
 ] as const;
 
 function isoOrNull(value: unknown): string | null {
@@ -596,6 +634,42 @@ function dossierFactFromRow(row: {
   };
 }
 
+function agentEventFromRow(row: {
+  id: string;
+  user_id: string | null;
+  agent_name: string | null;
+  request_id: string | null;
+  method: string;
+  path: string;
+  action: string;
+  status_code: number | null;
+  success: boolean;
+  duration_ms: number | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  error_message: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: Date | null;
+}): IntelAgentEvent {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    agentName: row.agent_name,
+    requestId: row.request_id,
+    method: row.method,
+    path: row.path,
+    action: row.action,
+    statusCode: intOrNull(row.status_code),
+    success: Boolean(row.success),
+    durationMs: intOrNull(row.duration_ms),
+    entityType: row.entity_type,
+    entityId: row.entity_id,
+    errorMessage: row.error_message,
+    metadata: row.metadata || {},
+    createdAt: isoOrNull(row.created_at),
+  };
+}
+
 function isRecoverableIntelSchemaError(error: unknown): boolean {
   const code = String((error as any)?.code || "");
   const message = String((error as any)?.message || "");
@@ -695,6 +769,58 @@ export class IndustrialIntelRepository {
 
     const found = new Set(result.rows.map((row: { table_name: string }) => row.table_name));
     return DOSSIER_TABLES.every((name) => found.has(name));
+  }
+
+  async hasAgentEventTables(): Promise<boolean> {
+    const result = await pool.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name IN ('intel_agent_events')
+    `);
+
+    const found = new Set(result.rows.map((row: { table_name: string }) => row.table_name));
+    return AGENT_EVENT_TABLES.every((name) => found.has(name));
+  }
+
+  async ensureAgentEventTables(): Promise<void> {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.intel_agent_events (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id varchar REFERENCES public.users(id) ON DELETE SET NULL,
+        agent_name varchar,
+        request_id varchar,
+        method varchar NOT NULL,
+        path text NOT NULL,
+        action varchar NOT NULL,
+        status_code integer,
+        success boolean NOT NULL DEFAULT true,
+        duration_ms integer,
+        entity_type varchar,
+        entity_id varchar,
+        error_message text,
+        metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+        created_at timestamp DEFAULT now()
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_agent_events_user
+        ON public.intel_agent_events (user_id, created_at DESC)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_agent_events_agent
+        ON public.intel_agent_events (agent_name, created_at DESC)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_agent_events_request
+        ON public.intel_agent_events (request_id)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_intel_agent_events_action
+        ON public.intel_agent_events (action)
+    `);
+    await pool.query(`ALTER TABLE public.intel_agent_events ENABLE ROW LEVEL SECURITY`);
   }
 
   async ensureDossierTables(): Promise<void> {
@@ -1386,6 +1512,85 @@ export class IndustrialIntelRepository {
       lastSeenAt: isoOrNull(row.last_seen_at),
       removedAt: isoOrNull(row.removed_at),
     };
+  }
+
+  async createAgentEvent(input: CreateIntelAgentEventInput): Promise<IntelAgentEvent | null> {
+    try {
+      await this.ensureAgentEventTables();
+      const result = await pool.query(
+        `
+          INSERT INTO public.intel_agent_events (
+            user_id,
+            agent_name,
+            request_id,
+            method,
+            path,
+            action,
+            status_code,
+            success,
+            duration_ms,
+            entity_type,
+            entity_id,
+            error_message,
+            metadata
+          ) VALUES (
+            (SELECT id FROM public.users WHERE id = $1 LIMIT 1),
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            COALESCE($8, true),
+            $9,
+            $10,
+            $11,
+            $12,
+            COALESCE($13, '{}'::jsonb)
+          )
+          RETURNING *
+        `,
+        [
+          input.userId ?? null,
+          input.agentName ?? null,
+          input.requestId ?? null,
+          input.method,
+          input.path,
+          input.action,
+          input.statusCode ?? null,
+          input.success ?? null,
+          input.durationMs ?? null,
+          input.entityType ?? null,
+          input.entityId ?? null,
+          input.errorMessage ?? null,
+          JSON.stringify(input.metadata || {}),
+        ],
+      );
+      return result.rows[0] ? agentEventFromRow(result.rows[0]) : null;
+    } catch (error) {
+      if (isRecoverableIntelSchemaError(error)) return null;
+      throw error;
+    }
+  }
+
+  async getAgentEvents(userId: string, limit = 100): Promise<IntelAgentEvent[]> {
+    try {
+      if (!(await this.hasAgentEventTables())) return [];
+      const result = await pool.query(
+        `
+          SELECT *
+          FROM public.intel_agent_events
+          WHERE user_id = $1
+          ORDER BY created_at DESC NULLS LAST
+          LIMIT $2
+        `,
+        [userId, limit],
+      );
+      return result.rows.map(agentEventFromRow);
+    } catch (error) {
+      if (isRecoverableIntelSchemaError(error)) return [];
+      throw error;
+    }
   }
 
   async seedDossiersFromListings(userId: string, limit = 250): Promise<number> {

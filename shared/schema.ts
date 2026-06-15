@@ -1008,6 +1008,33 @@ export const intelSurveyEvents = pgTable(
   ],
 );
 
+export const intelAgentEvents = pgTable(
+  "intel_agent_events",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+    agentName: varchar("agent_name"),
+    requestId: varchar("request_id"),
+    method: varchar("method").notNull(),
+    path: text("path").notNull(),
+    action: varchar("action").notNull(),
+    statusCode: integer("status_code"),
+    success: boolean("success").notNull().default(true),
+    durationMs: integer("duration_ms"),
+    entityType: varchar("entity_type"),
+    entityId: varchar("entity_id"),
+    errorMessage: text("error_message"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_intel_agent_events_user").on(table.userId, table.createdAt),
+    index("IDX_intel_agent_events_agent").on(table.agentName, table.createdAt),
+    index("IDX_intel_agent_events_request").on(table.requestId),
+    index("IDX_intel_agent_events_action").on(table.action),
+  ],
+);
+
 export type IntelSource = typeof intelSources.$inferSelect;
 export type InsertIntelSource = typeof intelSources.$inferInsert;
 export type IntelListing = typeof intelListings.$inferSelect;
@@ -1028,3 +1055,5 @@ export type IntelSurveyItem = typeof intelSurveyItems.$inferSelect;
 export type InsertIntelSurveyItem = typeof intelSurveyItems.$inferInsert;
 export type IntelSurveyEvent = typeof intelSurveyEvents.$inferSelect;
 export type InsertIntelSurveyEvent = typeof intelSurveyEvents.$inferInsert;
+export type IntelAgentEvent = typeof intelAgentEvents.$inferSelect;
+export type InsertIntelAgentEvent = typeof intelAgentEvents.$inferInsert;

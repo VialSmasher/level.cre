@@ -20,7 +20,8 @@
     "db:push": "npm --workspace @apps/api run db:push",
     "db:prepare": "npm --workspace @apps/api run db:prepare",
     "intel:migrate": "npm --workspace @apps/api run intel:migrate",
-    "intel:seed": "npm --workspace @apps/api run intel:seed"
+    "intel:seed": "npm --workspace @apps/api run intel:seed",
+    "intel:agent-smoke": "npm --workspace @apps/api run intel:agent-smoke"
   },
   "devDependencies": {
     "npm-run-all": "^4.1.5",
