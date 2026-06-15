@@ -20,6 +20,7 @@ import fs from 'fs';
 import path from 'path';
 import { XP_VALUES, actionForInteractionType, xpForInteractionType } from './lib/gamification';
 import { registerIndustrialIntelRoutes } from './modules/industrial-intel/registerRoutes';
+import { registerResidentLoyaltyRoutes } from './modules/resident-loyalty/registerRoutes';
 import {
   buildDataQualityReview,
   buildFollowUpReview,
@@ -4516,6 +4517,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  await registerResidentLoyaltyRoutes(app);
   registerIndustrialIntelRoutes(app);
 
   const httpServer = createServer(app);
