@@ -24,6 +24,11 @@ Agents can already use the normal authenticated HTTP API to:
    - `POST /api/intel/dossiers/:id/facts`
    - `PATCH /api/intel/dossiers/:id/facts/:factId`
 
+6. Extract proposed facts from an uploaded PDF asset.
+   - `POST /api/intel/dossiers/:id/assets/:assetId/extract`
+   - The asset must already be uploaded and marked `active`.
+   - Current extraction support is PDF-only. PPTX is intentionally not enabled until we add a proper zip/XML parser.
+
 Facts should stay `proposed` when an agent extracted them from imperfect source material. Facts become `approved` only after broker review, or when the broker/agent has explicit permission to mark a broker-provided fact as approved.
 
 ## Expected Agent Behavior
@@ -101,3 +106,15 @@ To let Codex, Claude CoWork, or another broker-controlled assistant populate Lev
    - Uses approved dossier facts and primary assets to populate the client card.
 
 The key rule: agents should be able to upload and propose, but the app should keep broker approval as the quality gate before anything becomes client-facing.
+
+## Implemented First Slice
+
+The first shippable slice is dossier-level PDF extraction:
+
+1. Create or select a dossier.
+2. Upload a PDF brochure or tear sheet to the dossier.
+3. Mark the uploaded asset complete.
+4. Call `POST /api/intel/dossiers/:id/assets/:assetId/extract`.
+5. Review proposed facts in the Dossiers page.
+
+Validated locally against `2959 Parsons Road Tear Sheet.pdf`. The extractor identified address, market, submarket, listing type, building size, land size, clear height, zoning, and loading from the source PDF.

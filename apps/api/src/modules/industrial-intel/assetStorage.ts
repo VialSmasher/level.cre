@@ -70,3 +70,13 @@ export async function signIntelListingAsset(asset: IntelListingAsset) {
 export async function signIntelListingAssets(assets: IntelListingAsset[]) {
   return Promise.all(assets.map((asset) => signIntelListingAsset(asset)));
 }
+
+export async function downloadIntelListingAsset(asset: IntelListingAsset): Promise<Buffer> {
+  const supabase = getSupabaseAdmin();
+  if (!supabase) {
+    throw new Error("Supabase Storage is not configured");
+  }
+  const { data, error } = await supabase.storage.from(asset.storageBucket).download(asset.storagePath);
+  if (error || !data) throw error || new Error("Failed to download asset");
+  return Buffer.from(await data.arrayBuffer());
+}

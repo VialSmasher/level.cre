@@ -249,6 +249,22 @@ export default function IndustrialIntelDossiersPage() {
     },
   });
 
+  const extractAssetMutation = useMutation({
+    mutationFn: async (asset: IntelListingAsset) => {
+      if (!selectedId) throw new Error("Select a property dossier first.");
+      const response = await apiRequest("POST", `/api/intel/dossiers/${selectedId}/assets/${asset.id}/extract`);
+      return response.json() as Promise<{ facts: IntelDossierFact[] }>;
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/intel/dossiers/${selectedId}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/dossiers"] });
+      toast({ title: `Extracted ${result.facts.filter(Boolean).length} proposed facts` });
+    },
+    onError: (error: any) => {
+      toast({ title: "Extraction failed", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
   const createFactMutation = useMutation({
     mutationFn: async () => {
       if (!selectedId) throw new Error("Select a property dossier first.");
@@ -540,11 +556,25 @@ export default function IndustrialIntelDossiersPage() {
                                     <p className="line-clamp-2 text-sm font-semibold text-slate-950">{asset.fileName}</p>
                                     <p className="mt-1 text-xs text-slate-500">{asset.assetType} - {formatBytes(asset.fileSize)}</p>
                                   </div>
-                                  {asset.signedUrl && (
-                                    <a href={asset.signedUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-blue-700">
-                                      Open
-                                    </a>
-                                  )}
+                                  <div className="flex shrink-0 items-center gap-2">
+                                    {asset.contentType === "application/pdf" && asset.status === "active" && (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-8 px-2 text-xs"
+                                        disabled={extractAssetMutation.isPending}
+                                        onClick={() => extractAssetMutation.mutate(asset)}
+                                      >
+                                        Extract
+                                      </Button>
+                                    )}
+                                    {asset.signedUrl && (
+                                      <a href={asset.signedUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-blue-700">
+                                        Open
+                                      </a>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             ))

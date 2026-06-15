@@ -44,9 +44,11 @@ import { resolvePublicLinkCandidates } from "./publicLinkResolver";
 import { runIndustrialIntelSource } from "./sourceRegistry";
 import {
   createIntelAssetSignedUpload,
+  downloadIntelListingAsset,
   getIntelAssetBucket,
   signIntelListingAssets,
 } from "./assetStorage";
+import { extractSurveyFactsFromBuffer, type SurveySyncExtractionResult } from "./surveySyncExtraction";
 
 export type CreateSurveyItemAssetUploadInput = {
   fileName: string;
@@ -62,6 +64,14 @@ export type CreateManualPublicLinkInput = {
 };
 
 export type CreateDossierAssetUploadInput = CreateSurveyItemAssetUploadInput;
+
+export type SurveySyncDossierAssetExtraction = {
+  assetId: string;
+  dossierId: string;
+  extraction: SurveySyncExtractionResult;
+  facts: Awaited<ReturnType<typeof industrialIntelRepository.upsertDossierFact>>[];
+  dossier: IntelPropertyDossierDetail | null;
+};
 
 function sanitizeFileName(fileName: string) {
   return fileName
@@ -165,6 +175,50 @@ export class IndustrialIntelService {
 
   async updateDossierFact(userId: string, dossierId: string, factId: string, input: UpdateIntelDossierFactInput) {
     return industrialIntelRepository.updateDossierFact(userId, dossierId, factId, input);
+  }
+
+  async extractDossierAsset(
+    userId: string,
+    dossierId: string,
+    assetId: string,
+  ): Promise<SurveySyncDossierAssetExtraction | null> {
+    const asset = await industrialIntelRepository.getDossierAssetById(userId, dossierId, assetId);
+    if (!asset) return null;
+    if (asset.status !== "active") {
+      throw new Error("Asset must be uploaded and active before extraction");
+    }
+
+    const buffer = await downloadIntelListingAsset(asset);
+    const extraction = await extractSurveyFactsFromBuffer(buffer, {
+      contentType: asset.contentType,
+      fileName: asset.fileName,
+      sourceAssetId: asset.id,
+    });
+
+    const dossierPatch: UpdateIntelPropertyDossierInput = {};
+    if (extraction.title) dossierPatch.title = extraction.title;
+    if (extraction.address) dossierPatch.address = extraction.address;
+    if (extraction.address) dossierPatch.normalizedAddress = extraction.address;
+    if (extraction.market) dossierPatch.market = extraction.market;
+    if (extraction.submarket) dossierPatch.submarket = extraction.submarket;
+    if (extraction.assetType) dossierPatch.assetType = extraction.assetType;
+    if (extraction.listingType) dossierPatch.listingType = extraction.listingType;
+    if (Object.keys(dossierPatch).length > 0) {
+      await industrialIntelRepository.updateDossier(userId, dossierId, dossierPatch);
+    }
+
+    const facts = [];
+    for (const fact of extraction.facts) {
+      facts.push(await industrialIntelRepository.upsertDossierFact(userId, dossierId, fact));
+    }
+
+    return {
+      assetId,
+      dossierId,
+      extraction,
+      facts,
+      dossier: await this.getDossierById(userId, dossierId),
+    };
   }
 
   async archiveDuplicateListings(keepId: string, duplicateIds: string[]) {

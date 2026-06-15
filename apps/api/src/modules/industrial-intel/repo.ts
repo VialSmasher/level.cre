@@ -1683,6 +1683,23 @@ export class IndustrialIntelRepository {
     return result.rows.map(listingAssetFromRow);
   }
 
+  async getDossierAssetById(userId: string, dossierId: string, assetId: string): Promise<IntelListingAsset | null> {
+    await this.ensureDossierTables();
+    const result = await pool.query(
+      `
+        SELECT assets.*
+        FROM public.intel_listing_assets assets
+        INNER JOIN public.intel_property_dossiers dossiers ON dossiers.id = assets.dossier_id
+        WHERE assets.id = $1
+          AND assets.dossier_id = $2
+          AND dossiers.created_by_user_id = $3
+        LIMIT 1
+      `,
+      [assetId, dossierId, userId],
+    );
+    return result.rows[0] ? listingAssetFromRow(result.rows[0]) : null;
+  }
+
   async getDossierFacts(userId: string, dossierId: string): Promise<IntelDossierFact[]> {
     await this.ensureDossierTables();
     const dossier = await pool.query(

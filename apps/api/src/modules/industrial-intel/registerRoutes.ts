@@ -357,6 +357,24 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     }
   });
 
+  app.post("/api/intel/dossiers/:id/assets/:assetId/extract", requireAuth, async (req, res) => {
+    try {
+      await ensureIntelActor(req);
+      const result = await industrialIntelService.extractDossierAsset(getUserId(req), req.params.id, req.params.assetId);
+      if (!result) {
+        return res.status(404).json({ message: "Industrial intel dossier asset not found" });
+      }
+      res.json(result);
+    } catch (error: any) {
+      const message = String(error?.message || error || "Unknown extraction failure");
+      if (/supports PDF files only|must be uploaded and active/i.test(message)) {
+        return res.status(400).json({ message });
+      }
+      console.error("Error extracting industrial intel dossier asset:", error);
+      res.status(500).json({ message: "Failed to extract industrial intel dossier asset", detail: message });
+    }
+  });
+
   app.post("/api/intel/dossiers/:id/facts", requireAuth, async (req, res) => {
     try {
       const parsed = intelDossierFactSchema.safeParse(req.body);
