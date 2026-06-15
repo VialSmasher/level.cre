@@ -1,5 +1,6 @@
 import type {
   MaintenanceRequest,
+  OnboardingStepStatus,
   Resident,
   ResidentEvent,
   ResidentEventType,
@@ -63,6 +64,8 @@ export type BuildingStats = {
   rewardsIssued: number;
   estimatedFollowUpsAvoided: number;
   openTaskCount: number;
+  onboardingCompletionRate: number;
+  moveInReviewCount: number;
 };
 
 export function eventTypeLabel(eventType: ResidentEventType) {
@@ -104,6 +107,34 @@ export function rewardCategoryLabel(category: RewardOption['category']) {
     home: 'Home',
   };
   return labels[category];
+}
+
+export function onboardingStatusLabel(status: OnboardingStepStatus) {
+  const labels: Record<OnboardingStepStatus, string> = {
+    todo: 'To do',
+    in_progress: 'In progress',
+    submitted: 'Submitted',
+    manager_review: 'Manager review',
+    complete: 'Complete',
+  };
+  return labels[status];
+}
+
+export function calculateOnboardingProgress(state: ResidentLoyaltyDemoState, residentId: string) {
+  const steps = state.onboardingSteps.filter((step) => step.residentId === residentId);
+  if (steps.length === 0) {
+    return { completed: 0, total: 0, percent: 0 };
+  }
+  const completed = steps.filter((step) => step.status === 'complete').length;
+  return {
+    completed,
+    total: steps.length,
+    percent: Math.round((completed / steps.length) * 100),
+  };
+}
+
+export function getTenantLifecycle(state: ResidentLoyaltyDemoState, residentId: string) {
+  return state.tenantLifecycles.find((record) => record.residentId === residentId) ?? null;
 }
 
 export function calculateResidentPoints(
@@ -181,6 +212,7 @@ export function calculateBuildingStats(state: ResidentLoyaltyDemoState, building
   const notices = state.notices.filter((notice) => notice.buildingId === buildingId);
   const renewals = state.renewals.filter((renewal) => renewal.buildingId === buildingId);
   const redemptions = state.rewardRedemptions.filter((redemption) => redemption.buildingId === buildingId);
+  const onboardingSteps = state.onboardingSteps.filter((step) => step.buildingId === buildingId);
   const occupiedUnits = units.filter((unit) => unit.occupancyStatus === 'occupied' || unit.occupancyStatus === 'notice_to_vacate').length;
   const onTimeStreakCount = residents.filter((resident) => resident.rentStreakMonths >= 3).length;
   const averageRentStreakMonths = residents.length
@@ -199,6 +231,12 @@ export function calculateBuildingStats(state: ResidentLoyaltyDemoState, building
   const accessCoverageRate = residents.length ? Math.min(100, Math.round((accessConfirmations / residents.length) * 100)) : 0;
   const rentStreakRate = residents.length ? Math.min(100, Math.round((onTimeStreakCount / residents.length) * 100)) : 0;
   const rewardsPending = redemptions.filter((redemption) => redemption.status === 'pending').length;
+  const onboardingCompletionRate = onboardingSteps.length
+    ? Math.round((onboardingSteps.filter((step) => step.status === 'complete').length / onboardingSteps.length) * 100)
+    : 0;
+  const moveInReviewCount = state.tenantLifecycles.filter(
+    (record) => record.buildingId === buildingId && record.moveInInspection.status === 'manager_review',
+  ).length;
   const healthScore = clampScore(
     Math.round(
       noticeAcknowledgementRate * 0.25 +
@@ -227,6 +265,8 @@ export function calculateBuildingStats(state: ResidentLoyaltyDemoState, building
     rewardsIssued: redemptions.filter((redemption) => redemption.status === 'approved' || redemption.status === 'issued').length,
     estimatedFollowUpsAvoided: calculateEstimatedFollowUpsAvoided(events),
     openTaskCount: state.tasks.filter((task) => task.buildingId === buildingId && task.status === 'available').length,
+    onboardingCompletionRate,
+    moveInReviewCount,
   };
 }
 

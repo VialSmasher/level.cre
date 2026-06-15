@@ -40,6 +40,7 @@ const Badges = lazy(() => import("./pages/badges"));
 const TrackRecord = lazy(() => import("./pages/track-record"));
 const ResidentLoyalty = lazy(() => import("./pages/resident-loyalty"));
 const ResidentLoyaltyResidentDemo = lazy(() => import("./pages/resident-loyalty-resident-demo"));
+const ResidentLoyaltySetup = lazy(() => import("./pages/resident-loyalty-setup"));
 const IndustrialIntelHomePage = lazy(
   () => import("./tools/industrial-intel/pages/IndustrialIntelHomePage"),
 );
@@ -152,6 +153,12 @@ function Router() {
       <Route path="/resident-loyalty/resident-demo" component={() => (
         <Suspense fallback={<Spinner />}>
           <ResidentLoyaltyResidentDemo />
+        </Suspense>
+      )} />
+
+      <Route path="/resident-loyalty/setup" component={() => (
+        <Suspense fallback={<Spinner />}>
+          <ResidentLoyaltySetup />
         </Suspense>
       )} />
 
