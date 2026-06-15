@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentType } from 'react';
+import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import { Link } from 'wouter';
 import {
   ArrowLeft,
@@ -44,6 +44,7 @@ import {
   TASK_EVENT_MAP,
   taskTypeLabel,
 } from './residentLoyaltyLogic';
+import { loadResidentLoyaltyState, mergeResidentLoyaltyPortalState } from './residentLoyaltyApi';
 import type { ResidentTask, RewardOption } from './types';
 
 type IconType = ComponentType<{ className?: string }>;
@@ -102,6 +103,7 @@ export default function ResidentLoyaltyResidentDemoPage() {
   const [demo, setDemo] = useState(createResidentLoyaltyDemoState);
   const [selectedResidentId, setSelectedResidentId] = useState('resident-amelia-wong');
   const [lastAction, setLastAction] = useState<{ title: string; detail: string; tone: 'earned' | 'reward' } | null>(null);
+  const [isDatabaseBacked, setIsDatabaseBacked] = useState(false);
   const resident = demo.residents.find((item) => item.id === selectedResidentId) ?? demo.residents[0];
   const building = demo.buildings[0];
   const currentPoints = calculateResidentPoints(resident.id, demo.events, demo.rewardRedemptions);
@@ -126,6 +128,29 @@ export default function ResidentLoyaltyResidentDemoPage() {
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const lifecycle = getTenantLifecycle(demo, resident.id);
   const onboardingProgress = calculateOnboardingProgress(demo, resident.id);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPersistedState() {
+      try {
+        const payload = await loadResidentLoyaltyState();
+        if (cancelled || !payload.state) return;
+        setDemo((current) => mergeResidentLoyaltyPortalState(current, payload.state));
+        setIsDatabaseBacked(payload.source === 'database');
+        const loadedResidents = createResidentLoyaltyDemoState().residents;
+        const preferred = loadedResidents.find((item) => item.name === 'Amelia Wong') || loadedResidents[0];
+        if (preferred) setSelectedResidentId(preferred.id);
+      } catch (_error) {
+        if (!cancelled) setIsDatabaseBacked(false);
+      }
+    }
+
+    loadPersistedState();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const completeTask = (task: ResidentTask) => {
     setLastAction({
@@ -287,7 +312,12 @@ export default function ResidentLoyaltyResidentDemoPage() {
                     <p className="text-sm text-white/55">{building.name}</p>
                     <h1 className="mt-1 text-2xl font-black">{resident.name}</h1>
                     <p className="mt-1 text-sm text-white/60">Unit {getResidentUnitLabel(demo, resident)} - {building.neighbourhood}</p>
-                    <Badge className="mt-3 bg-white/10 text-white hover:bg-white/10">Gold resident</Badge>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Badge className="bg-white/10 text-white hover:bg-white/10">Gold resident</Badge>
+                      <Badge variant="outline" className="border-white/15 bg-white/5 text-white">
+                        {isDatabaseBacked ? 'Database-backed' : 'Demo'}
+                      </Badge>
+                    </div>
                   </div>
                   <div className="rounded-lg bg-[#f6c451] p-2 text-stone-950">
                     <WalletCards className="h-5 w-5" />

@@ -5,6 +5,7 @@ import {
   index,
   jsonb,
   pgTable,
+  date,
   timestamp,
   varchar,
   uuid,
@@ -1057,3 +1058,171 @@ export type IntelSurveyEvent = typeof intelSurveyEvents.$inferSelect;
 export type InsertIntelSurveyEvent = typeof intelSurveyEvents.$inferInsert;
 export type IntelAgentEvent = typeof intelAgentEvents.$inferSelect;
 export type InsertIntelAgentEvent = typeof intelAgentEvents.$inferInsert;
+
+// Resident Loyalty / PMS-lite onboarding tables
+export const residentLoyaltyLandlords = pgTable(
+  "resident_loyalty_landlords",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    ownerUserId: varchar("owner_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    name: varchar("name").notNull(),
+    managerName: varchar("manager_name"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_resident_loyalty_landlords_owner").on(table.ownerUserId),
+  ],
+);
+
+export const residentLoyaltyBuildings = pgTable(
+  "resident_loyalty_buildings",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    landlordId: varchar("landlord_id").notNull().references(() => residentLoyaltyLandlords.id, { onDelete: "cascade" }),
+    name: varchar("name").notNull(),
+    address: text("address"),
+    neighbourhood: varchar("neighbourhood"),
+    portalSlug: varchar("portal_slug").notNull(),
+    unitCount: integer("unit_count").notNull().default(0),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_resident_loyalty_buildings_landlord").on(table.landlordId),
+    unique("UQ_resident_loyalty_buildings_slug").on(table.portalSlug),
+  ],
+);
+
+export const residentLoyaltyUnits = pgTable(
+  "resident_loyalty_units",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    buildingId: varchar("building_id").notNull().references(() => residentLoyaltyBuildings.id, { onDelete: "cascade" }),
+    unitNumber: varchar("unit_number").notNull(),
+    floor: integer("floor"),
+    bedrooms: integer("bedrooms"),
+    occupancyStatus: varchar("occupancy_status").notNull().default("vacant"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_resident_loyalty_units_building").on(table.buildingId),
+    unique("UQ_resident_loyalty_units_number").on(table.buildingId, table.unitNumber),
+  ],
+);
+
+export const residentLoyaltyResidents = pgTable(
+  "resident_loyalty_residents",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    buildingId: varchar("building_id").notNull().references(() => residentLoyaltyBuildings.id, { onDelete: "cascade" }),
+    unitId: varchar("unit_id").notNull().references(() => residentLoyaltyUnits.id, { onDelete: "cascade" }),
+    userId: varchar("user_id").references(() => users.id, { onDelete: "set null" }),
+    name: varchar("name").notNull(),
+    email: varchar("email").notNull(),
+    moveInDate: date("move_in_date"),
+    rentStreakMonths: integer("rent_streak_months").notNull().default(0),
+    autopayStatus: varchar("autopay_status").notNull().default("not_set"),
+    renewalWindow: varchar("renewal_window").notNull().default("not_due"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_resident_loyalty_residents_building").on(table.buildingId),
+    index("IDX_resident_loyalty_residents_unit").on(table.unitId),
+    index("IDX_resident_loyalty_residents_user").on(table.userId),
+    unique("UQ_resident_loyalty_residents_unit_email").on(table.unitId, table.email),
+  ],
+);
+
+export const residentLoyaltyMemberships = pgTable(
+  "resident_loyalty_memberships",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    landlordId: varchar("landlord_id").notNull().references(() => residentLoyaltyLandlords.id, { onDelete: "cascade" }),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    residentId: varchar("resident_id").references(() => residentLoyaltyResidents.id, { onDelete: "cascade" }),
+    role: varchar("role").notNull().default("landlord_owner"), // landlord_owner | landlord_manager | resident
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_resident_loyalty_memberships_landlord").on(table.landlordId),
+    index("IDX_resident_loyalty_memberships_user").on(table.userId),
+    index("IDX_resident_loyalty_memberships_resident").on(table.residentId),
+  ],
+);
+
+export const residentLoyaltyTenantLifecycles = pgTable(
+  "resident_loyalty_tenant_lifecycles",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    residentId: varchar("resident_id").notNull().references(() => residentLoyaltyResidents.id, { onDelete: "cascade" }),
+    buildingId: varchar("building_id").notNull().references(() => residentLoyaltyBuildings.id, { onDelete: "cascade" }),
+    unitId: varchar("unit_id").notNull().references(() => residentLoyaltyUnits.id, { onDelete: "cascade" }),
+    inviteStatus: varchar("invite_status").notNull().default("draft"),
+    portalSlug: varchar("portal_slug").notNull(),
+    leaseDocumentName: varchar("lease_document_name"),
+    leaseStatus: varchar("lease_status").notNull().default("missing"),
+    leaseStartDate: date("lease_start_date"),
+    leaseEndDate: date("lease_end_date"),
+    leaseAcknowledgedAt: timestamp("lease_acknowledged_at"),
+    securityDepositAmountLabel: varchar("security_deposit_amount_label"),
+    securityDepositStatus: varchar("security_deposit_status").notNull().default("not_requested"),
+    securityDepositConfirmedAt: timestamp("security_deposit_confirmed_at"),
+    nextRentAmountLabel: varchar("next_rent_amount_label"),
+    nextRentDueDate: date("next_rent_due_date"),
+    nextRentStatus: varchar("next_rent_status").notNull().default("not_due"),
+    moveInInspectionStatus: varchar("move_in_inspection_status").notNull().default("not_started"),
+    moveInPhotoCount: integer("move_in_photo_count").notNull().default(0),
+    moveInIssueCount: integer("move_in_issue_count").notNull().default(0),
+    moveInSubmittedAt: timestamp("move_in_submitted_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_resident_loyalty_lifecycles_resident").on(table.residentId),
+    index("IDX_resident_loyalty_lifecycles_building").on(table.buildingId),
+    unique("UQ_resident_loyalty_lifecycles_resident").on(table.residentId),
+  ],
+);
+
+export const residentLoyaltyOnboardingSteps = pgTable(
+  "resident_loyalty_onboarding_steps",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    residentId: varchar("resident_id").notNull().references(() => residentLoyaltyResidents.id, { onDelete: "cascade" }),
+    buildingId: varchar("building_id").notNull().references(() => residentLoyaltyBuildings.id, { onDelete: "cascade" }),
+    unitId: varchar("unit_id").notNull().references(() => residentLoyaltyUnits.id, { onDelete: "cascade" }),
+    type: varchar("type").notNull(),
+    title: varchar("title").notNull(),
+    description: text("description").notNull().default(""),
+    status: varchar("status").notNull().default("todo"),
+    points: integer("points"),
+    dueAt: timestamp("due_at"),
+    completedAt: timestamp("completed_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_resident_loyalty_steps_resident").on(table.residentId),
+    index("IDX_resident_loyalty_steps_building").on(table.buildingId),
+    index("IDX_resident_loyalty_steps_status").on(table.status),
+    unique("UQ_resident_loyalty_steps_type").on(table.residentId, table.type),
+  ],
+);
+
+export type ResidentLoyaltyLandlord = typeof residentLoyaltyLandlords.$inferSelect;
+export type InsertResidentLoyaltyLandlord = typeof residentLoyaltyLandlords.$inferInsert;
+export type ResidentLoyaltyBuilding = typeof residentLoyaltyBuildings.$inferSelect;
+export type InsertResidentLoyaltyBuilding = typeof residentLoyaltyBuildings.$inferInsert;
+export type ResidentLoyaltyUnit = typeof residentLoyaltyUnits.$inferSelect;
+export type InsertResidentLoyaltyUnit = typeof residentLoyaltyUnits.$inferInsert;
+export type ResidentLoyaltyResident = typeof residentLoyaltyResidents.$inferSelect;
+export type InsertResidentLoyaltyResident = typeof residentLoyaltyResidents.$inferInsert;
+export type ResidentLoyaltyMembership = typeof residentLoyaltyMemberships.$inferSelect;
+export type InsertResidentLoyaltyMembership = typeof residentLoyaltyMemberships.$inferInsert;
+export type ResidentLoyaltyTenantLifecycle = typeof residentLoyaltyTenantLifecycles.$inferSelect;
+export type InsertResidentLoyaltyTenantLifecycle = typeof residentLoyaltyTenantLifecycles.$inferInsert;
+export type ResidentLoyaltyOnboardingStep = typeof residentLoyaltyOnboardingSteps.$inferSelect;
+export type InsertResidentLoyaltyOnboardingStep = typeof residentLoyaltyOnboardingSteps.$inferInsert;

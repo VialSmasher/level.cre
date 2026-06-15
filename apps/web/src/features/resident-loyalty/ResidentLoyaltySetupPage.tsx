@@ -1,4 +1,4 @@
-import { useMemo, useState, type ComponentType } from 'react';
+import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import { Link } from 'wouter';
 import {
   ArrowRight,
@@ -32,6 +32,7 @@ import {
   getTenantLifecycle,
   onboardingStatusLabel,
 } from './residentLoyaltyLogic';
+import { loadResidentLoyaltyState, mergeResidentLoyaltyState, runResidentLoyaltyAction } from './residentLoyaltyApi';
 import type { OnboardingStepStatus, ResidentOnboardingStep, TenantLifecycleRecord } from './types';
 
 type IconType = ComponentType<{ className?: string }>;
@@ -96,6 +97,8 @@ export default function ResidentLoyaltySetupPage() {
   const [demo, setDemo] = useState(createResidentLoyaltyDemoState);
   const [selectedResidentId, setSelectedResidentId] = useState('resident-mateo-reyes');
   const [invitePreviewed, setInvitePreviewed] = useState(false);
+  const [isDatabaseBacked, setIsDatabaseBacked] = useState(false);
+  const [persistenceNote, setPersistenceNote] = useState('Public demo mode. Sign in to persist landlord and tenant records.');
 
   const building = demo.buildings[0];
   const landlord = demo.landlords[0];
@@ -108,6 +111,51 @@ export default function ResidentLoyaltySetupPage() {
   );
   const progress = calculateOnboardingProgress(demo, selectedResident.id);
   const portalUrl = lifecycle ? `https://app.livingrewards.com/${lifecycle.portalSlug}` : 'https://app.livingrewards.com/property/unit';
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPersistedState() {
+      try {
+        const payload = await loadResidentLoyaltyState();
+        if (cancelled || !payload.state) return;
+        setDemo((current) => mergeResidentLoyaltyState(current, payload.state));
+        setIsDatabaseBacked(payload.source === 'database');
+        setPersistenceNote(
+          payload.source === 'database'
+            ? 'Database-backed demo. Landlord, unit, tenant, lease, deposit, rent, and inspection records are persisted for this account.'
+            : 'Public demo mode. Sign in to persist landlord and tenant records.',
+        );
+        const loadedResidents = payload.state.residents || [];
+        const preferred = loadedResidents.find((resident) => resident.name === 'Mateo Reyes') || loadedResidents[0];
+        if (preferred) setSelectedResidentId(preferred.id);
+      } catch (_error) {
+        if (!cancelled) {
+          setIsDatabaseBacked(false);
+          setPersistenceNote('Public demo mode. Sign in to persist landlord and tenant records.');
+        }
+      }
+    }
+
+    loadPersistedState();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const syncPersistedAction = async (path: string) => {
+    if (!isDatabaseBacked) return;
+    try {
+      const payload = await runResidentLoyaltyAction(path);
+      if (payload.state) {
+        setDemo((current) => mergeResidentLoyaltyState(current, payload.state));
+      }
+      setPersistenceNote('Saved to the resident loyalty database.');
+    } catch (error: any) {
+      setIsDatabaseBacked(false);
+      setPersistenceNote(error?.message ? `Database save failed; continuing locally. ${error.message}` : 'Database save failed; continuing locally.');
+    }
+  };
 
   const updateStep = (stepId: string, status: OnboardingStepStatus) => {
     setDemo((current) => ({
@@ -137,6 +185,7 @@ export default function ResidentLoyaltySetupPage() {
           : step,
       ),
     }));
+    void syncPersistedAction(`/api/resident-loyalty/residents/${selectedResident.id}/invite`);
   };
 
   const acceptInvite = () => {
@@ -146,6 +195,7 @@ export default function ResidentLoyaltySetupPage() {
         record.residentId === selectedResident.id ? { ...record, inviteStatus: 'accepted' } : record,
       ),
     }));
+    void syncPersistedAction(`/api/resident-loyalty/residents/${selectedResident.id}/accept-invite`);
   };
 
   const markLeaseAcknowledged = () => {
@@ -169,6 +219,7 @@ export default function ResidentLoyaltySetupPage() {
           : step,
       ),
     }));
+    void syncPersistedAction(`/api/resident-loyalty/residents/${selectedResident.id}/lease-acknowledged`);
   };
 
   const submitInspectionForReview = () => {
@@ -194,6 +245,7 @@ export default function ResidentLoyaltySetupPage() {
           : step,
       ),
     }));
+    void syncPersistedAction(`/api/resident-loyalty/residents/${selectedResident.id}/inspection-submit`);
   };
 
   const completeInspectionReview = () => {
@@ -216,6 +268,7 @@ export default function ResidentLoyaltySetupPage() {
           : step,
       ),
     }));
+    void syncPersistedAction(`/api/resident-loyalty/residents/${selectedResident.id}/inspection-approve`);
   };
 
   const completeDepositStatus = () => {
@@ -239,6 +292,7 @@ export default function ResidentLoyaltySetupPage() {
           : step,
       ),
     }));
+    void syncPersistedAction(`/api/resident-loyalty/residents/${selectedResident.id}/deposit-confirmed`);
   };
 
   const stepAction = (step: ResidentOnboardingStep) => {
@@ -255,7 +309,18 @@ export default function ResidentLoyaltySetupPage() {
       }
       return <Button size="sm" variant="outline" onClick={submitInspectionForReview}>Submit review</Button>;
     }
-    return <Button size="sm" variant="outline" onClick={() => updateStep(step.id, 'complete')}>Mark done</Button>;
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => {
+          updateStep(step.id, 'complete');
+          void syncPersistedAction(`/api/resident-loyalty/onboarding-steps/${step.id}/complete`);
+        }}
+      >
+        Mark done
+      </Button>
+    );
   };
 
   return (
@@ -291,7 +356,12 @@ export default function ResidentLoyaltySetupPage() {
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 md:px-6 md:py-8">
         <section className="grid gap-5 lg:grid-cols-[1fr_390px]">
           <div className="rounded-lg bg-stone-950 p-5 text-white shadow-xl md:p-8">
-            <Badge className="bg-[#f6c451] text-stone-950 hover:bg-[#f6c451]">PMS-lite, not full PMS</Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className="bg-[#f6c451] text-stone-950 hover:bg-[#f6c451]">PMS-lite, not full PMS</Badge>
+              <Badge variant="outline" className="border-white/20 bg-white/10 text-white">
+                {isDatabaseBacked ? 'Database-backed' : 'Frontend demo'}
+              </Badge>
+            </div>
             <h1 className="mt-5 max-w-4xl text-4xl font-black leading-none md:text-6xl">
               Landlords onboard tenants into a branded operations and rewards portal.
             </h1>
@@ -304,6 +374,11 @@ export default function ResidentLoyaltySetupPage() {
               <SetupStep icon={Building2} title="1. Property" detail="Create landlord, building, units, and portal slug." active />
               <SetupStep icon={UserPlus} title="2. Invite" detail="Send a resident link for the correct unit and lease period." />
               <SetupStep icon={WalletCards} title="3. Rewards" detail="Tie move-in and operations tasks to positive points." />
+            </div>
+            <div className={`mt-5 rounded-lg border p-3 text-sm leading-6 ${
+              isDatabaseBacked ? 'border-emerald-300/30 bg-emerald-400/10 text-emerald-50' : 'border-white/15 bg-white/10 text-white/70'
+            }`}>
+              {persistenceNote}
             </div>
           </div>
 
