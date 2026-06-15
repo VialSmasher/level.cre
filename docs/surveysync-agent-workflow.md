@@ -6,6 +6,11 @@ SurveySync is the agent-facing intake layer for Industrial Intel property dossie
 
 Agents can already use the normal authenticated HTTP API to:
 
+0. Discover the active agent contract.
+   - `GET /api/intel/agent-manifest`
+   - Use this as the first call in a new Codex/Hermes session.
+   - It returns auth modes, supported upload types, endpoint paths, invariants, and the recommended SurveySync flow.
+
 1. Create or update a property dossier.
    - `POST /api/intel/dossiers`
    - `PATCH /api/intel/dossiers/:id`
@@ -30,6 +35,24 @@ Agents can already use the normal authenticated HTTP API to:
    - Current extraction support is PDF-only. PPTX is intentionally not enabled until we add a proper zip/XML parser.
 
 Facts should stay `proposed` when an agent extracted them from imperfect source material. Facts become `approved` only after broker review, or when the broker/agent has explicit permission to mark a broker-provided fact as approved.
+
+## Agent Authentication
+
+Browser-based agents can use the broker's normal Supabase user session.
+
+Server-to-server agents such as Hermes can use an optional static agent key when the deployment sets:
+
+- `INTEL_AGENT_API_KEY`
+- `INTEL_AGENT_USER_ID`
+- optional `INTEL_AGENT_EMAIL`
+- optional `INTEL_AGENT_NAME`
+
+The agent sends either:
+
+- `Authorization: Bearer <INTEL_AGENT_API_KEY>`
+- or `X-LevelCRE-Agent-Key: <INTEL_AGENT_API_KEY>`
+
+The API treats requests as the configured `INTEL_AGENT_USER_ID`, so the agent sees and writes the same owner-scoped dossiers, surveys, requirements, and assets every time. This is intentionally simple for the current MVP. The next production hardening step is scoped agent tokens plus per-agent audit records.
 
 ## Expected Agent Behavior
 

@@ -3,6 +3,7 @@ import { randomBytes } from "crypto";
 import { z } from "zod";
 import { getUserId, requireAuth } from "../../auth";
 import { ensureUser } from "../../ensureUser";
+import { industrialIntelAgentManifest } from "./agentManifest";
 import { industrialIntelService } from "./service";
 
 const intelRequirementSchema = z.object({
@@ -209,6 +210,17 @@ async function ensureIntelActor(req: Request) {
 }
 
 export function registerIndustrialIntelRoutes(app: Express): void {
+  app.get("/api/intel/agent-manifest", requireAuth, async (req, res) => {
+    res.json({
+      ...industrialIntelAgentManifest,
+      actor: {
+        userId: getUserId(req),
+        role: (req as any)?.user?.role || "user",
+        agentName: (req as any)?.user?.agentName || null,
+      },
+    });
+  });
+
   app.get("/api/intel/summary", requireAuth, async (_req, res) => {
     try {
       const summary = await industrialIntelService.getSummary();

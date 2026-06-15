@@ -1,6 +1,32 @@
 import { Request, Response, NextFunction } from 'express'
 // storage import intentionally omitted in dev/demo to avoid DB calls in restricted environments
 import { jwtVerify, JWTPayload } from 'jose'
+import { timingSafeEqual } from 'crypto'
+
+function safeTokenEquals(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left)
+  const rightBuffer = Buffer.from(right)
+  if (leftBuffer.length !== rightBuffer.length) return false
+  return timingSafeEqual(leftBuffer, rightBuffer)
+}
+
+function getConfiguredAgentUser(req: Request): { id: string; email?: string; agentName?: string } | null {
+  const expectedToken = process.env.INTEL_AGENT_API_KEY
+  const userId = process.env.INTEL_AGENT_USER_ID
+  if (!expectedToken || !userId) return null
+
+  const authHeader = req.headers.authorization
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
+  const headerToken = typeof req.headers['x-levelcre-agent-key'] === 'string' ? req.headers['x-levelcre-agent-key'] : null
+  const suppliedTokens = [bearerToken, headerToken].filter((token): token is string => Boolean(token))
+  if (!suppliedTokens.some((token) => safeTokenEquals(token, expectedToken))) return null
+
+  return {
+    id: userId,
+    email: process.env.INTEL_AGENT_EMAIL || undefined,
+    agentName: process.env.INTEL_AGENT_NAME || 'levelcre-agent',
+  }
+}
 
 // Verify JWT using Supabase shared secret (HS256)
 async function verifyBearerJWT(token: string): Promise<JWTPayload | null> {
@@ -46,6 +72,17 @@ export async function getUserFromBearerAuthHeader(authHeader?: string): Promise<
 export async function verifySupabaseToken(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization
 
+  const agentUser = getConfiguredAgentUser(req)
+  if (agentUser) {
+    ;(req as any).user = {
+      id: agentUser.id,
+      email: agentUser.email,
+      role: 'agent',
+      agentName: agentUser.agentName,
+    }
+    return next()
+  }
+
   // Demo mode is allowed for non-production usage and tests
   const allowDemo = process.env.DEMO_MODE === '1' || process.env.VITE_DEMO_MODE === '1' || req.app?.get('env') === 'development'
   if (allowDemo && req.headers['x-demo-mode'] === 'true') {
@@ -80,6 +117,17 @@ export function getUserId(req: Request): string {
 
 // Middleware for routes that need authentication but allow demo mode
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const agentUser = getConfiguredAgentUser(req)
+  if (agentUser) {
+    ;(req as any).user = {
+      id: agentUser.id,
+      email: agentUser.email,
+      role: 'agent',
+      agentName: agentUser.agentName,
+    }
+    return next()
+  }
+
   // Allow explicit demo mode via header
   const allowDemo = process.env.DEMO_MODE === '1' || process.env.VITE_DEMO_MODE === '1' || req.app?.get('env') === 'development'
   if (allowDemo && req.headers['x-demo-mode'] === 'true') {
