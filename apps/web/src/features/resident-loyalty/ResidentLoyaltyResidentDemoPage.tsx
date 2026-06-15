@@ -54,6 +54,17 @@ const taskIcons: Record<ResidentTask['type'], IconType> = {
 
 const benefitIcons = [Coffee, Utensils, Store, TicketPercent] as const;
 
+const rewardIcons: Record<RewardOption['category'], IconType> = {
+  rent_credit: Home,
+  gift_card: Gift,
+  perk: Sparkles,
+  fee_waiver: KeyRound,
+  travel: Plane,
+  dining: Utensils,
+  fitness: Trophy,
+  home: Store,
+};
+
 const formatDate = (iso?: string) =>
   iso ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(iso)) : 'Open';
 
@@ -76,6 +87,7 @@ function PhoneCard({
 export default function ResidentLoyaltyResidentDemoPage() {
   const [demo, setDemo] = useState(createResidentLoyaltyDemoState);
   const [selectedResidentId, setSelectedResidentId] = useState('resident-amelia-wong');
+  const [lastAction, setLastAction] = useState<{ title: string; detail: string; tone: 'earned' | 'reward' } | null>(null);
   const resident = demo.residents.find((item) => item.id === selectedResidentId) ?? demo.residents[0];
   const building = demo.buildings[0];
   const currentPoints = calculateResidentPoints(resident.id, demo.events, demo.rewardRedemptions);
@@ -92,11 +104,19 @@ export default function ResidentLoyaltyResidentDemoPage() {
     const redeemedRewardIds = new Set(residentRedemptions.map((redemption) => redemption.rewardId));
     return getAvailableRewards(resident, currentPoints, demo.rewards).filter((reward) => !redeemedRewardIds.has(reward.id));
   }, [currentPoints, demo.rewards, resident, residentRedemptions]);
+  const lockedRewards = demo.rewards
+    .filter((reward) => !availableRewards.some((available) => available.id === reward.id))
+    .slice(0, 4);
   const residentEvents = [...demo.events]
     .filter((event) => event.residentId === resident.id)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   const completeTask = (task: ResidentTask) => {
+    setLastAction({
+      title: 'Mission complete',
+      detail: `${task.points.toLocaleString()} points added for ${taskTypeLabel(task.type).toLowerCase()}.`,
+      tone: 'earned',
+    });
     setDemo((current) => {
       const eventType = TASK_EVENT_MAP[task.type];
       const created = buildResidentEvent(current, task.residentId, eventType, { taskId: task.id, source: 'resident_wallet_demo' });
@@ -132,6 +152,11 @@ export default function ResidentLoyaltyResidentDemoPage() {
   };
 
   const redeemReward = (reward: RewardOption) => {
+    setLastAction({
+      title: 'Reward request queued',
+      detail: `${reward.label} ${reward.valueLabel} is waiting for manager approval in this demo.`,
+      tone: 'reward',
+    });
     setDemo((current) => {
       const redemption = {
         id: `redemption-${reward.id}-${Date.now()}`,
@@ -156,10 +181,30 @@ export default function ResidentLoyaltyResidentDemoPage() {
   };
 
   const nearbyBenefits = [
-    { merchant: 'Credo Coffee', benefit: 'Free size upgrade', detail: '4 min walk' },
-    { merchant: 'Oliver Exchange', benefit: '$15 dinner drop', detail: 'Monthly benefit' },
-    { merchant: 'Corner Market', benefit: 'Grocery points boost', detail: 'Resident wallet offer' },
-    { merchant: 'Studio Pass', benefit: 'First class free', detail: 'Move-in welcome' },
+    {
+      merchant: 'Credo Coffee',
+      benefit: 'Free size upgrade',
+      detail: '4 min walk',
+      image: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=500&q=80',
+    },
+    {
+      merchant: 'Oliver Exchange',
+      benefit: '$15 dinner drop',
+      detail: 'Monthly benefit',
+      image: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=500&q=80',
+    },
+    {
+      merchant: 'Corner Market',
+      benefit: 'Grocery points boost',
+      detail: 'Resident wallet offer',
+      image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=500&q=80',
+    },
+    {
+      merchant: 'Studio Pass',
+      benefit: 'First class free',
+      detail: 'Move-in welcome',
+      image: 'https://images.unsplash.com/photo-1518611012118-696072aa579a?auto=format&fit=crop&w=500&q=80',
+    },
   ];
 
   return (
@@ -184,7 +229,13 @@ export default function ResidentLoyaltyResidentDemoPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Select value={resident.id} onValueChange={setSelectedResidentId}>
+              <Select
+                value={resident.id}
+                onValueChange={(value) => {
+                  setSelectedResidentId(value);
+                  setLastAction(null);
+                }}
+              >
                 <SelectTrigger className="w-[260px] border-white/15 bg-white/10 text-white">
                   <SelectValue />
                 </SelectTrigger>
@@ -210,16 +261,40 @@ export default function ResidentLoyaltyResidentDemoPage() {
           <section className="mx-auto w-full max-w-[430px] rounded-lg border border-white/20 bg-stone-950 p-3 shadow-2xl">
             <div className="overflow-hidden rounded-lg bg-[#fbf7ee]">
               <div className="bg-stone-950 p-5 text-white">
+                <div className="mb-4 flex items-center justify-between text-[11px] font-semibold text-white/60">
+                  <span>9:41</span>
+                  <span>Living Rewards</span>
+                  <span>5G</span>
+                </div>
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm text-white/55">{building.name}</p>
                     <h1 className="mt-1 text-2xl font-black">{resident.name}</h1>
                     <p className="mt-1 text-sm text-white/60">Unit {getResidentUnitLabel(demo, resident)} - {building.neighbourhood}</p>
+                    <Badge className="mt-3 bg-white/10 text-white hover:bg-white/10">Gold resident</Badge>
                   </div>
                   <div className="rounded-lg bg-[#f6c451] p-2 text-stone-950">
                     <WalletCards className="h-5 w-5" />
                   </div>
                 </div>
+
+                {lastAction && (
+                  <div
+                    className={`mt-4 rounded-lg border p-3 ${
+                      lastAction.tone === 'earned'
+                        ? 'border-emerald-300/25 bg-emerald-400/10'
+                        : 'border-[#f6c451]/30 bg-[#f6c451]/10'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className={lastAction.tone === 'earned' ? 'mt-0.5 h-4 w-4 text-emerald-300' : 'mt-0.5 h-4 w-4 text-[#f6c451]'} />
+                      <div>
+                        <p className="text-sm font-black">{lastAction.title}</p>
+                        <p className="mt-1 text-xs leading-5 text-white/65">{lastAction.detail}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="mt-5 rounded-lg bg-[#f6c451] p-5 text-stone-950">
                   <p className="text-xs font-semibold uppercase">Available points</p>
@@ -268,13 +343,6 @@ export default function ResidentLoyaltyResidentDemoPage() {
                 </PhoneCard>
 
                 <Tabs defaultValue="earn" className="space-y-3">
-                  <TabsList className="grid w-full grid-cols-4 bg-stone-100">
-                    <TabsTrigger value="earn">Earn</TabsTrigger>
-                    <TabsTrigger value="nearby">Nearby</TabsTrigger>
-                    <TabsTrigger value="redeem">Redeem</TabsTrigger>
-                    <TabsTrigger value="ledger">Ledger</TabsTrigger>
-                  </TabsList>
-
                   <TabsContent value="earn" className="space-y-3">
                     {availableTasks.length === 0 ? (
                       <PhoneCard className="bg-emerald-50">
@@ -301,7 +369,7 @@ export default function ResidentLoyaltyResidentDemoPage() {
                               </div>
                             </div>
                             <Button className="mt-4 w-full bg-stone-950 text-white hover:bg-stone-800" onClick={() => completeTask(task)}>
-                              Claim points
+                              Complete mission
                             </Button>
                           </PhoneCard>
                         );
@@ -313,8 +381,9 @@ export default function ResidentLoyaltyResidentDemoPage() {
                     {nearbyBenefits.map((benefit, index) => {
                       const Icon = benefitIcons[index % benefitIcons.length];
                       return (
-                        <PhoneCard key={benefit.merchant}>
-                          <div className="flex items-start gap-3">
+                        <div key={benefit.merchant} className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+                          <img src={benefit.image} alt="" className="h-24 w-full object-cover" />
+                          <div className="flex items-start gap-3 p-4">
                             <div className="rounded-lg bg-[#fff3ce] p-2 text-[#7a4c00]">
                               <Icon className="h-5 w-5" />
                             </div>
@@ -324,12 +393,22 @@ export default function ResidentLoyaltyResidentDemoPage() {
                               <p className="mt-2 text-xs font-semibold text-stone-500">{benefit.detail}</p>
                             </div>
                           </div>
-                        </PhoneCard>
+                        </div>
                       );
                     })}
                   </TabsContent>
 
                   <TabsContent value="redeem" className="space-y-3">
+                    <PhoneCard className="border-[#f6c451]/50 bg-[#fff3ce]">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase text-[#7a4c00]">June feature reward</p>
+                          <p className="mt-1 text-lg font-black">2x local dining weekend</p>
+                          <p className="mt-1 text-sm text-stone-700">Mock benefit tied to the building, not a payment product.</p>
+                        </div>
+                        <Gift className="h-5 w-5 text-[#8a5a00]" />
+                      </div>
+                    </PhoneCard>
                     {availableRewards.length === 0 ? (
                       <PhoneCard>
                         <p className="font-bold">No rewards unlocked yet.</p>
@@ -338,6 +417,14 @@ export default function ResidentLoyaltyResidentDemoPage() {
                     ) : (
                       availableRewards.map((reward) => (
                         <PhoneCard key={reward.id}>
+                          {(() => {
+                            const RewardIcon = rewardIcons[reward.category];
+                            return (
+                              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-stone-950 text-[#f6c451]">
+                                <RewardIcon className="h-5 w-5" />
+                              </div>
+                            );
+                          })()}
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <p className="font-black">{reward.label}</p>
@@ -351,9 +438,33 @@ export default function ResidentLoyaltyResidentDemoPage() {
                         </PhoneCard>
                       ))
                     )}
+                    {lockedRewards.length > 0 && (
+                      <div className="rounded-lg border border-stone-200 bg-stone-50 p-4">
+                        <p className="text-xs font-semibold uppercase text-stone-500">Unlock next</p>
+                        <div className="mt-3 space-y-2">
+                          {lockedRewards.map((reward) => {
+                            const RewardIcon = rewardIcons[reward.category];
+                            return (
+                              <div key={reward.id} className="flex items-center justify-between gap-3 rounded-lg bg-white p-3">
+                                <div className="flex items-center gap-3">
+                                  <div className="rounded-lg bg-stone-100 p-2 text-stone-700">
+                                    <RewardIcon className="h-4 w-4" />
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-black">{reward.label}</p>
+                                    <p className="text-xs text-stone-500">{reward.valueLabel}</p>
+                                  </div>
+                                </div>
+                                <Badge variant="outline">{rewardRequirementLabel(reward)}</Badge>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </TabsContent>
 
-                  <TabsContent value="ledger" className="space-y-3">
+                  <TabsContent value="activity" className="space-y-3">
                     {residentEvents.slice(0, 8).map((event) => (
                       <PhoneCard key={event.id}>
                         <div className="flex items-start justify-between gap-3">
@@ -366,6 +477,25 @@ export default function ResidentLoyaltyResidentDemoPage() {
                       </PhoneCard>
                     ))}
                   </TabsContent>
+
+                  <TabsList className="sticky bottom-0 grid h-auto w-full grid-cols-4 rounded-lg border border-stone-200 bg-white p-1 shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
+                    <TabsTrigger value="earn" className="flex h-14 flex-col gap-1 text-xs data-[state=active]:bg-stone-950 data-[state=active]:text-white">
+                      <ClipboardCheck className="h-4 w-4" />
+                      Earn
+                    </TabsTrigger>
+                    <TabsTrigger value="nearby" className="flex h-14 flex-col gap-1 text-xs data-[state=active]:bg-stone-950 data-[state=active]:text-white">
+                      <MapPin className="h-4 w-4" />
+                      Nearby
+                    </TabsTrigger>
+                    <TabsTrigger value="redeem" className="flex h-14 flex-col gap-1 text-xs data-[state=active]:bg-stone-950 data-[state=active]:text-white">
+                      <Gift className="h-4 w-4" />
+                      Redeem
+                    </TabsTrigger>
+                    <TabsTrigger value="activity" className="flex h-14 flex-col gap-1 text-xs data-[state=active]:bg-stone-950 data-[state=active]:text-white">
+                      <WalletCards className="h-4 w-4" />
+                      Activity
+                    </TabsTrigger>
+                  </TabsList>
                 </Tabs>
               </div>
             </div>
@@ -375,7 +505,7 @@ export default function ResidentLoyaltyResidentDemoPage() {
             <div className="rounded-lg border border-white/10 bg-white/10 p-5 md:p-7">
               <Badge className="bg-[#f6c451] text-stone-950 hover:bg-[#f6c451]">Resident app view</Badge>
               <h2 className="mt-4 max-w-2xl text-4xl font-black leading-none md:text-6xl">
-                This is the actual product surface.
+                A resident wallet for home, neighborhood, and rewards.
               </h2>
               <p className="mt-4 max-w-2xl text-base leading-7 text-white/70">
                 The manager benefits are downstream. The resident sees a wallet, a rent streak, a monthly drop,
