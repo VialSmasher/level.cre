@@ -333,7 +333,7 @@ export default function ResidentLoyaltySetupPage() {
             </div>
             <div>
               <p className="text-lg font-black">Living Rewards</p>
-              <p className="text-xs text-stone-600">PMS-lite tenant onboarding layer</p>
+              <p className="text-xs text-stone-600">Property operations portal</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -357,23 +357,24 @@ export default function ResidentLoyaltySetupPage() {
         <section className="grid gap-5 lg:grid-cols-[1fr_390px]">
           <div className="rounded-lg bg-stone-950 p-5 text-white shadow-xl md:p-8">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge className="bg-[#f6c451] text-stone-950 hover:bg-[#f6c451]">PMS-lite, not full PMS</Badge>
+              <Badge className="bg-[#f6c451] text-stone-950 hover:bg-[#f6c451]">Property management cockpit</Badge>
               <Badge variant="outline" className="border-white/20 bg-white/10 text-white">
                 {isDatabaseBacked ? 'Database-backed' : 'Frontend demo'}
               </Badge>
             </div>
             <h1 className="mt-5 max-w-4xl text-4xl font-black leading-none md:text-6xl">
-              Landlords onboard tenants into a branded operations and rewards portal.
+              A cleaner landlord portal for the work managers chase every week.
             </h1>
             <p className="mt-5 max-w-3xl text-base leading-7 text-white/70 md:text-lg">
-              The landlord sets up the property, adds a unit and tenant, sends an invite, and tracks move-in readiness:
-              lease packet acknowledgement, deposit confirmation, inspection photos, building notices, and first rent
-              status. Payments, accounting, screening, and legal signing stay outside this MVP.
+              Set up the property, add units and tenants, send resident invites, and track the operational record:
+              lease packet acknowledgement, deposit status, move-in inspection photos, building notices, first rent
+              status, renewal signals, and reward spend. Payments, accounting, screening, and legal signing stay outside
+              this MVP.
             </p>
             <div className="mt-7 grid gap-3 md:grid-cols-3">
-              <SetupStep icon={Building2} title="1. Property" detail="Create landlord, building, units, and portal slug." active />
-              <SetupStep icon={UserPlus} title="2. Invite" detail="Send a resident link for the correct unit and lease period." />
-              <SetupStep icon={WalletCards} title="3. Rewards" detail="Tie move-in and operations tasks to positive points." />
+              <SetupStep icon={Building2} title="1. Operating record" detail="Create landlord, building, units, residents, and portal slug." active />
+              <SetupStep icon={UserPlus} title="2. Resident workflow" detail="Invite the tenant into the correct unit, lease period, and task queue." />
+              <SetupStep icon={WalletCards} title="3. Engagement layer" detail="Use points, credits, and community drops to drive completion." />
             </div>
             <div className={`mt-5 rounded-lg border p-3 text-sm leading-6 ${
               isDatabaseBacked ? 'border-emerald-300/30 bg-emerald-400/10 text-emerald-50' : 'border-white/15 bg-white/10 text-white/70'
@@ -464,7 +465,7 @@ export default function ResidentLoyaltySetupPage() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Lifecycle record</Badge>
-                  <h2 className="mt-3 text-2xl font-black text-stone-950">What the portal should show</h2>
+                  <h2 className="mt-3 text-2xl font-black text-stone-950">Core resident record</h2>
                 </div>
                 <KeyRound className="h-6 w-6 text-[#8a5a00]" />
               </div>
@@ -510,8 +511,8 @@ export default function ResidentLoyaltySetupPage() {
                 <div>
                   <h2 className="text-2xl font-black text-stone-950">Onboarding checklist</h2>
                   <p className="mt-2 text-sm leading-6 text-stone-600">
-                    This is the practical PMS-lite wedge: tenants complete move-in records, managers see what is stuck,
-                    and rewards make the useful behavior feel positive.
+                    This is the operational wedge: tenants complete records, managers see what is stuck, and rewards
+                    make useful behavior feel positive instead of punitive.
                   </p>
                 </div>
                 <ClipboardCheck className="h-6 w-6 text-stone-500" />
@@ -544,8 +545,8 @@ export default function ResidentLoyaltySetupPage() {
                 <div className="mt-4 space-y-3">
                   {[
                     [Home, 'Marketing site', 'Sells the product to landlords and property managers.'],
-                    [Building2, 'Landlord portal', 'Setup, tenant invites, records, rewards, and operations queues.'],
-                    [WalletCards, 'Resident portal', 'Move-in tasks, notices, rewards, maintenance, and renewal interest.'],
+                    [Building2, 'Manager portal', 'Properties, units, residents, records, rewards, and operations queues.'],
+                    [WalletCards, 'Resident portal', 'Move-in tasks, notices, rewards, maintenance, community, and renewals.'],
                   ].map(([Icon, title, detail]) => {
                     const TypedIcon = Icon as IconType;
                     return (
@@ -567,7 +568,7 @@ export default function ResidentLoyaltySetupPage() {
             <Card className="border-stone-200 bg-white shadow-sm">
               <CardContent className="p-5">
                 <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-800">Boundary</Badge>
-                <h2 className="mt-3 text-xl font-black text-stone-950">Not full PMS yet</h2>
+                <h2 className="mt-3 text-xl font-black text-stone-950">Sharp MVP boundary</h2>
                 <div className="mt-4 space-y-3 text-sm leading-6 text-stone-600">
                   <div className="flex gap-2">
                     <BadgeCheck className="mt-0.5 h-4 w-4 text-emerald-700" />
@@ -583,7 +584,7 @@ export default function ResidentLoyaltySetupPage() {
                   </div>
                   <div className="flex gap-2">
                     <Bell className="mt-0.5 h-4 w-4 text-[#8a5a00]" />
-                    <p>Use rewards to reduce manager chasing during move-in and early residency.</p>
+                    <p>Use rewards and community moments to reduce manager chasing during move-in and early residency.</p>
                   </div>
                 </div>
               </CardContent>
@@ -596,7 +597,7 @@ export default function ResidentLoyaltySetupPage() {
             <div>
               <h2 className="text-xl font-black text-stone-950">Recommended next product bet</h2>
               <p className="mt-1 text-sm leading-6 text-stone-600">
-                Turn this flow into real Supabase-backed records before adding payments or accounting.
+                Turn this into a real operating portal before adding rent payments, accounting, or PMS replacement claims.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

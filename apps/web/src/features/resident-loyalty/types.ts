@@ -163,7 +163,18 @@ export type ResidentOnboardingStep = {
 export type RewardOption = {
   id: string;
   label: string;
-  category: 'rent_credit' | 'gift_card' | 'perk' | 'fee_waiver' | 'travel' | 'dining' | 'fitness' | 'home';
+  category:
+    | 'rent_credit'
+    | 'gift_card'
+    | 'perk'
+    | 'fee_waiver'
+    | 'travel'
+    | 'dining'
+    | 'fitness'
+    | 'home'
+    | 'internet'
+    | 'transit'
+    | 'community';
   pointCost?: number;
   milestoneMonths?: number;
   valueLabel: string;

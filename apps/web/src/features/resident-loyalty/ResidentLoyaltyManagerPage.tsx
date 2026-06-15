@@ -13,16 +13,16 @@ import {
   Gift,
   Home,
   KeyRound,
-  MapPin,
-  Plane,
+  Megaphone,
+  MessageSquare,
   Sparkles,
   Store,
-  TicketPercent,
   Trophy,
+  TrainFront,
   UserPlus,
   Users,
-  Utensils,
   WalletCards,
+  Wifi,
   Wrench,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -158,7 +158,7 @@ function AppPreview({
           <div className="flex items-center justify-between gap-2">
             <div>
               <p className="text-sm font-bold text-stone-950">June monthly drop</p>
-              <p className="text-xs text-stone-600">Dining credits, free-rent draw, transfer boost</p>
+              <p className="text-xs text-stone-600">Internet credits, grocery wallet drops, community goals</p>
             </div>
             <Sparkles className="h-5 w-5 text-[#b77a00]" />
           </div>
@@ -295,18 +295,27 @@ export default function ResidentLoyaltyManagerPage() {
     }));
   };
 
-  const neighborhoodBenefits = [
-    { icon: Coffee, merchant: 'Credo Coffee', perk: 'Free drip upgrade', detail: '4 min walk', tone: 'bg-[#fff3ce] text-[#7a4c00]' },
-    { icon: Utensils, merchant: 'Oliver Exchange', perk: '$15 dining drop', detail: 'First of month only', tone: 'bg-rose-50 text-rose-800' },
-    { icon: Store, merchant: 'Neighborhood Market', perk: '5 percent grocery boost', detail: 'Linked wallet', tone: 'bg-emerald-50 text-emerald-800' },
-    { icon: TicketPercent, merchant: 'Studio Pass', perk: 'First class free', detail: 'Resident benefit', tone: 'bg-sky-50 text-sky-800' },
+  const communityChannels = [
+    { icon: Megaphone, title: 'Building announcements', value: `${stats.noticeAcknowledgementRate}%`, detail: 'acknowledged across active notices', tone: 'bg-[#fff3ce] text-[#7a4c00]' },
+    { icon: MessageSquare, title: 'Resident polls', value: '3 open', detail: 'package room, bike storage, summer patio rules', tone: 'bg-sky-50 text-sky-800' },
+    { icon: Store, title: 'Move-out marketplace', value: '12 posts', detail: 'furniture, moving boxes, and resident-to-resident handoffs', tone: 'bg-emerald-50 text-emerald-800' },
+    { icon: Coffee, title: 'Community moments', value: '2 events', detail: 'coffee morning and resident drop week', tone: 'bg-rose-50 text-rose-800' },
   ];
 
   const rewardPath = [
-    { icon: Home, label: 'Rent credit', detail: 'Redeem points against next month rent', value: '$10 to $100 mock credits' },
-    { icon: Plane, label: 'Travel transfer', detail: 'Prototype travel partner transfer rail', value: '1:1 mock partner' },
-    { icon: Gift, label: 'Everyday rewards', detail: 'Coffee, groceries, dining, rideshare', value: '500+ points' },
-    { icon: KeyRound, label: 'Building perks', detail: 'Parking, elevator priority, fee waivers', value: 'Per-property perks' },
+    { icon: Home, label: 'Rent credits', detail: 'Small, capped credits tied to streaks and renewals.', value: '$10 to $100 mock credits' },
+    { icon: Wifi, label: 'Internet credits', detail: 'A utility-style reward residents actually understand.', value: '$25 monthly draw' },
+    { icon: TrainFront, label: 'Everyday mobility', detail: 'Transit, rideshare, grocery, dining, and coffee credits.', value: '500+ points' },
+    { icon: MessageSquare, label: 'Community drops', detail: 'Building-wide goals unlock coffee mornings, markets, and resident events.', value: 'Shared rewards' },
+  ];
+
+  const operationsCockpit = [
+    { icon: UserPlus, label: 'Leasing handoff', value: '2 move-ins', detail: 'Invite, lease packet, deposit status, utility setup, first rent status.' },
+    { icon: Wrench, label: 'Maintenance quality', value: `${stats.maintenancePhotoRate}%`, detail: 'Photo-first requests and access confirmations before dispatch.' },
+    { icon: Bell, label: 'Notice compliance', value: `${stats.noticeAcknowledgementRate}%`, detail: 'Unit-level read receipts for water, fire, parking, and access notices.' },
+    { icon: CalendarClock, label: 'Renewal visibility', value: stats.renewalInterestCount, detail: 'Residents can signal interest before the vacancy risk becomes urgent.' },
+    { icon: Gift, label: 'Reward budget', value: '$250', detail: 'Mock monthly budget controlled by manager approval rules.' },
+    { icon: Users, label: 'Community pulse', value: '4 channels', detail: 'Announcements, polls, marketplace, resident events, and manager Q&A.' },
   ];
 
   return (
@@ -344,7 +353,7 @@ export default function ResidentLoyaltyManagerPage() {
           <div className="relative overflow-hidden rounded-lg bg-[#111412] p-5 text-white shadow-xl md:p-8">
             <img
               src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1500&q=80"
-              alt="Neighborhood restaurant amenity"
+              alt="Resident community amenity"
               className="absolute inset-0 h-full w-full object-cover opacity-28"
             />
             <div className="absolute inset-0 bg-gradient-to-r from-[#111412] via-[#111412]/90 to-[#111412]/55" />
@@ -354,25 +363,25 @@ export default function ResidentLoyaltyManagerPage() {
               <Badge variant="outline" className="border-white/20 bg-white/10 text-white">Demo network</Badge>
             </div>
             <h1 className="mt-6 max-w-3xl text-4xl font-black leading-none md:text-6xl">
-              Rewards for the place residents already live.
+              A property management portal residents actually want to use.
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-white/75 md:text-lg">
-              This prototype shifts the product from an internal checklist into a resident rewards wallet: rent streaks,
-              monthly drops, neighborhood benefits, flexible rewards, and a quiet operator console that proves the
-              operational lift.
+              This prototype pushes beyond a loyalty widget. It combines move-ins, maintenance quality, notice
+              compliance, renewal visibility, resident communication, and a rewards wallet that gives tenants real
+              reasons to engage.
             </p>
             <div className="mt-6 grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border border-white/10 bg-white/10 p-4">
-                <p className="text-sm font-bold text-[#f6c451]">Rent</p>
-                <p className="mt-1 text-sm text-white/70">On-time streaks and milestone rewards</p>
+                <p className="text-sm font-bold text-[#f6c451]">Operations</p>
+                <p className="mt-1 text-sm text-white/70">Move-ins, notices, maintenance, renewals</p>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/10 p-4">
-                <p className="text-sm font-bold text-[#9fe6b8]">Neighborhood</p>
-                <p className="mt-1 text-sm text-white/70">Local dining, fitness, grocery, and service perks</p>
+                <p className="text-sm font-bold text-[#9fe6b8]">Community</p>
+                <p className="mt-1 text-sm text-white/70">Announcements, polls, events, marketplace</p>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/10 p-4">
                 <p className="text-sm font-bold text-[#9bd5ff]">Rewards</p>
-                <p className="mt-1 text-sm text-white/70">Rent credits, everyday rewards, and building perks</p>
+                <p className="mt-1 text-sm text-white/70">Internet, grocery, transit, rent, dining</p>
               </div>
             </div>
             <div className="mt-6 flex flex-wrap gap-3">
@@ -395,8 +404,38 @@ export default function ResidentLoyaltyManagerPage() {
         <section className="grid gap-3 md:grid-cols-4">
           <MetricTile label="Resident members" value={stats.residentCount} detail={`${stats.occupiedUnits}/${stats.unitCount} units connected`} icon={Users} tone="stone" />
           <MetricTile label="Rent streak members" value={stats.onTimeStreakCount} detail={`${stats.averageRentStreakMonths} month average`} icon={Trophy} tone="gold" />
-          <MetricTile label="Neighborhood perks" value="4" detail="Mock local offers in the demo" icon={MapPin} tone="rose" />
+          <MetricTile label="Community actions" value="4" detail="Announcements, polls, events, marketplace" icon={MessageSquare} tone="rose" />
           <MetricTile label="Follow-ups avoided" value={stats.estimatedFollowUpsAvoided} detail="Estimated manager touches saved" icon={BadgeCheck} tone="green" />
+        </section>
+
+        <section>
+          <div className="mb-4">
+            <Badge variant="outline" className="border-stone-300 bg-white text-stone-700">Property management cockpit</Badge>
+            <h2 className="mt-3 text-2xl font-black text-stone-950">The part landlords should pay for</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-stone-600">
+              Rewards create engagement, but the revenue story is better operations: fewer manual follow-ups, cleaner
+              maintenance intake, stronger move-in records, better notice proof, and earlier renewal signals.
+            </p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {operationsCockpit.map((item) => {
+              const Icon = item.icon;
+              return (
+                <div key={item.label} className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase text-stone-500">{item.label}</p>
+                      <p className="mt-2 text-2xl font-black text-stone-950">{item.value}</p>
+                    </div>
+                    <div className="rounded-lg bg-stone-950 p-2 text-[#f6c451]">
+                      <Icon className="h-5 w-5" />
+                    </div>
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-stone-600">{item.detail}</p>
+                </div>
+              );
+            })}
+          </div>
         </section>
 
         <section className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
@@ -407,8 +446,8 @@ export default function ResidentLoyaltyManagerPage() {
                   <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Monthly moment</Badge>
                   <h2 className="mt-3 text-2xl font-black text-stone-950">Monthly rewards drop</h2>
                   <p className="mt-2 text-sm leading-6 text-stone-600">
-                    A recurring reason to open the app: bonus local dining, a mock free-rent draw, and partner perks.
-                    This keeps the product from feeling like chores with points.
+                    A recurring reason to open the app: an internet-credit draw, grocery wallet credits, and a building
+                    community goal. This keeps the product from feeling like chores with points.
                   </p>
                 </div>
                 <div className="rounded-lg bg-[#fff3ce] p-3 text-[#8a5a00]">
@@ -418,18 +457,18 @@ export default function ResidentLoyaltyManagerPage() {
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-lg bg-[#111412] p-4 text-white">
                   <p className="text-xs text-white/60">Drop</p>
-                  <p className="mt-2 text-lg font-black">Win a month of rent</p>
-                  <p className="mt-1 text-xs text-white/65">Mock sweepstakes, not payment processing</p>
+                  <p className="mt-2 text-lg font-black">Internet bill credit</p>
+                  <p className="mt-1 text-xs text-white/65">$25 monthly draw, mocked for MVP</p>
                 </div>
                 <div className="rounded-lg border border-stone-200 p-4">
                   <p className="text-xs text-stone-500">Boost</p>
-                  <p className="mt-2 text-lg font-black">2x neighborhood points</p>
-                  <p className="mt-1 text-xs text-stone-600">Dining and coffee partner demo</p>
+                  <p className="mt-2 text-lg font-black">Grocery wallet boost</p>
+                  <p className="mt-1 text-xs text-stone-600">Everyday value residents recognize</p>
                 </div>
                 <div className="rounded-lg border border-stone-200 p-4">
                   <p className="text-xs text-stone-500">Mission</p>
-                  <p className="mt-2 text-lg font-black">Home ready bonus</p>
-                  <p className="mt-1 text-xs text-stone-600">Notice, access, and photos bundled</p>
+                  <p className="mt-2 text-lg font-black">Community unlock</p>
+                  <p className="mt-1 text-xs text-stone-600">Building hits a goal, everyone gets a drop</p>
                 </div>
               </div>
             </CardContent>
@@ -439,23 +478,23 @@ export default function ResidentLoyaltyManagerPage() {
             <CardContent className="p-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800">Neighborhood as an amenity</Badge>
-                  <h2 className="mt-3 text-2xl font-black text-stone-950">{building.neighbourhood} benefits</h2>
+                  <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800">Community layer</Badge>
+                  <h2 className="mt-3 text-2xl font-black text-stone-950">Make the building feel alive</h2>
                 </div>
-                <MapPin className="h-6 w-6 text-rose-700" />
+                <MessageSquare className="h-6 w-6 text-rose-700" />
               </div>
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                {neighborhoodBenefits.map((benefit) => {
+                {communityChannels.map((benefit) => {
                   const Icon = benefit.icon;
                   return (
-                    <div key={benefit.merchant} className="rounded-lg border border-stone-200 p-4">
+                    <div key={benefit.title} className="rounded-lg border border-stone-200 p-4">
                       <div className="flex items-start gap-3">
                         <div className={`rounded-lg p-2 ${benefit.tone}`}>
                           <Icon className="h-5 w-5" />
                         </div>
                         <div>
-                          <p className="font-bold text-stone-950">{benefit.merchant}</p>
-                          <p className="mt-1 text-sm text-stone-600">{benefit.perk}</p>
+                          <p className="font-bold text-stone-950">{benefit.title}</p>
+                          <p className="mt-1 text-lg font-black text-stone-950">{benefit.value}</p>
                           <p className="mt-2 text-xs font-semibold text-stone-500">{benefit.detail}</p>
                         </div>
                       </div>
@@ -471,7 +510,7 @@ export default function ResidentLoyaltyManagerPage() {
           <div className="mb-4 flex items-end justify-between gap-3">
             <div>
               <Badge variant="outline" className="border-stone-300 bg-white text-stone-700">Redemption marketplace</Badge>
-              <h2 className="mt-3 text-2xl font-black text-stone-950">Flexible rewards without real fulfillment yet</h2>
+              <h2 className="mt-3 text-2xl font-black text-stone-950">Rewards that feel like real tenant value</h2>
             </div>
           </div>
           <div className="grid gap-3 md:grid-cols-4">

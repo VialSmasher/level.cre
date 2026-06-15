@@ -12,15 +12,18 @@ import {
   Home,
   KeyRound,
   MapPin,
+  Megaphone,
+  MessageSquare,
   Plane,
   ReceiptText,
   ShieldCheck,
   Sparkles,
   Store,
-  TicketPercent,
   Trophy,
+  TrainFront,
   Utensils,
   WalletCards,
+  Wifi,
   Wrench,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -57,7 +60,7 @@ const taskIcons: Record<ResidentTask['type'], IconType> = {
   complete_move_in_checklist: ClipboardCheck,
 };
 
-const benefitIcons = [Coffee, Utensils, Store, TicketPercent] as const;
+const communityIcons = [Megaphone, Coffee, Store, MessageSquare] as const;
 
 const rewardIcons: Record<RewardOption['category'], IconType> = {
   rent_credit: Home,
@@ -68,6 +71,9 @@ const rewardIcons: Record<RewardOption['category'], IconType> = {
   dining: Utensils,
   fitness: Trophy,
   home: Store,
+  internet: Wifi,
+  transit: TrainFront,
+  community: MessageSquare,
 };
 
 const toDisplayDate = (iso: string) => {
@@ -221,29 +227,29 @@ export default function ResidentLoyaltyResidentDemoPage() {
     });
   };
 
-  const nearbyBenefits = [
+  const communityFeed = [
     {
-      merchant: 'Credo Coffee',
-      benefit: 'Free size upgrade',
-      detail: '4 min walk',
+      title: 'June resident drop',
+      benefit: '$25 grocery wallet draw for residents who complete this week\'s building notice.',
+      detail: 'Ends Friday',
       image: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=500&q=80',
     },
     {
-      merchant: 'Oliver Exchange',
-      benefit: '$15 dinner drop',
-      detail: 'Monthly benefit',
+      title: 'Lobby coffee morning',
+      benefit: 'Free coffee bar for residents after the annual fire alarm test is acknowledged.',
+      detail: 'Saturday 9:30 AM',
       image: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=500&q=80',
     },
     {
-      merchant: 'Corner Market',
-      benefit: 'Grocery points boost',
-      detail: 'Resident wallet offer',
+      title: 'Move-out marketplace',
+      benefit: 'Residents are sharing shelves, desks, boxes, and move-out items with the building.',
+      detail: '12 active posts',
       image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=500&q=80',
     },
     {
-      merchant: 'Studio Pass',
-      benefit: 'First class free',
-      detail: 'Move-in welcome',
+      title: 'Ask management',
+      benefit: 'Vote on bike room storage, package room hours, and summer patio rules.',
+      detail: '3 open polls',
       image: 'https://images.unsplash.com/photo-1518611012118-696072aa579a?auto=format&fit=crop&w=500&q=80',
     },
   ];
@@ -366,7 +372,7 @@ export default function ResidentLoyaltyResidentDemoPage() {
                     <div>
                       <p className="text-xs font-semibold uppercase text-[#7a4c00]">Monthly drop</p>
                       <p className="mt-1 text-lg font-black">First-of-month rewards</p>
-                      <p className="mt-1 text-sm text-stone-700">Dining credits, free-rent draw, and neighborhood boosts.</p>
+                      <p className="mt-1 text-sm text-stone-700">Internet credits, grocery wallet drops, and building-wide rewards.</p>
                     </div>
                     <Sparkles className="h-5 w-5 text-[#8a5a00]" />
                   </div>
@@ -461,18 +467,18 @@ export default function ResidentLoyaltyResidentDemoPage() {
                     )}
                   </TabsContent>
 
-                  <TabsContent value="nearby" className="space-y-3">
-                    {nearbyBenefits.map((benefit, index) => {
-                      const Icon = benefitIcons[index % benefitIcons.length];
+                  <TabsContent value="community" className="space-y-3">
+                    {communityFeed.map((benefit, index) => {
+                      const Icon = communityIcons[index % communityIcons.length];
                       return (
-                        <div key={benefit.merchant} className="overflow-hidden rounded-lg border border-stone-200 bg-white">
+                        <div key={benefit.title} className="overflow-hidden rounded-lg border border-stone-200 bg-white">
                           <img src={benefit.image} alt="" className="h-24 w-full object-cover" />
                           <div className="flex items-start gap-3 p-4">
                             <div className="rounded-lg bg-[#fff3ce] p-2 text-[#7a4c00]">
                               <Icon className="h-5 w-5" />
                             </div>
                             <div>
-                              <p className="font-black">{benefit.merchant}</p>
+                              <p className="font-black">{benefit.title}</p>
                               <p className="mt-1 text-sm text-stone-600">{benefit.benefit}</p>
                               <p className="mt-2 text-xs font-semibold text-stone-500">{benefit.detail}</p>
                             </div>
@@ -487,8 +493,8 @@ export default function ResidentLoyaltyResidentDemoPage() {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-xs font-semibold uppercase text-[#7a4c00]">June feature reward</p>
-                          <p className="mt-1 text-lg font-black">2x local dining weekend</p>
-                          <p className="mt-1 text-sm text-stone-700">Mock benefit tied to the building, not a payment product.</p>
+                          <p className="mt-1 text-lg font-black">Internet + grocery credit week</p>
+                          <p className="mt-1 text-sm text-stone-700">Mock credits tied to useful resident actions, not a payment product.</p>
                         </div>
                         <Gift className="h-5 w-5 text-[#8a5a00]" />
                       </div>
@@ -567,9 +573,9 @@ export default function ResidentLoyaltyResidentDemoPage() {
                       <ClipboardCheck className="h-4 w-4" />
                       Earn
                     </TabsTrigger>
-                    <TabsTrigger value="nearby" className="flex h-14 flex-col gap-1 text-xs data-[state=active]:bg-stone-950 data-[state=active]:text-white">
-                      <MapPin className="h-4 w-4" />
-                      Nearby
+                    <TabsTrigger value="community" className="flex h-14 flex-col gap-1 text-xs data-[state=active]:bg-stone-950 data-[state=active]:text-white">
+                      <MessageSquare className="h-4 w-4" />
+                      Community
                     </TabsTrigger>
                     <TabsTrigger value="redeem" className="flex h-14 flex-col gap-1 text-xs data-[state=active]:bg-stone-950 data-[state=active]:text-white">
                       <Gift className="h-4 w-4" />
@@ -589,11 +595,11 @@ export default function ResidentLoyaltyResidentDemoPage() {
             <div className="rounded-lg border border-white/10 bg-white/10 p-5 md:p-7">
               <Badge className="bg-[#f6c451] text-stone-950 hover:bg-[#f6c451]">Resident app view</Badge>
               <h2 className="mt-4 max-w-2xl text-4xl font-black leading-none md:text-6xl">
-                A resident wallet for home, neighborhood, and rewards.
+                A resident wallet for home, community, and real rewards.
               </h2>
               <p className="mt-4 max-w-2xl text-base leading-7 text-white/70">
                 The manager benefits are downstream. The resident sees a wallet, a rent streak, a monthly drop,
-                neighborhood perks, and simple ways to earn.
+                resident credits, monthly drops, building updates, and simple ways to earn.
               </p>
             </div>
 
@@ -605,13 +611,13 @@ export default function ResidentLoyaltyResidentDemoPage() {
               </div>
               <div className="rounded-lg border border-white/10 bg-white/10 p-4">
                 <MapPin className="h-5 w-5 text-rose-300" />
-                <p className="mt-3 text-xl font-black">Neighborhood value</p>
-                <p className="mt-1 text-sm leading-6 text-white/65">Local perks make the building feel connected.</p>
+                <p className="mt-3 text-xl font-black">Community value</p>
+                <p className="mt-1 text-sm leading-6 text-white/65">Useful updates, polls, events, and resident marketplace posts.</p>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/10 p-4">
                 <Gift className="h-5 w-5 text-emerald-300" />
                 <p className="mt-3 text-xl font-black">Flexible rewards</p>
-                <p className="mt-1 text-sm leading-6 text-white/65">Rent credit, dining, travel-style, and building perks.</p>
+                <p className="mt-1 text-sm leading-6 text-white/65">Internet, grocery, transit, dining, rent, and community drops.</p>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/10 p-4">
                 <CheckCircle2 className="h-5 w-5 text-sky-300" />

@@ -20,7 +20,7 @@ import {
   KeyRound,
   Loader2,
   Mail,
-  MapPin,
+  MessageSquare,
   Sparkles,
   WalletCards,
   Wrench,
@@ -258,7 +258,8 @@ export default function Landing() {
             <p className="mt-5 max-w-2xl text-base leading-7 text-white/68 md:text-lg">
               Reward residents for useful behavior: on-time rent habits, acknowledged notices, better maintenance
               requests, confirmed access, early renewal interest, and move-in checklists. The landlord gets fewer
-              follow-ups. The resident gets points, local perks, and flexible mock rewards.
+              follow-ups, cleaner records, and renewal visibility. The resident gets points, real-life credits, and
+              a reason to use the building portal.
             </p>
 
             <div className="mt-7 grid gap-3 sm:grid-cols-3">
@@ -268,9 +269,9 @@ export default function Landing() {
                 <p className="mt-1 text-sm text-white/60">Rent streaks and home missions</p>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/[0.07] p-4">
-                <MapPin className="h-5 w-5 text-rose-300" />
-                <p className="mt-3 font-black">Neighborhood perks</p>
-                <p className="mt-1 text-sm text-white/60">Local benefits as an amenity</p>
+                <MessageSquare className="h-5 w-5 text-rose-300" />
+                <p className="mt-3 font-black">Community loop</p>
+                <p className="mt-1 text-sm text-white/60">Notices, polls, and resident moments</p>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/[0.07] p-4">
                 <Building2 className="h-5 w-5 text-emerald-300" />
@@ -424,8 +425,8 @@ export default function Landing() {
               {[
                 [Wrench, 'Better maintenance requests', 'Photos and access details up front'],
                 [Bell, 'Notice records', 'Positive acknowledgement loop'],
-                [MapPin, 'Neighborhood as amenity', 'Local perks around the building'],
-                [Gift, 'Flexible mock rewards', 'Rent, lifestyle, travel, and building perks'],
+                [MessageSquare, 'Resident communication', 'Notices, polls, and community updates'],
+                [Gift, 'Rewards residents care about', 'Rent, grocery, internet, transit, and dining credits'],
               ].map(([Icon, title, detail]) => {
                 const TypedIcon = Icon as typeof Wrench;
                 return (

@@ -99,12 +99,15 @@ export function rewardCategoryLabel(category: RewardOption['category']) {
   const labels: Record<RewardOption['category'], string> = {
     rent_credit: 'Rent credit',
     gift_card: 'Gift card',
-    perk: 'Building perk',
+    perk: 'Community reward',
     fee_waiver: 'Fee waiver',
     travel: 'Travel',
     dining: 'Dining',
     fitness: 'Fitness',
     home: 'Home',
+    internet: 'Internet credit',
+    transit: 'Transit',
+    community: 'Community',
   };
   return labels[category];
 }
