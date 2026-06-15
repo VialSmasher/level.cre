@@ -7,11 +7,13 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Coffee,
+  FileText,
   Gift,
   Home,
   KeyRound,
   MapPin,
   Plane,
+  ReceiptText,
   ShieldCheck,
   Sparkles,
   Store,
@@ -29,6 +31,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { createResidentLoyaltyDemoState } from './residentLoyaltyDemoData';
 import {
   buildResidentEvent,
+  calculateOnboardingProgress,
   calculateLifetimePoints,
   calculateResidentPoints,
   eventTypeLabel,
@@ -36,6 +39,7 @@ import {
   getCurrentStreakMilestone,
   getNextStreakMilestone,
   getResidentUnitLabel,
+  getTenantLifecycle,
   rewardCategoryLabel,
   TASK_EVENT_MAP,
   taskTypeLabel,
@@ -65,8 +69,18 @@ const rewardIcons: Record<RewardOption['category'], IconType> = {
   home: Store,
 };
 
+const toDisplayDate = (iso: string) => {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const [year, month, day] = iso.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+  return new Date(iso);
+};
+
 const formatDate = (iso?: string) =>
-  iso ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(iso)) : 'Open';
+  iso ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(toDisplayDate(iso)) : 'Open';
+
+const readableStatus = (status: string) => status.replace(/_/g, ' ');
 
 function rewardRequirementLabel(reward: RewardOption) {
   if (typeof reward.pointCost === 'number') return `${reward.pointCost.toLocaleString()} pts`;
@@ -110,6 +124,8 @@ export default function ResidentLoyaltyResidentDemoPage() {
   const residentEvents = [...demo.events]
     .filter((event) => event.residentId === resident.id)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const lifecycle = getTenantLifecycle(demo, resident.id);
+  const onboardingProgress = calculateOnboardingProgress(demo, resident.id);
 
   const completeTask = (task: ResidentTask) => {
     setLastAction({
@@ -341,6 +357,44 @@ export default function ResidentLoyaltyResidentDemoPage() {
                     {currentMilestone ? `${currentMilestone.rewardLabel} earned` : 'Keep the streak going.'}
                   </p>
                 </PhoneCard>
+
+                {lifecycle && (
+                  <PhoneCard>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase text-stone-500">Move-in portal</p>
+                        <p className="mt-1 text-lg font-black">{onboardingProgress.percent}% ready</p>
+                        <p className="mt-1 text-sm text-stone-600">
+                          Lease, deposit, inspection, and rent status. No payments are collected here.
+                        </p>
+                      </div>
+                      <KeyRound className="h-5 w-5 text-[#8a5a00]" />
+                    </div>
+                    <Progress value={onboardingProgress.percent} className="mt-3 h-2" />
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      <div className="rounded-lg border border-stone-200 bg-stone-50 p-3">
+                        <FileText className="h-4 w-4 text-stone-700" />
+                        <p className="mt-2 text-xs font-semibold text-stone-500">Lease</p>
+                        <p className="mt-1 text-sm font-black capitalize">{readableStatus(lifecycle.lease.status)}</p>
+                      </div>
+                      <div className="rounded-lg border border-stone-200 bg-stone-50 p-3">
+                        <ShieldCheck className="h-4 w-4 text-emerald-700" />
+                        <p className="mt-2 text-xs font-semibold text-stone-500">Deposit</p>
+                        <p className="mt-1 text-sm font-black capitalize">{readableStatus(lifecycle.securityDeposit.status)}</p>
+                      </div>
+                      <div className="rounded-lg border border-stone-200 bg-stone-50 p-3">
+                        <ClipboardCheck className="h-4 w-4 text-sky-700" />
+                        <p className="mt-2 text-xs font-semibold text-stone-500">Inspection</p>
+                        <p className="mt-1 text-sm font-black capitalize">{readableStatus(lifecycle.moveInInspection.status)}</p>
+                      </div>
+                      <div className="rounded-lg border border-stone-200 bg-stone-50 p-3">
+                        <ReceiptText className="h-4 w-4 text-amber-700" />
+                        <p className="mt-2 text-xs font-semibold text-stone-500">Next rent</p>
+                        <p className="mt-1 text-sm font-black">{formatDate(lifecycle.nextRent.dueDate)}</p>
+                      </div>
+                    </div>
+                  </PhoneCard>
+                )}
 
                 <Tabs defaultValue="earn" className="space-y-3">
                   <TabsContent value="earn" className="space-y-3">

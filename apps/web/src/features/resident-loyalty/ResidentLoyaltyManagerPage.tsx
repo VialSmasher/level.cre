@@ -19,6 +19,7 @@ import {
   Store,
   TicketPercent,
   Trophy,
+  UserPlus,
   Users,
   Utensils,
   WalletCards,
@@ -322,6 +323,12 @@ export default function ResidentLoyaltyManagerPage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" asChild className="border-stone-300 bg-white">
+              <Link href="/resident-loyalty/setup">
+                Setup tenant
+                <UserPlus className="h-4 w-4" />
+              </Link>
+            </Button>
             <Button variant="outline" asChild className="border-stone-300 bg-white">
               <Link href="/resident-loyalty/resident-demo">
                 Open resident app

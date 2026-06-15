@@ -21,6 +21,19 @@ export type ResidentTaskStatus = 'available' | 'completed' | 'manager_review';
 export type RewardStatus = 'available' | 'pending' | 'approved' | 'issued';
 export type MaintenanceStatus = 'submitted' | 'reviewed' | 'scheduled' | 'completed';
 export type RenewalInterestStatus = 'not_yet' | 'interested' | 'pending' | 'signed' | 'declined';
+export type LeaseDocumentStatus = 'missing' | 'uploaded' | 'acknowledged' | 'signed';
+export type SecurityDepositStatus = 'not_requested' | 'requested' | 'received' | 'confirmed';
+export type RentDueStatus = 'not_due' | 'upcoming' | 'paid' | 'overdue';
+export type MoveInInspectionStatus = 'not_started' | 'in_progress' | 'submitted' | 'manager_review' | 'completed';
+export type OnboardingStepStatus = 'todo' | 'in_progress' | 'submitted' | 'manager_review' | 'complete';
+export type OnboardingStepType =
+  | 'tenant_invite_sent'
+  | 'lease_acknowledged'
+  | 'security_deposit_confirmed'
+  | 'move_in_inspection_completed'
+  | 'building_rules_acknowledged'
+  | 'utility_setup_confirmed'
+  | 'first_rent_status_reviewed';
 
 export type Landlord = {
   id: string;
@@ -101,6 +114,52 @@ export type RenewalStatus = {
   targetDate: string;
 };
 
+export type TenantLifecycleRecord = {
+  id: string;
+  residentId: string;
+  buildingId: string;
+  unitId: string;
+  inviteStatus: 'draft' | 'sent' | 'accepted';
+  portalSlug: string;
+  lease: {
+    documentName: string;
+    status: LeaseDocumentStatus;
+    startDate: string;
+    endDate: string;
+    acknowledgedAt?: string;
+  };
+  securityDeposit: {
+    amountLabel: string;
+    status: SecurityDepositStatus;
+    confirmedAt?: string;
+  };
+  nextRent: {
+    amountLabel: string;
+    dueDate: string;
+    status: RentDueStatus;
+  };
+  moveInInspection: {
+    status: MoveInInspectionStatus;
+    photoCount: number;
+    issueCount: number;
+    submittedAt?: string;
+  };
+};
+
+export type ResidentOnboardingStep = {
+  id: string;
+  residentId: string;
+  buildingId: string;
+  unitId: string;
+  type: OnboardingStepType;
+  title: string;
+  description: string;
+  status: OnboardingStepStatus;
+  points?: number;
+  dueAt?: string;
+  completedAt?: string;
+};
+
 export type RewardOption = {
   id: string;
   label: string;
@@ -146,4 +205,6 @@ export type ResidentLoyaltyDemoState = {
   maintenanceRequests: MaintenanceRequest[];
   notices: BuildingNotice[];
   renewals: RenewalStatus[];
+  tenantLifecycles: TenantLifecycleRecord[];
+  onboardingSteps: ResidentOnboardingStep[];
 };
