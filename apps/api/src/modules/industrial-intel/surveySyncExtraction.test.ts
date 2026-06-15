@@ -60,3 +60,40 @@ test("extractSurveyFactsFromText classifies freestanding building flyers with la
   assert.equal(textFact(result, "lease_rate"), "$14/SF");
   assert.equal(textFact(result, "loading")?.includes("LEASE TERM"), false);
 });
+
+test("extractSurveyFactsFromText prioritizes municipal address over broker office boilerplate", () => {
+  const result = extractSurveyFactsFromText(
+    "royalparkrealty.com #201, 9038 51 Avenue NW Edmonton, AB T6E 5X4 FOR LEASE NISKU INDUSTRIAL OFFICE & SHOP 501 14 Avenue, Nisku, AB HIGHLIGHTS MUNICIPAL ADDRESS 501-14 Avenue, Nisku, AB 10,796 sq ft +/- stand alone office/shop with cranes on 1.25 acres +/- ZONING GI (General Industrial) CLEAR HEIGHT 23' LEASE RATE $16.00/sq ft",
+    { fileName: "For-Lease-Nisku-Industrial-Office-Shop-1.pdf" },
+  );
+
+  assert.equal(result.address, "501-14 Avenue, Nisku");
+  assert.equal(result.market, "Nisku");
+  assert.equal(result.assetType, "building");
+  assert.equal(numberFact(result, "building_size_sf"), 10796);
+});
+
+test("extractSurveyFactsFromText keeps land intersection flyers from becoming broker office buildings", () => {
+  const result = extractSurveyFactsFromText(
+    "royalparkrealty.com #201, 9038 51 Avenue NW Edmonton, AB T6E 5X4 Rare 3.58 acre +/- parcel for sale in Strathcona County. IM (Medium Industrial) zoning allows for a variety of uses. FOR SALE 3.58 ACRES IN STRATHCONA COUNTY 13 Street & 90 Avenue, Strathcona County, AB MUNICIPAL ADDRESS 13 Street & 90 Avenue, Strathcona County PRICE REDUCED! Price $785,000.00",
+    { fileName: "13-Street-90-Avenue_For-Sale-3.pdf" },
+  );
+
+  assert.equal(result.address, null);
+  assert.equal(textFact(result, "location_description"), "13 Street & 90 Avenue");
+  assert.equal(result.assetType, "land");
+  assert.equal(textFact(result, "zoning"), "IM");
+});
+
+test("extractSurveyFactsFromText handles Red Deer lease ranges and unit size ranges", () => {
+  const result = extractSurveyFactsFromText(
+    "7719 EDGAR INDUSTRIAL DRIVE RED DEER, AB FOR LEASE LOCATION Edgar Industrial Park LEASE RATES $12.00 PSF - $13.00 PSF ZONING I1 - Industrial (Business Service) District UNIT SIZES 4,067 SF - 9,705 SF",
+    { fileName: "Brochure_-7719_Edgar_v7.pdf" },
+  );
+
+  assert.equal(result.address, "7719 EDGAR INDUSTRIAL DRIVE");
+  assert.equal(result.market, "Red Deer");
+  assert.equal(textFact(result, "lease_rate"), "$12.00 PSF");
+  assert.equal(numberFact(result, "building_size_sf"), null);
+  assert.equal(numberFact(result, "available_size_sf"), 9705);
+});

@@ -71,12 +71,16 @@ function cleanFileName(fileName?: string | null): string {
   return cleanText((fileName || "").replace(/\.[a-z0-9]+$/i, "").replace(/[_()[\]{}]/g, " "));
 }
 
+function removeBrokerBoilerplate(text: string): string {
+  return text.replace(/#201,\s*9038\s+51\s+Avenue\s+NW\s+Edmonton,\s*AB\s*T6E\s*5X4/gi, " ");
+}
+
 const streetSuffixPattern =
   "(?:Street|St\\.?|Avenue|Ave\\.?|Av\\.?|Road|Rd\\.?|Drive|Dr\\.?|Boulevard|Blvd\\.?|Trail|Way|Lane|Ln\\.?|Highway|Hwy\\.?)";
 
 const addressPatterns = [
   new RegExp(
-    `\\b(\\d{2,6}(?:\\s*-\\s*\\d{2,6})?\\s+(?:\\d{1,5}[A-Za-z]?|[A-Za-z][A-Za-z0-9.'-]*)(?:\\s+[A-Za-z0-9.'-]+){0,4}\\s+${streetSuffixPattern}\\s*(?:NW|NE|SW|SE)?(?:\\s*,\\s*[A-Za-z .]+)?)\\b`,
+    `\\b(\\d{2,6}(?:\\s*-\\s*\\d{1,6})?\\s+(?:[A-Za-z0-9.'-]+\\s+){0,5}${streetSuffixPattern}\\s*(?:NW|NE|SW|SE)?(?:\\s*,\\s*[A-Za-z .]+)?)\\b`,
     "i",
   ),
 ];
@@ -84,17 +88,28 @@ const addressPatterns = [
 function isPlausibleAddress(value: string): boolean {
   const lower = value.toLowerCase();
   if (!/\d/.test(value) || !new RegExp(streetSuffixPattern, "i").test(value)) return false;
-  if (/vehicle|vpd|per day|for lease|for sale|exposure|marshalling|available|current configuration/.test(lower)) {
+  if (/vehicle|vpd|per day|for lease|for sale|exposure|marshalling|available|current configuration|acres?|price reduced/.test(lower)) {
     return false;
   }
+  if (new RegExp(`^\\d{1,5}\\s+${streetSuffixPattern}(?:,\\s*[A-Za-z .]+)?$`, "i").test(value)) return false;
+  const suffixCount = value.match(new RegExp(`\\b${streetSuffixPattern}\\b`, "gi"))?.length || 0;
+  if (suffixCount > 1) return false;
   if (/^\s*0+\b/.test(value)) return false;
   return true;
 }
 
 function inferAddress(text: string, fileName?: string | null): string | null {
+  const searchableText = removeBrokerBoilerplate(text);
   const fromFileName = firstPlausibleMatchText(cleanFileName(fileName), addressPatterns, isPlausibleAddress);
   if (fromFileName) return fromFileName;
-  return firstPlausibleMatchText(text, addressPatterns, isPlausibleAddress);
+
+  const municipalAddress = firstMatchText(searchableText, [
+    /(?:municipal address|property address|address)\s*[:\-]?\s*(.{0,140})/i,
+  ]);
+  const fromMunicipalAddress = firstPlausibleMatchText(municipalAddress || "", addressPatterns, isPlausibleAddress);
+  if (fromMunicipalAddress) return fromMunicipalAddress;
+
+  return firstPlausibleMatchText(searchableText, addressPatterns, isPlausibleAddress);
 }
 
 function inferLocationDescription(text: string): string | null {
@@ -112,9 +127,13 @@ function inferTitle(text: string, address: string | null, fileName?: string | nu
 
 function inferMarket(text: string): string | null {
   const lower = text.toLowerCase();
-  if (lower.includes("edmonton")) return "Edmonton Metro";
+  if (lower.includes("sherwood park") || lower.includes("strathcona county")) return "Sherwood Park / Strathcona County";
   if (lower.includes("nisku")) return "Nisku";
   if (lower.includes("acheson")) return "Acheson";
+  if (lower.includes("red deer")) return "Red Deer";
+  if (lower.includes("leduc")) return "Leduc";
+  if (lower.includes("spruce grove")) return "Spruce Grove";
+  if (lower.includes("edmonton")) return "Edmonton Metro";
   return null;
 }
 
@@ -129,13 +148,14 @@ function inferSubmarket(text: string): string | null {
 
 function inferAssetType(text: string): string | null {
   const lower = text.toLowerCase();
-  if (
-    /warehouse|office\s*\/\s*warehouse|showroom|freestanding [a-z\s/]*building|building area|total building area|clear height|loading/i.test(
+  if (/parcel for sale|acres? in [a-z\s]+county|industrial land|land for sale/i.test(text)) return "land";
+  const hasStrongBuildingSignal =
+    /warehouse|office\s*\/\s*warehouse|office\s*\/\s*shop|office\/shop|shop|showroom|freestanding [a-z\s/]*building|stand alone [a-z\s/]*building|building area|building size|total building area|clear height|loading/i.test(
       lower,
-    )
-  ) {
-    return "building";
-  }
+    );
+  const hasLandSignal = /\b(?:land|parcel|acres?|site)\b/i.test(lower);
+  if (hasLandSignal && !hasStrongBuildingSignal) return "land";
+  if (hasStrongBuildingSignal) return "building";
   if (lower.includes("yard")) return "yard";
   if ((lower.includes("land") || /\bac(?:res?)?\b/.test(lower)) && !lower.includes("building area")) return "land";
   if (lower.includes("industrial") || lower.includes("office")) return "building";
@@ -215,11 +235,14 @@ export function extractSurveyFactsFromText(
   addNumberFact(facts, "building_size_sf", "Building Size", firstMatchNumber(normalized, [
     /(?:total area|total building area)\s*[:\-]?\s*(?:\+\/-\s*)?([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft\.?)/i,
     /(?:\+\/-\s*)?([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft\.?)\s*[-]\s*total area/i,
+    /(?:\+\/-\s*)?([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft\.?)\s+building includes\b/i,
+    /(?:building size|building area)\s*[:\-]?.{0,220}?([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft\.?)\s+total\b/i,
     /(?:building size|building area|building)\s*[:\-]?\s*(?:\+\/-\s*)?([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft\.?)/i,
-    /(?:\+\/-\s*)?([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft\.?)(?:\s*\+\/-)?\s+(?:freestanding|building|warehouse|office|showroom)/i,
+    /(?:\+\/-\s*)?([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft\.?)(?:\s*\+\/-)?\s+(?:freestanding|stand alone|building|warehouse|office|showroom)/i,
   ]), sourceAssetId, 72);
 
   addNumberFact(facts, "available_size_sf", "Available Size", firstMatchNumber(normalized, [
+    /(?:unit sizes?|available|premises|space available)\s*[:\-]?\s*(?:\+\/-\s*)?[0-9][0-9,]*\s*(?:sf|sq\.?\s*ft\.?)\s*[-–]\s*(?:\+\/-\s*)?([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft\.?)/i,
     /(?:available|premises|space available)\s*[:\-]?\s*(?:\+\/-\s*)?([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft\.?)/i,
     /(?:\+\/-\s*)?([0-9][0-9,]*)\s*(?:sf|sq\.?\s*ft\.?)\s+(?:available|for lease)/i,
   ]), sourceAssetId, 70);
@@ -236,20 +259,21 @@ export function extractSurveyFactsFromText(
   ]), sourceAssetId, 70);
 
   addTextFact(facts, "zoning", "Zoning", firstMatchText(normalized, [
+    /\b([A-Z]{1,8})\s*\([^)]+(?:Industrial|Business|Commercial|District)[^)]*\)\s+zoning/i,
     /(?:zoning|zone)\s*[:\-]?\s*([A-Z]{1,6}\s*-\s*[A-Za-z ]{4,48}?(?:Industrial|Commercial|Business|District))/i,
     /(?:zoning|zone)\s*[:\-]?\s*([A-Z0-9]{1,8})(?=\s+(?:Clear Height|Loading|Ceiling|Power|Operating|Lease Term|Tax|CAM|Sprinklers|$))/i,
     /(?:zoning|zone)\s*[:\-]?\s*([A-Z0-9]{1,8})\b/i,
   ]), sourceAssetId, 68);
 
   addTextFact(facts, "loading", "Loading", firstMatchText(normalized, [
-    /Loading(?:\s*\([^)]+\))?\s*[:\-]?\s*((?:\([0-9]+\)|[0-9]+|Two|One)?.{0,160}?(?:Dock|Grade|Ramp).{0,90}?)(?=\s+(?:Ceiling|Power|Additional|Zoning|Clear Height|Lease Term|Operating Cost|Operating Costs|Tax|CAM|Sprinklers|Marshalling Area)|$)/i,
+    /Loading(?:\s*\([^)]+\))?\s*[:\-]?\s*((?:\([0-9]+\)|[0-9]+|Two|One)?.{0,160}?(?:Dock|Grade|Ramp).{0,90}?)(?=\s+(?:Ceiling|Heating|Power|Additional|Zoning|Clear Height|Lease Term|Operating Cost|Operating Costs|Tax|CAM|Sprinklers|Marshalling Area)|$)/i,
     /((?:[0-9]+\s*)?(?:dock|grade)(?:\s+loading)?(?:\s+doors?)?(?:\s*(?:and|,)\s*(?:[0-9]+\s*)?(?:dock|grade)(?:\s+loading)?(?:\s+doors?)?)?)/i,
   ]), sourceAssetId, 62);
 
   addTextFact(facts, "lease_rate", "Lease Rate", firstMatchText(normalized, [
     /(?:rate reduced!\s*)?now\s*[:\-]?\s*(\$?\s*[0-9][0-9,.]*\s*(?:(?:\/|per)\s*)?(?:sf|psf|sq\.?\s*ft\.?)?)/i,
-    /lease rate reduced\s*[:\-]?\s*(\$?\s*[0-9][0-9,.]*\s*(?:(?:\/|per)\s*)?(?:sf|psf|sq\.?\s*ft\.?)?)/i,
-    /(?:asking rate|lease rate|asking rent|net rent)\s*[:\-]?\s*(\$?\s*[0-9][0-9,.]*\s*(?:(?:\/|per)\s*)?(?:sf|psf|sq\.?\s*ft\.?)?)/i,
+    /lease rates? reduced\s*[:\-]?\s*(\$?\s*[0-9][0-9,.]*\s*(?:(?:\/|per)\s*)?(?:sf|psf|sq\.?\s*ft\.?)?)/i,
+    /(?:asking rate|lease rates?|asking rent|net rent)\s*[:\-]?\s*(\$?\s*[0-9][0-9,.]*\s*(?:(?:\/|per)\s*)?(?:sf|psf|sq\.?\s*ft\.?)?)(?:\s*[-]\s*\$?\s*[0-9][0-9,.]*\s*(?:(?:\/|per)\s*)?(?:sf|psf|sq\.?\s*ft\.?)?)?/i,
   ]), sourceAssetId, 68);
 
   addTextFact(facts, "asking_price", "Asking Price", firstMatchText(normalized, [
