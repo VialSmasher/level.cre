@@ -1,39 +1,44 @@
 import { useAuth } from '@/contexts/AuthContext'
-import type { ComponentType } from 'react'
+import type { ComponentType, ReactNode } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuSeparator, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { 
-  User, 
-  Settings, 
-  LogOut, 
-  ChevronDown,
-  Map,
+import {
+  BarChart3,
   Briefcase,
   Brain,
-  RotateCcw,
-  BarChart3,
-  Layers,
-  Fingerprint,
-  Menu,
-  X,
   ChartSpline,
-  Bot,
-  Trophy,
-  Mail
+  ChevronDown,
+  ClipboardCheck,
+  FileText,
+  Layers,
+  LogOut,
+  Mail,
+  Map,
+  Menu,
+  RotateCcw,
+  Settings,
+  Table as TableIcon,
+  User,
+  X,
 } from 'lucide-react'
-import { Table } from 'lucide-react'
 import { Link, useLocation } from 'wouter'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { useState } from 'react'
 
 interface AppLayoutProps {
-  children: React.ReactNode
+  children: ReactNode
+}
+
+type NavItem = {
+  label: string
+  href: string
+  icon: ComponentType<{ size?: number; className?: string }>
+  active: boolean
 }
 
 export function AppLayout({ children }: AppLayoutProps) {
@@ -60,15 +65,8 @@ export function AppLayout({ children }: AppLayoutProps) {
     return location === path
   }
 
-  const isScorecardActive = location === '/broker-stats' || location === '/leaderboard' || location === '/badges'
+  const isPerformanceActive = location === '/broker-stats' || location === '/leaderboard' || location === '/badges'
   const profileLabel = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'
-
-  type NavItem = {
-    label: string
-    href: string
-    icon: ComponentType<{ size?: number; className?: string }>
-    active?: boolean
-  }
 
   const navGroups: NavItem[][] = [
     [
@@ -80,377 +78,183 @@ export function AppLayout({ children }: AppLayoutProps) {
     [
       { label: 'Knowledge', href: '/app/knowledge', icon: Brain, active: isActive('/app/knowledge') },
       { label: 'Requirements', href: '/app/requirements', icon: Layers, active: isActive('/app/requirements') },
-      { label: 'Market Comps', href: '/app/market-comps', icon: Table, active: isActive('/app/market-comps') },
+      { label: 'Market Comps', href: '/app/market-comps', icon: TableIcon, active: isActive('/app/market-comps') },
     ],
     [
-      { label: 'Scorecard', href: '/broker-stats', icon: BarChart3, active: isScorecardActive },
+      { label: 'Performance', href: '/broker-stats', icon: BarChart3, active: isPerformanceActive },
     ],
   ]
 
+  const mobileNavItems: NavItem[] = [
+    ...navGroups.flat(),
+    { label: 'Track Record', href: '/track-record', icon: FileText, active: isActive('/track-record') },
+    { label: 'Review Console', href: '/app/review', icon: ClipboardCheck, active: isActive('/app/review') },
+    { label: 'Settings', href: '/app/profile', icon: Settings, active: isActive('/app/profile') },
+  ]
+
+  const navLinkClass = (active: boolean) =>
+    `inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 ${
+      active
+        ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950'
+        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-gray-800 dark:hover:text-white'
+    }`
+
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
-      {/* Top Navigation */}
-      <nav className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-          <div className="flex h-14 items-center justify-between sm:h-16">
-            {/* Logo */}
-            <div className="flex items-center min-w-0 gap-4">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <nav className="border-b border-border bg-card dark:bg-gray-900">
+        <div className="mx-auto max-w-[1600px] px-3 sm:px-6">
+          <div className="flex h-14 items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-4">
               <Link
                 href="/app"
-                className="text-xl font-black tracking-tight text-slate-900 dark:text-gray-100 sm:text-2xl"
-                aria-label="Go to dashboard"
+                className="inline-flex items-center gap-2 text-lg font-semibold tracking-normal text-slate-950 dark:text-gray-100"
+                aria-label="Go to map"
               >
-                <span className="inline-flex items-center gap-1">
-                  level CRE
-                  <ChartSpline size={18} className="-mt-px sm:h-5 sm:w-5" />
-                </span>
+                <span>Level CRE</span>
+                <ChartSpline size={17} className="text-slate-500" />
               </Link>
             </div>
 
-            {/* Navigation Links */}
-            <div className="hidden md:flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50/80 p-1 shadow-inner dark:border-gray-700 dark:bg-gray-900/40">
+            <div className="hidden min-w-0 flex-1 items-center justify-center gap-1 md:flex">
               {navGroups.map((group, groupIndex) => (
                 <div key={groupIndex} className="flex items-center gap-1">
-                  {groupIndex > 0 && <div className="mx-1 h-6 w-px bg-slate-200 dark:bg-gray-700" />}
+                  {groupIndex > 0 && <div className="mx-1 h-5 w-px bg-border" />}
                   {group.map((item) => {
                     const Icon = item.icon
-                    const active = !!item.active
                     return (
-                      <Tooltip key={item.label}>
-                        <TooltipTrigger asChild>
-                          <Link
-                            href={item.href}
-                            className={`inline-flex h-10 items-center justify-center gap-2 rounded-full px-3 text-sm font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                              active
-                                ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:ring-blue-900'
-                                : 'text-slate-500 hover:bg-white hover:text-slate-900 hover:shadow-sm dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100'
-                            }`}
-                            aria-label={item.label}
-                          >
-                            <Icon size={20} />
-                            {active && <span>{item.label}</span>}
-                          </Link>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{item.label}</p>
-                        </TooltipContent>
-                      </Tooltip>
+                      <Link
+                        key={item.label}
+                        href={item.href}
+                        className={navLinkClass(item.active)}
+                        aria-current={item.active ? 'page' : undefined}
+                      >
+                        <Icon size={16} />
+                        <span>{item.label}</span>
+                      </Link>
                     )
                   })}
                 </div>
               ))}
             </div>
 
-            {/* Mobile menu button and Profile */}
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center gap-2">
               <div className="md:hidden">
-                <Button 
-                  variant="ghost" 
-                  size="sm"
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                  className="p-2"
                   aria-label="Toggle mobile menu"
                 >
-                  {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+                  {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
                 </Button>
               </div>
-              
-              {/* Profile Dropdown */}
+
               <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="flex max-w-[260px] items-center space-x-1 rounded-full px-1.5 sm:space-x-2 sm:px-2">
-                  <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                    {user?.user_metadata?.avatar_url ? (
-                      <img 
-                        src={user.user_metadata.avatar_url} 
-                        alt="Profile" 
-                        className="w-8 h-8 rounded-full"
-                      />
-                    ) : (
-                      <User className="h-4 w-4 text-blue-600" />
-                    )}
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="h-9 max-w-[260px] gap-2 rounded-md px-1.5 sm:px-2">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-100 text-slate-600">
+                      {user?.user_metadata?.avatar_url ? (
+                        <img
+                          src={user.user_metadata.avatar_url}
+                          alt="Profile"
+                          className="h-7 w-7 rounded-md object-cover"
+                        />
+                      ) : (
+                        <User className="h-4 w-4" />
+                      )}
+                    </div>
+                    <span className="hidden max-w-[170px] truncate text-sm font-medium text-slate-700 md:block">
+                      {profileLabel}
+                    </span>
+                    <ChevronDown className="h-4 w-4 text-slate-400" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <div className="border-b border-border px-3 py-2">
+                    <p className="text-sm font-medium text-foreground">
+                      {user?.user_metadata?.full_name || 'User'}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {user?.email}
+                    </p>
                   </div>
-                  <span className="hidden max-w-[170px] truncate text-sm font-medium text-gray-700 md:block">
-                    {profileLabel}
-                  </span>
-                  <ChevronDown className="h-4 w-4 text-gray-400" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <div className="px-3 py-2 border-b border-gray-100">
-                  <p className="text-sm font-medium text-gray-900">
-                    {user?.user_metadata?.full_name || 'User'}
-                  </p>
-                  <p className="text-sm text-gray-500 truncate">
-                    {user?.email}
-                  </p>
-                </div>
-                <DropdownMenuItem asChild>
-                  <Link href="/launcher" className="w-full">
-                    <Layers className="mr-2 h-4 w-4" />
-                    Broker tools
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/track-record" className="w-full">
-                    <Trophy className="mr-2 h-4 w-4" />
-                    Track Record
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/app/review" className="w-full">
-                    <Bot className="mr-2 h-4 w-4" />
-                    Review Console
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/app/profile" className="w-full">
-                    <Settings className="mr-2 h-4 w-4" />
-                    Settings
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Sign Out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <DropdownMenuItem asChild>
+                    <Link href="/launcher" className="w-full">
+                      <Layers className="mr-2 h-4 w-4" />
+                      Broker tools
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/track-record" className="w-full">
+                      <FileText className="mr-2 h-4 w-4" />
+                      Track Record
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/app/review" className="w-full">
+                      <ClipboardCheck className="mr-2 h-4 w-4" />
+                      Review Console
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/app/profile" className="w-full">
+                      <Settings className="mr-2 h-4 w-4" />
+                      Settings
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleSignOut}>
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Sign Out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </div>
 
-        {/* Mobile Navigation Menu */}
         {mobileMenuOpen && (
-          <div className="md:hidden bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
-            <div className="px-4 py-3 space-y-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Map"
-                  >
-                    <Map size={20} />
-                    <span className="font-medium">Map</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Map</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href={workspacesHref} 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/workspaces') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Workspaces"
-                  >
-                    <Briefcase size={20} />
-                    <span className="font-medium">Workspaces</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Workspaces</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/knowledge" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/knowledge') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Knowledge"
-                  >
-                    <Brain size={20} />
-                    <span className="font-medium">Knowledge</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Knowledge</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/followup" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/followup') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Follow Up"
-                  >
-                    <RotateCcw size={20} />
-                    <span className="font-medium">Follow Up</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Follow Up</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
+          <div className="border-t border-border bg-card md:hidden">
+            <div className="grid gap-1 px-3 py-3">
+              {mobileNavItems.map((item) => {
+                const Icon = item.icon
+                return (
                   <Link
-                    href="/app/inbox"
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/inbox')
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30'
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    key={item.href}
+                    href={item.href}
+                    className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                      item.active
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-600 hover:bg-muted hover:text-slate-950'
                     }`}
                     onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Inbox"
+                    aria-current={item.active ? 'page' : undefined}
                   >
-                    <Mail size={20} />
-                    <span className="font-medium">Inbox</span>
+                    <Icon size={17} />
+                    <span>{item.label}</span>
                   </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Inbox</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/broker-stats" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/broker-stats') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Broker Stats"
-                  >
-                    <BarChart3 size={20} />
-                    <span className="font-medium">Broker Stats</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Broker Stats</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/requirements" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/requirements') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Requirements"
-                  >
-                    <Layers size={20} />
-                    <span className="font-medium">Requirements</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Requirements</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/market-comps" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/market-comps') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Market Comps"
-                  >
-                    <Table size={20} />
-                    <span className="font-medium">Market Comps</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Market Comps</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/review" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/review') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Review Console"
-                  >
-                    <Bot size={20} />
-                    <span className="font-medium">Review Console</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Review Console</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/profile" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/profile') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Profile"
-                  >
-                    <Fingerprint size={20} />
-                    <span className="font-medium">Profile</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Profile</p>
-                </TooltipContent>
-              </Tooltip>
+                )
+              })}
             </div>
           </div>
         )}
       </nav>
 
-      {/* Main Content */}
-      <main className="flex-1 min-h-0 flex flex-col">
+      <main className="flex min-h-0 flex-1 flex-col">
         {children}
       </main>
-      {/* Build badge (non-invasive) */}
+
       {(() => {
-        const sha = (import.meta as any)?.env?.VITE_COMMIT_SHA as string | undefined;
-        if (!sha) return null;
+        const sha = (import.meta as any)?.env?.VITE_COMMIT_SHA as string | undefined
+        if (!sha) return null
         return (
-          <div className="fixed bottom-1 right-2 text-[10px] text-gray-500 bg-white/70 dark:bg-gray-800/70 px-2 py-0.5 rounded select-none opacity-80" style={{ pointerEvents: 'none' }}>
+          <div
+            className="fixed bottom-1 right-2 rounded-sm bg-card/80 px-2 py-0.5 text-[10px] text-muted-foreground opacity-80"
+            style={{ pointerEvents: 'none' }}
+          >
             build: {String(sha).slice(0, 7)}
           </div>
-        );
+        )
       })()}
     </div>
   )
