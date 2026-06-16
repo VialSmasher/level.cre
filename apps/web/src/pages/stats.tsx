@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowRight, Brain, MapPin, Medal, Phone, Sparkles, Target, Trophy, Zap } from 'lucide-react';
+import { Activity, ArrowRight, BarChart3, Brain, MapPin, Phone, Target, Zap } from 'lucide-react';
 import { BrokerSkillsRow, SkillActivityRow, Requirement } from '@level-cre/shared/schema';
 import { Link } from 'wouter';
 
@@ -150,8 +150,8 @@ function SkillTrackRow({ name, xp, icon: Icon, description, skillKey, progressPe
         </div>
       </div>
       <div className="flex items-center gap-3 lg:block lg:text-right">
-        <p className="text-lg font-black leading-none text-slate-950">Lv {level}</p>
-        <p className="mt-0.5 text-xs font-medium text-slate-500">{xp.toLocaleString()} XP</p>
+        <p className="text-lg font-black leading-none text-slate-950">Band {level}</p>
+        <p className="mt-0.5 text-xs font-medium text-slate-500">{xp.toLocaleString()} pts</p>
       </div>
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs">
@@ -300,27 +300,27 @@ export default function StatsPage() {
         <div>
           <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
-              <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Scorecard</p>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-normal text-slate-500">Broker analytics</p>
               <h1 className="text-2xl font-black tracking-tight text-slate-950 md:text-3xl">Broker Performance</h1>
               <p className="mt-1 text-sm text-slate-600">Weekly activity, CRM momentum, and market knowledge progress.</p>
             </div>
             <div className="flex w-fit items-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm md:pb-0">
               <span className="inline-flex h-9 items-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white">
-                <Trophy className="h-4 w-4" />
+                <BarChart3 className="h-4 w-4" />
                 Overview
               </span>
               <Link
                 href="/badges"
                 className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
               >
-                <Medal className="h-4 w-4" />
-                Badges
+                <Activity className="h-4 w-4" />
+                Milestones
               </Link>
               <Link
                 href="/leaderboard"
                 className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
               >
-                <Trophy className="h-4 w-4" />
+                <Target className="h-4 w-4" />
                 Standings
               </Link>
             </div>
@@ -333,12 +333,12 @@ export default function StatsPage() {
                 <div className="absolute right-0 top-0 h-24 w-24 rounded-bl-full bg-blue-500/20" />
                 <div className="relative flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Broker level</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Activity index</p>
                     <p className="mt-2 text-4xl font-black leading-none">{headerLoading || headerError ? 0 : totalLevel}</p>
                     <p className="mt-2 text-xs text-slate-300">Across all skills</p>
                   </div>
                   <div className="rounded-xl bg-white/10 p-2">
-                    <Trophy className="h-5 w-5 text-blue-200" />
+                    <BarChart3 className="h-5 w-5 text-blue-200" />
                   </div>
                 </div>
               </CardContent>
@@ -396,7 +396,7 @@ export default function StatsPage() {
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <span className="rounded-lg bg-blue-50 p-1.5">
-                  <Sparkles className="h-4 w-4 text-blue-600" />
+                  <Target className="h-4 w-4 text-blue-600" />
                 </span>
                 Next Best Actions
               </CardTitle>
@@ -431,7 +431,7 @@ export default function StatsPage() {
               <CardTitle className="flex items-center justify-between gap-3 text-lg">
                 <span>This Week</span>
                 <Badge variant="outline" className="rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
-                  {weeklyXpTotal} XP
+                  {weeklyXpTotal} pts
                 </Badge>
               </CardTitle>
             </CardHeader>
@@ -442,7 +442,7 @@ export default function StatsPage() {
                   <div key={r.key} className="grid gap-2">
                     <div className="flex items-center justify-between text-sm">
                       <span className="font-medium text-slate-800">{r.label}</span>
-                      <span className="text-slate-500">{r.value} / {r.goal} XP</span>
+                      <span className="text-slate-500">{r.value} / {r.goal} pts</span>
                     </div>
                     <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
                       <div className={`h-full rounded-full ${r.color}`} style={{ width: `${pct}%` }} />
@@ -462,14 +462,14 @@ export default function StatsPage() {
                 <p className="mt-1 text-sm text-slate-600">Progress by prospecting, follow-up, consistency, and market knowledge.</p>
               </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
-                {weeklyXpTotal} XP this week
+                {weeklyXpTotal} pts this week
               </div>
             </div>
           </CardHeader>
           <CardContent className="p-0">
             <div className="hidden border-b border-slate-100 bg-slate-50 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid lg:grid-cols-[minmax(190px,1fr)_90px_minmax(210px,1.2fr)_minmax(150px,0.8fr)]">
               <span>Track</span>
-              <span className="text-right">Level</span>
+              <span className="text-right">Band</span>
               <span>Progress</span>
               <span>Next action</span>
             </div>

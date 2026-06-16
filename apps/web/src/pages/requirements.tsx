@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Edit, Trash2, Tag, Building, Users, Clock, MapPin, ClipboardList, Search, Sparkles } from "lucide-react";
+import { Plus, Edit, Trash2, Tag, Building, Users, Clock, MapPin, ClipboardList, Search } from "lucide-react";
 import { Requirement, InsertRequirement, Submarket } from "@level-cre/shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import { uniqueSubmarketNames } from "@/lib/submarkets";
@@ -286,15 +286,15 @@ export default function RequirementsPage() {
   const sourceCount = uniqueSources.length;
 
   return (
-    <div className="min-h-screen bg-slate-50 px-6 py-8 dark:bg-gray-900">
-      <div className="mx-auto max-w-7xl space-y-6">
+    <div className="min-h-screen bg-background px-4 py-4 sm:px-6">
+      <div className="mx-auto max-w-[1600px] space-y-4">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
-            <Badge variant="outline" className="mb-2 gap-2 rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
+            <Badge variant="outline" className="mb-2 gap-2 border-border bg-card px-2.5 py-1 text-muted-foreground">
               <ClipboardList className="h-3.5 w-3.5" />
               Tenant and buyer demand
             </Badge>
-            <h1 className="text-4xl font-bold tracking-tight text-slate-950 dark:text-white">Requirements board</h1>
+            <h1 className="text-2xl font-semibold tracking-normal text-foreground">Requirements Register</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-gray-300">
               Track active needs, source relationships, and structured search criteria for future matching.
             </p>
@@ -302,7 +302,7 @@ export default function RequirementsPage() {
           
           <Modal open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <ModalTrigger asChild>
-              <Button onClick={resetForm} className="h-10 rounded-full px-4" aria-label="Add Requirement" title="Add Requirement">
+              <Button onClick={resetForm} aria-label="Add Requirement" title="Add Requirement">
                 <Plus className="mr-2 h-4 w-4" />
                 New requirement
               </Button>
@@ -471,7 +471,7 @@ export default function RequirementsPage() {
                 <p className="mt-1 text-3xl font-bold text-slate-950">{activeCount}</p>
               </div>
               <div className="rounded-xl bg-emerald-50 p-2 text-emerald-600">
-                <Sparkles className="h-5 w-5" />
+                <ClipboardList className="h-5 w-5" />
               </div>
             </CardContent>
           </Card>
@@ -538,33 +538,35 @@ export default function RequirementsPage() {
           </CardContent>
         </Card>
 
-        {/* Requirements List */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        {/* Requirements Register */}
+        <div className="grid grid-cols-1 gap-2">
           {isLoading ? (
-            <div className="col-span-full rounded-2xl bg-white p-8 text-center text-sm text-slate-500 shadow-sm">Loading requirements...</div>
+            <div className="col-span-full rounded-lg border border-border bg-card p-8 text-center text-sm text-muted-foreground">Loading requirements...</div>
           ) : filteredRequirements.length === 0 ? (
-            <div className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+            <div className="col-span-full rounded-lg border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
               No requirements found. Add a requirement or loosen the filters.
             </div>
           ) : (
             filteredRequirements.map((requirement) => (
-              <Card key={requirement.id} className="border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md">
+              <Card key={requirement.id} className="border-border bg-card shadow-none">
                 <CardHeader className="pb-3">
-                  <div className="flex justify-between items-start">
-                    <CardTitle className="text-lg leading-tight text-slate-950">{requirement.title}</CardTitle>
+                  <div className="flex items-start justify-between gap-4">
+                    <CardTitle className="min-w-0 truncate text-sm leading-5 text-foreground" title={requirement.title}>{requirement.title}</CardTitle>
                     <div className="flex gap-1">
                       <Button
                         variant="ghost"
-                        size="sm"
+                        size="icon"
                         onClick={() => handleEdit(requirement)}
+                        aria-label="Edit requirement"
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"
-                        size="sm"
+                        size="icon"
                         onClick={() => handleDelete(requirement.id!)}
                         className="text-red-600 hover:text-red-700"
+                        aria-label="Delete requirement"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -581,16 +583,16 @@ export default function RequirementsPage() {
                   </div>
                 </CardHeader>
                 
-                <CardContent className="space-y-3">
+                <CardContent className="grid gap-2 border-t border-border pt-3 text-sm md:grid-cols-5">
                   {requirement.location && (
-                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <div className="flex items-center gap-2 text-slate-600">
                       <MapPin className="h-4 w-4" />
                       {requirement.location}
                     </div>
                   )}
                   
                   {requirement.spaceSize && (
-                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <div className="flex items-center gap-2 text-slate-600">
                       <Building className="h-4 w-4" />
                       {formatSpaceSize(requirement.spaceSize)}
                     </div>
@@ -599,20 +601,20 @@ export default function RequirementsPage() {
 
                   
                   {requirement.contactName && (
-                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <div className="flex items-center gap-2 text-slate-600">
                       <Users className="h-4 w-4" />
                       {requirement.contactName}
                     </div>
                   )}
                   
                   {requirement.notes && (
-                    <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
+                    <p className="line-clamp-1 text-slate-600 md:col-span-2">
                       {requirement.notes}
                     </p>
                   )}
                   
                   {requirement.tags && requirement.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex flex-wrap gap-1 md:col-span-5">
                       {requirement.tags.map((tag, index) => (
                         <Badge key={index} variant="secondary" className="text-xs">
                           {tag}

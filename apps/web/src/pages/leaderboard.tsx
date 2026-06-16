@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowUpRight, Crown, Medal, ShieldCheck, Sparkles, Target, Trophy, Users } from 'lucide-react';
+import { Activity, ArrowUpRight, BarChart3, ShieldCheck, Target, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { Link } from 'wouter';
@@ -63,27 +63,27 @@ export default function LeaderboardPage() {
       <div className="mx-auto max-w-7xl space-y-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Scorecard</p>
-            <h1 className="text-2xl font-black tracking-tight text-slate-950 md:text-3xl">Market Standings</h1>
-            <p className="mt-1 text-sm text-slate-600">See where you stand, who is leading, and the XP gap to climb.</p>
+            <p className="mb-1 text-xs font-semibold uppercase tracking-normal text-slate-500">Broker analytics</p>
+            <h1 className="text-2xl font-black tracking-tight text-slate-950 md:text-3xl">Team Activity Standings</h1>
+            <p className="mt-1 text-sm text-slate-600">Compare broker activity, coverage, and follow-through across the workspace.</p>
           </div>
           <div className="flex w-fit items-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             <Link
               href="/broker-stats"
               className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
             >
-              <Trophy className="h-4 w-4" />
+              <BarChart3 className="h-4 w-4" />
               Overview
             </Link>
             <Link
               href="/badges"
               className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
             >
-              <Medal className="h-4 w-4" />
-              Badges
+              <Activity className="h-4 w-4" />
+              Milestones
             </Link>
             <span className="inline-flex h-9 items-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white">
-              <Trophy className="h-4 w-4" />
+              <Target className="h-4 w-4" />
               Standings
             </span>
           </div>
@@ -96,7 +96,7 @@ export default function LeaderboardPage() {
                 <div>
                   <p className="text-sm font-medium text-slate-600">Your rank</p>
                   <p className="mt-1 text-3xl font-bold text-slate-950">{currentRank ? `#${currentRank}` : '-'}</p>
-                  <p className="mt-1 text-xs text-slate-500">{currentUserEntry ? `${formatXp(currentUserEntry.xp_total)} total XP` : 'Not ranked yet'}</p>
+                  <p className="mt-1 text-xs text-slate-500">{currentUserEntry ? `${formatXp(currentUserEntry.xp_total)} total pts` : 'Not ranked yet'}</p>
                 </div>
                 <div className="rounded-lg bg-blue-50 p-2 text-blue-600">
                   <Target className="h-5 w-5" />
@@ -111,7 +111,7 @@ export default function LeaderboardPage() {
                 <div>
                   <p className="text-sm font-medium text-slate-600">Gap to next</p>
                   <p className="mt-1 text-3xl font-bold text-slate-950">{xpToNextRank ? formatXp(xpToNextRank) : '-'}</p>
-                  <p className="mt-1 text-xs text-slate-500">{nextRankEntry ? `XP to pass ${nextRankEntry.display_name}` : 'You are at the top'}</p>
+                  <p className="mt-1 text-xs text-slate-500">{nextRankEntry ? `Points to pass ${nextRankEntry.display_name}` : 'You are at the top'}</p>
                 </div>
                 <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600">
                   <ArrowUpRight className="h-5 w-5" />
@@ -126,10 +126,10 @@ export default function LeaderboardPage() {
                 <div>
                   <p className="text-sm font-medium text-slate-600">Market leader</p>
                   <p className="mt-1 truncate text-2xl font-bold text-slate-950">{leader?.display_name || '-'}</p>
-                  <p className="mt-1 text-xs text-slate-500">{leader ? `${formatXp(leader.xp_total)} XP` : 'No standings yet'}</p>
+                  <p className="mt-1 text-xs text-slate-500">{leader ? `${formatXp(leader.xp_total)} pts` : 'No standings yet'}</p>
                 </div>
                 <div className="rounded-lg bg-amber-50 p-2 text-amber-600">
-                  <Crown className="h-5 w-5" />
+                  <BarChart3 className="h-5 w-5" />
                 </div>
               </div>
             </CardContent>
@@ -165,17 +165,16 @@ export default function LeaderboardPage() {
                           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-sm font-bold shadow-sm">
                             #{rank}
                           </div>
-                          {rank === 1 ? <Crown className="h-5 w-5" /> : <Medal className="h-5 w-5" />}
                         </div>
                         <p className="truncate text-lg font-bold text-slate-950">{entry.display_name}</p>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <Badge variant="secondary" className="rounded-full bg-white/80 text-xs">Level {entry.level_total}</Badge>
+                          <Badge variant="secondary" className="rounded-full bg-white/80 text-xs">Band {entry.level_total}</Badge>
                           {isCurrentUser && <Badge className="rounded-full bg-slate-950 text-xs text-white hover:bg-slate-950">You</Badge>}
                         </div>
                       </div>
                       <div className="text-right">
                         <p className="text-2xl font-bold text-slate-950">{formatXp(entry.xp_total)}</p>
-                        <p className="text-xs font-medium text-slate-500">XP</p>
+                        <p className="text-xs font-medium text-slate-500">pts</p>
                       </div>
                     </div>
                   </CardContent>
@@ -193,7 +192,7 @@ export default function LeaderboardPage() {
                   <ShieldCheck className="h-5 w-5 text-blue-600" />
                   Full Standings
                 </CardTitle>
-                <p className="mt-1 text-sm text-slate-600">All-time level and XP rankings for the workspace.</p>
+                <p className="mt-1 text-sm text-slate-600">All-time activity bands and point totals for the workspace.</p>
               </div>
               <div className="flex w-full max-w-md rounded-full border border-slate-200 bg-slate-50 p-1 text-xs font-semibold text-slate-600 md:w-auto">
                 <span className="rounded-full bg-white px-4 py-2 text-blue-700 shadow-sm">All time</span>
@@ -211,7 +210,7 @@ export default function LeaderboardPage() {
               </div>
             ) : !leaderboard || leaderboard.length === 0 ? (
               <div className="py-10 text-center text-slate-500">
-                <Crown className="mx-auto mb-3 h-12 w-12 text-slate-300" />
+                  <Users className="mx-auto mb-3 h-12 w-12 text-slate-300" />
                 <p>No teammates yet</p>
               </div>
             ) : (
@@ -224,8 +223,8 @@ export default function LeaderboardPage() {
                 <div className="grid grid-cols-12 gap-3 border-b border-slate-200 px-3 pb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                   <div>Rank</div>
                   <div className="col-span-5">Broker</div>
-                  <div className="col-span-2 text-center">Level</div>
-                  <div className="col-span-2 text-center">Total XP</div>
+                  <div className="col-span-2 text-center">Band</div>
+                  <div className="col-span-2 text-center">Total pts</div>
                   <div className="col-span-2 text-right">Status</div>
                 </div>
                 {leaderboard.map((entry, index) => {
@@ -240,7 +239,6 @@ export default function LeaderboardPage() {
                     >
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-bold text-slate-950">#{rank}</span>
-                        {rank === 1 && <Crown className="h-4 w-4 text-amber-500" />}
                       </div>
                       <div className="col-span-5 min-w-0">
                         <div className="truncate text-sm font-semibold text-slate-950">
@@ -263,7 +261,6 @@ export default function LeaderboardPage() {
                           <Badge variant="outline" className="rounded-full border-amber-200 bg-amber-50 text-xs text-amber-700">Top 3</Badge>
                         ) : (
                           <Badge variant="outline" className="rounded-full border-slate-200 bg-white text-xs text-slate-500">
-                            <Sparkles className="mr-1 h-3 w-3" />
                             Ranked
                           </Badge>
                         )}
