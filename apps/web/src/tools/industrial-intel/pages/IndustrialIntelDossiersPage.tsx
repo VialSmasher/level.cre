@@ -1,6 +1,21 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Bot, Check, CircleAlert, FileText, Image, Library, Plus, Search, Upload } from "lucide-react";
+import {
+  Check,
+  CheckCircle2,
+  CircleAlert,
+  Cloud,
+  ExternalLink,
+  FileCheck2,
+  FileText,
+  Image,
+  Library,
+  Loader2,
+  Plus,
+  Search,
+  Upload,
+  XCircle,
+} from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
@@ -84,6 +99,14 @@ type IntelDossierDetail = IntelDossierListItem & {
   listing: IntelListing | null;
 };
 
+type UploadJob = {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  status: "queued" | "uploading" | "saved" | "failed";
+  message: string;
+};
+
 const FACT_PRESETS = [
   { key: "site_size", label: "Site size" },
   { key: "building_size", label: "Building size" },
@@ -107,6 +130,17 @@ function cleanAssetType(file: File) {
   return file.type === "application/pdf" ? "brochure" : "photo";
 }
 
+function uploadJobStatusLabel(status: UploadJob["status"]) {
+  if (status === "queued") return "Queued";
+  if (status === "uploading") return "Uploading";
+  if (status === "saved") return "Saved";
+  return "Failed";
+}
+
+function assetStatusLabel(status: IntelListingAsset["status"]) {
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
 function factDisplayValue(fact: IntelDossierFact) {
   if (fact.valueText) return fact.valueText;
   if (fact.valueNumber !== null && fact.valueNumber !== undefined) return formatNumber(fact.valueNumber);
@@ -127,6 +161,8 @@ export default function IndustrialIntelDossiersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState({ title: "", address: "", market: "", assetType: "land" });
   const [newFact, setNewFact] = useState({ factKey: "site_size", valueText: "", confidence: 85 });
+  const [uploadJobs, setUploadJobs] = useState<UploadJob[]>([]);
+  const [dragActive, setDragActive] = useState(false);
 
   const { data: dossiers = [], isLoading: dossiersLoading } = useQuery<IntelDossierListItem[]>({
     queryKey: ["/api/intel/dossiers"],
@@ -183,6 +219,15 @@ export default function IndustrialIntelDossiersPage() {
       ]
     : [];
 
+  const updateUploadJob = (id: string, patch: Partial<UploadJob>) => {
+    setUploadJobs((jobs) => jobs.map((job) => (job.id === id ? { ...job, ...patch } : job)));
+  };
+
+  const handleAssetFiles = (files: File[]) => {
+    if (!files.length) return;
+    uploadAssetsMutation.mutate(files);
+  };
+
   const createDossierMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/intel/dossiers", {
@@ -195,6 +240,10 @@ export default function IndustrialIntelDossiersPage() {
       return response.json() as Promise<IntelDossierDetail>;
     },
     onSuccess: (dossier) => {
+      queryClient.setQueryData<IntelDossierListItem[]>(["/api/intel/dossiers"], (current = []) => {
+        const withoutCreated = current.filter((candidate) => candidate.id !== dossier.id);
+        return [dossier, ...withoutCreated];
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/intel/dossiers"] });
       queryClient.setQueryData([`/api/intel/dossiers/${dossier.id}`], dossier);
       setSelectedDossierId(dossier.id);
@@ -209,15 +258,54 @@ export default function IndustrialIntelDossiersPage() {
 
   const uploadAssetsMutation = useMutation({
     mutationFn: async (files: File[]) => {
-      if (!selectedId) throw new Error("Select a property dossier first.");
-      if (!supabase) throw new Error("Supabase is not configured in this browser.");
+      const jobs = files.map((file, index) => ({
+        id: `${Date.now()}-${index}-${file.name}`,
+        fileName: file.name,
+        fileSize: file.size,
+        status: "queued" as const,
+        message: "Waiting to upload",
+      }));
+      setUploadJobs(jobs);
+
+      const invalidFile = files
+        .map((file, index) => {
+          if (!["application/pdf", "image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+            return { index, message: "Unsupported file type", error: `${file.name} is not a supported file.` };
+          }
+          if (file.size > 25 * 1024 * 1024) {
+            return { index, message: "File is larger than 25 MB", error: `${file.name} is larger than 25 MB.` };
+          }
+          return null;
+        })
+        .find(Boolean);
+
+      if (invalidFile) {
+        setUploadJobs((currentJobs) =>
+          currentJobs.map((job, index) => ({
+            ...job,
+            status: "failed",
+            message: index === invalidFile.index ? invalidFile.message : "Upload canceled",
+          })),
+        );
+        throw new Error(invalidFile.error);
+      }
+
+      if (!selectedId) {
+        setUploadJobs((currentJobs) => currentJobs.map((job) => ({ ...job, status: "failed", message: "Select a dossier first" })));
+        throw new Error("Select a property dossier first.");
+      }
+      if (!supabase) {
+        setUploadJobs((currentJobs) => currentJobs.map((job) => ({ ...job, status: "failed", message: "Supabase storage is not configured" })));
+        throw new Error("Supabase is not configured in this browser.");
+      }
+
+      const targetDossierId = selectedId;
       const uploaded: IntelListingAsset[] = [];
-      for (const file of files) {
-        if (!["application/pdf", "image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-          throw new Error(`${file.name} is not a supported file.`);
-        }
-        if (file.size > 25 * 1024 * 1024) throw new Error(`${file.name} is larger than 25 MB.`);
-        const response = await apiRequest("POST", `/api/intel/dossiers/${selectedId}/assets/upload-url`, {
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        const job = jobs[index];
+        updateUploadJob(job.id, { status: "uploading", message: "Creating secure upload slot" });
+        const response = await apiRequest("POST", `/api/intel/dossiers/${targetDossierId}/assets/upload-url`, {
           fileName: file.name,
           contentType: file.type,
           fileSize: file.size,
@@ -227,22 +315,49 @@ export default function IndustrialIntelDossiersPage() {
           asset: IntelListingAsset;
           upload: { bucket: string; path: string; token: string };
         };
+        updateUploadJob(job.id, { status: "uploading", message: "Uploading to storage" });
         const { error } = await (supabase.storage.from(created.upload.bucket) as any).uploadToSignedUrl(
           created.upload.path,
           created.upload.token,
           file,
           { contentType: file.type, upsert: false },
         );
-        if (error) throw error;
+        if (error) {
+          updateUploadJob(job.id, { status: "failed", message: error.message || "Storage upload failed" });
+          throw error;
+        }
+        updateUploadJob(job.id, { status: "uploading", message: "Saving file to dossier" });
         const completeResponse = await apiRequest("POST", `/api/intel/assets/${created.asset.id}/complete`);
-        uploaded.push(await completeResponse.json() as IntelListingAsset);
+        const saved = await completeResponse.json() as IntelListingAsset;
+        uploaded.push(saved);
+        updateUploadJob(job.id, { status: "saved", message: "Saved to dossier" });
       }
-      return uploaded;
+      return { assets: uploaded, dossierId: targetDossierId };
     },
-    onSuccess: (assets) => {
-      queryClient.invalidateQueries({ queryKey: [`/api/intel/dossiers/${selectedId}`] });
+    onSuccess: ({ assets, dossierId }) => {
+      queryClient.setQueryData<IntelDossierDetail>([`/api/intel/dossiers/${dossierId}`], (current) => {
+        if (!current) return current;
+        const existingIds = new Set(current.assets.map((asset) => asset.id));
+        const nextAssets = [...assets.filter((asset) => !existingIds.has(asset.id)), ...current.assets];
+        return {
+          ...current,
+          assets: nextAssets,
+          assetCount: nextAssets.length,
+        };
+      });
+      queryClient.setQueryData<IntelDossierListItem[]>(["/api/intel/dossiers"], (current = []) =>
+        current.map((dossier) =>
+          dossier.id === dossierId
+            ? { ...dossier, assetCount: Math.max(dossier.assetCount + assets.length, assets.length) }
+            : dossier,
+        ),
+      );
+      queryClient.invalidateQueries({ queryKey: [`/api/intel/dossiers/${dossierId}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/intel/dossiers"] });
-      toast({ title: assets.length === 1 ? "Asset uploaded" : `${assets.length} assets uploaded` });
+      toast({
+        title: assets.length === 1 ? "File saved to dossier" : `${assets.length} files saved to dossier`,
+        description: "Recent files and package readiness have been updated.",
+      });
     },
     onError: (error: any) => {
       toast({ title: "Upload failed", description: error?.message || "Please try again.", variant: "destructive" });
@@ -320,7 +435,7 @@ export default function IndustrialIntelDossiersPage() {
         </div>
       </header>
 
-      <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)_360px]">
+      <div className="grid items-start gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="space-y-4">
           <Card className="rounded-2xl border-slate-200 shadow-sm">
             <CardHeader className="pb-3">
@@ -388,8 +503,8 @@ export default function IndustrialIntelDossiersPage() {
           </Card>
         </aside>
 
-        <main className="space-y-5">
-          <Card className="rounded-2xl border-slate-200 shadow-sm">
+        <main className="min-w-0 space-y-5">
+          <Card className="overflow-hidden rounded-2xl border-slate-200 shadow-sm">
             <CardContent className="p-0">
               {!selectedId || detailLoading ? (
                 <div className="flex min-h-[420px] items-center justify-center text-sm text-slate-500">
@@ -430,19 +545,53 @@ export default function IndustrialIntelDossiersPage() {
                         <p className="mt-1 text-sm font-semibold text-slate-950">{selectedDossier.submarket || selectedDossier.market || "-"}</p>
                       </div>
                     </div>
+                    <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                      {surveySyncRows.map((row) => (
+                        <div key={row.label} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                          <div className="flex min-w-0 items-center gap-2">
+                            {row.ready ? (
+                              <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                            ) : (
+                              <CircleAlert className="h-4 w-4 shrink-0 text-amber-600" />
+                            )}
+                            <span className="truncate text-xs font-semibold text-slate-600">{row.label}</span>
+                          </div>
+                          <span className="shrink-0 text-sm font-semibold text-slate-950">{row.value}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
-                  <section className="grid gap-5 p-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+                  <section className="grid gap-5 p-6 xl:grid-cols-[minmax(0,1fr)_360px]">
                     <div className="space-y-5">
-                      <div className="rounded-2xl border border-dashed border-blue-200 bg-blue-50/40 p-5">
+                      <div
+                        className={`rounded-2xl border p-5 transition ${
+                          dragActive ? "border-blue-400 bg-blue-50 shadow-sm" : "border-slate-200 bg-white"
+                        }`}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          setDragActive(true);
+                        }}
+                        onDragLeave={() => setDragActive(false)}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          setDragActive(false);
+                          handleAssetFiles(Array.from(event.dataTransfer.files || []));
+                        }}
+                      >
                         <div className="flex flex-wrap items-center justify-between gap-4">
-                          <div>
-                            <p className="text-sm font-semibold text-slate-950">Drop brochures, surveys, site plans, and photos</p>
-                            <p className="mt-1 text-sm text-slate-600">Stored once here, reused across map cards, survey links, and export packages.</p>
+                          <div className="flex items-start gap-3">
+                            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700 ring-1 ring-blue-100">
+                              <Cloud className="h-5 w-5" />
+                            </span>
+                            <div>
+                              <p className="text-base font-semibold text-slate-950">Source files</p>
+                              <p className="mt-1 text-sm text-slate-600">Drag brochures, surveys, site plans, or photos here. PDF, JPG, PNG, or WebP. 25 MB max.</p>
+                            </div>
                           </div>
-                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700">
-                            <Upload className="h-4 w-4" />
-                            Upload files
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700">
+                            {uploadAssetsMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                            {uploadAssetsMutation.isPending ? "Uploading" : "Choose files"}
                             <input
                               type="file"
                               className="hidden"
@@ -450,12 +599,50 @@ export default function IndustrialIntelDossiersPage() {
                               accept="application/pdf,image/jpeg,image/png,image/webp"
                               onChange={(event) => {
                                 const files = Array.from(event.target.files || []);
-                                if (files.length) uploadAssetsMutation.mutate(files);
+                                handleAssetFiles(files);
                                 event.target.value = "";
                               }}
                             />
                           </label>
                         </div>
+                        {uploadJobs.length > 0 && (
+                          <div className="mt-4 space-y-2 rounded-xl bg-slate-50 p-3">
+                            <div className="flex items-center justify-between gap-3 px-1">
+                              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Upload activity</p>
+                              <p className="text-xs font-medium text-slate-500">
+                                {uploadJobs.filter((job) => job.status === "saved").length} of {uploadJobs.length} saved
+                              </p>
+                            </div>
+                            {uploadJobs.map((job) => (
+                              <div key={job.id} className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 ring-1 ring-slate-100">
+                                <div className="flex min-w-0 items-center gap-3">
+                                  {job.status === "saved" ? (
+                                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                                  ) : job.status === "failed" ? (
+                                    <XCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                                  ) : (
+                                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-600" />
+                                  )}
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-semibold text-slate-950">{job.fileName}</p>
+                                    <p className="text-xs text-slate-500">{formatBytes(job.fileSize)} - {job.message}</p>
+                                  </div>
+                                </div>
+                                <span
+                                  className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${
+                                    job.status === "saved"
+                                      ? "bg-emerald-50 text-emerald-700"
+                                      : job.status === "failed"
+                                        ? "bg-rose-50 text-rose-700"
+                                        : "bg-blue-50 text-blue-700"
+                                  }`}
+                                >
+                                  {uploadJobStatusLabel(job.status)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       <div>
@@ -477,27 +664,38 @@ export default function IndustrialIntelDossiersPage() {
                         </div>
                       </div>
 
-                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                        <h3 className="text-lg font-semibold text-slate-950">Add broker-approved fact</h3>
-                        <div className="mt-4 grid gap-3 md:grid-cols-[220px_minmax(0,1fr)_120px]">
-                          <select
-                            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm"
-                            value={newFact.factKey}
-                            onChange={(event) => setNewFact({ ...newFact, factKey: event.target.value })}
-                          >
-                            {FACT_PRESETS.map((fact) => (
-                              <option key={fact.key} value={fact.key}>{fact.label}</option>
-                            ))}
-                          </select>
-                          <Textarea
-                            className="min-h-10"
-                            value={newFact.valueText}
-                            onChange={(event) => setNewFact({ ...newFact, valueText: event.target.value })}
-                            placeholder="Example: +/- 11.78 acres, BE zoning, full city services at lot line"
-                          />
+                      <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                        <div className="flex items-center justify-between gap-3">
+                          <h3 className="text-lg font-semibold text-slate-950">Add approved fact</h3>
+                          <Badge variant="outline" className="bg-slate-50">Broker reviewed</Badge>
+                        </div>
+                        <div className="mt-4 grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+                          <div>
+                            <Label>Fact type</Label>
+                            <select
+                              className="mt-2 h-11 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
+                              value={newFact.factKey}
+                              onChange={(event) => setNewFact({ ...newFact, factKey: event.target.value })}
+                            >
+                              {FACT_PRESETS.map((fact) => (
+                                <option key={fact.key} value={fact.key}>{fact.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <Label>Value</Label>
+                            <Textarea
+                              className="mt-2 min-h-24 resize-y"
+                              value={newFact.valueText}
+                              onChange={(event) => setNewFact({ ...newFact, valueText: event.target.value })}
+                              placeholder="Example: +/- 11.78 acres, BE zoning, full city services at lot line"
+                            />
+                          </div>
+                        </div>
+                        <div className="mt-4 flex justify-end">
                           <Button disabled={!newFact.valueText.trim() || createFactMutation.isPending} onClick={() => createFactMutation.mutate()}>
-                            <Check className="mr-2 h-4 w-4" />
-                            Save
+                            {createFactMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                            Save fact
                           </Button>
                         </div>
                       </div>
@@ -530,7 +728,12 @@ export default function IndustrialIntelDossiersPage() {
 
                     <aside className="space-y-4">
                       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <h3 className="text-sm font-semibold text-slate-950">Package assets</h3>
+                        <div className="flex items-center justify-between gap-3">
+                          <h3 className="text-sm font-semibold text-slate-950">Package assets</h3>
+                          <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
+                            {selectedDossier.assets.length} saved
+                          </span>
+                        </div>
                         <div className="mt-4 space-y-3">
                           <div className="flex items-center justify-between rounded-xl bg-white p-3">
                             <span className="flex items-center gap-2 text-sm font-semibold"><FileText className="h-4 w-4 text-blue-700" /> PDFs</span>
@@ -544,25 +747,45 @@ export default function IndustrialIntelDossiersPage() {
                       </div>
 
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                        <h3 className="text-sm font-semibold text-slate-950">Recent files</h3>
+                        <div className="flex items-center justify-between gap-3">
+                          <h3 className="text-sm font-semibold text-slate-950">Recent files</h3>
+                          {uploadAssetsMutation.isPending && (
+                            <span className="flex items-center gap-1 text-xs font-semibold text-blue-700">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              Saving
+                            </span>
+                          )}
+                        </div>
                         <div className="mt-3 space-y-2">
                           {(selectedDossier.assets || []).length === 0 ? (
-                            <p className="rounded-xl border border-dashed border-slate-200 p-3 text-sm text-slate-500">No files uploaded yet.</p>
+                            <p className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">No source files saved yet.</p>
                           ) : (
                             selectedDossier.assets.slice(0, 8).map((asset) => (
-                              <div key={asset.id} className="rounded-xl border border-slate-200 p-3">
+                              <div key={asset.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
                                 <div className="flex items-start justify-between gap-3">
-                                  <div>
+                                  <div className="flex min-w-0 gap-3">
+                                    <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-blue-700 ring-1 ring-slate-200">
+                                      {asset.contentType === "application/pdf" ? <FileText className="h-4 w-4" /> : <Image className="h-4 w-4" />}
+                                    </span>
+                                    <div className="min-w-0">
                                     <p className="line-clamp-2 text-sm font-semibold text-slate-950">{asset.fileName}</p>
-                                    <p className="mt-1 text-xs text-slate-500">{asset.assetType} - {formatBytes(asset.fileSize)}</p>
+                                      <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                        <span>{asset.assetType}</span>
+                                        <span>{formatBytes(asset.fileSize)}</span>
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
+                                          <FileCheck2 className="h-3 w-3" />
+                                          {assetStatusLabel(asset.status)}
+                                        </span>
+                                      </p>
+                                    </div>
                                   </div>
-                                  <div className="flex shrink-0 items-center gap-2">
+                                  <div className="flex shrink-0 flex-wrap justify-end gap-2">
                                     {asset.contentType === "application/pdf" && asset.status === "active" && (
                                       <Button
                                         type="button"
                                         variant="outline"
                                         size="sm"
-                                        className="h-8 px-2 text-xs"
+                                        className="h-8 px-3 text-xs"
                                         disabled={extractAssetMutation.isPending}
                                         onClick={() => extractAssetMutation.mutate(asset)}
                                       >
@@ -570,8 +793,13 @@ export default function IndustrialIntelDossiersPage() {
                                       </Button>
                                     )}
                                     {asset.signedUrl && (
-                                      <a href={asset.signedUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-blue-700">
-                                        Open
+                                      <a
+                                        href={asset.signedUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                                      >
+                                        Open <ExternalLink className="h-3 w-3" />
                                       </a>
                                     )}
                                   </div>
@@ -610,50 +838,6 @@ export default function IndustrialIntelDossiersPage() {
             </CardContent>
           </Card>
         </main>
-
-        <aside className="space-y-4">
-          <Card className="rounded-2xl border-slate-200 shadow-sm">
-            <CardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <CardTitle>SurveySync</CardTitle>
-                <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
-                  API-ready
-                </span>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {selectedDossier ? (
-                surveySyncRows.map((row) => (
-                  <div key={row.label} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3">
-                    <div className="flex items-center gap-2">
-                      {row.ready ? (
-                        <Check className="h-4 w-4 text-emerald-600" />
-                      ) : (
-                        <CircleAlert className="h-4 w-4 text-amber-600" />
-                      )}
-                      <span className="text-sm font-semibold text-slate-950">{row.label}</span>
-                    </div>
-                    <span className="text-sm font-semibold text-slate-600">{row.value}</span>
-                  </div>
-                ))
-              ) : (
-                <p className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">Select a dossier to see intake status.</p>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl border-slate-200 shadow-sm">
-            <CardContent className="p-4">
-              <div className="flex gap-3">
-                <Bot className="mt-0.5 h-5 w-5 text-blue-700" />
-                <div>
-                  <p className="text-sm font-semibold text-slate-950">Agent handoff</p>
-                  <p className="mt-1 text-sm text-slate-600">Create dossier, upload file, propose facts, await broker approval.</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </aside>
       </div>
     </div>
   );

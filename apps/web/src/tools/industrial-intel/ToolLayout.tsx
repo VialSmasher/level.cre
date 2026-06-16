@@ -20,7 +20,7 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-950">
       <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-3">
+        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-4 px-6 py-3">
           <Link href="/tools/industrial-intel" className="group flex items-center gap-3">
             <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-sm">
               <Database className="h-5 w-5" />
@@ -74,7 +74,7 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-6 py-8">{children}</main>
+      <main className="mx-auto max-w-[1600px] px-6 py-8">{children}</main>
     </div>
   );
 }
