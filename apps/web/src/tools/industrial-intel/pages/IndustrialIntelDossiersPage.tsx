@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   CircleAlert,
   Cloud,
+  Eye,
   ExternalLink,
   FileCheck2,
   FileText,
@@ -13,6 +14,7 @@ import {
   Loader2,
   Plus,
   Search,
+  ShieldCheck,
   Upload,
   XCircle,
 } from "lucide-react";
@@ -107,6 +109,11 @@ type UploadJob = {
   message: string;
 };
 
+type FactDraft = {
+  label: string;
+  valueText: string;
+};
+
 const FACT_PRESETS = [
   { key: "site_size", label: "Site size" },
   { key: "building_size", label: "Building size" },
@@ -141,6 +148,10 @@ function assetStatusLabel(status: IntelListingAsset["status"]) {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+function hasMapCoordinates(dossier: IntelDossierDetail | IntelDossierListItem) {
+  return dossier.latitude !== null && dossier.latitude !== undefined && dossier.longitude !== null && dossier.longitude !== undefined;
+}
+
 function factDisplayValue(fact: IntelDossierFact) {
   if (fact.valueText) return fact.valueText;
   if (fact.valueNumber !== null && fact.valueNumber !== undefined) return formatNumber(fact.valueNumber);
@@ -163,6 +174,8 @@ export default function IndustrialIntelDossiersPage() {
   const [newFact, setNewFact] = useState({ factKey: "site_size", valueText: "", confidence: 85 });
   const [uploadJobs, setUploadJobs] = useState<UploadJob[]>([]);
   const [dragActive, setDragActive] = useState(false);
+  const [reviewMode, setReviewMode] = useState(false);
+  const [factDrafts, setFactDrafts] = useState<Record<string, FactDraft>>({});
 
   const { data: dossiers = [], isLoading: dossiersLoading } = useQuery<IntelDossierListItem[]>({
     queryKey: ["/api/intel/dossiers"],
@@ -194,6 +207,17 @@ export default function IndustrialIntelDossiersPage() {
   const pdfAssets = selectedDossier?.assets.filter((asset) => asset.contentType === "application/pdf") || [];
   const photoAssets = selectedDossier?.assets.filter((asset) => asset.contentType !== "application/pdf") || [];
   const activeListing = selectedDossier?.listing;
+  const readinessChecks = selectedDossier
+    ? [
+        { label: "Address", ready: Boolean(selectedDossier.address) },
+        { label: "Map coordinates", ready: hasMapCoordinates(selectedDossier) },
+        { label: "Source file or source URL", ready: selectedDossier.assets.length > 0 || Boolean(activeListing?.brochureUrl || activeListing?.sourceUrl) },
+        { label: "Client-safe facts", ready: approvedFacts.length >= 3 },
+        { label: "Review queue clear", ready: proposedFacts.length === 0 },
+      ]
+    : [];
+  const readyToMarkPackage = readinessChecks.length > 0 && readinessChecks.every((check) => check.ready);
+  const missingReadinessLabels = readinessChecks.filter((check) => !check.ready).map((check) => check.label);
   const surveySyncRows = selectedDossier
     ? [
         {
@@ -213,8 +237,8 @@ export default function IndustrialIntelDossiersPage() {
         },
         {
           label: "Map ready",
-          value: selectedDossier.latitude && selectedDossier.longitude ? "Yes" : "No",
-          ready: Boolean(selectedDossier.latitude && selectedDossier.longitude),
+          value: hasMapCoordinates(selectedDossier) ? "Yes" : "No",
+          ready: hasMapCoordinates(selectedDossier),
         },
       ]
     : [];
@@ -364,6 +388,28 @@ export default function IndustrialIntelDossiersPage() {
     },
   });
 
+  const updateDossierMutation = useMutation({
+    mutationFn: async ({ id, patch }: { id: string; patch: Partial<IntelDossierListItem> }) => {
+      const response = await apiRequest("PATCH", `/api/intel/dossiers/${id}`, patch);
+      return response.json() as Promise<IntelDossierDetail>;
+    },
+    onSuccess: (dossier) => {
+      queryClient.setQueryData([`/api/intel/dossiers/${dossier.id}`], dossier);
+      queryClient.setQueryData<IntelDossierListItem[]>(["/api/intel/dossiers"], (current = []) =>
+        current.map((candidate) => (candidate.id === dossier.id ? { ...candidate, ...dossier } : candidate)),
+      );
+      queryClient.invalidateQueries({ queryKey: [`/api/intel/dossiers/${dossier.id}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/intel/dossiers"] });
+      toast({
+        title: dossier.status === "active" ? "Package marked ready" : "Dossier updated",
+        description: dossier.status === "active" ? "Approved facts and source files are now survey-ready." : undefined,
+      });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to update dossier", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
   const extractAssetMutation = useMutation({
     mutationFn: async (asset: IntelListingAsset) => {
       if (!selectedId) throw new Error("Select a property dossier first.");
@@ -406,11 +452,16 @@ export default function IndustrialIntelDossiersPage() {
   });
 
   const updateFactMutation = useMutation({
-    mutationFn: async ({ fact, status }: { fact: IntelDossierFact; status: "approved" | "rejected" }) => {
-      const response = await apiRequest("PATCH", `/api/intel/dossiers/${fact.dossierId}/facts/${fact.id}`, { status });
+    mutationFn: async ({ fact, patch }: { fact: IntelDossierFact; patch: Partial<IntelDossierFact> }) => {
+      const response = await apiRequest("PATCH", `/api/intel/dossiers/${fact.dossierId}/facts/${fact.id}`, patch);
       return response.json() as Promise<IntelDossierFact>;
     },
     onSuccess: (fact) => {
+      setFactDrafts((drafts) => {
+        const nextDrafts = { ...drafts };
+        delete nextDrafts[fact.id];
+        return nextDrafts;
+      });
       queryClient.invalidateQueries({ queryKey: [`/api/intel/dossiers/${fact.dossierId}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/intel/dossiers"] });
     },
@@ -418,6 +469,34 @@ export default function IndustrialIntelDossiersPage() {
       toast({ title: "Failed to update fact", description: error?.message || "Please try again.", variant: "destructive" });
     },
   });
+
+  const getFactDraft = (fact: IntelDossierFact) => factDrafts[fact.id] || {
+    label: fact.label,
+    valueText: factDisplayValue(fact) === "-" ? "" : factDisplayValue(fact),
+  };
+
+  const setFactDraft = (fact: IntelDossierFact, patch: Partial<FactDraft>) => {
+    setFactDrafts((drafts) => ({
+      ...drafts,
+      [fact.id]: { ...getFactDraft(fact), ...patch },
+    }));
+  };
+
+  const approveFact = (fact: IntelDossierFact) => {
+    const draft = getFactDraft(fact);
+    updateFactMutation.mutate({
+      fact,
+      patch: {
+        label: draft.label.trim() || fact.label,
+        valueText: draft.valueText.trim(),
+        status: "approved",
+      },
+    });
+  };
+
+  const rejectFact = (fact: IntelDossierFact) => {
+    updateFactMutation.mutate({ fact, patch: { status: "rejected" } });
+  };
 
   return (
     <div className="space-y-6">
@@ -523,8 +602,25 @@ export default function IndustrialIntelDossiersPage() {
                         </div>
                         <p className="mt-1 text-sm text-slate-600">{selectedDossier.address || selectedDossier.submarket || selectedDossier.market || "No location recorded"}</p>
                       </div>
-                      <div className={`rounded-full px-3 py-1.5 text-sm font-semibold ring-1 ${completenessTone(selectedDossier.dataCompletenessScore)}`}>
-                        {selectedDossier.dataCompletenessScore}% package-ready
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button type="button" variant={reviewMode ? "default" : "outline"} onClick={() => setReviewMode((value) => !value)}>
+                          <Eye className="mr-2 h-4 w-4" />
+                          {reviewMode ? "Back to dossier" : "Review package"}
+                        </Button>
+                        {selectedDossier.status !== "active" && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={!readyToMarkPackage || updateDossierMutation.isPending}
+                            onClick={() => updateDossierMutation.mutate({ id: selectedDossier.id, patch: { status: "active" } })}
+                          >
+                            {updateDossierMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                            Mark ready
+                          </Button>
+                        )}
+                        <div className={`rounded-full px-3 py-1.5 text-sm font-semibold ring-1 ${completenessTone(selectedDossier.dataCompletenessScore)}`}>
+                          {selectedDossier.dataCompletenessScore}% package-ready
+                        </div>
                       </div>
                     </div>
                     <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -562,6 +658,302 @@ export default function IndustrialIntelDossiersPage() {
                     </div>
                   </div>
 
+                  {reviewMode ? (
+                    <section className="grid gap-5 p-6 xl:grid-cols-[420px_minmax(0,1fr)_340px]">
+                      <div className="space-y-4">
+                        <div
+                          className={`rounded-2xl border p-5 transition ${
+                            dragActive ? "border-blue-400 bg-blue-50 shadow-sm" : "border-slate-200 bg-white"
+                          }`}
+                          onDragOver={(event) => {
+                            event.preventDefault();
+                            setDragActive(true);
+                          }}
+                          onDragLeave={() => setDragActive(false)}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            setDragActive(false);
+                            handleAssetFiles(Array.from(event.dataTransfer.files || []));
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <p className="text-lg font-semibold text-slate-950">Source material</p>
+                              <p className="mt-1 text-sm text-slate-600">Upload or open the files used to verify this property.</p>
+                            </div>
+                            <label className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700">
+                              {uploadAssetsMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                              {uploadAssetsMutation.isPending ? "Uploading" : "Upload"}
+                              <input
+                                type="file"
+                                className="hidden"
+                                multiple
+                                accept="application/pdf,image/jpeg,image/png,image/webp"
+                                onChange={(event) => {
+                                  const files = Array.from(event.target.files || []);
+                                  handleAssetFiles(files);
+                                  event.target.value = "";
+                                }}
+                              />
+                            </label>
+                          </div>
+
+                          {uploadJobs.length > 0 && (
+                            <div className="mt-4 space-y-2 rounded-xl bg-slate-50 p-3">
+                              <div className="flex items-center justify-between gap-3 px-1">
+                                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Upload activity</p>
+                                <p className="text-xs font-medium text-slate-500">
+                                  {uploadJobs.filter((job) => job.status === "saved").length} of {uploadJobs.length} saved
+                                </p>
+                              </div>
+                              {uploadJobs.map((job) => (
+                                <div key={job.id} className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 ring-1 ring-slate-100">
+                                  <div className="flex min-w-0 items-center gap-3">
+                                    {job.status === "saved" ? (
+                                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                                    ) : job.status === "failed" ? (
+                                      <XCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                                    ) : (
+                                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-600" />
+                                    )}
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-semibold text-slate-950">{job.fileName}</p>
+                                      <p className="text-xs text-slate-500">{formatBytes(job.fileSize)} - {job.message}</p>
+                                    </div>
+                                  </div>
+                                  <span
+                                    className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${
+                                      job.status === "saved"
+                                        ? "bg-emerald-50 text-emerald-700"
+                                        : job.status === "failed"
+                                          ? "bg-rose-50 text-rose-700"
+                                          : "bg-blue-50 text-blue-700"
+                                    }`}
+                                  >
+                                    {uploadJobStatusLabel(job.status)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="mt-4 space-y-2">
+                            {selectedDossier.assets.length === 0 ? (
+                              <p className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">No source files saved yet.</p>
+                            ) : (
+                              selectedDossier.assets.map((asset) => (
+                                <div key={asset.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="flex min-w-0 gap-3">
+                                      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-blue-700 ring-1 ring-slate-200">
+                                        {asset.contentType === "application/pdf" ? <FileText className="h-4 w-4" /> : <Image className="h-4 w-4" />}
+                                      </span>
+                                      <div className="min-w-0">
+                                        <p className="line-clamp-2 text-sm font-semibold text-slate-950">{asset.fileName}</p>
+                                        <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                          <span>{asset.assetType}</span>
+                                          <span>{formatBytes(asset.fileSize)}</span>
+                                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">
+                                            <FileCheck2 className="h-3 w-3" />
+                                            {assetStatusLabel(asset.status)}
+                                          </span>
+                                        </p>
+                                      </div>
+                                    </div>
+                                    <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                                      {asset.contentType === "application/pdf" && asset.status === "active" && (
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-8 px-3 text-xs"
+                                          disabled={extractAssetMutation.isPending}
+                                          onClick={() => extractAssetMutation.mutate(asset)}
+                                        >
+                                          Extract
+                                        </Button>
+                                      )}
+                                      {asset.signedUrl && (
+                                        <a
+                                          href={asset.signedUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                                        >
+                                          Open <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                          <h3 className="text-sm font-semibold text-slate-950">Listing links</h3>
+                          <div className="mt-3 space-y-2 text-sm">
+                            {activeListing?.brochureUrl ? (
+                              <a href={activeListing.brochureUrl} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 font-semibold text-blue-700 hover:bg-blue-50">
+                                Brochure link <ExternalLink className="h-4 w-4" />
+                              </a>
+                            ) : null}
+                            {activeListing?.sourceUrl ? (
+                              <a href={activeListing.sourceUrl} target="_blank" rel="noreferrer" className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 font-semibold text-blue-700 hover:bg-blue-50">
+                                Source listing <ExternalLink className="h-4 w-4" />
+                              </a>
+                            ) : null}
+                            {!activeListing?.brochureUrl && !activeListing?.sourceUrl && (
+                              <p className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">No listing source links recorded.</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <h3 className="text-lg font-semibold text-slate-950">Review proposed facts</h3>
+                              <p className="mt-1 text-sm text-slate-600">Edit before approval. Proposed facts are never client-safe until approved.</p>
+                            </div>
+                            <Badge variant="outline" className="bg-amber-50 text-amber-700">{proposedFacts.length} pending</Badge>
+                          </div>
+                          <div className="mt-4 space-y-3">
+                            {proposedFacts.length === 0 ? (
+                              <p className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">No facts waiting for review.</p>
+                            ) : (
+                              proposedFacts.map((fact) => {
+                                const draft = getFactDraft(fact);
+                                return (
+                                  <div key={fact.id} className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+                                    <div className="grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)]">
+                                      <div>
+                                        <Label>Client label</Label>
+                                        <Input
+                                          className="mt-2 bg-white"
+                                          value={draft.label}
+                                          onChange={(event) => setFactDraft(fact, { label: event.target.value })}
+                                        />
+                                      </div>
+                                      <div>
+                                        <Label>Client value</Label>
+                                        <Textarea
+                                          className="mt-2 min-h-20 bg-white"
+                                          value={draft.valueText}
+                                          onChange={(event) => setFactDraft(fact, { valueText: event.target.value })}
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                                      <p className="text-xs text-slate-600">Confidence {fact.confidence}% - {fact.source}</p>
+                                      <div className="flex items-center gap-2">
+                                        <Button size="sm" variant="outline" disabled={updateFactMutation.isPending} onClick={() => rejectFact(fact)}>
+                                          Reject
+                                        </Button>
+                                        <Button size="sm" disabled={!draft.valueText.trim() || updateFactMutation.isPending} onClick={() => approveFact(fact)}>
+                                          Approve
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                          <div className="flex items-center justify-between gap-3">
+                            <h3 className="text-lg font-semibold text-slate-950">Add missing approved fact</h3>
+                            <Badge variant="outline" className="bg-slate-50">Client-safe</Badge>
+                          </div>
+                          <div className="mt-4 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+                            <div>
+                              <Label>Fact type</Label>
+                              <select
+                                className="mt-2 h-11 w-full rounded-md border border-slate-200 bg-white px-3 text-sm"
+                                value={newFact.factKey}
+                                onChange={(event) => setNewFact({ ...newFact, factKey: event.target.value })}
+                              >
+                                {FACT_PRESETS.map((fact) => (
+                                  <option key={fact.key} value={fact.key}>{fact.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <Label>Value</Label>
+                              <Textarea
+                                className="mt-2 min-h-24 resize-y"
+                                value={newFact.valueText}
+                                onChange={(event) => setNewFact({ ...newFact, valueText: event.target.value })}
+                                placeholder="Example: +/- 11.78 acres, BE zoning, full city services at lot line"
+                              />
+                            </div>
+                          </div>
+                          <div className="mt-4 flex justify-end">
+                            <Button disabled={!newFact.valueText.trim() || createFactMutation.isPending} onClick={() => createFactMutation.mutate()}>
+                              {createFactMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
+                              Save approved fact
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <aside className="space-y-4">
+                        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                          <div className="flex items-center justify-between gap-3">
+                            <h3 className="text-lg font-semibold text-slate-950">Review outcome</h3>
+                            <Badge variant={selectedDossier.status === "active" ? "default" : "outline"}>{selectedDossier.status === "active" ? "Ready" : "Draft"}</Badge>
+                          </div>
+                          <div className="mt-4 space-y-2">
+                            {readinessChecks.map((check) => (
+                              <div key={check.label} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2.5">
+                                <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-700">
+                                  {check.ready ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" /> : <CircleAlert className="h-4 w-4 shrink-0 text-amber-600" />}
+                                  {check.label}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                          {missingReadinessLabels.length > 0 && (
+                            <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+                              Missing: {missingReadinessLabels.join(", ")}.
+                            </p>
+                          )}
+                          <Button
+                            type="button"
+                            className="mt-4 w-full"
+                            disabled={!readyToMarkPackage || selectedDossier.status === "active" || updateDossierMutation.isPending}
+                            onClick={() => updateDossierMutation.mutate({ id: selectedDossier.id, patch: { status: "active" } })}
+                          >
+                            {updateDossierMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                            {selectedDossier.status === "active" ? "Package ready" : "Mark package ready"}
+                          </Button>
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <h3 className="text-sm font-semibold text-slate-950">Approved client facts</h3>
+                            <Badge variant="outline" className="bg-white">{approvedFacts.length}</Badge>
+                          </div>
+                          <div className="space-y-2">
+                            {approvedFacts.length === 0 ? (
+                              <p className="rounded-xl border border-dashed border-slate-200 p-4 text-sm text-slate-500">No approved facts yet.</p>
+                            ) : (
+                              approvedFacts.map((fact) => (
+                                <div key={fact.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                  <p className="text-[11px] font-semibold uppercase text-slate-500">{fact.label}</p>
+                                  <p className="mt-1 text-sm font-semibold text-slate-950">{factDisplayValue(fact)}</p>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      </aside>
+                    </section>
+                  ) : (
                   <section className="grid gap-5 p-6 xl:grid-cols-[minmax(0,1fr)_360px]">
                     <div className="space-y-5">
                       <div
@@ -716,8 +1108,8 @@ export default function IndustrialIntelDossiersPage() {
                                   <p className="text-sm text-slate-700">{factDisplayValue(fact)}</p>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  <Button size="sm" variant="outline" onClick={() => updateFactMutation.mutate({ fact, status: "rejected" })}>Reject</Button>
-                                  <Button size="sm" onClick={() => updateFactMutation.mutate({ fact, status: "approved" })}>Approve</Button>
+                                  <Button size="sm" variant="outline" onClick={() => rejectFact(fact)}>Reject</Button>
+                                  <Button size="sm" onClick={() => approveFact(fact)}>Approve</Button>
                                 </div>
                               </div>
                             ))}
@@ -818,7 +1210,7 @@ export default function IndustrialIntelDossiersPage() {
                             Address
                           </p>
                           <p className="flex items-center gap-2 text-slate-600">
-                            {selectedDossier.latitude && selectedDossier.longitude ? <Check className="h-4 w-4 text-emerald-600" /> : <CircleAlert className="h-4 w-4 text-amber-600" />}
+                            {hasMapCoordinates(selectedDossier) ? <Check className="h-4 w-4 text-emerald-600" /> : <CircleAlert className="h-4 w-4 text-amber-600" />}
                             Map coordinates
                           </p>
                           <p className="flex items-center gap-2 text-slate-600">
@@ -833,6 +1225,7 @@ export default function IndustrialIntelDossiersPage() {
                       </div>
                     </aside>
                   </section>
+                  )}
                 </div>
               )}
             </CardContent>
