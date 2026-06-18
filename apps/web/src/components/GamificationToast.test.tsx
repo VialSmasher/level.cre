@@ -4,14 +4,12 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { GamificationToast } from './GamificationToast';
 
-test('GamificationToast renders operational confirmation', () => {
+test('GamificationToast renders xp text', () => {
   const html = renderToStaticMarkup(<GamificationToast xp={25} />);
-  assert.match(html, /Activity saved/);
-  assert.doesNotMatch(html, /XP/);
+  assert.match(html, /\+25 XP/);
 });
 
-test('GamificationToast renders label when provided without xp copy', () => {
+test('GamificationToast renders label when provided', () => {
   const html = renderToStaticMarkup(<GamificationToast xp={15} label="Call logged" />);
-  assert.match(html, /Call logged/);
-  assert.doesNotMatch(html, /XP/);
+  assert.match(html, /Call logged \+15 XP/);
 });

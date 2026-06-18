@@ -11,7 +11,6 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Badge } from "@/components/ui/badge";
 import { Edit, Plus, Trash2, Banknote, Building2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { CommandBar, CommandBarGroup } from "@/components/ui/command-bar";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { MarketComp, InsertMarketComp, Submarket, MarketCompDealType, MarketCompAssetType } from "@level-cre/shared/schema";
@@ -237,22 +236,30 @@ export default function MarketCompsPage() {
     });
   }, [comps, dealTypeFilter, searchQuery]);
 
+  const assetBadge = (asset: string) => {
+    const map: Record<string, string> = {
+      Building: 'bg-blue-100 text-blue-800',
+      Land: 'bg-green-100 text-green-800',
+      Other: 'bg-gray-100 text-gray-800',
+    };
+    return map[asset] || 'bg-gray-100 text-gray-800';
+  };
+
   return (
-    <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-[1600px] space-y-4 px-4 py-4 sm:px-6">
-        <div className="flex flex-col gap-3 border-b border-border pb-4 md:flex-row md:items-end md:justify-between">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-4">
+      <div className="max-w-7xl mx-auto">
+        <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-semibold tracking-normal text-foreground">Market Comps</h1>
-            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">Lease and sale evidence for broker pricing, renewal, and requirement matching decisions.</p>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Market Comps</h1>
+            <p className="text-gray-600 dark:text-gray-300 mt-2">Track comparable leases and sales to build market knowledge</p>
           </div>
 
           <Modal open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <Tooltip>
               <TooltipTrigger asChild>
                 <ModalTrigger asChild>
-                  <Button aria-label="Create Market Comp" onClick={() => { resetForm(); setIsDialogOpen(true); }}>
+                  <Button size="icon" aria-label="Create Market Comp" onClick={() => { resetForm(); setIsDialogOpen(true); }}>
                     <Plus className="h-4 w-4" />
-                    Add comp
                   </Button>
                 </ModalTrigger>
               </TooltipTrigger>
@@ -419,72 +426,65 @@ export default function MarketCompsPage() {
           </Modal>
         </div>
 
-        <CommandBar>
-          <CommandBarGroup className="flex-1">
-            <Input
-              className="max-w-xl"
-              placeholder="Search address, tenant, buyer, seller, or submarket"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            <Select value={dealTypeFilter} onValueChange={(v) => setDealTypeFilter(v as any)}>
-              <SelectTrigger className="w-full sm:w-[180px]">
-                <SelectValue placeholder="All Types" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All deal types</SelectItem>
-                <SelectItem value="lease">Lease</SelectItem>
-                <SelectItem value="sale">Sale</SelectItem>
-              </SelectContent>
-            </Select>
-          </CommandBarGroup>
-          <div className="text-xs font-medium text-muted-foreground">
-            {filtered.length} of {comps.length} comps
-          </div>
-        </CommandBar>
+        {/* Filters */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <Input placeholder="Search (address, tenant, buyer, seller)" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+          <Select value={dealTypeFilter} onValueChange={(v) => setDealTypeFilter(v as any)}>
+            <SelectTrigger>
+              <SelectValue placeholder="All Types" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="lease">Lease</SelectItem>
+              <SelectItem value="sale">Sale</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
 
-        {/* Ledger */}
-        <div className="grid grid-cols-1 gap-2">
+        {/* List */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
           {isLoading ? (
             <div className="col-span-full text-center py-8">Loading comps...</div>
           ) : filtered.length === 0 ? (
             <div className="col-span-full text-center py-8 text-gray-500 dark:text-gray-400">No comps yet. Add your first one.</div>
           ) : (
             filtered.map(comp => (
-              <Card key={comp.id} className="border-border bg-card shadow-none">
-                <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between gap-4">
-                    <CardTitle className="min-w-0 truncate text-sm leading-5" title={comp.address}>{comp.address}</CardTitle>
+              <Card key={comp.id} className="hover:shadow-lg transition-shadow">
+                <CardHeader className="pb-3">
+                  <div className="flex justify-between items-start">
+                    <CardTitle className="text-lg">{comp.address}</CardTitle>
                     <div className="flex gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => onEdit(comp)} aria-label="Edit comp"><Edit className="h-4 w-4" /></Button>
-                      <Button variant="ghost" size="icon" className="text-red-600" onClick={() => onDelete(comp.id!)} aria-label="Delete comp"><Trash2 className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="sm" onClick={() => onEdit(comp)}><Edit className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="sm" className="text-red-600" onClick={() => onDelete(comp.id!)}><Trash2 className="h-4 w-4" /></Button>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Badge variant="outline">{comp.submarket || '–'}</Badge>
-                    <Badge variant="outline">{comp.assetType}</Badge>
+                    <Badge className={assetBadge(comp.assetType)}>{comp.assetType}</Badge>
                     <Badge variant={comp.dealType === 'sale' ? 'secondary' : 'outline'} className={comp.dealType === 'sale' ? 'bg-amber-100 text-amber-800' : ''}>
                       {comp.dealType === 'sale' ? 'Sale' : 'Lease'}
                     </Badge>
                   </div>
                 </CardHeader>
-                <CardContent className="grid gap-2 border-t border-border pt-3 text-sm text-slate-700 md:grid-cols-4">
+                <CardContent className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
                   {comp.dealType === 'lease' ? (
-                    <>
-                      <div>{comp.tenant ? <span className="inline-flex items-center gap-2"><Building2 className="h-4 w-4" />{comp.tenant}</span> : 'Tenant -'}</div>
-                      <div>Term: {comp.termMonths ? `${comp.termMonths} mo` : '-'}</div>
-                      <div>Rate: {comp.rate ? `$${comp.rate}` : '-'}</div>
-                      <div>Commencement: {comp.commencement || '-'}</div>
-                    </>
+                    <div className="space-y-1">
+                      {comp.tenant && <div className="flex items-center gap-2"><Building2 className="h-4 w-4" />Tenant: {comp.tenant}</div>}
+                      {comp.termMonths && <div>Term: {comp.termMonths} mo</div>}
+                      {comp.rate && <div>Rate: ${comp.rate}</div>}
+                      {comp.commencement && <div>Commencement: {comp.commencement}</div>}
+                      {comp.concessions && <div>TI/Free: {comp.concessions}</div>}
+                    </div>
                   ) : (
-                    <>
-                      <div>Date: {comp.saleDate || '-'}</div>
-                      <div>{comp.price ? <span className="inline-flex items-center gap-2"><Banknote className="h-4 w-4" />${Number(comp.price).toLocaleString()}</span> : 'Price -'}</div>
-                      <div>{comp.pricePerSf ? `$/SF: $${Number(comp.pricePerSf).toLocaleString()}` : comp.pricePerAcre ? `$/Acre: $${Number(comp.pricePerAcre).toLocaleString()}` : 'Metric -'}</div>
-                      <div className="truncate">Parties: {[comp.buyer, comp.seller].filter(Boolean).join(' / ') || '-'}</div>
-                    </>
+                    <div className="space-y-1">
+                      {comp.saleDate && <div>Date: {comp.saleDate}</div>}
+                      {comp.price && <div className="flex items-center gap-2"><Banknote className="h-4 w-4" />Price: ${Number(comp.price).toLocaleString()}</div>}
+                      {comp.pricePerSf && <div>$/SF: ${Number(comp.pricePerSf).toLocaleString()}</div>}
+                      {comp.pricePerAcre && <div>$/Acre: ${Number(comp.pricePerAcre).toLocaleString()}</div>}
+                      {(comp.buyer || comp.seller) && <div>Buyer/Seller: {[comp.buyer, comp.seller].filter(Boolean).join(' / ')}</div>}
+                    </div>
                   )}
-                  {comp.notes && <div className="text-xs text-muted-foreground md:col-span-4">Notes: {comp.notes}</div>}
+                  {comp.notes && <div className="pt-1">Notes: {comp.notes}</div>}
                 </CardContent>
               </Card>
             ))

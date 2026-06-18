@@ -18,20 +18,20 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
   const [location] = useLocation();
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-40 border-b border-border bg-card">
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
+    <div className="min-h-screen bg-slate-100 text-slate-950">
+      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-4 px-6 py-3">
           <Link href="/tools/industrial-intel" className="group flex items-center gap-3">
-            <span className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-slate-900 text-white">
-              <Database className="h-4 w-4" />
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-sm">
+              <Database className="h-5 w-5" />
             </span>
             <span>
-              <span className="block text-[11px] font-semibold uppercase tracking-normal text-muted-foreground">Inventory intelligence</span>
-              <span className="block text-base font-semibold leading-tight text-foreground group-hover:text-primary">Industrial Intel</span>
+              <span className="block text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Inventory intelligence</span>
+              <span className="block text-lg font-semibold leading-tight text-slate-950 group-hover:text-blue-700">Industrial Intel</span>
             </span>
           </Link>
 
-          <nav className="flex flex-wrap items-center gap-1">
+          <nav className="flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1 shadow-sm">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive =
@@ -42,12 +42,11 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors ${
+                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
                   isActive
-                    ? "bg-slate-900 text-white"
-                    : "text-slate-600 hover:bg-muted hover:text-slate-950"
+                    ? "bg-white text-blue-700 shadow-sm ring-1 ring-blue-200"
+                    : "text-slate-600 hover:bg-white hover:text-slate-950"
                 }`}
-                aria-current={isActive ? "page" : undefined}
               >
                 <Icon className="h-4 w-4" />
                 {item.label}
@@ -59,14 +58,14 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
           <div className="flex items-center gap-2">
             <Link
               href="/launcher"
-              className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-slate-700 hover:bg-muted hover:text-slate-950"
+              className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:border-blue-200 hover:text-blue-700"
             >
               <Home className="h-4 w-4" />
               Tools
             </Link>
             <Link
               href="/app"
-              className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              className="inline-flex h-10 items-center gap-2 rounded-full bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
             >
               Level CRE
               <ArrowUpRight className="h-4 w-4" />
@@ -75,7 +74,7 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6">{children}</main>
+      <main className="mx-auto max-w-[1600px] px-6 py-8">{children}</main>
     </div>
   );
 }

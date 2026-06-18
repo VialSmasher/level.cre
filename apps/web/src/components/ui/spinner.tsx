@@ -2,10 +2,10 @@ import React from "react";
 
 export function Spinner() {
   return (
-    <div className="flex min-h-[240px] items-center justify-center">
+    <div className="flex items-center justify-center h-screen">
       <div className="text-center">
-        <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-primary"></div>
-        <p className="text-sm text-muted-foreground">Loading...</p>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+        <p className="text-gray-600">Loading...</p>
       </div>
     </div>
   );

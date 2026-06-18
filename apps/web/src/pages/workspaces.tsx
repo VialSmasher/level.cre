@@ -12,7 +12,7 @@ import { apiRequest } from '@/lib/queryClient';
 import { prospectLabel } from '@/lib/copy';
 import { useAuth } from '@/contexts/AuthContext';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
-import { ArrowRight, Briefcase, CalendarDays, MoreHorizontal, Pencil, Plus, Share2, Trash2, Users } from 'lucide-react';
+import { ArrowRight, Briefcase, CalendarDays, MoreHorizontal, Pencil, Plus, Share2, Sparkles, Trash2, Users } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
@@ -66,21 +66,21 @@ function WorkspaceCard({
 
   return (
     <Card
-      className="group relative cursor-pointer overflow-hidden border-border bg-card shadow-none transition-colors hover:border-slate-400"
+      className="group relative cursor-pointer overflow-hidden border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
       onClick={onOpen}
     >
-      <CardHeader className="space-y-0 pb-2">
+      <CardHeader className="space-y-0 pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-slate-700">
-              {kind === 'shared' ? <Users className="h-4 w-4" /> : <Briefcase className="h-4 w-4" />}
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+              {kind === 'shared' ? <Users className="h-5 w-5" /> : <Briefcase className="h-5 w-5" />}
             </div>
             <div className="min-w-0">
-              <CardTitle className="truncate text-sm leading-5 text-foreground" title={name}>
+              <CardTitle className="truncate text-base leading-tight text-slate-950" title={name}>
                 {name}
               </CardTitle>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="border-border bg-background px-2 py-0 text-xs text-slate-600">
+                <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 px-2 py-0 text-xs text-slate-600">
                   {kind === 'shared' ? 'Shared' : 'Workspace'}
                 </Badge>
                 <span className="inline-flex items-center gap-1 text-xs text-slate-500">
@@ -95,7 +95,7 @@ function WorkspaceCard({
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-8 w-8 shrink-0 opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100"
+                className="h-8 w-8 shrink-0 rounded-full opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100"
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
                 aria-label="Workspace actions"
               >
@@ -121,12 +121,12 @@ function WorkspaceCard({
         </div>
       </CardHeader>
       <CardContent className="pt-0">
-        <div className="flex items-center justify-between border-t border-border pt-3">
-          <div className="flex items-baseline gap-2">
-            <p className="text-lg font-semibold text-foreground">{count}</p>
-            <p className="text-xs text-muted-foreground">{prospectLabel(count)}</p>
+        <div className="flex items-center justify-between border-t border-slate-100 pt-4">
+          <div>
+            <p className="text-2xl font-bold text-slate-950">{count}</p>
+            <p className="text-xs text-slate-500">{prospectLabel(count)}</p>
           </div>
-          <div className="inline-flex items-center gap-1 text-sm font-medium text-primary opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100">
+          <div className="inline-flex items-center gap-1 text-sm font-semibold text-blue-700 opacity-0 transition-opacity group-hover:opacity-100">
             Open
             <ArrowRight className="h-4 w-4" />
           </div>
@@ -352,20 +352,20 @@ export default function WorkspacesIndex() {
   });
 
   return (
-    <div className="min-h-screen bg-background px-4 py-4 sm:px-6">
-      <div className="mx-auto max-w-[1600px] space-y-4">
+    <div className="min-h-screen bg-slate-50 px-6 py-8">
+      <div className="mx-auto max-w-6xl space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
-          <Badge variant="outline" className="mb-2 gap-2 border-border bg-card px-2.5 py-1 text-muted-foreground">
+          <Badge variant="outline" className="mb-2 gap-2 rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
             <Briefcase className="h-3.5 w-3.5" />
             Workspace library
           </Badge>
-          <h1 className="text-2xl font-semibold tracking-normal text-foreground">Workspace Library</h1>
+          <h1 className="text-4xl font-bold tracking-tight text-slate-950">Workspace command center</h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-600">Organize pursuit maps, shared prospect sets, and client-specific canvassing work.</p>
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button onClick={() => setOpen(true)} aria-label="Create Workspace">
+            <Button onClick={() => setOpen(true)} aria-label="Create Workspace" className="h-10 rounded-full px-4">
               <Plus className="mr-2 h-4 w-4" />
               New workspace
             </Button>
@@ -395,7 +395,7 @@ export default function WorkspacesIndex() {
               <p className="mt-1 text-3xl font-bold text-slate-950">{totalOwnedProspects}</p>
             </div>
             <div className="rounded-xl bg-emerald-50 p-2 text-emerald-600">
-              <Briefcase className="h-5 w-5" />
+              <Sparkles className="h-5 w-5" />
             </div>
           </CardContent>
         </Card>
@@ -413,9 +413,9 @@ export default function WorkspacesIndex() {
       </div>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 gap-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-24 animate-pulse rounded-lg border border-border bg-card" />
+            <div key={i} className="h-40 animate-pulse rounded-2xl bg-white shadow-sm" />
           ))}
         </div>
       ) : (
@@ -428,7 +428,7 @@ export default function WorkspacesIndex() {
             </div>
             <Badge variant="outline" className="rounded-full bg-white">{listings.length}</Badge>
           </div>
-          <div className="grid grid-cols-1 gap-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {listings.length === 0 && (
             <Card className="col-span-full border-dashed border-slate-300 bg-white">
               <CardHeader>
@@ -467,9 +467,9 @@ export default function WorkspacesIndex() {
             <Badge variant="outline" className="rounded-full bg-white">{shared.length}</Badge>
           </div>
           {isLoadingShared ? (
-            <div className="grid grid-cols-1 gap-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-24 animate-pulse rounded-lg border border-border bg-card" />
+                <div key={i} className="h-40 animate-pulse rounded-2xl bg-white shadow-sm" />
               ))}
             </div>
           ) : shared.length === 0 ? (
@@ -477,7 +477,7 @@ export default function WorkspacesIndex() {
               <CardContent className="p-5 text-sm text-slate-600">No shared workspaces yet.</CardContent>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 gap-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {shared.map((l) => (
                 <WorkspaceCard
                   key={l.id}
