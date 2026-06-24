@@ -431,6 +431,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       .filter((part) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(part))));
   }
 
+  function parsePostmarkAddressList(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return Array.from(new Set(value
+      .map((item: any) => String(item?.Email || item?.email || '').trim().toLowerCase())
+      .filter((part) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(part))));
+  }
+
+  function getInboundRecipientEmails(payload: any): string[] {
+    return Array.from(new Set([
+      ...parseEmailAddresses(payload?.to || payload?.To || payload?.recipient || payload?.Recipients),
+      ...parseEmailAddresses(payload?.cc || payload?.Cc),
+      ...parseEmailAddresses(payload?.bcc || payload?.Bcc),
+      ...parseEmailAddresses(payload?.OriginalRecipient || payload?.originalRecipient),
+      ...parsePostmarkAddressList(payload?.ToFull || payload?.toFull),
+      ...parsePostmarkAddressList(payload?.CcFull || payload?.ccFull),
+      ...parsePostmarkAddressList(payload?.BccFull || payload?.bccFull),
+    ]));
+  }
+
   function parseSender(value: unknown) {
     const text = String(value || '').trim();
     const match = text.match(/^(.*?)<([^>]+)>$/);
@@ -451,10 +470,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   function resolveInboundUserId(payload: any) {
     const explicit = pickString(payload, ['userId', 'user_id', 'levelCreUserId']);
     if (explicit) return explicit;
-    const recipients = [
-      ...parseEmailAddresses(payload?.to || payload?.To || payload?.recipient || payload?.Recipients),
-      ...parseEmailAddresses(payload?.cc || payload?.Cc),
-    ];
+    const mailboxHash = pickString(payload, ['MailboxHash', 'mailboxHash']);
+    if (/^[a-z0-9-]{20,}$/i.test(mailboxHash)) return mailboxHash;
+    const recipients = getInboundRecipientEmails(payload);
     const token = recipients
       .map((email) => email.match(/\+([a-z0-9-]{20,})@/i)?.[1])
       .find(Boolean);
@@ -465,6 +483,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const from = parseSender(payload?.from || payload?.From || payload?.sender || payload?.Sender);
     const to = parseEmailAddresses(payload?.to || payload?.To || payload?.recipient || payload?.Recipients);
     const cc = parseEmailAddresses(payload?.cc || payload?.Cc);
+    const bcc = parseEmailAddresses(payload?.bcc || payload?.Bcc);
+    const inboundRecipients = getInboundRecipientEmails(payload);
     const subject = pickString(payload, ['subject', 'Subject']) || '(no subject)';
     const textBody = pickString(payload, ['text', 'TextBody', 'body-plain', 'stripped-text', 'plain', 'body']);
     const htmlBody = pickString(payload, ['html', 'HtmlBody', 'body-html', 'stripped-html']);
@@ -496,7 +516,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       sourceUrl: '',
       rawMetadata: {
         source: payload?.source || payload?.provider || 'inbound-webhook',
-        inboundAddress: [...to, ...cc].find((email) => email.includes(`+${userId}`)) || null,
+        inboundAddress: inboundRecipients.find((email) => email.includes(`+${userId}`)) || null,
+        originalRecipient: pickString(payload, ['OriginalRecipient', 'originalRecipient']) || null,
+        bccEmails: bcc,
+        mailboxHash: pickString(payload, ['MailboxHash', 'mailboxHash']) || null,
       },
     };
   }
