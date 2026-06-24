@@ -99,6 +99,15 @@ Preferred communication style: Simple, everyday language.
 - Postmark `MailboxHash` is the plus-address token after `+`; when it matches a Level CRE user id, it should be treated as the inbound user id.
 - Missed historical BCC emails will not appear just by refreshing the app. They need Postmark webhook retry/reprocess or a resend/forward after the code is deployed.
 
+## Automation / Sales Brief Direction
+
+- Outlook email is currently the user's practical source of truth for active deals and business development work. Level CRE should reduce manual data entry by syncing Outlook first, then turning email activity into structured brief/action signals.
+- The Outlook sync route is `POST /api/email/outlook/sync`; it should sync sent mail and inbox mail, default to a 90-day window, and preserve sent-mail activity because sent mail is the strongest signal for what the user is actively working on.
+- The Outlook-derived automation brief is `GET /api/automation/outlook-brief`. It reads stored Outlook messages, groups conversations, weights sent activity, detects deal/action language and property-like address mentions, and returns ranked signals with suggested next actions.
+- The combined daily business-development source is `GET /api/automation/sales-brief`. It should include Level CRE records when they exist, but Outlook-derived signals must still appear when the deal/listing/prospect has not been manually entered in Level CRE yet.
+- Known deal names, addresses, companies, and listing names should be passed as comma-separated `watch` query terms or configured through `LEVELCRE_AUTOMATION_WATCH_TERMS`; avoid hard-coding private live deal targets into the repo.
+- Codex daily automations should call/sync Outlook first, read the Level CRE automation brief, then enrich with live Outlook thread context and ZoomInfo before presenting the user's daily action list.
+
 ## Auth Modes
 
 - Demo Mode: Instant access with seeded demo data. Triggered by the “Start Demo Mode” button or `localStorage.setItem('demo-mode','true')`.
