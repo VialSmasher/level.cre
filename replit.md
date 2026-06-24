@@ -90,6 +90,15 @@ Preferred communication style: Simple, everyday language.
 - **Date Utilities**: date-fns for date manipulation and formatting
 - **Utility Libraries**: clsx and tailwind-merge for conditional styling
 
+## Email Capture / Postmark Inbound
+
+- The inbox BCC capture flow is: Outlook email -> user BCCs the Postmark inbound address -> Postmark inbound webhook posts JSON to `/api/email/inbound/webhook` -> `apps/api/src/routes.ts` stores the message in `email_messages` and creates an `email_prospect_matches` review row.
+- The webhook must be authorized with `EMAIL_INBOUND_WEBHOOK_SECRET` / `INBOUND_EMAIL_WEBHOOK_SECRET`, supplied by Postmark as either `?secret=...`, `Authorization: Bearer ...`, or `x-levelcre-inbound-secret`.
+- User routing depends on the personal intake address format `levelcre+{userId}@{EMAIL_INBOUND_DOMAIN}` unless `EMAIL_INBOUND_DEFAULT_USER_ID` is intentionally configured for a single-user fallback.
+- Do not remove Postmark BCC parsing when refactoring inbound email. Postmark may place the captured BCC intake address in `Bcc`, `BccFull`, `OriginalRecipient`, or `MailboxHash`, not only in `To` or `Cc`. `resolveInboundUserId` must continue checking those fields so Outlook BCC logging works.
+- Postmark `MailboxHash` is the plus-address token after `+`; when it matches a Level CRE user id, it should be treated as the inbound user id.
+- Missed historical BCC emails will not appear just by refreshing the app. They need Postmark webhook retry/reprocess or a resend/forward after the code is deployed.
+
 ## Auth Modes
 
 - Demo Mode: Instant access with seeded demo data. Triggered by the “Start Demo Mode” button or `localStorage.setItem('demo-mode','true')`.
