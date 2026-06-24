@@ -3724,6 +3724,367 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  type SalesBriefAction = {
+    id: string;
+    type: 'follow_up_due' | 'stale_prospect' | 'listing_progress' | 'email_cleanup' | 'research_target';
+    priority: 'critical' | 'high' | 'medium' | 'low';
+    priorityScore: number;
+    title: string;
+    reason: string;
+    suggestedAction: string;
+    source: 'level_cre' | 'email_review' | 'listing';
+    dueAt?: string | null;
+    prospect?: Record<string, unknown> | null;
+    listing?: Record<string, unknown> | null;
+    email?: Record<string, unknown> | null;
+    automationHints?: Record<string, unknown>;
+  };
+
+  function normalizeBriefDate(value: unknown): Date | null {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(String(value));
+    return Number.isFinite(date.getTime()) ? date : null;
+  }
+
+  function briefIso(value: unknown): string | null {
+    const date = normalizeBriefDate(value);
+    return date ? date.toISOString() : null;
+  }
+
+  function daysUntil(value: unknown, now = new Date()): number | null {
+    const date = normalizeBriefDate(value);
+    if (!date) return null;
+    return Math.ceil((date.getTime() - now.getTime()) / 86_400_000);
+  }
+
+  function daysSince(value: unknown, now = new Date()): number | null {
+    const date = normalizeBriefDate(value);
+    if (!date) return null;
+    return Math.floor((now.getTime() - date.getTime()) / 86_400_000);
+  }
+
+  function prospectBriefName(row: any): string {
+    return row.contact_company || row.business_name || row.name || 'Untitled prospect';
+  }
+
+  function briefPriority(score: number): SalesBriefAction['priority'] {
+    if (score >= 90) return 'critical';
+    if (score >= 70) return 'high';
+    if (score >= 45) return 'medium';
+    return 'low';
+  }
+
+  function uniqueBriefActions(actions: SalesBriefAction[]): SalesBriefAction[] {
+    const seen = new Set<string>();
+    const result: SalesBriefAction[] = [];
+    for (const action of actions.sort((left, right) => right.priorityScore - left.priorityScore)) {
+      const key = `${action.type}:${action.prospect?.id || ''}:${action.listing?.id || ''}:${action.email?.id || ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(action);
+    }
+    return result;
+  }
+
+  app.get('/api/automation/sales-brief', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const limit = Math.min(Math.max(Number(req.query.limit) || 12, 3), 25);
+      const now = new Date();
+      if (isDemo(req)) {
+        return res.json({
+          generatedAt: now.toISOString(),
+          summary: {
+            openActions: 0,
+            dueFollowUps: 0,
+            staleProspects: 0,
+            listingProgressItems: 0,
+            emailCleanupItems: 0,
+          },
+          actions: [],
+          buckets: { doToday: [], thisWeek: [], cleanup: [], research: [] },
+          nextBestAction: null,
+          automationNotes: [
+            'Demo mode does not read production prospects or inbox captures.',
+          ],
+        });
+      }
+
+      const [prospectsResult, listingsResult, emailResult] = await Promise.all([
+        pool.query(`
+          SELECT
+            p.id,
+            p.name,
+            p.status,
+            p.address,
+            p.last_contact_date,
+            p.follow_up_due_date,
+            p.contact_name,
+            p.contact_email,
+            p.contact_phone,
+            p.contact_company,
+            p.business_name,
+            p.website_url,
+            p.created_at,
+            p.updated_at,
+            MAX(ci.created_at) AS last_interaction_at,
+            COUNT(ci.id)::int AS interaction_count,
+            array_remove(array_agg(DISTINCT l.title), NULL) AS listing_titles
+          FROM public.prospects p
+          LEFT JOIN public.contact_interactions ci
+            ON ci.prospect_id = p.id AND ci.user_id = p.user_id
+          LEFT JOIN public.listing_prospects lp
+            ON lp.prospect_id = p.id
+          LEFT JOIN public.listings l
+            ON l.id = lp.listing_id AND l.archived_at IS NULL
+          WHERE p.user_id = $1
+            AND COALESCE(p.status, '') <> 'no_go'
+          GROUP BY p.id
+          ORDER BY COALESCE(p.follow_up_due_date, MAX(ci.created_at), p.updated_at, p.created_at) ASC
+          LIMIT 200
+        `, [userId]),
+        pool.query(`
+          SELECT
+            l.id,
+            l.title,
+            l.address,
+            l.deal_type,
+            l.size,
+            l.price,
+            l.created_at,
+            COUNT(DISTINCT lp.prospect_id)::int AS prospect_count,
+            MAX(ci.created_at) AS last_activity_at
+          FROM public.listings l
+          LEFT JOIN public.listing_prospects lp
+            ON lp.listing_id = l.id
+          LEFT JOIN public.contact_interactions ci
+            ON ci.user_id = l.user_id AND (ci.listing_id = l.id OR ci.prospect_id = lp.prospect_id)
+          WHERE l.user_id = $1
+            AND l.archived_at IS NULL
+          GROUP BY l.id
+          ORDER BY COALESCE(MAX(ci.created_at), l.created_at) ASC
+          LIMIT 50
+        `, [userId]),
+        pool.query(`
+          SELECT
+            epm.id AS match_id,
+            epm.match_status,
+            epm.created_at AS match_created_at,
+            em.id AS email_id,
+            em.subject,
+            em.sender_email,
+            em.sender_name,
+            em.sent_at,
+            em.received_at,
+            em.snippet,
+            p.id AS prospect_id,
+            p.name AS prospect_name,
+            p.contact_company AS prospect_contact_company,
+            p.business_name AS prospect_business_name,
+            l.id AS listing_id,
+            l.title AS listing_title
+          FROM public.email_prospect_matches epm
+          JOIN public.email_messages em ON em.id = epm.email_message_id
+          LEFT JOIN public.prospects p ON p.id = epm.prospect_id
+          LEFT JOIN public.listings l ON l.id = epm.listing_id
+          WHERE epm.user_id = $1
+            AND epm.match_status IN ('needs_context', 'pending_review')
+          ORDER BY COALESCE(em.sent_at, em.received_at, epm.created_at) DESC
+          LIMIT 40
+        `, [userId]),
+      ]);
+
+      const actions: SalesBriefAction[] = [];
+
+      for (const row of prospectsResult.rows) {
+        const dueIn = daysUntil(row.follow_up_due_date, now);
+        const lastTouch = row.last_contact_date || row.last_interaction_at || row.updated_at || row.created_at;
+        const inactiveDays = daysSince(lastTouch, now);
+        const name = prospectBriefName(row);
+        const prospect = {
+          id: row.id,
+          name,
+          status: row.status,
+          address: row.address || null,
+          contactName: row.contact_name || null,
+          contactEmail: row.contact_email || null,
+          contactPhone: row.contact_phone || null,
+          listingTitles: row.listing_titles || [],
+          lastTouch: briefIso(lastTouch),
+          followUpDueDate: briefIso(row.follow_up_due_date),
+        };
+
+        if (dueIn !== null && dueIn <= 7) {
+          const overdueBoost = dueIn < 0 ? Math.min(Math.abs(dueIn) * 4, 24) : 0;
+          const score = 76 + overdueBoost + (row.status === 'listing' ? 12 : 0);
+          actions.push({
+            id: `followup:${row.id}`,
+            type: 'follow_up_due',
+            priority: briefPriority(score),
+            priorityScore: score,
+            title: dueIn < 0 ? `Overdue follow-up: ${name}` : `Upcoming follow-up: ${name}`,
+            reason: dueIn < 0
+              ? `Follow-up is ${Math.abs(dueIn)} day${Math.abs(dueIn) === 1 ? '' : 's'} overdue.`
+              : `Follow-up is due in ${dueIn} day${dueIn === 1 ? '' : 's'}.`,
+            suggestedAction: row.contact_phone
+              ? 'Call first, then log the outcome and set the next follow-up.'
+              : 'Send a short follow-up email, then log the outcome and set the next follow-up.',
+            source: 'level_cre',
+            dueAt: briefIso(row.follow_up_due_date),
+            prospect,
+            automationHints: {
+              checkOutlookThread: Boolean(row.contact_email),
+              enrichWithZoomInfo: !row.contact_phone || !row.contact_email,
+            },
+          });
+        }
+
+        const staleThreshold = row.status === 'listing' ? 7 : row.status === 'contacted' ? 14 : 30;
+        if ((dueIn === null || dueIn > 7) && inactiveDays !== null && inactiveDays >= staleThreshold) {
+          const score = Math.min(42 + inactiveDays + (row.status === 'listing' ? 18 : 0), 88);
+          actions.push({
+            id: `stale:${row.id}`,
+            type: 'stale_prospect',
+            priority: briefPriority(score),
+            priorityScore: score,
+            title: `Revive stale activity: ${name}`,
+            reason: `No logged activity for ${inactiveDays} days while status is ${row.status}.`,
+            suggestedAction: row.contact_phone
+              ? 'Make a quick check-in call and decide whether this is still real pipeline.'
+              : 'Find the best contact, send a check-in, and decide whether to keep this active.',
+            source: 'level_cre',
+            prospect,
+            automationHints: {
+              checkOutlookThread: Boolean(row.contact_email),
+              enrichWithZoomInfo: !row.contact_phone || !row.contact_email,
+            },
+          });
+        }
+
+        if (!row.contact_phone && !row.contact_email && row.status !== 'no_go') {
+          const score = row.status === 'listing' || row.status === 'contacted' ? 58 : 36;
+          actions.push({
+            id: `research:${row.id}`,
+            type: 'research_target',
+            priority: briefPriority(score),
+            priorityScore: score,
+            title: `Find a reachable contact: ${name}`,
+            reason: 'Prospect is active but missing both phone and email contact details.',
+            suggestedAction: 'Use ZoomInfo to find the likely decision maker and add direct contact info before outreach.',
+            source: 'level_cre',
+            prospect,
+            automationHints: {
+              enrichWithZoomInfo: true,
+            },
+          });
+        }
+      }
+
+      for (const row of listingsResult.rows) {
+        const inactiveDays = daysSince(row.last_activity_at || row.created_at, now);
+        if (inactiveDays !== null && inactiveDays >= 7) {
+          const score = Math.min(64 + inactiveDays + Math.min(Number(row.prospect_count || 0), 10), 92);
+          actions.push({
+            id: `listing:${row.id}`,
+            type: 'listing_progress',
+            priority: briefPriority(score),
+            priorityScore: score,
+            title: `Progress listing: ${row.title || row.address || 'Untitled listing'}`,
+            reason: `${row.prospect_count || 0} linked prospect${Number(row.prospect_count || 0) === 1 ? '' : 's'} and no logged listing activity for ${inactiveDays} days.`,
+            suggestedAction: 'Review the linked prospects, choose the next buyer/tenant call, and log a listing progress note.',
+            source: 'listing',
+            listing: {
+              id: row.id,
+              title: row.title,
+              address: row.address || null,
+              dealType: row.deal_type || null,
+              prospectCount: Number(row.prospect_count || 0),
+              lastActivityAt: briefIso(row.last_activity_at),
+            },
+            automationHints: {
+              checkOutlookThread: true,
+              enrichWithZoomInfo: Number(row.prospect_count || 0) < 5,
+            },
+          });
+        }
+      }
+
+      for (const row of emailResult.rows) {
+        const ageDays = daysSince(row.sent_at || row.received_at || row.match_created_at, now) || 0;
+        const hasContext = Boolean(row.prospect_id || row.listing_id);
+        const score = (hasContext ? 62 : 72) + Math.min(ageDays * 3, 18);
+        actions.push({
+          id: `email:${row.match_id}`,
+          type: 'email_cleanup',
+          priority: briefPriority(score),
+          priorityScore: score,
+          title: hasContext ? `Log captured email: ${row.subject || '(no subject)'}` : `Attach context to captured email: ${row.subject || '(no subject)'}`,
+          reason: hasContext
+            ? 'Captured email has context but has not been logged as a prospect interaction.'
+            : 'Captured email needs prospect/listing context before it can become useful sales activity.',
+          suggestedAction: hasContext
+            ? 'Review the email, log it as an interaction, and set the next follow-up.'
+            : 'Attach the right prospect/listing or create a new prospect, then log the next step.',
+          source: 'email_review',
+          email: {
+            id: row.email_id,
+            reviewId: row.match_id,
+            subject: row.subject || '',
+            sender: row.sender_name || row.sender_email || '',
+            sentAt: briefIso(row.sent_at || row.received_at || row.match_created_at),
+            snippet: row.snippet || '',
+          },
+          prospect: row.prospect_id ? {
+            id: row.prospect_id,
+            name: row.prospect_contact_company || row.prospect_business_name || row.prospect_name || '',
+          } : null,
+          listing: row.listing_id ? {
+            id: row.listing_id,
+            title: row.listing_title || '',
+          } : null,
+          automationHints: {
+            checkOutlookThread: true,
+            enrichWithZoomInfo: !hasContext,
+          },
+        });
+      }
+
+      const rankedActions = uniqueBriefActions(actions).slice(0, limit);
+      const bucket = (predicate: (action: SalesBriefAction) => boolean) => rankedActions.filter(predicate);
+      const dueFollowUps = rankedActions.filter((action) => action.type === 'follow_up_due');
+      const staleProspects = rankedActions.filter((action) => action.type === 'stale_prospect');
+      const listingProgressItems = rankedActions.filter((action) => action.type === 'listing_progress');
+      const emailCleanupItems = rankedActions.filter((action) => action.type === 'email_cleanup');
+
+      res.json({
+        generatedAt: now.toISOString(),
+        summary: {
+          openActions: rankedActions.length,
+          dueFollowUps: dueFollowUps.length,
+          staleProspects: staleProspects.length,
+          listingProgressItems: listingProgressItems.length,
+          emailCleanupItems: emailCleanupItems.length,
+          researchTargets: rankedActions.filter((action) => action.type === 'research_target').length,
+        },
+        actions: rankedActions,
+        buckets: {
+          doToday: bucket((action) => action.priority === 'critical' || action.priority === 'high').slice(0, 7),
+          thisWeek: bucket((action) => action.priority === 'medium').slice(0, 10),
+          cleanup: bucket((action) => action.type === 'email_cleanup').slice(0, 10),
+          research: bucket((action) => action.type === 'research_target').slice(0, 10),
+        },
+        nextBestAction: rankedActions[0] || null,
+        automationNotes: [
+          'Use this endpoint as the Level CRE source for daily Codex sales automations.',
+          'Codex should enrich actions with Outlook thread context and ZoomInfo contact/company data before presenting a final daily action list.',
+        ],
+      });
+    } catch (error) {
+      console.error('Error building automation sales brief:', error);
+      res.status(500).json({ message: 'Failed to build sales brief' });
+    }
+  });
+
   app.get('/api/tool-a/review/followups', requireAuth, async (req, res) => {
     try {
       const listingId = typeof req.query.listingId === 'string' ? req.query.listingId : undefined;
