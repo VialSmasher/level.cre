@@ -243,7 +243,7 @@ export default function InboxPage() {
 
   const syncOutlookMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest('POST', '/api/email/outlook/sync', { days: 30 })
+      const response = await apiRequest('POST', '/api/email/outlook/sync', { days: 90 })
       return response.json()
     },
     onSuccess: invalidate,
