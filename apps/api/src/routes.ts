@@ -467,6 +467,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return '';
   }
 
+  function getInboundAddressDomain(email: string) {
+    const [, domain = ''] = String(email || '').toLowerCase().split('@');
+    return domain;
+  }
+
+  function isConfiguredInboundAddress(email: string) {
+    const normalized = String(email || '').trim().toLowerCase();
+    if (!normalized) return false;
+    const configuredAddress = String(process.env.EMAIL_INBOUND_ADDRESS || process.env.INBOUND_EMAIL_ADDRESS || '').trim().toLowerCase();
+    if (configuredAddress && normalized === configuredAddress) return true;
+    const configuredDomain = String(process.env.EMAIL_INBOUND_DOMAIN || process.env.INBOUND_EMAIL_DOMAIN || '').trim().toLowerCase();
+    return Boolean(configuredDomain && getInboundAddressDomain(normalized) === configuredDomain);
+  }
+
+  function extractInboundUserToken(email: string) {
+    const normalized = String(email || '').trim().toLowerCase();
+    if (!normalized || !isConfiguredInboundAddress(normalized)) return '';
+    const localPart = normalized.split('@')[0] || '';
+    const plusToken = localPart.match(/\+([a-z0-9-]{20,})$/i)?.[1];
+    if (plusToken) return plusToken;
+    if (/^[a-z0-9-]{20,}$/i.test(localPart)) return localPart;
+    return '';
+  }
+
   function resolveInboundUserId(payload: any) {
     const explicit = pickString(payload, ['userId', 'user_id', 'levelCreUserId']);
     if (explicit) return explicit;
@@ -474,7 +498,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (/^[a-z0-9-]{20,}$/i.test(mailboxHash)) return mailboxHash;
     const recipients = getInboundRecipientEmails(payload);
     const token = recipients
-      .map((email) => email.match(/\+([a-z0-9-]{20,})@/i)?.[1])
+      .map((email) => extractInboundUserToken(email))
       .find(Boolean);
     return token || process.env.EMAIL_INBOUND_DEFAULT_USER_ID || '';
   }
@@ -516,7 +540,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       sourceUrl: '',
       rawMetadata: {
         source: payload?.source || payload?.provider || 'inbound-webhook',
-        inboundAddress: inboundRecipients.find((email) => email.includes(`+${userId}`)) || null,
+        inboundAddress: inboundRecipients.find((email) => extractInboundUserToken(email) === userId) || null,
+        inboundRecipients,
         originalRecipient: pickString(payload, ['OriginalRecipient', 'originalRecipient']) || null,
         bccEmails: bcc,
         mailboxHash: pickString(payload, ['MailboxHash', 'mailboxHash']) || null,
