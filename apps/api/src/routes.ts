@@ -3132,9 +3132,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let messagesStored = 0;
     let matchesCreated = 0;
 
+    const maxPagesPerFolder = Math.min(Math.max(Number(process.env.OUTLOOK_SYNC_MAX_PAGES || 5), 1), 20);
     for (const folder of folders) {
       const url = new URL(`https://graph.microsoft.com/v1.0/me/mailFolders/${folder.id}/messages`);
-      url.searchParams.set('$top', '50');
+      url.searchParams.set('$top', '100');
       url.searchParams.set('$orderby', `${folder.dateField} desc`);
       url.searchParams.set('$filter', `${folder.dateField} ge ${cutoff}`);
       url.searchParams.set('$select', [
@@ -3150,94 +3151,98 @@ export async function registerRoutes(app: Express): Promise<Server> {
         'webLink',
         'hasAttachments',
       ].join(','));
-      const data = await graphGet(accessToken, url.toString());
-      for (const message of data.value || []) {
-        messagesSeen += 1;
-        const sender = message.from?.emailAddress || {};
-        const recipients = (message.toRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
-        const ccRecipients = (message.ccRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
-        const messageData = {
-          provider: 'outlook',
-          providerMessageId: message.id,
-          providerThreadId: message.conversationId || null,
-          mailbox: folder.mailbox,
-          direction: folder.direction,
-          subject: message.subject || '',
-          senderEmail: sender.address || '',
-          senderName: sender.name || '',
-          recipientEmails: recipients,
-          ccEmails: ccRecipients,
-          sentAt: message.sentDateTime ? new Date(message.sentDateTime) : null,
-          receivedAt: message.receivedDateTime ? new Date(message.receivedDateTime) : null,
-          snippet: message.bodyPreview || '',
-          attachmentNames: [],
-          sourceUrl: message.webLink || '',
-        };
-        const inserted = await pool.query(`
-          INSERT INTO public.email_messages (
-            user_id, connection_id, provider, provider_message_id, provider_thread_id, mailbox, direction,
-            subject, sender_email, sender_name, recipient_emails, cc_emails, sent_at, received_at,
-            snippet, attachment_names, source_url, raw_metadata, updated_at
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now())
-          ON CONFLICT (user_id, provider, provider_message_id)
-          DO UPDATE SET
-            provider_thread_id = EXCLUDED.provider_thread_id,
-            mailbox = EXCLUDED.mailbox,
-            direction = EXCLUDED.direction,
-            subject = EXCLUDED.subject,
-            sender_email = EXCLUDED.sender_email,
-            sender_name = EXCLUDED.sender_name,
-            recipient_emails = EXCLUDED.recipient_emails,
-            cc_emails = EXCLUDED.cc_emails,
-            sent_at = EXCLUDED.sent_at,
-            received_at = EXCLUDED.received_at,
-            snippet = EXCLUDED.snippet,
-            source_url = EXCLUDED.source_url,
-            raw_metadata = EXCLUDED.raw_metadata,
-            updated_at = now()
-          RETURNING id, (xmax = 0) AS inserted
-        `, [
-          userId,
-          connectionId,
-          messageData.provider,
-          messageData.providerMessageId,
-          messageData.providerThreadId,
-          messageData.mailbox,
-          messageData.direction,
-          messageData.subject,
-          messageData.senderEmail,
-          messageData.senderName,
-          messageData.recipientEmails,
-          messageData.ccEmails,
-          messageData.sentAt,
-          messageData.receivedAt,
-          messageData.snippet,
-          messageData.attachmentNames,
-          messageData.sourceUrl,
-          JSON.stringify({ hasAttachments: Boolean(message.hasAttachments) }),
-        ]);
-        const emailMessageId = inserted.rows[0].id;
-        if (inserted.rows[0].inserted) messagesStored += 1;
+      let nextUrl: string | null = url.toString();
+      for (let page = 0; nextUrl && page < maxPagesPerFolder; page += 1) {
+        const data = await graphGet(accessToken, nextUrl);
+        nextUrl = typeof data['@odata.nextLink'] === 'string' ? data['@odata.nextLink'] : null;
+        for (const message of data.value || []) {
+          messagesSeen += 1;
+          const sender = message.from?.emailAddress || {};
+          const recipients = (message.toRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
+          const ccRecipients = (message.ccRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
+          const messageData = {
+            provider: 'outlook',
+            providerMessageId: message.id,
+            providerThreadId: message.conversationId || null,
+            mailbox: folder.mailbox,
+            direction: folder.direction,
+            subject: message.subject || '',
+            senderEmail: sender.address || '',
+            senderName: sender.name || '',
+            recipientEmails: recipients,
+            ccEmails: ccRecipients,
+            sentAt: message.sentDateTime ? new Date(message.sentDateTime) : null,
+            receivedAt: message.receivedDateTime ? new Date(message.receivedDateTime) : null,
+            snippet: message.bodyPreview || '',
+            attachmentNames: [],
+            sourceUrl: message.webLink || '',
+          };
+          const inserted = await pool.query(`
+            INSERT INTO public.email_messages (
+              user_id, connection_id, provider, provider_message_id, provider_thread_id, mailbox, direction,
+              subject, sender_email, sender_name, recipient_emails, cc_emails, sent_at, received_at,
+              snippet, attachment_names, source_url, raw_metadata, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, now())
+            ON CONFLICT (user_id, provider, provider_message_id)
+            DO UPDATE SET
+              provider_thread_id = EXCLUDED.provider_thread_id,
+              mailbox = EXCLUDED.mailbox,
+              direction = EXCLUDED.direction,
+              subject = EXCLUDED.subject,
+              sender_email = EXCLUDED.sender_email,
+              sender_name = EXCLUDED.sender_name,
+              recipient_emails = EXCLUDED.recipient_emails,
+              cc_emails = EXCLUDED.cc_emails,
+              sent_at = EXCLUDED.sent_at,
+              received_at = EXCLUDED.received_at,
+              snippet = EXCLUDED.snippet,
+              source_url = EXCLUDED.source_url,
+              raw_metadata = EXCLUDED.raw_metadata,
+              updated_at = now()
+            RETURNING id, (xmax = 0) AS inserted
+          `, [
+            userId,
+            connectionId,
+            messageData.provider,
+            messageData.providerMessageId,
+            messageData.providerThreadId,
+            messageData.mailbox,
+            messageData.direction,
+            messageData.subject,
+            messageData.senderEmail,
+            messageData.senderName,
+            messageData.recipientEmails,
+            messageData.ccEmails,
+            messageData.sentAt,
+            messageData.receivedAt,
+            messageData.snippet,
+            messageData.attachmentNames,
+            messageData.sourceUrl,
+            JSON.stringify({ hasAttachments: Boolean(message.hasAttachments), folder: folder.mailbox }),
+          ]);
+          const emailMessageId = inserted.rows[0].id;
+          if (inserted.rows[0].inserted) messagesStored += 1;
 
-        const result = await pool.query(`
-          INSERT INTO public.email_prospect_matches (
-            user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
-            suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
-          )
-          SELECT $1, $2, NULL, 0, 'needs_context', $3, 'email', 'contacted', $4, now()
-          WHERE NOT EXISTS (
-            SELECT 1 FROM public.email_prospect_matches
-            WHERE user_id = $1 AND email_message_id = $2 AND prospect_id IS NULL
-          )
-          RETURNING id
-        `, [
-          userId,
-          emailMessageId,
-          'Captured email activity; no automatic prospect matching.',
-          [messageData.subject, messageData.snippet].filter(Boolean).join('\n').slice(0, 1000),
-        ]);
-        if (result.rows[0]) matchesCreated += 1;
+          const result = await pool.query(`
+            INSERT INTO public.email_prospect_matches (
+              user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
+              suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
+            )
+            SELECT $1, $2, NULL, 0, 'needs_context', $3, 'email', 'contacted', $4, now()
+            WHERE NOT EXISTS (
+              SELECT 1 FROM public.email_prospect_matches
+              WHERE user_id = $1 AND email_message_id = $2 AND prospect_id IS NULL
+            )
+            RETURNING id
+          `, [
+            userId,
+            emailMessageId,
+            'Captured email activity; no automatic prospect matching.',
+            [messageData.subject, messageData.snippet].filter(Boolean).join('\n').slice(0, 1000),
+          ]);
+          if (result.rows[0]) matchesCreated += 1;
+        }
       }
     }
     await pool.query(`
@@ -3252,7 +3257,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       if (isDemo(req)) return res.status(400).json({ message: 'Email sync is disabled in demo mode' });
       const userId = getUserId(req);
-      const days = Math.min(Math.max(Number(req.body?.days || 30), 1), 90);
+      const days = Math.min(Math.max(Number(req.body?.days || 90), 1), 365);
       const connectionResult = await pool.query(`
         SELECT id FROM public.email_connections
         WHERE user_id = $1 AND provider = 'outlook' AND status = 'connected'
@@ -3726,13 +3731,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   type SalesBriefAction = {
     id: string;
-    type: 'follow_up_due' | 'stale_prospect' | 'listing_progress' | 'email_cleanup' | 'research_target';
+    type: 'follow_up_due' | 'stale_prospect' | 'listing_progress' | 'email_cleanup' | 'research_target' | 'outlook_signal';
     priority: 'critical' | 'high' | 'medium' | 'low';
     priorityScore: number;
     title: string;
     reason: string;
     suggestedAction: string;
-    source: 'level_cre' | 'email_review' | 'listing';
+    source: 'level_cre' | 'email_review' | 'listing' | 'outlook';
     dueAt?: string | null;
     prospect?: Record<string, unknown> | null;
     listing?: Record<string, unknown> | null;
@@ -3786,6 +3791,307 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return result;
   }
 
+  type OutlookBriefSignal = {
+    id: string;
+    priority: SalesBriefAction['priority'];
+    priorityScore: number;
+    stage: 'needs_response' | 'waiting_on_reply' | 'active_work' | 'stale_work';
+    title: string;
+    reason: string;
+    suggestedAction: string;
+    lastActivityAt: string | null;
+    lastOutboundAt: string | null;
+    lastInboundAt: string | null;
+    outboundCount: number;
+    inboundCount: number;
+    participantEmails: string[];
+    propertyMentions: string[];
+    dealTerms: string[];
+    watchTerms: string[];
+    latestEmail: Record<string, unknown> | null;
+    sourceUrls: string[];
+  };
+
+  const OUTLOOK_DEAL_TERMS = [
+    'offer',
+    'signed',
+    'signature',
+    'loi',
+    'lease',
+    'purchase',
+    'psa',
+    'counter',
+    'buyer',
+    'tenant',
+    'tour',
+    'showing',
+    'listing',
+    'commission',
+    'closing',
+    'condition',
+    'due diligence',
+    'possession',
+  ];
+
+  function normalizeOutlookSubject(subject: unknown): string {
+    return String(subject || '')
+      .toLowerCase()
+      .replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, '')
+      .replace(/\s+/g, ' ')
+      .trim() || '(no subject)';
+  }
+
+  function normalizeBriefText(value: unknown): string {
+    return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
+  function messageActivityAt(row: any): Date | null {
+    return normalizeBriefDate(row.sent_at || row.received_at || row.created_at);
+  }
+
+  function parseWatchTerms(value: unknown): string[] {
+    const envTerms = String(process.env.LEVELCRE_AUTOMATION_WATCH_TERMS || '')
+      .split(',')
+      .map((term) => term.trim())
+      .filter(Boolean);
+    const queryTerms = Array.isArray(value)
+      ? value.flatMap((item) => String(item).split(','))
+      : String(value || '').split(',');
+    return Array.from(new Set([...envTerms, ...queryTerms]
+      .map((term) => normalizeBriefText(term))
+      .filter((term) => term.length >= 2)));
+  }
+
+  function extractPropertyMentions(text: string): string[] {
+    const mentions = new Set<string>();
+    const patterns = [
+      /\b\d{3,6}\s+\d{1,3}\s*(?:st|street|ave|avenue|av|rd|road)?\b/gi,
+      /\b\d{3,6}\s+(?:[a-z0-9.'-]+\s+){0,5}(?:st|street|ave|avenue|av|rd|road|dr|drive|blvd|boulevard|trail|trl|way|cres|crescent|gate|place|pl|court|ct|parsons)\b/gi,
+    ];
+    for (const pattern of patterns) {
+      for (const match of text.matchAll(pattern)) {
+        const mention = match[0].replace(/\s+/g, ' ').trim();
+        if (mention.length >= 6) mentions.add(mention);
+      }
+    }
+    return Array.from(mentions).slice(0, 8);
+  }
+
+  function extractDealTerms(text: string): string[] {
+    return OUTLOOK_DEAL_TERMS.filter((term) => text.includes(term));
+  }
+
+  function buildOutlookBriefSignals(rows: any[], options: { limit: number; now?: Date; watchTerms?: string[] }): OutlookBriefSignal[] {
+    const now = options.now || new Date();
+    const watchTerms = options.watchTerms || [];
+    const groups = new Map<string, { key: string; normalizedSubject: string; messages: any[] }>();
+
+    for (const row of rows) {
+      const normalizedSubject = normalizeOutlookSubject(row.subject);
+      const key = row.provider_thread_id || `subject:${normalizedSubject}`;
+      if (!groups.has(key)) groups.set(key, { key, normalizedSubject, messages: [] });
+      groups.get(key)!.messages.push(row);
+    }
+
+    const signals: OutlookBriefSignal[] = [];
+    for (const group of groups.values()) {
+      const messages = group.messages
+        .map((message) => ({ ...message, activityAt: messageActivityAt(message) }))
+        .filter((message) => message.activityAt)
+        .sort((left, right) => right.activityAt.getTime() - left.activityAt.getTime());
+      if (messages.length === 0) continue;
+
+      const latest = messages[0];
+      const outbound = messages.filter((message) => message.direction === 'sent');
+      const inbound = messages.filter((message) => message.direction === 'received');
+      const lastOutbound = outbound[0]?.activityAt || null;
+      const lastInbound = inbound[0]?.activityAt || null;
+      const lastActivity = latest.activityAt;
+      const text = normalizeBriefText(messages.map((message) => [
+        message.subject,
+        message.snippet,
+        message.sender_email,
+        ...(message.recipient_emails || []),
+        ...(message.cc_emails || []),
+      ].filter(Boolean).join(' ')).join(' '));
+      const propertyMentions = extractPropertyMentions(text);
+      const dealTerms = extractDealTerms(text);
+      const matchedWatchTerms = watchTerms.filter((term) => text.includes(term));
+      const participantEmails = Array.from(new Set(messages.flatMap((message) => [
+        message.sender_email,
+        ...(message.recipient_emails || []),
+        ...(message.cc_emails || []),
+      ]).filter(Boolean).map((email) => String(email).toLowerCase()))).slice(0, 12);
+      const sourceUrls = Array.from(new Set(messages.map((message) => message.source_url).filter(Boolean))).slice(0, 5);
+
+      const latestIsInbound = latest.direction === 'received';
+      const latestIsOutbound = latest.direction === 'sent';
+      const daysIdle = daysSince(lastActivity, now) || 0;
+      const daysSinceOutbound = lastOutbound ? daysSince(lastOutbound, now) : null;
+      const waitingOnReply = Boolean(lastOutbound && (!lastInbound || lastOutbound.getTime() > lastInbound.getTime()));
+      const needsResponse = Boolean(lastInbound && (!lastOutbound || lastInbound.getTime() > lastOutbound.getTime()));
+      const hasStrongContext = propertyMentions.length > 0 || dealTerms.length > 0 || matchedWatchTerms.length > 0;
+
+      let score = 28 + Math.min(outbound.length * 8, 28) + Math.min(inbound.length * 4, 16);
+      score += Math.min(propertyMentions.length * 8, 18);
+      score += Math.min(dealTerms.length * 5, 24);
+      score += Math.min(matchedWatchTerms.length * 16, 32);
+      if (needsResponse) score += 24;
+      if (waitingOnReply && daysSinceOutbound !== null && daysSinceOutbound >= 2) {
+        score += 18 + Math.min(daysSinceOutbound * 3, 24);
+      }
+      if (latestIsOutbound && daysIdle >= 7) score += 10;
+      if (!hasStrongContext && outbound.length < 2) score -= 18;
+      score = Math.max(20, Math.min(score, 98));
+
+      const stage: OutlookBriefSignal['stage'] = needsResponse
+        ? 'needs_response'
+        : waitingOnReply && daysSinceOutbound !== null && daysSinceOutbound >= 2
+          ? 'waiting_on_reply'
+          : daysIdle >= 14
+            ? 'stale_work'
+            : 'active_work';
+      const titleContext = propertyMentions[0] || matchedWatchTerms[0] || group.normalizedSubject;
+      const title = stage === 'needs_response'
+        ? `Reply needed: ${titleContext}`
+        : stage === 'waiting_on_reply'
+          ? `Follow up sent thread: ${titleContext}`
+          : stage === 'stale_work'
+            ? `Revive Outlook thread: ${titleContext}`
+            : `Active Outlook work: ${titleContext}`;
+      const reason = stage === 'needs_response'
+        ? 'Latest useful signal is an inbound email after your last sent message.'
+        : stage === 'waiting_on_reply'
+          ? `You sent the latest email ${daysSinceOutbound} day${daysSinceOutbound === 1 ? '' : 's'} ago and no newer reply is stored.`
+          : stage === 'stale_work'
+            ? `This thread has ${outbound.length} sent email${outbound.length === 1 ? '' : 's'} but no stored movement for ${daysIdle} days.`
+            : `Recent sent-mail activity suggests this is active work, with ${outbound.length} outbound touch${outbound.length === 1 ? '' : 'es'}.`;
+      const suggestedAction = stage === 'needs_response'
+        ? 'Open the latest Outlook message, reply or decide the next step, then let Level CRE log the outcome.'
+        : stage === 'waiting_on_reply'
+          ? 'Send a concise follow-up or call the decision maker, then mark whether this is still live.'
+          : stage === 'stale_work'
+            ? 'Decide whether to revive, replace the buyer/contact, or archive this as dead pipeline.'
+            : 'Review the thread and decide whether it should become a Level CRE prospect, listing action, or follow-up.';
+
+      signals.push({
+        id: `outlook:${group.key}`,
+        priority: briefPriority(score),
+        priorityScore: score,
+        stage,
+        title,
+        reason,
+        suggestedAction,
+        lastActivityAt: briefIso(lastActivity),
+        lastOutboundAt: briefIso(lastOutbound),
+        lastInboundAt: briefIso(lastInbound),
+        outboundCount: outbound.length,
+        inboundCount: inbound.length,
+        participantEmails,
+        propertyMentions,
+        dealTerms,
+        watchTerms: matchedWatchTerms,
+        latestEmail: latest ? {
+          id: latest.id,
+          subject: latest.subject || '',
+          direction: latest.direction,
+          sender: latest.sender_name || latest.sender_email || '',
+          sentAt: briefIso(latest.sent_at || latest.received_at || latest.created_at),
+          snippet: latest.snippet || '',
+          sourceUrl: latest.source_url || '',
+        } : null,
+        sourceUrls,
+      });
+    }
+
+    return signals
+      .sort((left, right) => right.priorityScore - left.priorityScore)
+      .slice(0, options.limit);
+  }
+
+  async function getOutlookBriefRows(userId: string, days: number, rowLimit = 1000) {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const result = await pool.query(`
+      SELECT
+        id,
+        provider_thread_id,
+        provider_message_id,
+        mailbox,
+        direction,
+        subject,
+        sender_email,
+        sender_name,
+        recipient_emails,
+        cc_emails,
+        sent_at,
+        received_at,
+        snippet,
+        source_url,
+        created_at
+      FROM public.email_messages
+      WHERE user_id = $1
+        AND provider = 'outlook'
+        AND COALESCE(sent_at, received_at, created_at) >= $2
+      ORDER BY COALESCE(sent_at, received_at, created_at) DESC
+      LIMIT $3
+    `, [userId, since, rowLimit]);
+    return result.rows;
+  }
+
+  app.get('/api/automation/outlook-brief', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const now = new Date();
+      const days = Math.min(Math.max(Number(req.query.days) || 90, 1), 365);
+      const limit = Math.min(Math.max(Number(req.query.limit) || 12, 3), 50);
+      const watchTerms = parseWatchTerms(req.query.watch);
+      if (isDemo(req)) {
+        return res.json({
+          generatedAt: now.toISOString(),
+          days,
+          summary: {
+            signals: 0,
+            needsResponse: 0,
+            waitingOnReply: 0,
+            activeWork: 0,
+            staleWork: 0,
+          },
+          watchTerms,
+          signals: [],
+          nextBestSignal: null,
+          automationNotes: [
+            'Demo mode does not read production Outlook activity.',
+          ],
+        });
+      }
+
+      const rows = await getOutlookBriefRows(userId, days);
+      const signals = buildOutlookBriefSignals(rows, { limit, now, watchTerms });
+      res.json({
+        generatedAt: now.toISOString(),
+        days,
+        summary: {
+          emailsAnalyzed: rows.length,
+          signals: signals.length,
+          needsResponse: signals.filter((signal) => signal.stage === 'needs_response').length,
+          waitingOnReply: signals.filter((signal) => signal.stage === 'waiting_on_reply').length,
+          activeWork: signals.filter((signal) => signal.stage === 'active_work').length,
+          staleWork: signals.filter((signal) => signal.stage === 'stale_work').length,
+        },
+        watchTerms,
+        signals,
+        nextBestSignal: signals[0] || null,
+        automationNotes: [
+          'This endpoint treats Outlook sent mail as the strongest signal for current sales work.',
+          'Pass comma-separated watch terms in the watch query parameter for known deal names, addresses, companies, or listing names.',
+        ],
+      });
+    } catch (error) {
+      console.error('Error building Outlook automation brief:', error);
+      res.status(500).json({ message: 'Failed to build Outlook brief' });
+    }
+  });
+
   app.get('/api/automation/sales-brief', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
@@ -3810,7 +4116,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const [prospectsResult, listingsResult, emailResult] = await Promise.all([
+      const watchTerms = parseWatchTerms(req.query.watch);
+      const [prospectsResult, listingsResult, emailResult, outlookRows] = await Promise.all([
         pool.query(`
           SELECT
             p.id,
@@ -3892,6 +4199,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ORDER BY COALESCE(em.sent_at, em.received_at, epm.created_at) DESC
           LIMIT 40
         `, [userId]),
+        getOutlookBriefRows(userId, 90),
       ]);
 
       const actions: SalesBriefAction[] = [];
@@ -4049,12 +4357,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      const outlookSignals = buildOutlookBriefSignals(outlookRows, { limit: 8, now, watchTerms });
+      for (const signal of outlookSignals) {
+        actions.push({
+          id: signal.id,
+          type: 'outlook_signal',
+          priority: signal.priority,
+          priorityScore: signal.priorityScore,
+          title: signal.title,
+          reason: signal.reason,
+          suggestedAction: signal.suggestedAction,
+          source: 'outlook',
+          email: signal.latestEmail,
+          automationHints: {
+            source: 'outlook_sent_and_inbox',
+            stage: signal.stage,
+            checkOutlookThread: true,
+            enrichWithZoomInfo: signal.participantEmails.length > 0,
+            createLevelCreRecord: true,
+            participantEmails: signal.participantEmails,
+            propertyMentions: signal.propertyMentions,
+            dealTerms: signal.dealTerms,
+            watchTerms: signal.watchTerms,
+            sourceUrls: signal.sourceUrls,
+          },
+        });
+      }
+
       const rankedActions = uniqueBriefActions(actions).slice(0, limit);
       const bucket = (predicate: (action: SalesBriefAction) => boolean) => rankedActions.filter(predicate);
       const dueFollowUps = rankedActions.filter((action) => action.type === 'follow_up_due');
       const staleProspects = rankedActions.filter((action) => action.type === 'stale_prospect');
       const listingProgressItems = rankedActions.filter((action) => action.type === 'listing_progress');
       const emailCleanupItems = rankedActions.filter((action) => action.type === 'email_cleanup');
+      const outlookSignalItems = rankedActions.filter((action) => action.type === 'outlook_signal');
 
       res.json({
         generatedAt: now.toISOString(),
@@ -4064,6 +4400,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           staleProspects: staleProspects.length,
           listingProgressItems: listingProgressItems.length,
           emailCleanupItems: emailCleanupItems.length,
+          outlookSignals: outlookSignalItems.length,
           researchTargets: rankedActions.filter((action) => action.type === 'research_target').length,
         },
         actions: rankedActions,
@@ -4072,11 +4409,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           thisWeek: bucket((action) => action.priority === 'medium').slice(0, 10),
           cleanup: bucket((action) => action.type === 'email_cleanup').slice(0, 10),
           research: bucket((action) => action.type === 'research_target').slice(0, 10),
+          outlook: bucket((action) => action.type === 'outlook_signal').slice(0, 10),
         },
         nextBestAction: rankedActions[0] || null,
+        outlook: {
+          emailsAnalyzed: outlookRows.length,
+          signals: outlookSignals,
+          watchTerms,
+        },
         automationNotes: [
           'Use this endpoint as the Level CRE source for daily Codex sales automations.',
-          'Codex should enrich actions with Outlook thread context and ZoomInfo contact/company data before presenting a final daily action list.',
+          'Outlook sent mail is treated as a primary signal for active work when Level CRE records are incomplete.',
+          'Codex should enrich actions with live Outlook thread context and ZoomInfo contact/company data before presenting a final daily action list.',
         ],
       });
     } catch (error) {
