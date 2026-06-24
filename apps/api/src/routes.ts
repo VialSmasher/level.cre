@@ -180,6 +180,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const migrationPath = candidatePaths.find((candidate) => fs.existsSync(candidate));
       if (!migrationPath) return;
       await pool.query(fs.readFileSync(migrationPath, 'utf8'));
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS "IDX_email_messages_user_activity"
+          ON public.email_messages(user_id, COALESCE(sent_at, received_at, created_at) DESC);
+      `);
     } catch (error: any) {
       console.error('Failed to ensure email integration tables:', error?.message || error);
     }
@@ -506,7 +510,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       WHERE lower(email) = $1
       LIMIT 1
     `, [normalized]);
-    return result.rows[0]?.id || '';
+    if (result.rows[0]?.id) return result.rows[0].id;
+    const connectionResult = await pool.query(`
+      SELECT user_id AS id FROM public.email_connections
+      WHERE provider = 'outlook'
+        AND lower(email_address) = $1
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+      LIMIT 1
+    `, [normalized]);
+    return connectionResult.rows[0]?.id || '';
   }
 
   async function resolveInboundUserId(payload: any) {
@@ -3387,6 +3399,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const payload = req.body || {};
       const userId = await resolveInboundUserId({ ...req.query, ...payload });
       if (!userId) {
+        console.warn('Inbound email could not be matched to a Level CRE user', {
+          from: pickString(payload, ['from', 'From', 'sender', 'Sender']),
+          recipients: getInboundRecipientEmails(payload),
+          mailboxHash: pickString(payload, ['MailboxHash', 'mailboxHash']) || null,
+          originalRecipient: pickString(payload, ['OriginalRecipient', 'originalRecipient']) || null,
+        });
         return res.status(400).json({ message: 'Inbound email could not be matched to a Level CRE user' });
       }
       const userResult = await pool.query(`SELECT id FROM public.users WHERE id = $1 LIMIT 1`, [userId]);

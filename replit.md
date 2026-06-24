@@ -97,7 +97,7 @@ Preferred communication style: Simple, everyday language.
 - User routing depends on the personal intake address format `levelcre+{userId}@{EMAIL_INBOUND_DOMAIN}` unless `EMAIL_INBOUND_DEFAULT_USER_ID` is intentionally configured for a single-user fallback.
 - Do not remove Postmark BCC parsing when refactoring inbound email. Postmark may place the captured BCC intake address in `Bcc`, `BccFull`, `OriginalRecipient`, or `MailboxHash`, not only in `To` or `Cc`. `resolveInboundUserId` must continue checking those fields so Outlook BCC logging works.
 - Postmark `MailboxHash` is the plus-address token after `+`; when it matches a Level CRE user id, it should be treated as the inbound user id.
-- When `EMAIL_INBOUND_ADDRESS` / `INBOUND_EMAIL_ADDRESS` is a fixed Postmark address such as `{hash}@inbound.postmarkapp.com`, that hash may not be a Level CRE user id. In that case, the inbound resolver should verify candidate ids against `public.users` and then fall back to matching the email sender against `public.users.email`.
+- When `EMAIL_INBOUND_ADDRESS` / `INBOUND_EMAIL_ADDRESS` is a fixed Postmark address such as `{hash}@inbound.postmarkapp.com`, that hash may not be a Level CRE user id. In that case, the inbound resolver should verify candidate ids against `public.users` and then fall back to matching the email sender against `public.users.email` and `email_connections.email_address`.
 - Missed historical BCC emails will not appear just by refreshing the app. They need Postmark webhook retry/reprocess or a resend/forward after the code is deployed.
 
 ## Automation / Sales Brief Direction
