@@ -491,16 +491,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return '';
   }
 
-  function resolveInboundUserId(payload: any) {
+  async function findExistingInboundUserId(candidate: string) {
+    const userId = String(candidate || '').trim();
+    if (!userId) return '';
+    const result = await pool.query(`SELECT id FROM public.users WHERE id = $1 LIMIT 1`, [userId]);
+    return result.rows[0]?.id || '';
+  }
+
+  async function findInboundUserIdByEmail(email: string) {
+    const normalized = String(email || '').trim().toLowerCase();
+    if (!normalized) return '';
+    const result = await pool.query(`
+      SELECT id FROM public.users
+      WHERE lower(email) = $1
+      LIMIT 1
+    `, [normalized]);
+    return result.rows[0]?.id || '';
+  }
+
+  async function resolveInboundUserId(payload: any) {
     const explicit = pickString(payload, ['userId', 'user_id', 'levelCreUserId']);
-    if (explicit) return explicit;
+    if (explicit) return await findExistingInboundUserId(explicit);
     const mailboxHash = pickString(payload, ['MailboxHash', 'mailboxHash']);
-    if (/^[a-z0-9-]{20,}$/i.test(mailboxHash)) return mailboxHash;
+    if (/^[a-z0-9-]{20,}$/i.test(mailboxHash)) {
+      const mailboxUserId = await findExistingInboundUserId(mailboxHash);
+      if (mailboxUserId) return mailboxUserId;
+    }
     const recipients = getInboundRecipientEmails(payload);
-    const token = recipients
+    const tokens = recipients
       .map((email) => extractInboundUserToken(email))
-      .find(Boolean);
-    return token || process.env.EMAIL_INBOUND_DEFAULT_USER_ID || '';
+      .filter(Boolean);
+    for (const token of tokens) {
+      const tokenUserId = await findExistingInboundUserId(token);
+      if (tokenUserId) return tokenUserId;
+    }
+    const defaultUserId = process.env.EMAIL_INBOUND_DEFAULT_USER_ID || '';
+    if (defaultUserId) {
+      const defaultUser = await findExistingInboundUserId(defaultUserId);
+      if (defaultUser) return defaultUser;
+    }
+    const from = parseSender(payload?.from || payload?.From || payload?.sender || payload?.Sender);
+    return await findInboundUserIdByEmail(from.email);
   }
 
   function normalizeInboundPayload(payload: any, userId: string) {
@@ -3354,9 +3385,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       const payload = req.body || {};
-      const userId = resolveInboundUserId({ ...req.query, ...payload });
+      const userId = await resolveInboundUserId({ ...req.query, ...payload });
       if (!userId) {
-        return res.status(400).json({ message: 'Inbound email did not include a Level CRE user token' });
+        return res.status(400).json({ message: 'Inbound email could not be matched to a Level CRE user' });
       }
       const userResult = await pool.query(`SELECT id FROM public.users WHERE id = $1 LIMIT 1`, [userId]);
       if (!userResult.rows[0]) return res.status(404).json({ message: 'Level CRE user not found' });
