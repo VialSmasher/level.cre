@@ -548,6 +548,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       LIMIT 1
     `, [normalized]);
     if (result.rows[0]?.id) return result.rows[0].id;
+    const profileResult = await pool.query(`
+      SELECT id FROM public.profiles
+      WHERE lower(email) = $1
+      LIMIT 1
+    `, [normalized]);
+    if (profileResult.rows[0]?.id) return profileResult.rows[0].id;
     const connectionResult = await pool.query(`
       SELECT user_id AS id FROM public.email_connections
       WHERE provider = 'outlook'
@@ -564,6 +570,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       FROM public.email_connections
       WHERE provider = 'outlook'
         AND status = 'connected'
+      LIMIT 2
+    `);
+    return result.rows.length === 1 ? result.rows[0].id : '';
+  }
+
+  async function findSoleLevelCreUserId() {
+    const result = await pool.query(`
+      SELECT id FROM public.users
+      ORDER BY created_at ASC NULLS LAST
       LIMIT 2
     `);
     return result.rows.length === 1 ? result.rows[0].id : '';
@@ -593,6 +608,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const from = parseSender(payload?.from || payload?.From || payload?.sender || payload?.Sender);
     const senderUserId = await findInboundUserIdByEmail(from.email);
     if (senderUserId) return senderUserId;
+    if (isRecipientVerifiedInboundPayload(payload)) {
+      const soleUserId = await findSoleLevelCreUserId();
+      if (soleUserId) return soleUserId;
+    }
     return await findSoleConnectedOutlookUserId();
   }
 
