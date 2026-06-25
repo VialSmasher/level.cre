@@ -452,6 +452,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       .filter((part) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(part))));
   }
 
+  function parseGraphRecipientEmails(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return Array.from(new Set(value.flatMap((recipient: any) => {
+      const address = String(recipient?.emailAddress?.address || '').trim().toLowerCase();
+      const nameEmails = parseEmailAddresses(recipient?.emailAddress?.name);
+      return [address, ...nameEmails].filter((part) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(part));
+    })));
+  }
+
   function parsePostmarkAddressList(value: unknown): string[] {
     if (!Array.isArray(value)) return [];
     return Array.from(new Set(value
@@ -3257,9 +3266,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         for (const message of data.value || []) {
           messagesSeen += 1;
           const sender = message.from?.emailAddress || {};
-          const recipients = (message.toRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
-          const ccRecipients = (message.ccRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
-          const bccRecipients = (message.bccRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
+          const recipients = parseGraphRecipientEmails(message.toRecipients);
+          const ccRecipients = parseGraphRecipientEmails(message.ccRecipients);
+          const bccRecipients = parseGraphRecipientEmails(message.bccRecipients);
           const messageData = {
             provider: 'outlook',
             providerMessageId: message.id,
@@ -3386,17 +3395,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       nextUrl = typeof data['@odata.nextLink'] === 'string' ? data['@odata.nextLink'] : null;
       for (const message of data.value || []) {
         messagesSeen += 1;
-        const bccRecipients = (message.bccRecipients || [])
-          .map((recipient: any) => recipient.emailAddress?.address)
-          .filter(Boolean)
-          .map((email: string) => String(email).trim().toLowerCase());
+        const bccRecipients = parseGraphRecipientEmails(message.bccRecipients);
         const capturedByBcc = bccRecipients.some((email: string) => isConfiguredInboundAddress(email));
         if (!capturedByBcc) continue;
 
         bccCapturesSeen += 1;
         const sender = message.from?.emailAddress || {};
-        const recipients = (message.toRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
-        const ccRecipients = (message.ccRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
+        const recipients = parseGraphRecipientEmails(message.toRecipients);
+        const ccRecipients = parseGraphRecipientEmails(message.ccRecipients);
         const inserted = await pool.query(`
           INSERT INTO public.email_messages (
             user_id, connection_id, provider, provider_message_id, provider_thread_id, mailbox, direction,
@@ -3648,6 +3654,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       if (isDemo(req)) return res.json([]);
+      try {
+        const connectionResult = await pool.query(`
+          SELECT id FROM public.email_connections
+          WHERE user_id = $1 AND provider = 'outlook' AND status = 'connected'
+          ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+          LIMIT 1
+        `, [userId]);
+        const connectionId = connectionResult.rows[0]?.id;
+        if (connectionId) {
+          await syncOutlookBccCapturesForConnection(userId, connectionId, 14);
+        }
+      } catch (syncError: any) {
+        console.warn('Skipping Outlook BCC recovery before email review fetch:', syncError?.message || syncError);
+      }
       const status = typeof req.query.status === 'string' ? req.query.status : 'pending_review';
       const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 250);
       const params: any[] = [userId, limit];
