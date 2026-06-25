@@ -521,6 +521,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return connectionResult.rows[0]?.id || '';
   }
 
+  async function findSoleConnectedOutlookUserId() {
+    const result = await pool.query(`
+      SELECT DISTINCT user_id AS id
+      FROM public.email_connections
+      WHERE provider = 'outlook'
+        AND status = 'connected'
+      LIMIT 2
+    `);
+    return result.rows.length === 1 ? result.rows[0].id : '';
+  }
+
   async function resolveInboundUserId(payload: any) {
     const explicit = pickString(payload, ['userId', 'user_id', 'levelCreUserId']);
     if (explicit) return await findExistingInboundUserId(explicit);
@@ -543,7 +554,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (defaultUser) return defaultUser;
     }
     const from = parseSender(payload?.from || payload?.From || payload?.sender || payload?.Sender);
-    return await findInboundUserIdByEmail(from.email);
+    const senderUserId = await findInboundUserIdByEmail(from.email);
+    if (senderUserId) return senderUserId;
+    return await findSoleConnectedOutlookUserId();
   }
 
   function normalizeInboundPayload(payload: any, userId: string) {
