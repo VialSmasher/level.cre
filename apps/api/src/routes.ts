@@ -551,26 +551,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
   async function findInboundUserIdByEmail(email: string) {
     const normalized = String(email || '').trim().toLowerCase();
     if (!normalized) return '';
-    const result = await pool.query(`
-      SELECT id FROM public.users
-      WHERE lower(email) = $1
-      LIMIT 1
-    `, [normalized]);
-    if (result.rows[0]?.id) return result.rows[0].id;
-    const profileResult = await pool.query(`
-      SELECT id FROM public.profiles
-      WHERE lower(email) = $1
-      LIMIT 1
-    `, [normalized]);
-    if (profileResult.rows[0]?.id) return profileResult.rows[0].id;
-    const connectionResult = await pool.query(`
-      SELECT user_id AS id FROM public.email_connections
-      WHERE provider = 'outlook'
-        AND lower(email_address) = $1
-      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
-      LIMIT 1
-    `, [normalized]);
-    return connectionResult.rows[0]?.id || '';
+    try {
+      const result = await pool.query(`
+        SELECT id FROM public.users
+        WHERE lower(email) = $1
+        LIMIT 1
+      `, [normalized]);
+      if (result.rows[0]?.id) return result.rows[0].id;
+    } catch (error) {
+      console.warn('Inbound sender lookup against users failed', {
+        email: normalized,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    try {
+      const profileResult = await pool.query(`
+        SELECT id FROM public.profiles
+        WHERE lower(email) = $1
+        LIMIT 1
+      `, [normalized]);
+      if (profileResult.rows[0]?.id) return profileResult.rows[0].id;
+    } catch (error) {
+      console.warn('Inbound sender lookup against profiles failed', {
+        email: normalized,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    try {
+      const connectionResult = await pool.query(`
+        SELECT user_id AS id FROM public.email_connections
+        WHERE provider = 'outlook'
+          AND lower(email_address) = $1
+        ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+        LIMIT 1
+      `, [normalized]);
+      return connectionResult.rows[0]?.id || '';
+    } catch (error) {
+      console.warn('Inbound sender lookup against email_connections failed', {
+        email: normalized,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return '';
+    }
   }
 
   async function findSoleConnectedOutlookUserId() {
