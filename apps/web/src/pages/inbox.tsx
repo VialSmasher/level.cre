@@ -85,6 +85,9 @@ type InboundEmailConfig = {
   domainConfigured: boolean
   intakeAddress: string | null
   webhookUrl: string
+  webhookSecretRequired?: boolean
+  webhookAuthMethods?: string[]
+  webhookUrlTemplate?: string
 }
 
 type EmailOutcome = 'contacted' | 'scheduled_meeting' | 'not_interested' | 'follow_up_later'
@@ -249,6 +252,22 @@ export default function InboxPage() {
     onSuccess: invalidate,
   })
 
+  const syncBccMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/email/outlook/sync-bcc', { days: 14 })
+      return response.json()
+    },
+    onSettled: invalidate,
+  })
+
+  const refreshInbox = () => {
+    if (outlookConfig?.connected) {
+      syncBccMutation.mutate()
+      return
+    }
+    invalidate()
+  }
+
   const prospectOptions = useMemo(() => {
     return [...prospects]
       .sort((left, right) => (left.contactCompany || left.businessName || left.name || '').localeCompare(right.contactCompany || right.businessName || right.name || ''))
@@ -357,7 +376,14 @@ export default function InboxPage() {
                   <SelectItem value="ignored">Archived</SelectItem>
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="icon" onClick={invalidate} aria-label="Refresh">
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={refreshInbox}
+                disabled={syncBccMutation.isPending}
+                aria-label="Refresh"
+                title={outlookConfig?.connected ? 'Refresh and recover recent BCC captures from Outlook' : 'Refresh'}
+              >
                 <RefreshCcw className="h-4 w-4" />
               </Button>
             </div>

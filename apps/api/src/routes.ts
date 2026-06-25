@@ -411,13 +411,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
   function isInboundRequestAuthorized(req: Request) {
     const expected = getInboundWebhookSecret();
     if (!expected) return false;
+    const candidates: string[] = [];
     const supplied = String(req.headers['x-levelcre-inbound-secret'] || '').trim();
-    const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
-    const candidate = supplied || bearer || String(req.query.secret || '');
-    if (!candidate) return false;
-    const actualBuffer = Buffer.from(candidate);
+    if (supplied) candidates.push(supplied);
+    const authorization = String(req.headers.authorization || '').trim();
+    if (/^Bearer\s+/i.test(authorization)) {
+      candidates.push(authorization.replace(/^Bearer\s+/i, '').trim());
+    } else if (/^Basic\s+/i.test(authorization)) {
+      try {
+        const decoded = Buffer.from(authorization.replace(/^Basic\s+/i, '').trim(), 'base64').toString('utf8');
+        const separatorIndex = decoded.indexOf(':');
+        if (decoded) candidates.push(decoded);
+        if (separatorIndex >= 0) {
+          const username = decoded.slice(0, separatorIndex).trim();
+          const password = decoded.slice(separatorIndex + 1).trim();
+          if (username) candidates.push(username);
+          if (password) candidates.push(password);
+        }
+      } catch {
+        // Ignore malformed Basic auth headers and continue checking other auth methods.
+      }
+    }
+    const querySecret = String(req.query.secret || '').trim();
+    if (querySecret) candidates.push(querySecret);
     const expectedBuffer = Buffer.from(expected);
-    return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+    return candidates.some((candidate) => {
+      const actualBuffer = Buffer.from(candidate);
+      return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+    });
   }
 
   function parseEmailAddresses(value: unknown): string[] {
@@ -3222,6 +3243,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         'from',
         'toRecipients',
         'ccRecipients',
+        'bccRecipients',
         'sentDateTime',
         'receivedDateTime',
         'bodyPreview',
@@ -3237,6 +3259,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const sender = message.from?.emailAddress || {};
           const recipients = (message.toRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
           const ccRecipients = (message.ccRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
+          const bccRecipients = (message.bccRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
           const messageData = {
             provider: 'outlook',
             providerMessageId: message.id,
@@ -3296,7 +3319,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             messageData.snippet,
             messageData.attachmentNames,
             messageData.sourceUrl,
-            JSON.stringify({ hasAttachments: Boolean(message.hasAttachments), folder: folder.mailbox }),
+            JSON.stringify({ hasAttachments: Boolean(message.hasAttachments), folder: folder.mailbox, bccRecipients }),
           ]);
           const emailMessageId = inserted.rows[0].id;
           if (inserted.rows[0].inserted) messagesStored += 1;
@@ -3329,6 +3352,151 @@ export async function registerRoutes(app: Express): Promise<Server> {
     `, [connectionId, userId]);
     return { messagesSeen, messagesStored, matchesCreated };
   }
+
+  async function syncOutlookBccCapturesForConnection(userId: string, connectionId: string, days: number) {
+    const accessToken = await refreshOutlookToken(connectionId, userId);
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    let messagesSeen = 0;
+    let bccCapturesSeen = 0;
+    let messagesStored = 0;
+    let matchesCreated = 0;
+
+    const maxPages = Math.min(Math.max(Number(process.env.OUTLOOK_BCC_SYNC_MAX_PAGES || 2), 1), 10);
+    const url = new URL('https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages');
+    url.searchParams.set('$top', '50');
+    url.searchParams.set('$orderby', 'sentDateTime desc');
+    url.searchParams.set('$filter', `sentDateTime ge ${cutoff}`);
+    url.searchParams.set('$select', [
+      'id',
+      'conversationId',
+      'subject',
+      'from',
+      'toRecipients',
+      'ccRecipients',
+      'bccRecipients',
+      'sentDateTime',
+      'receivedDateTime',
+      'bodyPreview',
+      'webLink',
+      'hasAttachments',
+    ].join(','));
+    let nextUrl: string | null = url.toString();
+    for (let page = 0; nextUrl && page < maxPages; page += 1) {
+      const data = await graphGet(accessToken, nextUrl);
+      nextUrl = typeof data['@odata.nextLink'] === 'string' ? data['@odata.nextLink'] : null;
+      for (const message of data.value || []) {
+        messagesSeen += 1;
+        const bccRecipients = (message.bccRecipients || [])
+          .map((recipient: any) => recipient.emailAddress?.address)
+          .filter(Boolean)
+          .map((email: string) => String(email).trim().toLowerCase());
+        const capturedByBcc = bccRecipients.some((email: string) => isConfiguredInboundAddress(email));
+        if (!capturedByBcc) continue;
+
+        bccCapturesSeen += 1;
+        const sender = message.from?.emailAddress || {};
+        const recipients = (message.toRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
+        const ccRecipients = (message.ccRecipients || []).map((recipient: any) => recipient.emailAddress?.address).filter(Boolean);
+        const inserted = await pool.query(`
+          INSERT INTO public.email_messages (
+            user_id, connection_id, provider, provider_message_id, provider_thread_id, mailbox, direction,
+            subject, sender_email, sender_name, recipient_emails, cc_emails, sent_at, received_at,
+            snippet, attachment_names, source_url, raw_metadata, updated_at
+          )
+          VALUES ($1, $2, 'outlook', $3, $4, 'sent', 'sent', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
+          ON CONFLICT (user_id, provider, provider_message_id)
+          DO UPDATE SET
+            provider_thread_id = EXCLUDED.provider_thread_id,
+            mailbox = EXCLUDED.mailbox,
+            direction = EXCLUDED.direction,
+            subject = EXCLUDED.subject,
+            sender_email = EXCLUDED.sender_email,
+            sender_name = EXCLUDED.sender_name,
+            recipient_emails = EXCLUDED.recipient_emails,
+            cc_emails = EXCLUDED.cc_emails,
+            sent_at = EXCLUDED.sent_at,
+            received_at = EXCLUDED.received_at,
+            snippet = EXCLUDED.snippet,
+            source_url = EXCLUDED.source_url,
+            raw_metadata = EXCLUDED.raw_metadata,
+            updated_at = now()
+          RETURNING id, (xmax = 0) AS inserted
+        `, [
+          userId,
+          connectionId,
+          message.id,
+          message.conversationId || null,
+          message.subject || '',
+          sender.address || '',
+          sender.name || '',
+          recipients,
+          ccRecipients,
+          message.sentDateTime ? new Date(message.sentDateTime) : null,
+          message.receivedDateTime ? new Date(message.receivedDateTime) : null,
+          message.bodyPreview || '',
+          [],
+          message.webLink || '',
+          JSON.stringify({
+            hasAttachments: Boolean(message.hasAttachments),
+            folder: 'sent',
+            bccRecipients,
+            captureSource: 'outlook-bcc-fallback',
+          }),
+        ]);
+        const emailMessageId = inserted.rows[0].id;
+        const isNewMessage = Boolean(inserted.rows[0]?.inserted);
+        if (isNewMessage) messagesStored += 1;
+        await awardCapturedEmailActivity(userId, emailMessageId, isNewMessage);
+
+        const result = await pool.query(`
+          INSERT INTO public.email_prospect_matches (
+            user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
+            suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
+          )
+          SELECT $1, $2, NULL, 0, 'needs_context', $3, 'email', 'contacted', $4, now()
+          WHERE NOT EXISTS (
+            SELECT 1 FROM public.email_prospect_matches
+            WHERE user_id = $1 AND email_message_id = $2 AND prospect_id IS NULL
+          )
+          RETURNING id
+        `, [
+          userId,
+          emailMessageId,
+          'Captured from Outlook BCC fallback; Postmark webhook may not have delivered.',
+          [message.subject || '', message.bodyPreview || ''].filter(Boolean).join('\n').slice(0, 1000),
+        ]);
+        if (result.rows[0]) matchesCreated += 1;
+      }
+    }
+
+    await pool.query(`
+      UPDATE public.email_connections
+      SET last_synced_at = now(), status = 'connected', error_message = NULL, updated_at = now()
+      WHERE id = $1 AND user_id = $2
+    `, [connectionId, userId]);
+    return { messagesSeen, bccCapturesSeen, messagesStored, matchesCreated };
+  }
+
+  app.post('/api/email/outlook/sync-bcc', requireAuth, async (req, res) => {
+    try {
+      if (isDemo(req)) return res.status(400).json({ message: 'Email sync is disabled in demo mode' });
+      const userId = getUserId(req);
+      const days = Math.min(Math.max(Number(req.body?.days || 14), 1), 30);
+      const connectionResult = await pool.query(`
+        SELECT id FROM public.email_connections
+        WHERE user_id = $1 AND provider = 'outlook' AND status = 'connected'
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [userId]);
+      const connectionId = connectionResult.rows[0]?.id;
+      if (!connectionId) return res.status(400).json({ message: 'Connect Outlook before syncing BCC captures' });
+      const result = await syncOutlookBccCapturesForConnection(userId, connectionId, days);
+      res.json(result);
+    } catch (error: any) {
+      console.error('Error syncing Outlook BCC captures:', error);
+      res.status(500).json({ message: error?.message || 'Failed to sync Outlook BCC captures' });
+    }
+  });
 
   app.post('/api/email/outlook/sync', requireAuth, async (req, res) => {
     try {
@@ -3386,11 +3554,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         process.env.PUBLIC_APP_URL ||
         process.env.OUTLOOK_REDIRECT_BASE_URL ||
         `${req.protocol}://${req.get('host')}`;
+      const webhookUrl = `${String(webhookBase).replace(/\/$/, '')}/api/email/inbound/webhook`;
       res.json({
         configured: Boolean(getInboundWebhookSecret()),
         domainConfigured: Boolean(domain || fixedAddress),
         intakeAddress: fixedAddress || (domain ? `levelcre+${userId}@${domain}` : null),
-        webhookUrl: `${String(webhookBase).replace(/\/$/, '')}/api/email/inbound/webhook`,
+        webhookUrl,
+        webhookSecretRequired: Boolean(getInboundWebhookSecret()),
+        webhookAuthMethods: ['query-secret', 'bearer', 'x-levelcre-inbound-secret', 'basic'],
+        webhookUrlTemplate: getInboundWebhookSecret() ? `${webhookUrl}?secret=<inbound-webhook-secret>` : webhookUrl,
       });
     } catch (error) {
       console.error('Error fetching inbound email config:', error);
