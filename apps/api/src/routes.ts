@@ -537,6 +537,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return '';
   }
 
+  function cleanInboundSnippet(value: string) {
+    const normalized = String(value || '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/mailto:[^\s>]+/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) return '';
+    const signatureMarkers = [
+      /\bassociate partner\b/i,
+      /\bmain office:\b/i,
+      /\bdirect:\b/i,
+      /\bmobile:\b/i,
+      /\bwww\./i,
+    ];
+    const cutoff = signatureMarkers
+      .map((pattern) => normalized.search(pattern))
+      .filter((index) => index >= 0)
+      .sort((a, b) => a - b)[0];
+    const trimmed = cutoff !== undefined ? normalized.slice(0, cutoff).trim() : normalized;
+    return trimmed.slice(0, 4000);
+  }
+
   function getInboundAddressDomain(email: string) {
     const [, domain = ''] = String(email || '').toLowerCase().split('@');
     return domain;
@@ -675,7 +697,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const subject = pickString(payload, ['subject', 'Subject']) || '(no subject)';
     const textBody = pickString(payload, ['text', 'TextBody', 'body-plain', 'stripped-text', 'plain', 'body']);
     const htmlBody = pickString(payload, ['html', 'HtmlBody', 'body-html', 'stripped-html']);
-    const snippet = (textBody || htmlBody.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, 4000);
+    const snippet = cleanInboundSnippet(textBody || htmlBody);
     const messageId = pickString(payload, ['messageId', 'MessageID', 'Message-Id', 'message-id', 'MessageId']);
     const dateText = pickString(payload, ['date', 'Date', 'timestamp']);
     const parsedDate = dateText ? new Date(/^\d+$/.test(dateText) ? Number(dateText) * 1000 : dateText) : new Date();
