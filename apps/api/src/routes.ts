@@ -180,10 +180,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const migrationPath = candidatePaths.find((candidate) => fs.existsSync(candidate));
       if (!migrationPath) return;
       await pool.query(fs.readFileSync(migrationPath, 'utf8'));
-      await pool.query(`
-        CREATE INDEX IF NOT EXISTS "IDX_email_messages_user_activity"
-          ON public.email_messages(user_id, COALESCE(sent_at, received_at, created_at) DESC);
-      `);
     } catch (error: any) {
       console.error('Failed to ensure email integration tables:', error?.message || error);
     }
