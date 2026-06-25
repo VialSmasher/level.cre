@@ -350,7 +350,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         subject, sender_email, sender_name, recipient_emails, cc_emails, sent_at, received_at,
         snippet, attachment_names, source_url, raw_metadata, updated_at
       )
-      VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, now())
+      VALUES (
+        $1::varchar,
+        NULL,
+        $2::varchar,
+        $3::varchar,
+        $4::varchar,
+        $5::varchar,
+        $6::varchar,
+        $7::text,
+        $8::varchar,
+        $9::varchar,
+        $10::varchar[],
+        $11::varchar[],
+        $12::timestamp,
+        $13::timestamp,
+        $14::text,
+        $15::varchar[],
+        $16::text,
+        $17::jsonb,
+        now()
+      )
       ON CONFLICT (user_id, provider, provider_message_id)
       DO UPDATE SET
         provider_thread_id = EXCLUDED.provider_thread_id,
@@ -397,10 +417,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
         suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
       )
-      SELECT $1, $2, NULL, 0, 'needs_context', $3, 'email', 'contacted', $4, now()
+      SELECT $1::varchar, $2::varchar, NULL, 0, 'needs_context', $3::text, 'email', 'contacted', $4::text, now()
       WHERE NOT EXISTS (
         SELECT 1 FROM public.email_prospect_matches
-        WHERE user_id = $1 AND email_message_id = $2 AND prospect_id IS NULL
+        WHERE user_id = $1::varchar AND email_message_id = $2::varchar AND prospect_id IS NULL
       )
       RETURNING id
     `, [
