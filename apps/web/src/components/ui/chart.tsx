@@ -133,11 +133,10 @@ const ChartTooltipContent = React.forwardRef<
   ) => {
     const { config } = useChart()
 
-  import { useMemo } from 'react';
-  const tooltipLabel = useMemo(() => {
+    const tooltipLabel = useMemo(() => {
       if (hideLabel || !payload?.length) {
         return null
-        const tooltipLabel = useMemo(() => {
+      }
 
       const [item] = payload
       const key = `${labelKey || item?.dataKey || item?.name || "value"}`
