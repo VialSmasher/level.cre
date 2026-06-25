@@ -104,24 +104,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   async function awardCapturedEmailActivity(userId: string, emailMessageId: string, isNewMessage: boolean) {
     if (!isNewMessage) return false;
-    const existing = await pool.query(`
-      SELECT id FROM public.skill_activities
-      WHERE user_id = $1
-        AND skill_type = 'followUp'
-        AND action = $2
-        AND related_id = $3
-      LIMIT 1
-    `, [userId, actionForInteractionType('email'), emailMessageId]);
-    if (existing.rows[0]) return false;
-    await storage.addSkillActivity({
-      userId,
-      skillType: 'followUp',
-      action: actionForInteractionType('email'),
-      xpGained: xpForInteractionType('email'),
-      relatedId: emailMessageId,
-      multiplier: 1,
-    });
-    return true;
+    try {
+      const existing = await pool.query(`
+        SELECT id FROM public.skill_activities
+        WHERE user_id = $1
+          AND skill_type = 'followUp'
+          AND action = $2
+          AND related_id = $3
+        LIMIT 1
+      `, [userId, actionForInteractionType('email'), emailMessageId]);
+      if (existing.rows[0]) return false;
+      await storage.addSkillActivity({
+        userId,
+        skillType: 'followUp',
+        action: actionForInteractionType('email'),
+        xpGained: xpForInteractionType('email'),
+        relatedId: emailMessageId,
+        multiplier: 1,
+      });
+      return true;
+    } catch (error) {
+      console.warn('Captured email stored without XP activity credit', {
+        userId,
+        emailMessageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
   }
 
   function cleanProspectName(data: { name?: string | null; businessName?: string | null; contactCompany?: string | null; geometry?: unknown }): string {
