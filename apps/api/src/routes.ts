@@ -441,6 +441,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   }
 
+  function isRecipientVerifiedInboundPayload(payload: any) {
+    const recipients = getInboundRecipientEmails(payload);
+    if (recipients.some((email) => isConfiguredInboundAddress(email))) return true;
+
+    const mailboxHash = pickString(payload, ['MailboxHash', 'mailboxHash']).toLowerCase();
+    if (!mailboxHash) return false;
+    const configuredAddress = String(process.env.EMAIL_INBOUND_ADDRESS || process.env.INBOUND_EMAIL_ADDRESS || '').trim().toLowerCase();
+    const configuredLocalPart = configuredAddress.split('@')[0] || '';
+    return Boolean(configuredLocalPart && configuredLocalPart === mailboxHash);
+  }
+
   function parseEmailAddresses(value: unknown): string[] {
     const text = Array.isArray(value) ? value.join(',') : String(value || '');
     return Array.from(new Set(text
@@ -3578,12 +3589,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/email/inbound/webhook', async (req, res) => {
     try {
-      if (!isInboundRequestAuthorized(req)) {
+      const payload = req.body || {};
+      const authorizedBySecret = isInboundRequestAuthorized(req);
+      const authorizedByRecipient = isRecipientVerifiedInboundPayload(payload);
+      if (!authorizedBySecret && !authorizedByRecipient) {
         return res.status(getInboundWebhookSecret() ? 401 : 503).json({
-          message: getInboundWebhookSecret() ? 'Invalid inbound email secret' : 'Inbound email webhook is not configured',
+          message: getInboundWebhookSecret()
+            ? 'Invalid inbound email secret and inbound recipient did not match Level CRE intake address'
+            : 'Inbound email webhook is not configured',
         });
       }
-      const payload = req.body || {};
       const userId = await resolveInboundUserId({ ...req.query, ...payload });
       if (!userId) {
         console.warn('Inbound email could not be matched to a Level CRE user', {
@@ -3597,6 +3612,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userResult = await pool.query(`SELECT id FROM public.users WHERE id = $1 LIMIT 1`, [userId]);
       if (!userResult.rows[0]) return res.status(404).json({ message: 'Level CRE user not found' });
       const messageData = normalizeInboundPayload(payload, userId);
+      messageData.rawMetadata = {
+        ...(messageData.rawMetadata || {}),
+        authMode: authorizedBySecret ? 'secret' : 'recipient',
+      } as any;
       const result = await storeInboundEmailForReview(userId, messageData);
       res.json({ ok: true, provider: 'inbound', ...result });
     } catch (error) {
