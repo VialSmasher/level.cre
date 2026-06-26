@@ -1,13 +1,19 @@
 import { Link } from 'wouter'
-import { Activity, ArrowRight, Brain, Briefcase, ChartSpline, Map, Target } from 'lucide-react'
+import { Activity, ArrowRight, BarChart3, Briefcase, ChartSpline, Map, RotateCcw, Target } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 
 const focusAreas = [
   {
+    label: 'Today',
+    href: '/app/today',
+    icon: BarChart3,
+    description: 'Start a focused BD block and see the next useful prospecting work.',
+  },
+  {
     label: 'Map',
-    href: '/app',
+    href: '/app/map',
     icon: Map,
     description: 'Work the prospecting map and update relationship status.',
   },
@@ -18,10 +24,10 @@ const focusAreas = [
     description: 'Turn listings, territories, and cleanup queues into focused prospecting pushes.',
   },
   {
-    label: 'Knowledge',
-    href: '/app/knowledge',
-    icon: Brain,
-    description: 'Review stale records, missing contacts, and market-memory gaps.',
+    label: 'Follow-ups',
+    href: '/app/followup',
+    icon: RotateCcw,
+    description: 'Clear due touches and keep the relationship engine moving.',
   },
   {
     label: 'Activity Capture',
@@ -55,7 +61,7 @@ export default function LauncherPage() {
             </div>
           </div>
           <Button asChild className="bg-slate-950 text-white hover:bg-slate-800">
-            <Link href="/app">
+            <Link href="/app/today">
               Open Level CRE
               <ArrowRight className="ml-2 h-4 w-4" />
             </Link>

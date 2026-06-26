@@ -1,6 +1,6 @@
 import { Link } from 'wouter'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, Briefcase, CheckCircle2, Mail, Map, Phone, Sparkles, Target, Wrench } from 'lucide-react'
+import { ArrowRight, Briefcase, CheckCircle2, Mail, Map, Phone, Target, Wrench } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -83,7 +83,7 @@ export default function ChallengesPage() {
       description: 'Add targets, verify status, and build coverage in one focused area.',
       metric: untouchedProspects.toLocaleString(),
       metricLabel: 'new prospects',
-      href: '/app',
+      href: '/app/map',
       action: 'Open map',
       icon: Map,
       tone: 'border-emerald-200 bg-emerald-50 text-emerald-700',
@@ -93,8 +93,8 @@ export default function ChallengesPage() {
       description: 'Turn weak records into usable CRM data before the next call block.',
       metric: missingContacts.toLocaleString(),
       metricLabel: 'missing contact',
-      href: '/app/knowledge',
-      action: 'Open knowledge',
+      href: '/app/review',
+      action: 'Open enrichment',
       icon: Wrench,
       tone: 'border-amber-200 bg-amber-50 text-amber-700',
     },
@@ -119,9 +119,9 @@ export default function ChallengesPage() {
               <Target className="h-4 w-4" />
               Challenges
             </div>
-            <h1 className="mt-1 text-2xl font-bold text-slate-950">Prospecting Challenges</h1>
+            <h1 className="mt-1 text-2xl font-bold text-slate-950">Prospecting Blocks</h1>
             <p className="mt-1 max-w-2xl text-sm text-slate-500">
-              Focus the day around one measurable prospecting push, then let Scorecard track the activity.
+              Pick one measurable business-development push, then let Scorecard track the activity.
             </p>
           </div>
           <Button asChild className="bg-slate-950 text-white hover:bg-slate-800">
@@ -136,11 +136,11 @@ export default function ChallengesPage() {
           <CardContent className="grid gap-4 p-5 md:grid-cols-[1fr_auto] md:items-center">
             <div>
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
-                <Sparkles className="h-4 w-4 text-blue-600" />
-                Beat-the-assistant loop
+                <Target className="h-4 w-4 text-blue-600" />
+                Assistant-supported blocks
               </div>
               <p className="mt-1 text-sm leading-6 text-slate-600">
-                Work a listing, territory, or cleanup queue against an assistant-suggested target. Workspaces stay underneath as the shared container; challenges are the motivational layer.
+                Work a listing, territory, or cleanup queue against a clear assistant-suggested target. Workspaces stay underneath as the shared container; challenges are the motivational layer.
               </p>
             </div>
             <Badge variant="outline" className="w-fit rounded-md border-blue-200 bg-blue-50 px-3 py-1.5 text-blue-700">
@@ -209,4 +209,3 @@ export default function ChallengesPage() {
     </div>
   )
 }
-

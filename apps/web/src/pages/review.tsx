@@ -11,7 +11,6 @@ import {
   Mail,
   Phone,
   RefreshCw,
-  Sparkles,
   TriangleAlert,
   Wrench,
 } from 'lucide-react'
@@ -262,15 +261,15 @@ export default function ReviewPage() {
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
               <Bot className="h-3.5 w-3.5" />
-              Level CRE Review Console
+              Enrichment Queue
             </div>
             <div className="space-y-2">
               <h1 className="text-3xl font-semibold tracking-tight text-slate-950">
-                See what a clawbot would flag before it touches anything
+                Review records before an assistant enriches them
               </h1>
               <p className="max-w-3xl text-sm leading-6 text-slate-600">
-                This is a read-only review surface over Level CRE. It uses the same deterministic follow-up and data-quality
-                logic your bots can call, so we can validate the signal before we automate any edits.
+                This is a read-only queue over Level CRE. It uses the same deterministic follow-up and data-quality
+                logic an automation can call, so we can validate the signal before any assisted write-back.
               </p>
             </div>
           </div>
@@ -334,8 +333,8 @@ export default function ReviewPage() {
             </div>
             <div className="flex flex-wrap gap-2">
               <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
-                <Sparkles className="mr-1 h-3.5 w-3.5" />
-                Bot-readable
+                <Bot className="mr-1 h-3.5 w-3.5" />
+                Agent-ready
               </Badge>
               <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
                 <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
@@ -544,7 +543,7 @@ export default function ReviewPage() {
                   Data Quality Review
                 </CardTitle>
                 <p className="text-sm text-slate-600">
-                  These are the cleanup suggestions a future clawbot could surface before any write-back flow exists.
+                  These are the cleanup suggestions an enrichment automation could surface before any write-back flow exists.
                 </p>
               </CardHeader>
               <CardContent>

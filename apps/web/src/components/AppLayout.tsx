@@ -54,6 +54,12 @@ export function AppLayout({ children }: AppLayoutProps) {
     if (path === '/app') {
       return location === '/app' || location === '/app/'
     }
+    if (path === '/app/today') {
+      return location === '/app' || location === '/app/' || location === '/app/today'
+    }
+    if (path === '/app/map') {
+      return location === '/app/map'
+    }
     if (path === '/app/workspaces') {
       return location === '/app/workspaces' || location.startsWith('/app/workspaces/')
     }
@@ -71,19 +77,20 @@ export function AppLayout({ children }: AppLayoutProps) {
   }
 
   const primaryNavItems: NavItem[] = [
-    { label: 'Map', href: '/app', icon: Map, active: isActive('/app') },
+    { label: 'Today', href: '/app/today', icon: Activity, active: isActive('/app/today') },
+    { label: 'Map', href: '/app/map', icon: Map, active: isActive('/app/map') },
     { label: 'Follow-ups', href: '/app/followup', icon: RotateCcw, active: isActive('/app/followup') },
-    { label: 'Knowledge', href: '/app/knowledge', icon: Brain, active: isActive('/app/knowledge') },
     { label: 'Challenges', href: '/app/challenges', icon: Target, active: isActive('/app/challenges') },
     { label: 'Scorecard', href: '/broker-stats', icon: BarChart3, active: isScorecardActive },
   ]
 
   const secondaryNavItems: NavItem[] = [
+    { label: 'Knowledge', href: '/app/knowledge', icon: Brain, active: isActive('/app/knowledge') },
     { label: 'Activity Capture', href: '/app/inbox', icon: Activity, active: isActive('/app/inbox') },
     { label: 'Workspaces', href: workspacesHref, icon: Briefcase, active: isActive('/app/workspaces') },
     { label: 'Requirements', href: '/app/requirements', icon: Layers, active: isActive('/app/requirements') },
     { label: 'Market Comps', href: '/app/market-comps', icon: Table, active: isActive('/app/market-comps') },
-    { label: 'Review Console', href: '/app/review', icon: Bot, active: isActive('/app/review') },
+    { label: 'Enrichment Queue', href: '/app/review', icon: Bot, active: isActive('/app/review') },
     { label: 'Profile', href: '/app/profile', icon: Fingerprint, active: isActive('/app/profile') },
   ]
 
@@ -96,7 +103,7 @@ export function AppLayout({ children }: AppLayoutProps) {
             {/* Logo */}
             <div className="flex items-center min-w-0 gap-4">
               <Link
-                href="/app"
+                href="/app/today"
                 className="text-xl font-black tracking-tight text-slate-900 dark:text-gray-100 sm:text-2xl"
                 aria-label="Go to dashboard"
               >
@@ -213,7 +220,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 <DropdownMenuItem asChild>
                   <Link href="/app/review" className="w-full">
                     <Bot className="mr-2 h-4 w-4" />
-                    Review Console
+                    Enrichment Queue
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>

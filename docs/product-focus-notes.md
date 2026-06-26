@@ -21,6 +21,7 @@ Level CRE v1 should be a map-first prospecting and business-development system f
 
 The product should feel like a practical sales fitness tracker:
 
+- Start a focused daily BD block.
 - Work a prospecting map.
 - Keep follow-ups current.
 - Capture calls, emails, meetings, and notes.
@@ -78,19 +79,20 @@ Workspaces can remain underneath as the container. Challenges should become the 
 
 Primary:
 
+- Today
 - Map
 - Follow-ups
-- Knowledge
 - Challenges
 - Scorecard
 
 Secondary / tucked away:
 
+- Knowledge
 - Activity Capture
 - Requirements
 - Market Comps
 - Workspaces
-- Review Console
+- Enrichment Queue
 - Profile / Settings
 
 Parked:
