@@ -172,7 +172,7 @@ export default function Landing() {
     // Set demo flag and reload page to ensure proper initialization
     localStorage.setItem('demo-mode', 'true')
     const nextPath = getStoredPostAuthRedirect()
-    const demoRedirect = isToolAPostAuthRedirect(nextPath) ? nextPath! : '/app'
+    const demoRedirect = isToolAPostAuthRedirect(nextPath) ? nextPath! : '/app/today'
     setStoredPostAuthRedirect(demoRedirect)
     window.location.href = demoRedirect
   }

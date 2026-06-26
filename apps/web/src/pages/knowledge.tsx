@@ -907,7 +907,7 @@ export default function Knowledge() {
                         try {
                           window.localStorage.setItem('levelcre:focusProspectId', selectedProspect.id);
                         } catch {}
-                        setLocation('/app');
+                        setLocation('/app/map');
                       }}
                     >
                       Open map

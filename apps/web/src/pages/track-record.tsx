@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type ReactNode, type SetStateAction } from 'react'
 import Papa from 'papaparse'
-import * as XLSX from 'xlsx'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -262,24 +261,9 @@ function parseTrackRecordCsv(file: File): Promise<DealImportResult> {
   })
 }
 
-async function parseTrackRecordWorkbook(file: File): Promise<DealImportResult> {
-  const data = await file.arrayBuffer()
-  const workbook = XLSX.read(data, { type: 'array', cellDates: true })
-
-  for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName]
-    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: '' })
-    if (findHeaderRow(rows) >= 0) {
-      return parseTrackRecordRows(rows)
-    }
-  }
-
-  throw new Error('Could not find a usable deal sheet in this workbook.')
-}
-
 function isImportableDealFile(file: File) {
   const name = file.name.toLowerCase()
-  return name.endsWith('.csv') || name.endsWith('.xlsx') || name.endsWith('.xls')
+  return name.endsWith('.csv')
 }
 
 function readImageDataUrls(files: FileList | File[], limit = 4): Promise<string[]> {
@@ -475,15 +459,12 @@ export default function TrackRecordPage() {
   const importDealFile = async (file: File | undefined) => {
     if (!file) return
     if (!isImportableDealFile(file)) {
-      setImportMessage('Drop a CSV or Excel workbook exported from your deal report.')
+      setImportMessage('Drop a CSV exported from your deal report.')
       return
     }
 
     try {
-      const fileName = file.name.toLowerCase()
-      const result = fileName.endsWith('.csv')
-        ? await parseTrackRecordCsv(file)
-        : await parseTrackRecordWorkbook(file)
+      const result = await parseTrackRecordCsv(file)
       let duplicateCount = 0
       const seen = new Set(deals.map((deal) => deal.sourceId || `${deal.title}|${deal.address}|${deal.closedDate}`.toLowerCase()))
       const newDeals = result.deals.filter((deal) => {
@@ -579,7 +560,7 @@ export default function TrackRecordPage() {
             )}
           </div>
           <div className="flex flex-wrap gap-2 print:hidden">
-            <input ref={csvInputRef} type="file" accept=".csv,text/csv,.xlsx,.xls" className="hidden" onChange={(e) => importDealFile(e.target.files?.[0])} />
+            <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => importDealFile(e.target.files?.[0])} />
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button size="icon" variant="outline" onClick={() => csvInputRef.current?.click()} aria-label="Import CSV">

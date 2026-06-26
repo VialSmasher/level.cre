@@ -64,7 +64,7 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
               Tools
             </Link>
             <Link
-              href="/app"
+              href="/app/today"
               className="inline-flex h-10 items-center gap-2 rounded-full bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
             >
               Level CRE

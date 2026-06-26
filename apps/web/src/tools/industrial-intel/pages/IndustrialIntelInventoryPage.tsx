@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { GoogleMap, InfoWindowF, useJsApiLoader } from "@react-google-maps/api";
 import Papa from "papaparse";
-import * as XLSX from "xlsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -193,7 +192,7 @@ function sourceNameFromFile(file: File) {
   if (normalized.includes("costar") && normalized.includes("lease")) return "CoStar Lease Export";
 
   return file.name
-    .replace(/\.(csv|xlsx|xls)$/i, "")
+    .replace(/\.csv$/i, "")
     .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -616,22 +615,9 @@ export default function IndustrialIntelInventoryPage() {
     setUploadError(null);
 
     const lowerName = file.name.toLowerCase();
-    if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
-      try {
-        const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = firstSheetName ? workbook.Sheets[firstSheetName] : null;
-        if (!worksheet) {
-          setUploadRows([]);
-          setUploadError("That workbook does not have a readable first sheet.");
-          return;
-        }
-        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: "" });
-        applyUploadRows(rows, file);
-      } catch (error) {
-        setUploadRows([]);
-        setUploadError(error instanceof Error ? error.message : "Could not parse that Excel file.");
-      }
+    if (!lowerName.endsWith(".csv")) {
+      setUploadRows([]);
+      setUploadError("Upload a CSV export for now. Spreadsheet workbook parsing is parked with Industrial Intel.");
       return;
     }
 
@@ -1127,12 +1113,12 @@ export default function IndustrialIntelInventoryPage() {
                         }}
                         className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-blue-300 bg-blue-50/60 px-4 py-4 text-center transition hover:border-blue-400 hover:bg-blue-50"
                       >
-                        <span className="text-sm font-semibold text-slate-950">Drop Excel or CSV here</span>
-                        <span className="mt-1 text-xs text-slate-600">Supports .xlsx, .xls, and .csv exports</span>
+                        <span className="text-sm font-semibold text-slate-950">Drop CSV here</span>
+                        <span className="mt-1 text-xs text-slate-600">Supports CSV exports</span>
                         <Input
                           id="listingUpload"
                           type="file"
-                          accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                          accept=".csv,text/csv"
                           className="sr-only"
                           onChange={(event) => handleUploadFile(event.target.files?.[0] || null)}
                         />
