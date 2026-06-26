@@ -2,6 +2,19 @@
 
 Last updated: June 26, 2026
 
+## Overwhelming Product Principle
+
+The app exists to make the user want to cold call, prospect, and business develop.
+
+Every major product decision should support four goals:
+
+- Make prospecting feel easier to start and harder to ignore.
+- Record the useful activity and context with as little manual effort as possible.
+- Turn business development into a competitive fitness loop that feels closer to Fitbit or Strava than a traditional CRM.
+- Make the experience rewarding and habit-forming enough that the user wants to come back.
+
+When deciding whether to build, keep, park, or delete a feature, ask whether it increases the user's willingness to prospect, improves hands-off capture, strengthens the score/challenge loop, or makes the product more addictive to use. If it does not, it is probably secondary.
+
 ## Current Product Direction
 
 Level CRE v1 should be a map-first prospecting and business-development system for industrial CRE, not an end-to-end CRM or active-deal management product.
@@ -95,4 +108,3 @@ Parked:
 4. Fix root typecheck so build health is honest.
 5. Improve demo data and empty states so the app demonstrates the core loop.
 6. Make agent-facing review and next-action contracts explicit.
-
