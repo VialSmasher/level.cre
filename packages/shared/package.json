@@ -10,7 +10,7 @@
     "./schema": "./src/schema.ts"
   },
   "dependencies": {
-    "zod": "^3.25.76",
-    "drizzle-orm": "^0.44.5"
+    "drizzle-orm": "^0.45.2",
+    "zod": "^3.25.76"
   }
 }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
-import { Archive, CheckCircle2, ExternalLink, Inbox as InboxIcon, Mail, RefreshCcw, Search, Settings, ShieldCheck, Sparkles } from 'lucide-react'
+import { Activity, Archive, CheckCircle2, ExternalLink, Mail, RefreshCcw, Search, Settings, ShieldCheck, Sparkles } from 'lucide-react'
 import { Link } from 'wouter'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -320,11 +320,11 @@ export default function InboxPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <div className="flex items-center gap-2 text-sm font-semibold text-blue-700">
-              <InboxIcon className="h-4 w-4" />
-              Inbox
+              <Activity className="h-4 w-4" />
+              Activity Capture
             </div>
-            <h1 className="mt-1 text-2xl font-bold text-slate-950">CRM Activity</h1>
-            <p className="mt-1 text-sm text-slate-500">Captured emails, lightweight context cleanup, and sales activity credit.</p>
+            <h1 className="mt-1 text-2xl font-bold text-slate-950">Email Activity Capture</h1>
+            <p className="mt-1 text-sm text-slate-500">Captured follow-up emails, lightweight context cleanup, and scorecard credit.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="h-8 gap-1.5 bg-white px-3 text-emerald-700">
@@ -471,7 +471,7 @@ export default function InboxPage() {
             <Card className="rounded-lg border-slate-200">
               <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
                 <Mail className="h-8 w-8 text-slate-300" />
-                <p className="text-sm font-medium text-slate-700">No {statusLabels[status].toLowerCase()} emails</p>
+                <p className="text-sm font-medium text-slate-700">No {statusLabels[status].toLowerCase()} email activity</p>
               </CardContent>
             </Card>
           ) : (

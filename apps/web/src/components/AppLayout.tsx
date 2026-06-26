@@ -1,5 +1,4 @@
 import { useAuth } from '@/contexts/AuthContext'
-import type { ComponentType } from 'react'
 import { Button } from '@/components/ui/button'
 import { 
   DropdownMenu, 
@@ -24,8 +23,9 @@ import {
   X,
   ChartSpline,
   Bot,
-  Trophy,
-  Mail
+  Activity,
+  Target,
+  type LucideIcon
 } from 'lucide-react'
 import { Table } from 'lucide-react'
 import { Link, useLocation } from 'wouter'
@@ -66,25 +66,25 @@ export function AppLayout({ children }: AppLayoutProps) {
   type NavItem = {
     label: string
     href: string
-    icon: ComponentType<{ size?: number; className?: string }>
+    icon: LucideIcon
     active?: boolean
   }
 
-  const navGroups: NavItem[][] = [
-    [
-      { label: 'Map', href: '/app', icon: Map, active: isActive('/app') },
-      { label: 'Workspaces', href: workspacesHref, icon: Briefcase, active: isActive('/app/workspaces') },
-      { label: 'Follow-ups', href: '/app/followup', icon: RotateCcw, active: isActive('/app/followup') },
-      { label: 'Inbox', href: '/app/inbox', icon: Mail, active: isActive('/app/inbox') },
-    ],
-    [
-      { label: 'Knowledge', href: '/app/knowledge', icon: Brain, active: isActive('/app/knowledge') },
-      { label: 'Requirements', href: '/app/requirements', icon: Layers, active: isActive('/app/requirements') },
-      { label: 'Market Comps', href: '/app/market-comps', icon: Table, active: isActive('/app/market-comps') },
-    ],
-    [
-      { label: 'Scorecard', href: '/broker-stats', icon: BarChart3, active: isScorecardActive },
-    ],
+  const primaryNavItems: NavItem[] = [
+    { label: 'Map', href: '/app', icon: Map, active: isActive('/app') },
+    { label: 'Follow-ups', href: '/app/followup', icon: RotateCcw, active: isActive('/app/followup') },
+    { label: 'Knowledge', href: '/app/knowledge', icon: Brain, active: isActive('/app/knowledge') },
+    { label: 'Challenges', href: '/app/challenges', icon: Target, active: isActive('/app/challenges') },
+    { label: 'Scorecard', href: '/broker-stats', icon: BarChart3, active: isScorecardActive },
+  ]
+
+  const secondaryNavItems: NavItem[] = [
+    { label: 'Activity Capture', href: '/app/inbox', icon: Activity, active: isActive('/app/inbox') },
+    { label: 'Workspaces', href: workspacesHref, icon: Briefcase, active: isActive('/app/workspaces') },
+    { label: 'Requirements', href: '/app/requirements', icon: Layers, active: isActive('/app/requirements') },
+    { label: 'Market Comps', href: '/app/market-comps', icon: Table, active: isActive('/app/market-comps') },
+    { label: 'Review Console', href: '/app/review', icon: Bot, active: isActive('/app/review') },
+    { label: 'Profile', href: '/app/profile', icon: Fingerprint, active: isActive('/app/profile') },
   ]
 
   return (
@@ -108,37 +108,32 @@ export function AppLayout({ children }: AppLayoutProps) {
             </div>
 
             {/* Navigation Links */}
-            <div className="hidden md:flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50/80 p-1 shadow-inner dark:border-gray-700 dark:bg-gray-900/40">
-              {navGroups.map((group, groupIndex) => (
-                <div key={groupIndex} className="flex items-center gap-1">
-                  {groupIndex > 0 && <div className="mx-1 h-6 w-px bg-slate-200 dark:bg-gray-700" />}
-                  {group.map((item) => {
-                    const Icon = item.icon
-                    const active = !!item.active
-                    return (
-                      <Tooltip key={item.label}>
-                        <TooltipTrigger asChild>
-                          <Link
-                            href={item.href}
-                            className={`inline-flex h-10 items-center justify-center gap-2 rounded-full px-3 text-sm font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                              active
-                                ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:ring-blue-900'
-                                : 'text-slate-500 hover:bg-white hover:text-slate-900 hover:shadow-sm dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100'
-                            }`}
-                            aria-label={item.label}
-                          >
-                            <Icon size={20} />
-                            {active && <span>{item.label}</span>}
-                          </Link>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{item.label}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    )
-                  })}
-                </div>
-              ))}
+            <div className="hidden md:flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm dark:border-gray-700 dark:bg-gray-900/40">
+              {primaryNavItems.map((item) => {
+                const Icon = item.icon
+                const active = !!item.active
+                return (
+                  <Tooltip key={item.label}>
+                    <TooltipTrigger asChild>
+                      <Link
+                        href={item.href}
+                        className={`inline-flex h-9 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                          active
+                            ? 'bg-slate-950 text-white shadow-sm dark:bg-blue-950/70 dark:text-blue-100'
+                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100'
+                        }`}
+                        aria-label={item.label}
+                      >
+                        <Icon size={18} />
+                        <span>{item.label}</span>
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>{item.label}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                )
+              })}
             </div>
 
             {/* Mobile menu button and Profile */}
@@ -192,9 +187,27 @@ export function AppLayout({ children }: AppLayoutProps) {
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/track-record" className="w-full">
-                    <Trophy className="mr-2 h-4 w-4" />
-                    Track Record
+                  <Link href="/app/inbox" className="w-full">
+                    <Activity className="mr-2 h-4 w-4" />
+                    Activity Capture
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href={workspacesHref} className="w-full">
+                    <Briefcase className="mr-2 h-4 w-4" />
+                    Workspaces
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/app/requirements" className="w-full">
+                    <Layers className="mr-2 h-4 w-4" />
+                    Requirements
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/app/market-comps" className="w-full">
+                    <Table className="mr-2 h-4 w-4" />
+                    Market Comps
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
@@ -224,215 +237,31 @@ export function AppLayout({ children }: AppLayoutProps) {
         {mobileMenuOpen && (
           <div className="md:hidden bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
             <div className="px-4 py-3 space-y-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Map"
-                  >
-                    <Map size={20} />
-                    <span className="font-medium">Map</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Map</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href={workspacesHref} 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/workspaces') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Workspaces"
-                  >
-                    <Briefcase size={20} />
-                    <span className="font-medium">Workspaces</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Workspaces</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/knowledge" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/knowledge') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Knowledge"
-                  >
-                    <Brain size={20} />
-                    <span className="font-medium">Knowledge</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Knowledge</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/followup" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/followup') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Follow Up"
-                  >
-                    <RotateCcw size={20} />
-                    <span className="font-medium">Follow Up</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Follow Up</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link
-                    href="/app/inbox"
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/inbox')
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30'
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Inbox"
-                  >
-                    <Mail size={20} />
-                    <span className="font-medium">Inbox</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Inbox</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/broker-stats" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/broker-stats') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Broker Stats"
-                  >
-                    <BarChart3 size={20} />
-                    <span className="font-medium">Broker Stats</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Broker Stats</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/requirements" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/requirements') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Requirements"
-                  >
-                    <Layers size={20} />
-                    <span className="font-medium">Requirements</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Requirements</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/market-comps" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/market-comps') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Market Comps"
-                  >
-                    <Table size={20} />
-                    <span className="font-medium">Market Comps</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Market Comps</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/review" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/review') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Review Console"
-                  >
-                    <Bot size={20} />
-                    <span className="font-medium">Review Console</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Review Console</p>
-                </TooltipContent>
-              </Tooltip>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link 
-                    href="/app/profile" 
-                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
-                      isActive('/app/profile') 
-                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30' 
-                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Profile"
-                  >
-                    <Fingerprint size={20} />
-                    <span className="font-medium">Profile</span>
-                  </Link>
-                </TooltipTrigger>
-                <TooltipContent side="right">
-                  <p>Profile</p>
-                </TooltipContent>
-              </Tooltip>
+              {[...primaryNavItems, ...secondaryNavItems].map((item) => {
+                const Icon = item.icon
+                return (
+                  <Tooltip key={item.label}>
+                    <TooltipTrigger asChild>
+                      <Link
+                        href={item.href}
+                        className={`flex items-center space-x-3 rounded-md p-3 transition-colors ${
+                          item.active
+                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-100'
+                        }`}
+                        onClick={() => setMobileMenuOpen(false)}
+                        aria-label={item.label}
+                      >
+                        <Icon size={20} />
+                        <span className="font-medium">{item.label}</span>
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      <p>{item.label}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                )
+              })}
             </div>
           </div>
         )}
