@@ -26,6 +26,11 @@ import {
   type ToolAReviewInteraction,
   type ToolAReviewWorkspaceRef,
 } from './lib/toolAReview';
+import {
+  importSalesActivityBatch,
+  listSalesActivityImports,
+  SalesActivityBatchSchema,
+} from './lib/salesActivityImportService';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Supabase client for server-side OAuth
@@ -195,6 +200,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   await ensureEmailIntegrationTables();
+
+  async function ensureSalesActivityImportTables(): Promise<void> {
+    try {
+      const candidatePaths = [
+        path.resolve(process.cwd(), 'drizzle/0015_sales_activity_imports.sql'),
+        path.resolve(process.cwd(), '../../drizzle/0015_sales_activity_imports.sql'),
+      ];
+      const migrationPath = candidatePaths.find((candidate) => fs.existsSync(candidate));
+      if (!migrationPath) return;
+      await pool.query(fs.readFileSync(migrationPath, 'utf8'));
+    } catch (error: any) {
+      console.error('Failed to ensure sales activity import tables:', error?.message || error);
+    }
+  }
+
+  await ensureSalesActivityImportTables();
 
   const OUTLOOK_SCOPES = ['offline_access', 'User.Read', 'Mail.Read'];
 
@@ -3115,6 +3136,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting submarket:", error);
       res.status(500).json({ message: "Failed to delete submarket" });
+    }
+  });
+
+  app.post('/api/agent/sales-activity/batch', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
+
+      const parsed = SalesActivityBatchSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid sales activity import payload', error: parsed.error.errors });
+      }
+
+      if (isDemo(req)) {
+        return res.json({
+          imported: 0,
+          createdInteractions: 0,
+          matched: 0,
+          needsReview: 0,
+          ignored: 0,
+          duplicates: 0,
+          errors: 0,
+          results: [],
+          skipped: true,
+          reason: 'demo_mode',
+        });
+      }
+
+      const summary = await importSalesActivityBatch({
+        pool,
+        storage,
+        userId,
+        payload: parsed.data,
+        requireEditAccess: async (listingId) => requireEditAccess(req, listingId),
+      });
+      res.json(summary);
+    } catch (error) {
+      console.error('Error importing sales activity batch:', error);
+      res.status(500).json({ message: 'Failed to import sales activity batch' });
+    }
+  });
+
+  app.get('/api/agent/sales-activity/imports', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) return res.json({ rows: [] });
+      const limit = Math.min(Math.max(Number.parseInt(String(req.query.limit || '100'), 10) || 100, 1), 250);
+      const matchStatus = typeof req.query.matchStatus === 'string' ? req.query.matchStatus.trim() : undefined;
+      const source = typeof req.query.source === 'string' ? req.query.source.trim() : undefined;
+      const rows = await listSalesActivityImports({
+        pool,
+        userId,
+        limit,
+        matchStatus,
+        source,
+      });
+      res.json({ rows });
+    } catch (error) {
+      console.error('Error getting sales activity imports:', error);
+      res.status(500).json({ message: 'Failed to get sales activity imports' });
     }
   });
 

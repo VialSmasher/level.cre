@@ -362,6 +362,45 @@ export const listingProspects = pgTable(
 export type ListingProspect = typeof listingProspects.$inferSelect;
 export type InsertListingProspect = typeof listingProspects.$inferInsert;
 
+export const salesActivityImports = pgTable(
+  "sales_activity_imports",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    source: varchar("source").notNull().default("codex_followup"),
+    runId: varchar("run_id"),
+    externalActivityId: varchar("external_activity_id").notNull(),
+    activityStatus: varchar("activity_status").notNull(),
+    activityType: varchar("activity_type").notNull().default("email"),
+    contactName: varchar("contact_name"),
+    company: varchar("company"),
+    email: varchar("email"),
+    emailDomain: varchar("email_domain"),
+    subject: text("subject"),
+    notes: text("notes"),
+    activityAt: timestamp("activity_at"),
+    prospectId: varchar("prospect_id").references(() => prospects.id, { onDelete: "set null" }),
+    listingId: varchar("listing_id").references(() => listings.id, { onDelete: "set null" }),
+    matchStatus: varchar("match_status").notNull().default("needs_review"),
+    matchReason: text("match_reason"),
+    confidence: integer("confidence").notNull().default(0),
+    interactionId: varchar("interaction_id").references(() => contactInteractions.id, { onDelete: "set null" }),
+    rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_sales_activity_imports_user_status").on(table.userId, table.matchStatus),
+    index("IDX_sales_activity_imports_activity_at").on(table.userId, table.activityAt),
+    index("IDX_sales_activity_imports_prospect").on(table.prospectId),
+    index("IDX_sales_activity_imports_interaction").on(table.interactionId),
+    unique("UQ_sales_activity_imports_external").on(table.userId, table.source, table.externalActivityId),
+  ],
+);
+
+export type SalesActivityImport = typeof salesActivityImports.$inferSelect;
+export type InsertSalesActivityImport = typeof salesActivityImports.$inferInsert;
+
 export const emailConnections = pgTable(
   "email_connections",
   {
