@@ -1,18 +1,11 @@
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { GoogleMap, useJsApiLoader, Polygon, InfoWindow } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { PhoneInput } from '@/components/ui/phone-input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Download, MapIcon, MapPin, Satellite, ChevronLeft, ChevronRight, X, Trash2, Filter, User, LogOut, Settings, Edit3, Phone, Handshake } from 'lucide-react';
+import { Download, MapIcon, Satellite, ChevronLeft, ChevronRight, X, Filter, User, LogOut, Settings, Phone, Handshake } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MapControls } from '@/features/map/MapControls';
 import { MapContextMenu } from '@/features/map/MapContextMenu';
 
-const SPEED_TAG_SF_VALUES = [5000, 10000, 25000, 50000, 100000] as const;
 import { SearchComponent } from '@/components/SearchComponent';
 import { CSVUploader } from '@/components/CSVUploader';
 import { DeveloperSettings } from '@/components/DeveloperSettings';
@@ -34,6 +27,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { STATUS_META } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
+import { ProspectEditPanel, computeFollowUpDue, formatSfWithCommas, getDisplayAddressValue } from '@/features/map/ProspectEditPanel';
 import { useTerraDrawGoogleMaps, type MapDrawMode, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
 import { AdvancedMapMarker } from '@/features/map/AdvancedMapMarker';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
@@ -94,33 +88,6 @@ type ContextMenuState = {
 
 // Colors and labels now come from shared STATUS_META
 
-const FOLLOW_UP_LABELS: Record<FollowUpTimeframeType, string> = {
-  '1_month': '1 Month',
-  '3_month': '3 Months',
-  '6_month': '6 Months',
-  '1_year': '1 Year'
-};
-
-// Follow-up due date helpers
-const timeframeToMonths: Record<FollowUpTimeframeType, number> = {
-  '1_month': 1,
-  '3_month': 3,
-  '6_month': 6,
-  '1_year': 12,
-};
-const addMonthsSafe = (d: Date, months: number) => {
-  const date = new Date(d);
-  const day = date.getDate();
-  date.setMonth(date.getMonth() + months);
-  if (date.getDate() < day) date.setDate(0);
-  return date;
-};
-const computeFollowUpDue = (anchorIso?: string, timeframe?: FollowUpTimeframeType) => {
-  if (!timeframe) return undefined;
-  const months = timeframeToMonths[timeframe] ?? 3;
-  const anchor = anchorIso ? new Date(anchorIso) : new Date();
-  return addMonthsSafe(anchor, months).toISOString();
-};
 const addDaysIsoFromNow = (days: number) => {
   const d = new Date();
   d.setDate(d.getDate() + days);
@@ -246,26 +213,6 @@ const calculatePolygonAcres = (geometry: any): number | null => {
   }
 };
 
-const formatSfWithCommas = (value?: number | null): string => {
-  if (value === null || value === undefined || Number.isNaN(value)) return '';
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
-};
-
-const parseSfInput = (raw: string): number | null => {
-  const digitsOnly = raw.replace(/[^\d]/g, '');
-  if (!digitsOnly) return null;
-  const parsed = Number.parseInt(digitsOnly, 10);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-const parseAcresInput = (raw: string): number | null => {
-  const cleaned = raw.replace(/[^\d.]/g, '');
-  if (!cleaned || cleaned === '.') return null;
-  const parsed = Number.parseFloat(cleaned);
-  if (!Number.isFinite(parsed)) return null;
-  return Math.round((parsed + Number.EPSILON) * 100) / 100;
-};
-
 export default function HomePage() {
   const { toast } = useToast();
   const { user, isDemoMode } = useAuth();
@@ -335,7 +282,6 @@ export default function HomePage() {
   });
   // Legend open/close managed inside StatusLegend component
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
-  const notesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [isEditPanelOpen, setIsEditPanelOpen] = useState(false);
   const focusedProspectIdRef = useRef<string | null>(null);
   const [editingProspectId, setEditingProspectId] = useState<string | null>(null);
@@ -2038,424 +1984,108 @@ export default function HomePage() {
 
       {/* Edit Panel - Content-Sized with Proper Scrolling */}
       {isEditPanelOpen && selectedProspect && (
-        <div 
-          className="absolute bottom-2 left-2 right-2 z-[80] flex max-h-[74dvh] flex-col overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-xl md:left-auto md:right-0 md:top-0 md:bottom-auto md:w-80 md:max-h-[90vh] md:rounded-none md:border-y-0 md:border-r-0 md:border-l"
-          style={{ pointerEvents: 'auto' }}
-        >
-          {/* Header - Sticky */}
-          <div className="sticky top-0 z-10 bg-white border-b px-4 pt-3 pb-2">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-800">
-                Edit Prospect
-              </h2>
+        <ProspectEditPanel
+          prospect={selectedProspect}
+          values={{
+            address: getDisplayAddressValue(selectedProspect.name),
+            businessName: selectedProspect.businessName || '',
+            websiteUrl: selectedProspect.websiteUrl || '',
+            buildingSf: buildingSfInput,
+            lotSizeAcres: lotSizeAcresInput,
+            submarketId: selectedProspect.submarketId || '',
+            notes: selectedProspect.notes || '',
+            contactName: selectedProspect.contactName || '',
+            contactCompany: selectedProspect.contactCompany || '',
+            contactEmail: selectedProspect.contactEmail || '',
+            contactPhone: selectedProspect.contactPhone || '',
+          }}
+          submarketOptions={submarketOptions}
+          isEditingShape={editingProspectId === selectedProspect.id}
+          savePulse={savePulse}
+          coordinateLabel={selectedProspectLatLng ? formatCoordinates(selectedProspectLatLng.lat, selectedProspectLatLng.lng) : undefined}
+          footerOverlay={xpToast ? (
+            <GamificationToast
+              key={xpToast.id}
+              xp={xpToast.xp}
+              label={xpToast.label}
+              onDone={() => setXpToast(null)}
+            />
+          ) : null}
+          footerLeadingActions={(
+            <>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button 
-                    variant="ghost" 
-                    size="sm"
-                    onClick={() => void closeEditPanel()}
-                    className="text-gray-400 hover:text-gray-600 h-6 w-6 p-0"
-                    aria-label="Save and close"
+                  <Button
+                    onClick={() => void runQuickLog('call')}
+                    variant="outline"
+                    className="h-8 w-8 p-0"
+                    aria-label="Quick log call"
+                    title="Quick log call"
+                    disabled={quickLogPendingType !== null}
                   >
-                    <X className="h-4 w-4" />
+                    <Phone className="h-3.5 w-3.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="left">Save and close</TooltipContent>
+                <TooltipContent>Quick call + 30d follow-up</TooltipContent>
               </Tooltip>
-            </div>
-          </div>
-
-          {/* Body - Auto Height with Tabs */}
-          <div className="px-4 py-3 space-y-4">
-            <p className="text-[11px] text-gray-500">Changes save automatically</p>
-            <Tabs defaultValue="property" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="property" className="text-xs">Property</TabsTrigger>
-                <TabsTrigger value="contact" className="text-xs">Contact</TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="property" className="space-y-4">
-                {/* Business Name */}
-                <div>
-                  <Label className="text-xs font-medium text-gray-700">Business Name</Label>
-                  <Input
-                    key={`businessName-${selectedProspect.id}`}
-                    defaultValue={selectedProspect.businessName || ''}
-                    onChange={(e) => queueSelectedProspectPatch('businessName', e.target.value || null)}
-                    placeholder="Business name"
-                    className="h-8 text-sm"
-                  />
-                </div>
-
-                {/* Address */}
-                <div>
-                  <Label className="text-xs font-medium text-gray-700">Address</Label>
-                  {(() => {
-                    const n = selectedProspect?.name || '';
-                    const display = /^New\s+(polygon|rectangle|point|marker)/i.test(n) ? '' : n;
-                    return (
-                      <div className="flex items-center gap-2">
-                        <Input
-                          key={`name-${selectedProspect.id}`}
-                          defaultValue={display}
-                          onChange={(e) => queueSelectedProspectPatch('name', e.target.value)}
-                          placeholder="Property address"
-                          className="h-8 text-sm"
-                        />
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="h-8 w-8 p-0 shrink-0"
-                              aria-label="Open coordinates in Google Maps"
-                              title="Open in Google Maps"
-                              disabled={!selectedProspectLatLng}
-                              onClick={() => {
-                                if (!selectedProspectLatLng) return;
-                                handleOpenInMaps(selectedProspectLatLng.lat, selectedProspectLatLng.lng);
-                              }}
-                            >
-                              <MapPin className="h-3.5 w-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Open point in Google Maps</TooltipContent>
-                        </Tooltip>
-                      </div>
-                    );
-                  })()}
-                </div>
-
-                {/* Status & Follow Up Row */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Status</Label>
-                    <Select
-                      value={selectedProspect.status}
-                      onValueChange={(value: ProspectStatusType) => updateSelectedProspect('status', value)}
-                    >
-                      <SelectTrigger className="h-8 text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="z-[120]">
-                        {Object.entries(STATUS_META).map(([k, meta]) => (
-                          <SelectItem key={k} value={k}>
-                            <span className="inline-flex items-center gap-2">
-                              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: meta.color }} />
-                              {meta.label}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Follow Up</Label>
-                    <Select
-                      value={selectedProspect.followUpTimeframe || "none"}
-                      onValueChange={(value: FollowUpTimeframeType | "none") => {
-                        const tf = value === 'none' ? undefined : value;
-                        updateSelectedProspect('followUpTimeframe', tf);
-                        const anchor = selectedProspect.lastContactDate || selectedProspect.createdDate;
-                        const due = tf ? computeFollowUpDue(anchor, tf as FollowUpTimeframeType) : null;
-                        updateSelectedProspect('followUpDueDate', due);
-                      }}
-                    >
-                      <SelectTrigger className="h-8 text-sm">
-                        <SelectValue placeholder="None" />
-                      </SelectTrigger>
-                      <SelectContent className="z-[120]">
-                        <SelectItem value="none">None</SelectItem>
-                        {Object.entries(FOLLOW_UP_LABELS).map(([value, label]) => (
-                          <SelectItem key={value} value={value}>
-                            {label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {/* Building SF and Lot Size (manual override enabled) */}
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-gray-700">Speed Tags</Label>
-                  <div className="grid grid-cols-5 gap-1.5">
-                    {SPEED_TAG_SF_VALUES.map((sf) => (
-                      <Button
-                        key={sf}
-                        type="button"
-                        variant="outline"
-                        className="h-7 px-0 text-[11px]"
-                        onClick={() => {
-                          setBuildingSfInput(formatSfWithCommas(sf));
-                          updateSelectedProspect('buildingSf', sf);
-                        }}
-                      >
-                        {sf >= 100000 ? '100k+' : `${Math.round(sf / 1000)}k`}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Building SF</Label>
-                    <Input
-                      value={buildingSfInput}
-                      onChange={(e) => {
-                        const parsed = parseSfInput(e.target.value);
-                        setBuildingSfInput(parsed === null ? '' : formatSfWithCommas(parsed));
-                        updateSelectedProspect('buildingSf', parsed);
-                      }}
-                      placeholder="e.g. 10,000"
-                      inputMode="numeric"
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Lot Size (Acres)</Label>
-                    <Input
-                      value={lotSizeAcresInput}
-                      onChange={(e) => {
-                        if (!selectedProspect) return;
-                        setLotSizeAcresInput(e.target.value);
-                        manualLotOverrideRef.current.add(selectedProspect.id);
-                        const parsed = parseAcresInput(e.target.value);
-                        updateSelectedProspect('lotSizeAcres', parsed);
-                      }}
-                      placeholder="Auto or manual"
-                      inputMode="decimal"
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                </div>
-
-                {/* Submarket */}
-                <div>
-                  <Label className="text-xs font-medium text-gray-700">Submarket</Label>
-                  {submarketOptions.length === 0 ? (
-                    <Select disabled>
-                      <SelectTrigger className="h-8 text-sm">
-                        <SelectValue placeholder="No submarkets defined" />
-                      </SelectTrigger>
-                    </Select>
-                  ) : (
-                    <Select
-                      value={selectedProspect.submarketId || ''}
-                      onValueChange={(value) => updateSelectedProspect('submarketId', value === 'none' ? undefined : value)}
-                    >
-                      <SelectTrigger className="h-8 text-sm">
-                        <SelectValue placeholder="Select submarket" />
-                      </SelectTrigger>
-                      <SelectContent className="z-[120]">
-                        <SelectItem value="none">None</SelectItem>
-                        {submarketOptions.map((submarketName) => (
-                          <SelectItem key={submarketName} value={submarketName}>
-                            {submarketName}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-
-                {/* Notes */}
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <Label className="text-xs font-medium text-gray-700">Notes</Label>
-                    <VoiceDictationButton
-                      className="h-7 w-7 p-0"
-                      onTranscript={(text) => {
-                        const existing = notesTextareaRef.current?.value || selectedProspect.notes || '';
-                        const next = existing ? `${existing.trimEnd()} ${text}` : text;
-                        if (notesTextareaRef.current) {
-                          notesTextareaRef.current.value = next;
-                        }
-                        setSelectedProspect({ ...selectedProspect, notes: next });
-                        queueSelectedProspectPatch('notes', next);
-                      }}
-                    />
-                  </div>
-                  <Textarea
-                    ref={notesTextareaRef}
-                    key={`notes-${selectedProspect.id}`}
-                    defaultValue={selectedProspect.notes || ''}
-                    onChange={(e) => queueSelectedProspectPatch('notes', e.target.value)}
-                    placeholder="Add notes..."
-                    rows={3}
-                    className="resize-none text-sm"
-                  />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="contact" className="space-y-4">
-                <div>
-                  <Label className="text-xs font-medium text-gray-700">Website</Label>
-                  <Input
-                    type="url"
-                    key={`websiteUrl-${selectedProspect.id}`}
-                    defaultValue={selectedProspect.websiteUrl || ''}
-                    onChange={(e) => queueSelectedProspectPatch('websiteUrl', e.target.value || null)}
-                    placeholder="Website URL"
-                    className="h-8 text-sm"
-                  />
-                </div>
-
-                {/* Contact Name & Company Row */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Contact Name</Label>
-                    <Input
-                      key={`contactName-${selectedProspect.id}`}
-                      defaultValue={selectedProspect.contactName || ''}
-                      onChange={(e) => queueSelectedProspectPatch('contactName', e.target.value)}
-                      placeholder="Name"
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Company</Label>
-                    <Input
-                      key={`contactCompany-${selectedProspect.id}`}
-                      defaultValue={selectedProspect.contactCompany || ''}
-                      onChange={(e) => queueSelectedProspectPatch('contactCompany', e.target.value)}
-                      placeholder="Company"
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                </div>
-
-                {/* Email & Phone Row */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Email</Label>
-                    <Input
-                      type="email"
-                      key={`contactEmail-${selectedProspect.id}`}
-                      defaultValue={selectedProspect.contactEmail || ''}
-                      onChange={(e) => queueSelectedProspectPatch('contactEmail', e.target.value)}
-                      placeholder="Email"
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Phone</Label>
-                    <PhoneInput
-                      key={`contactPhone-${selectedProspect.id}`}
-                      defaultValue={selectedProspect.contactPhone || ''}
-                      onChange={(e) => queueSelectedProspectPatch('contactPhone', e.target.value)}
-                      placeholder="(000) 000-0000"
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                </div>
-              </TabsContent>
-            </Tabs>
-          </div>
-
-          {/* Footer - Sticky */}
-          <div className="sticky bottom-0 z-10 bg-white border-t px-4 py-3 relative">
-            <div className="relative flex items-center justify-center">
-              {xpToast && (
-                <GamificationToast
-                  key={xpToast.id}
-                  xp={xpToast.xp}
-                  label={xpToast.label}
-                  onDone={() => setXpToast(null)}
-                />
-              )}
-
-              <div className={`flex items-center gap-1 ${savePulse ? 'animate-pulse' : ''}`}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      onClick={() => void runQuickLog('call')}
-                      variant="outline"
-                      className="h-8 w-8 p-0"
-                      aria-label="Quick log call"
-                      title="Quick log call"
-                      disabled={quickLogPendingType !== null}
-                    >
-                      <Phone className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Quick call + 30d follow-up</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      onClick={() => void runQuickLog('meeting')}
-                      variant="outline"
-                      className="h-8 w-8 p-0"
-                      aria-label="Quick log meeting"
-                      title="Quick log meeting"
-                      disabled={quickLogPendingType !== null}
-                    >
-                      <Handshake className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Quick meeting follow-up</TooltipContent>
-                </Tooltip>
-                {selectedProspect.geometry.type === 'Polygon' || selectedProspect.geometry.type === 'Rectangle' ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        onClick={() => {
-                          if (editingProspectId === selectedProspect.id) {
-                            void savePolygonChanges();
-                          } else {
-                            enablePolygonEditing(selectedProspect.id);
-                          }
-                        }}
-                        variant="outline"
-                        className="h-8 w-8 p-0"
-                        aria-label={editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}
-                        title={editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}
-                      >
-                        <Edit3 className="h-3.5 w-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}</TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        onClick={() => handleDrawPolygon()}
-                        variant="outline"
-                        className="h-8 w-8 p-0"
-                        aria-label="Draw area"
-                        title="Draw area"
-                      >
-                        <Edit3 className="h-3.5 w-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Draw area</TooltipContent>
-                  </Tooltip>
-                )}
-              </div>
-              
-              <Button 
-                onClick={deleteSelectedProspect}
-                variant="destructive"
-                className="absolute right-0 h-8 px-3 text-xs"
-                title="Delete Prospect"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-            {selectedProspectLatLng && (
-              <button
-                type="button"
-                className="mt-2 block w-full text-[10px] text-gray-400 hover:text-gray-600 text-center"
-                onClick={() => void handleCopyCoordinates(selectedProspectLatLng.lat, selectedProspectLatLng.lng)}
-                title="Click to copy coordinates"
-              >
-                {formatCoordinates(selectedProspectLatLng.lat, selectedProspectLatLng.lng)}
-              </button>
-            )}
-          </div>
-        </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() => void runQuickLog('meeting')}
+                    variant="outline"
+                    className="h-8 w-8 p-0"
+                    aria-label="Quick log meeting"
+                    title="Quick log meeting"
+                    disabled={quickLogPendingType !== null}
+                  >
+                    <Handshake className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Quick meeting follow-up</TooltipContent>
+              </Tooltip>
+            </>
+          )}
+          onClose={() => void closeEditPanel()}
+          onDelete={() => void deleteSelectedProspect()}
+          onEditShape={() => {
+            if (editingProspectId === selectedProspect.id) {
+              void savePolygonChanges();
+            } else {
+              enablePolygonEditing(selectedProspect.id);
+            }
+          }}
+          onDrawArea={() => handleDrawPolygon()}
+          onCopyCoordinates={selectedProspectLatLng ? () => void handleCopyCoordinates(selectedProspectLatLng.lat, selectedProspectLatLng.lng) : undefined}
+          onOpenCoordinatesInMaps={selectedProspectLatLng ? () => handleOpenInMaps(selectedProspectLatLng.lat, selectedProspectLatLng.lng) : undefined}
+          onAddressChange={(value) => updateSelectedProspect('name', value)}
+          onBusinessNameChange={(value) => updateSelectedProspect('businessName', value || null)}
+          onWebsiteUrlChange={(value) => updateSelectedProspect('websiteUrl', value || null)}
+          onStatusChange={(value) => updateSelectedProspect('status', value)}
+          onFollowUpChange={(timeframe, dueDate) => {
+            setSelectedProspect((prev) => (
+              prev && prev.id === selectedProspect.id
+                ? ({ ...prev, followUpTimeframe: timeframe, followUpDueDate: dueDate ?? undefined } as Prospect)
+                : prev
+            ));
+            queueSelectedProspectPatch('followUpTimeframe', timeframe);
+            queueSelectedProspectPatch('followUpDueDate', dueDate);
+          }}
+          onBuildingSfChange={(displayValue, parsedValue) => {
+            setBuildingSfInput(displayValue);
+            updateSelectedProspect('buildingSf', parsedValue);
+          }}
+          onLotSizeAcresChange={(displayValue, parsedValue) => {
+            setLotSizeAcresInput(displayValue);
+            manualLotOverrideRef.current.add(selectedProspect.id);
+            updateSelectedProspect('lotSizeAcres', parsedValue);
+          }}
+          onSubmarketChange={(value) => updateSelectedProspect('submarketId', value)}
+          onNotesChange={(value) => updateSelectedProspect('notes', value)}
+          onContactNameChange={(value) => updateSelectedProspect('contactName', value)}
+          onContactCompanyChange={(value) => updateSelectedProspect('contactCompany', value)}
+          onContactEmailChange={(value) => updateSelectedProspect('contactEmail', value)}
+          onContactPhoneChange={(value) => updateSelectedProspect('contactPhone', value)}
+        />
       )}
 
       {/* Import Dialog */}

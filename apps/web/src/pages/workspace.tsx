@@ -3,24 +3,16 @@ import { useLocation, useRoute } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { GoogleMap, Polygon, useJsApiLoader } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
-// Drawer controls not used in workspace; edit panel opens directly
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
-import { PhoneInput } from '@/components/ui/phone-input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { MapControls } from '@/features/map/MapControls';
 import { createCustomAssetMarker } from '@/features/map/createCustomAssetMarker';
 import { apiRequest } from '@/lib/queryClient';
-import type { Prospect, FollowUpTimeframeType, ProspectGeometryType } from '@level-cre/shared/schema';
+import type { Prospect, ProspectGeometryType } from '@level-cre/shared/schema';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
-import { ArrowLeft, Briefcase, Save, X, Edit3, Trash2, Share2 } from 'lucide-react';
+import { ArrowLeft, Briefcase, Share2 } from 'lucide-react';
 import { Modal, ModalContent, ModalHeader, ModalFooter, ModalTitle, ModalDescription, ModalClose } from '@/components/primitives/Modal';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 // TerraDraw handles new map asset creation; saved assets continue to render as Google map overlays.
 import { ShareWorkspaceDialog } from '@/components/ShareWorkspaceDialog';
 import { useAuth } from '@/contexts/AuthContext';
@@ -31,10 +23,10 @@ import { useTerraDrawGoogleMaps, type TerraDrawFinishPayload } from '@/features/
 import { useGeocode } from '@/hooks/useGeocode';
 import { GOOGLE_MAPS_API_KEY_HELP_TEXT, getGoogleMapsApiKey, getGoogleMapsMapId } from '@/lib/googleMapsApiKey';
 import { nsKey, readJSON, removeKey, writeJSON } from '@/lib/storage';
-import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { clearAdvancedMarker, type AdvancedAssetMarker } from '@/features/map/advancedMarkers';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
 import { createAllStatusFilterSet, createStatusFilterSet, getStatusCounts } from '@/features/map/statusFilters';
+import { ProspectEditPanel, formatSfWithCommas, getDisplayAddressValue } from '@/features/map/ProspectEditPanel';
 // Note: Avoid importing AlertDialog to prevent a circular-import bundle bug
 
 type Listing = {
@@ -49,13 +41,8 @@ type Listing = {
 
 const libraries: any = ['geometry', 'places', 'marker'];
 const FIELD_BUFFER_DELAY = 600;
-const AUTO_NAME_REGEX = /^New\s+(polygon|rectangle|point|marker)/i;
 const GOOGLE_MAPS_API_KEY = getGoogleMapsApiKey();
 const GOOGLE_MAPS_MAP_ID = getGoogleMapsMapId();
-const getDisplayAddressValue = (name?: string | null) => {
-  if (!name) return '';
-  return AUTO_NAME_REGEX.test(name) ? '' : name;
-};
 
 type CreateProspectVariables = {
   payload: {
@@ -201,27 +188,6 @@ export default function Workspace() {
   const linkedProspectsErrorMessage = linkedProspectsError instanceof Error
     ? linkedProspectsError.message
     : null;
-
-  // Follow-up due date helpers
-  const timeframeToMonths: Record<FollowUpTimeframeType, number> = {
-    '1_month': 1,
-    '3_month': 3,
-    '6_month': 6,
-    '1_year': 12,
-  };
-  const addMonthsSafe = (d: Date, months: number) => {
-    const date = new Date(d);
-    const day = date.getDate();
-    date.setMonth(date.getMonth() + months);
-    if (date.getDate() < day) date.setDate(0);
-    return date;
-  };
-  const computeFollowUpDue = (anchorIso?: string, timeframe?: FollowUpTimeframeType) => {
-    if (!timeframe) return undefined;
-    const months = timeframeToMonths[timeframe] ?? 3;
-    const anchor = anchorIso ? new Date(anchorIso) : new Date();
-    return addMonthsSafe(anchor, months).toISOString();
-  };
 
   // Drawing state
   type DrawMode = 'select' | 'point' | 'polygon' | 'rectangle';
@@ -594,11 +560,6 @@ export default function Workspace() {
   const { profile } = useProfile();
   const submarketOptions = uniqueSubmarketNames(profile?.submarkets || []);
 
-  const SPEED_TAG_SF_VALUES = [5000, 10000, 25000, 50000, 100000] as const;
-  const FOLLOW_UP_LABELS: Record<'1_month'|'3_month'|'6_month'|'1_year', string> = {
-    '1_month': '1 Month', '3_month': '3 Months', '6_month': '6 Months', '1_year': '1 Year'
-  };
-
   // Helpers from /app
   const calculatePolygonAcres = (geometry: any): number | null => {
     if (!geometry || geometry.type !== 'Polygon') return null;
@@ -620,26 +581,6 @@ export default function Workspace() {
       const acres = (areaInSquareMeters * 10.764) / 43560;
       return Math.round((acres + Number.EPSILON) * 100) / 100;
     } catch { return null; }
-  };
-
-  const formatSfWithCommas = (value?: number | null): string => {
-    if (value === null || value === undefined || Number.isNaN(value)) return '';
-    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
-  };
-
-  const parseSfInput = (raw: string): number | null => {
-    const digitsOnly = raw.replace(/[^\d]/g, '');
-    if (!digitsOnly) return null;
-    const parsed = Number.parseInt(digitsOnly, 10);
-    return Number.isFinite(parsed) ? parsed : null;
-  };
-
-  const parseAcresInput = (raw: string): number | null => {
-    const cleaned = raw.replace(/[^\d.]/g, '');
-    if (!cleaned || cleaned === '.') return null;
-    const parsed = Number.parseFloat(cleaned);
-    if (!Number.isFinite(parsed)) return null;
-    return Math.round((parsed + Number.EPSILON) * 100) / 100;
   };
 
   // Debounced, optimistic field updates to avoid flicker while typing
@@ -1275,32 +1216,6 @@ export default function Workspace() {
     }
   }, [formatCoordinates, toast]);
 
-  const handleOpenInMaps = useCallback((lat: number, lng: number) => {
-    const url = `https://www.google.com/maps?q=${lat},${lng}`;
-    let opened = false;
-    try {
-      const win = window.open(url, '_blank', 'noopener,noreferrer');
-      if (win) {
-        opened = true;
-        win.opener = null;
-      }
-    } catch {}
-    if (!opened && typeof document !== 'undefined') {
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.target = '_blank';
-      anchor.rel = 'noopener noreferrer';
-      anchor.style.display = 'none';
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      opened = true;
-    }
-    if (!opened) {
-      window.location.href = url;
-    }
-  }, []);
-
   const handleCreateProspectAt = useCallback(async (lat: number, lng: number) => {
     if (!can.edit || createProspectMutation.isPending) return;
     let resolvedAddress = '';
@@ -1566,293 +1481,74 @@ export default function Workspace() {
 
       {/* Removed legacy Drawer UI */}
       {isEditPanelOpen && selectedProspect && prospectDraft && (
-        <div className="absolute bottom-2 left-2 right-2 z-[80] flex max-h-[74dvh] flex-col overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-xl md:left-auto md:right-0 md:top-0 md:bottom-auto md:w-80 md:max-h-[90vh] md:rounded-none md:border-y-0 md:border-r-0 md:border-l" style={{ pointerEvents: 'auto' }}>
-          <div className="sticky top-0 z-10 bg-white border-b px-4 pt-3 pb-2">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-800">Edit Prospect</h2>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button 
-                    variant="ghost" 
-                    size="sm"
-                    onClick={() => void closeEditPanel()}
-                    className="text-gray-400 hover:text-gray-600 h-6 w-6 p-0"
-                    aria-label="Save and close"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="left">Save and close</TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
-          <div className="px-4 py-3 space-y-4">
-            <p className="text-[11px] text-gray-500">Changes save automatically</p>
-            <Tabs defaultValue="property" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="property" className="text-xs">Property</TabsTrigger>
-                <TabsTrigger value="contact" className="text-xs">Contact</TabsTrigger>
-              </TabsList>
-              <TabsContent value="property" className="space-y-4">
-                <div>
-                  <Label className="text-xs font-medium text-gray-700">Address</Label>
-                  <Input
-                    value={localAddress}
-                    onChange={(e) => handleAddressChange(e.target.value)}
-                    onBlur={handleAddressBlur}
-                    placeholder="Property address"
-                    className="h-8 text-sm"
-                  />
-                </div>
-                {/* Business information (shown when available) */}
-                {(prospectDraft.businessName || prospectDraft.websiteUrl) && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-xs font-medium text-gray-700">Business Name</Label>
-                      <Input
-                        value={prospectDraft.businessName || ''}
-                        onChange={(e) => updateSelectedProspect('businessName', e.target.value || null)}
-                        placeholder="Business name"
-                        className="h-8 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs font-medium text-gray-700">Website</Label>
-                      <Input
-                        type="url"
-                        value={prospectDraft.websiteUrl || ''}
-                        onChange={(e) => updateSelectedProspect('websiteUrl', e.target.value || null)}
-                        placeholder="Website URL"
-                        className="h-8 text-sm"
-                      />
-                    </div>
-                  </div>
-                )}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Status</Label>
-                    <Select value={prospectDraft.status} onValueChange={(v) => updateSelectedProspect('status', v)}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent className="z-[120]">
-                        {Object.entries(STATUS_META).map(([k, meta]) => (
-                          <SelectItem key={k} value={k}>
-                            <span className="inline-flex items-center gap-2">
-                              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: meta.color }} />
-                              {meta.label}
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Follow Up</Label>
-                    <Select value={(prospectDraft as any).followUpTimeframe || 'none'} onValueChange={(v) => {
-                      const tf = (v === 'none' ? undefined : (v as FollowUpTimeframeType));
-                      updateSelectedProspect('followUpTimeframe' as any, tf);
-                      const anchor = prospectDraft.lastContactDate || (prospectDraft as any).createdDate;
-                      const due = tf ? computeFollowUpDue(anchor, tf) : null;
-                      updateSelectedProspect('followUpDueDate', due);
-                    }}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="None" /></SelectTrigger>
-                      <SelectContent className="z-[120]">
-                        <SelectItem value="none">None</SelectItem>
-                        {Object.entries(FOLLOW_UP_LABELS).map(([v,l]) => (<SelectItem key={v} value={v}>{l}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-gray-700">Speed Tags</Label>
-                  <div className="grid grid-cols-5 gap-1.5">
-                    {SPEED_TAG_SF_VALUES.map((sf) => (
-                      <Button
-                        key={sf}
-                        type="button"
-                        variant="outline"
-                        className="h-7 px-0 text-[11px]"
-                        onClick={() => {
-                          setLocalBuildingSf(formatSfWithCommas(sf));
-                          updateSelectedProspect('buildingSf', sf);
-                        }}
-                      >
-                        {sf >= 100000 ? '100k+' : `${Math.round(sf / 1000)}k`}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Building SF</Label>
-                    <Input
-                      value={localBuildingSf}
-                      onChange={(e) => {
-                        const parsed = parseSfInput(e.target.value);
-                        setLocalBuildingSf(parsed === null ? '' : formatSfWithCommas(parsed));
-                        updateSelectedProspect('buildingSf', parsed);
-                      }}
-                      placeholder="e.g. 10,000"
-                      inputMode="numeric"
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Lot Size (Acres)</Label>
-                    <Input
-                      value={localLotSizeAcres}
-                      onChange={(e) => {
-                        if (!prospectDraft?.id) return;
-                        setLocalLotSizeAcres(e.target.value);
-                        manualLotOverrideRef.current.add(prospectDraft.id);
-                        const parsed = parseAcresInput(e.target.value);
-                        updateSelectedProspect('lotSizeAcres', parsed);
-                      }}
-                      placeholder="Auto or manual"
-                      inputMode="decimal"
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-xs font-medium text-gray-700">Submarket</Label>
-                  {submarketOptions.length === 0 ? (
-                    <Select disabled><SelectTrigger className="h-8 text-sm"><SelectValue placeholder="No submarkets" /></SelectTrigger></Select>
-                  ) : (
-                    <Select value={(prospectDraft as any).submarketId || ''} onValueChange={(v) => updateSelectedProspect('submarketId' as any, v === 'none' ? undefined : v)}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select submarket" /></SelectTrigger>
-                      <SelectContent className="z-[120]">
-                        <SelectItem value="none">None</SelectItem>
-                        {submarketOptions.map((s) => (<SelectItem key={s} value={s}>{s}</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <Label className="text-xs font-medium text-gray-700">Notes</Label>
-                    <VoiceDictationButton
-                      className="h-7 w-7 p-0"
-                      onTranscript={(text) => handleNotesChange(localNotes ? `${localNotes.trimEnd()} ${text}` : text)}
-                    />
-                  </div>
-                  <Textarea
-                    value={localNotes}
-                    onChange={(e) => handleNotesChange(e.target.value)}
-                    onBlur={handleNotesBlur}
-                    rows={3}
-                    className="resize-none text-sm"
-                  />
-                </div>
-              </TabsContent>
-              <TabsContent value="contact" className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Contact Name</Label>
-                    <Input
-                      value={localContactName}
-                      onChange={(e) => handleContactNameChange(e.target.value)}
-                      onBlur={handleContactNameBlur}
-                      placeholder="Contact name"
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Company</Label>
-                    <Input
-                      value={localContactCompany}
-                      onChange={(e) => handleContactCompanyChange(e.target.value)}
-                      onBlur={handleContactCompanyBlur}
-                      placeholder="Company"
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Email</Label>
-                    <Input
-                      type="email"
-                      value={localContactEmail}
-                      onChange={(e) => handleContactEmailChange(e.target.value)}
-                      onBlur={handleContactEmailBlur}
-                      placeholder="name@company.com"
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium text-gray-700">Phone</Label>
-                    <PhoneInput
-                      value={localContactPhone}
-                      onChange={(e) => handleContactPhoneChange(e.target.value)}
-                      onBlur={handleContactPhoneBlur}
-                      placeholder="(000) 000-0000"
-                      className="h-8 text-sm"
-                    />
-                  </div>
-                </div>
-              </TabsContent>
-            </Tabs>
-            <div className="flex items-center gap-2 pt-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() => void closeEditPanel()}
-                    variant="outline"
-                    className="h-8 w-8 p-0 text-xs"
-                    aria-label="Save and close"
-                  >
-                    <Save className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Save and close</TooltipContent>
-              </Tooltip>
-              {selectedProspect.geometry.type === 'Polygon' || selectedProspect.geometry.type === 'Rectangle' ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button 
-                      onClick={() => {
-                        if (!can.edit) return;
-                        if (editingProspectId === selectedProspect.id) {
-                          void savePolygonChanges();
-                        } else {
-                          enablePolygonEditing(selectedProspect.id);
-                        }
-                      }} 
-                      variant="outline" 
-                      className="h-8 w-8 p-0"
-                      disabled={!can.edit}
-                      aria-label={editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}
-                    >
-                      <Edit3 className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{editingProspectId === selectedProspect.id ? 'Finish editing' : 'Edit shape'}</TooltipContent>
-                </Tooltip>
-              ) : (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      onClick={() => {
-                        if (!can.edit || !selectedProspect) return;
-                        // Mark this prospect as the target for the next drawn polygon
-                        setDrawingForProspect(selectedProspect);
-                        activateTerraDrawMode('polygon');
-                      }}
-                      variant="outline"
-                      className="h-8 w-8 p-0"
-                      disabled={!can.edit}
-                      aria-label="Draw area"
-                    >
-                      <Edit3 className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Draw area</TooltipContent>
-                </Tooltip>
-              )}
-              <Button onClick={() => setDeleteDialogOpen(true)} variant="destructive" className="h-8 px-3 text-xs ml-auto" disabled={!can.edit} aria-label="Delete prospect"><Trash2 className="h-3.5 w-3.5" /></Button>
-            </div>
-          </div>
-        </div>
+        <ProspectEditPanel
+          prospect={prospectDraft}
+          values={{
+            address: localAddress,
+            businessName: prospectDraft.businessName || '',
+            websiteUrl: prospectDraft.websiteUrl || '',
+            buildingSf: localBuildingSf,
+            lotSizeAcres: localLotSizeAcres,
+            submarketId: prospectDraft.submarketId || '',
+            notes: localNotes,
+            contactName: localContactName,
+            contactCompany: localContactCompany,
+            contactEmail: localContactEmail,
+            contactPhone: localContactPhone,
+          }}
+          submarketOptions={submarketOptions}
+          isEditingShape={editingProspectId === selectedProspect.id}
+          canEditShape={can.edit}
+          showSaveAction
+          deleteDisabled={!can.edit}
+          onClose={() => void closeEditPanel()}
+          onSaveAction={() => void closeEditPanel()}
+          onDelete={() => setDeleteDialogOpen(true)}
+          onEditShape={() => {
+            if (!can.edit) return;
+            if (editingProspectId === selectedProspect.id) {
+              void savePolygonChanges();
+            } else {
+              enablePolygonEditing(selectedProspect.id);
+            }
+          }}
+          onDrawArea={() => {
+            if (!can.edit || !selectedProspect) return;
+            setDrawingForProspect(selectedProspect);
+            activateTerraDrawMode('polygon');
+          }}
+          onAddressChange={handleAddressChange}
+          onAddressBlur={handleAddressBlur}
+          onBusinessNameChange={(value) => updateSelectedProspect('businessName', value || null)}
+          onWebsiteUrlChange={(value) => updateSelectedProspect('websiteUrl', value || null)}
+          onStatusChange={(value) => updateSelectedProspect('status', value)}
+          onFollowUpChange={(timeframe, dueDate) => {
+            updateSelectedProspect('followUpTimeframe', timeframe);
+            updateSelectedProspect('followUpDueDate', dueDate);
+          }}
+          onBuildingSfChange={(displayValue, parsedValue) => {
+            if (!prospectDraft.id) return;
+            setLocalBuildingSf(displayValue);
+            updateSelectedProspect('buildingSf', parsedValue);
+          }}
+          onLotSizeAcresChange={(displayValue, parsedValue) => {
+            if (!prospectDraft.id) return;
+            setLocalLotSizeAcres(displayValue);
+            manualLotOverrideRef.current.add(prospectDraft.id);
+            updateSelectedProspect('lotSizeAcres', parsedValue);
+          }}
+          onSubmarketChange={(value) => updateSelectedProspect('submarketId', value)}
+          onNotesChange={handleNotesChange}
+          onNotesBlur={handleNotesBlur}
+          onContactNameChange={handleContactNameChange}
+          onContactNameBlur={handleContactNameBlur}
+          onContactCompanyChange={handleContactCompanyChange}
+          onContactCompanyBlur={handleContactCompanyBlur}
+          onContactEmailChange={handleContactEmailChange}
+          onContactEmailBlur={handleContactEmailBlur}
+          onContactPhoneChange={handleContactPhoneChange}
+          onContactPhoneBlur={handleContactPhoneBlur}
+        />
       )}
       <ShareWorkspaceDialog listingId={listingId} open={shareOpen} onOpenChange={setShareOpen} canManage={can.share} />
       <Modal open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
