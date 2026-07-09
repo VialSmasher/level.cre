@@ -1633,7 +1633,7 @@ export default function Workspace() {
                     <Label className="text-xs font-medium text-gray-700">Status</Label>
                     <Select value={prospectDraft.status} onValueChange={(v) => updateSelectedProspect('status', v)}>
                       <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="z-[120]">
                         {Object.entries(STATUS_META).map(([k, meta]) => (
                           <SelectItem key={k} value={k}>
                             <span className="inline-flex items-center gap-2">
@@ -1655,7 +1655,7 @@ export default function Workspace() {
                       updateSelectedProspect('followUpDueDate', due);
                     }}>
                       <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="None" /></SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="z-[120]">
                         <SelectItem value="none">None</SelectItem>
                         {Object.entries(FOLLOW_UP_LABELS).map(([v,l]) => (<SelectItem key={v} value={v}>{l}</SelectItem>))}
                       </SelectContent>
@@ -1720,7 +1720,7 @@ export default function Workspace() {
                   ) : (
                     <Select value={(prospectDraft as any).submarketId || ''} onValueChange={(v) => updateSelectedProspect('submarketId' as any, v === 'none' ? undefined : v)}>
                       <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select submarket" /></SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="z-[120]">
                         <SelectItem value="none">None</SelectItem>
                         {submarketOptions.map((s) => (<SelectItem key={s} value={s}>{s}</SelectItem>))}
                       </SelectContent>
