@@ -2137,7 +2137,7 @@ export default function HomePage() {
                       <SelectTrigger className="h-8 text-sm">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="z-[120]">
                         {Object.entries(STATUS_META).map(([k, meta]) => (
                           <SelectItem key={k} value={k}>
                             <span className="inline-flex items-center gap-2">
@@ -2165,7 +2165,7 @@ export default function HomePage() {
                       <SelectTrigger className="h-8 text-sm">
                         <SelectValue placeholder="None" />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="z-[120]">
                         <SelectItem value="none">None</SelectItem>
                         {Object.entries(FOLLOW_UP_LABELS).map(([value, label]) => (
                           <SelectItem key={value} value={value}>
@@ -2247,7 +2247,7 @@ export default function HomePage() {
                       <SelectTrigger className="h-8 text-sm">
                         <SelectValue placeholder="Select submarket" />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="z-[120]">
                         <SelectItem value="none">None</SelectItem>
                         {submarketOptions.map((submarketName) => (
                           <SelectItem key={submarketName} value={submarketName}>
