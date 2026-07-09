@@ -58,7 +58,7 @@ export default function Onboarding() {
     onSuccess: (profile) => {
       try { queryClient.setQueryData(['/api/profile'], profile) } catch {}
       setNeedsOnboarding(false)
-      setLocation('/app')
+      setLocation('/app/today')
     },
     onError: (error: any) => {
       console.error('Error creating profile:', error)

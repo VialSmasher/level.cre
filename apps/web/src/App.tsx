@@ -13,10 +13,11 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 // Use explicit relative paths for lazy-loaded pages to ensure Vite
 // rewrites dynamic imports correctly in all environments.
 const Home = lazy(() => import("./pages/home"));
+const Today = lazy(() => import("./pages/today"));
 const Knowledge = lazy(() => import("./pages/knowledge"));
 const FollowUp = lazy(() => import("./pages/followup"));
 const Inbox = lazy(() => import("./pages/inbox"));
-const Stats = lazy(() => import("./pages/stats"));
+const Challenges = lazy(() => import("./pages/challenges"));
 const Requirements = lazy(() => import("./pages/requirements"));
 const MarketComps = lazy(() => import("./pages/market-comps"));
 const MapToolsTestPage = lazy(() => import("./pages/map-tools-test"));
@@ -60,10 +61,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
 import ToolLayout from "./tools/industrial-intel/ToolLayout";
-
-const INDUSTRIAL_INTEL_ENABLED =
-  String(import.meta.env.VITE_ENABLE_INDUSTRIAL_INTEL ?? "").toLowerCase() === "true" ||
-  String(import.meta.env.VITE_ENABLE_INDUSTRIAL_INTEL ?? "").toLowerCase() === "1";
+import { INDUSTRIAL_INTEL_ENABLED, TRACK_RECORD_ENABLED } from "@/lib/featureFlags";
 
 // Component to handle onboarding check and routing
 function OnboardingCheck({ children }: { children: React.ReactNode }) {
@@ -85,6 +83,16 @@ function OnboardingCheck({ children }: { children: React.ReactNode }) {
   }
 
   return <>{children}</>
+}
+
+function RedirectTo({ path }: { path: string }) {
+  const [, setLocation] = useLocation()
+
+  useEffect(() => {
+    setLocation(path)
+  }, [path, setLocation])
+
+  return null
 }
 
 function Router() {
@@ -218,12 +226,42 @@ function Router() {
       </Route>
 
       <Route path="/track-record">
+        {TRACK_RECORD_ENABLED ? (
+          <ProtectedRoute>
+            <OnboardingCheck>
+              <AppLayout>
+                <Suspense fallback={<Spinner />}>
+                  <TrackRecord />
+                </Suspense>
+              </AppLayout>
+            </OnboardingCheck>
+          </ProtectedRoute>
+        ) : (
+          <RedirectTo path="/broker-stats" />
+        )}
+      </Route>
+      <Route path="/app/today">
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
-              <Suspense fallback={<Spinner />}>
-                <TrackRecord />
-              </Suspense>
+              <RouteErrorBoundary>
+                <Suspense fallback={<Spinner />}>
+                  <Today />
+                </Suspense>
+              </RouteErrorBoundary>
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
+      <Route path="/app/map">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <RouteErrorBoundary>
+                <Suspense fallback={<Spinner />}>
+                  <Home />
+                </Suspense>
+              </RouteErrorBoundary>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>
@@ -234,7 +272,7 @@ function Router() {
             <AppLayout>
               <RouteErrorBoundary>
                 <Suspense fallback={<Spinner />}>
-                  <Home />
+                  <Today />
                 </Suspense>
               </RouteErrorBoundary>
             </AppLayout>
@@ -266,24 +304,24 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
+      <Route path="/app/challenges">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <Suspense fallback={<Spinner />}>
+                <Challenges />
+              </Suspense>
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
+
       <Route path="/app/inbox">
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>
               <Suspense fallback={<Spinner />}>
                 <Inbox />
-              </Suspense>
-            </AppLayout>
-          </OnboardingCheck>
-        </ProtectedRoute>
-      </Route>
-      
-      <Route path="/app/stats">
-        <ProtectedRoute>
-          <OnboardingCheck>
-            <AppLayout>
-              <Suspense fallback={<Spinner />}> 
-                <Stats />
               </Suspense>
             </AppLayout>
           </OnboardingCheck>

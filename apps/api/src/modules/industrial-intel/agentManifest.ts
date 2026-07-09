@@ -46,7 +46,7 @@ export const industrialIntelAgentManifest = {
     inventory: {
       endpoints: [
         { method: "GET", path: "/api/intel/listings", description: "List current inventory/listings." },
-        { method: "POST", path: "/api/intel/manual-listings/upload", description: "Bulk ingest structured listing records from CSV/XLSX-style rows." },
+        { method: "POST", path: "/api/intel/manual-listings/upload", description: "Bulk ingest structured listing records from CSV-style rows." },
       ],
     },
     dossiers: {

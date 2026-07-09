@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "target": "ES2022",
+    "types": ["node"],
     "baseUrl": ".",
     "paths": {
       "@level-cre/shared/*": ["../../packages/shared/src/*"]
