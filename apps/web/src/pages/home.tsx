@@ -1587,6 +1587,7 @@ export default function HomePage() {
       queryClient.invalidateQueries({ queryKey: ['/api/interactions'] });
       queryClient.invalidateQueries({ queryKey: ['/api/skill-activities'] });
       queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/automation/activity-pulse'] });
 
       const delta = newXpGained - expectedXp;
       if (delta !== 0) {

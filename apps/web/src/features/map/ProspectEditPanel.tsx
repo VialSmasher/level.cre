@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PhoneInput } from '@/components/ui/phone-input';
@@ -8,7 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
-import { Edit3, MapPin, Save, Trash2, X } from 'lucide-react';
+import { CalendarDays, Clock3, Edit3, Mail, MapPin, MessageSquareText, Phone, Save, Trash2, X } from 'lucide-react';
+import { apiRequest } from '@/lib/queryClient';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   STATUS_META,
   type FollowUpTimeframeType,
@@ -86,6 +89,38 @@ export type ProspectEditPanelValues = {
   contactEmail: string;
   contactPhone: string;
 };
+
+type ContactInteraction = {
+  id: string;
+  date: string;
+  type: string;
+  outcome: string;
+  notes?: string | null;
+  nextFollowUp?: string | null;
+  sourceProvider?: string | null;
+  createdAt?: string | null;
+};
+
+const interactionIcon = (type: string) => {
+  const normalized = String(type || '').toLowerCase();
+  if (normalized.includes('call') || normalized.includes('phone')) return Phone;
+  if (normalized.includes('email') || normalized.includes('mail')) return Mail;
+  if (normalized.includes('meeting') || normalized.includes('tour')) return CalendarDays;
+  return MessageSquareText;
+};
+
+const formatInteractionDate = (value?: string | null) => {
+  if (!value) return 'Date unavailable';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return 'Date unavailable';
+  return new Intl.DateTimeFormat('en-CA', {
+    month: 'short',
+    day: 'numeric',
+    year: date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric',
+  }).format(date);
+};
+
+const readableInteractionValue = (value: string) => value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 
 type ProspectEditPanelProps = {
   prospect: Prospect;
@@ -166,6 +201,22 @@ export function ProspectEditPanel({
   onContactPhoneChange,
   onContactPhoneBlur,
 }: ProspectEditPanelProps) {
+  const { isDemoMode } = useAuth();
+  const interactionsQuery = useQuery<ContactInteraction[]>({
+    queryKey: ['/api/interactions', prospect.id],
+    queryFn: async () => {
+      const response = await apiRequest('GET', `/api/interactions?prospectId=${encodeURIComponent(prospect.id)}`);
+      return response.json();
+    },
+    enabled: !isDemoMode || import.meta.env.DEV,
+    staleTime: 60_000,
+  });
+  const recentInteractions = useMemo(
+    () => [...(interactionsQuery.data || [])]
+      .sort((left, right) => new Date(right.date || right.createdAt || 0).getTime() - new Date(left.date || left.createdAt || 0).getTime())
+      .slice(0, 12),
+    [interactionsQuery.data],
+  );
   const geometryType = prospect.geometry.type as string;
   const isAreaShape = geometryType === 'Polygon' || geometryType === 'Rectangle';
   const shapeButtonLabel = isAreaShape
@@ -200,9 +251,10 @@ export function ProspectEditPanel({
       <div className="px-4 py-3 space-y-4">
         <p className="text-[11px] text-gray-500">Changes save automatically</p>
         <Tabs defaultValue="property" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="property" className="text-xs">Property</TabsTrigger>
             <TabsTrigger value="contact" className="text-xs">Contact</TabsTrigger>
+            <TabsTrigger value="activity" className="text-xs">Activity</TabsTrigger>
           </TabsList>
 
           <TabsContent value="property" className="space-y-4">
@@ -437,6 +489,68 @@ export function ProspectEditPanel({
                 />
               </div>
             </div>
+          </TabsContent>
+
+          <TabsContent value="activity" className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-gray-800">Recent activity</p>
+                <p className="mt-0.5 text-[11px] text-gray-500">Calls, emails, meetings, and notes</p>
+              </div>
+              <span className="rounded bg-gray-100 px-2 py-1 text-[11px] font-semibold text-gray-600">
+                {recentInteractions.length}
+              </span>
+            </div>
+
+            {interactionsQuery.isLoading ? (
+              <div className="space-y-2">
+                {[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded bg-gray-100" />)}
+              </div>
+            ) : null}
+
+            {!interactionsQuery.isLoading && recentInteractions.length === 0 ? (
+              <div className="border-y border-gray-100 py-8 text-center">
+                <MessageSquareText className="mx-auto h-6 w-6 text-gray-300" />
+                <p className="mt-2 text-xs font-medium text-gray-700">No activity recorded yet</p>
+                <p className="mt-1 text-[11px] leading-5 text-gray-500">Quick-log a call or meeting, or let Codex attach the next email.</p>
+              </div>
+            ) : null}
+
+            {interactionsQuery.isError ? (
+              <div role="alert" className="border-y border-red-100 py-4 text-xs text-red-700">Activity history could not be loaded.</div>
+            ) : null}
+
+            {recentInteractions.length > 0 ? (
+              <div className="divide-y divide-gray-100 border-y border-gray-100">
+                {recentInteractions.map((interaction) => {
+                  const InteractionIcon = interactionIcon(interaction.type);
+                  return (
+                    <article key={interaction.id} className="flex gap-3 py-3">
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded bg-blue-50 text-blue-700">
+                        <InteractionIcon className="h-3.5 w-3.5" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-xs font-semibold text-gray-800">{readableInteractionValue(interaction.type)}</p>
+                          <span className="shrink-0 text-[10px] text-gray-400">{formatInteractionDate(interaction.date || interaction.createdAt)}</span>
+                        </div>
+                        <p className="mt-0.5 text-[11px] text-gray-500">
+                          {readableInteractionValue(interaction.outcome)}
+                          {interaction.sourceProvider ? ` / ${readableInteractionValue(interaction.sourceProvider)}` : ' / Manual'}
+                        </p>
+                        {interaction.notes ? <p className="mt-1 line-clamp-3 text-[11px] leading-4 text-gray-600">{interaction.notes}</p> : null}
+                        {interaction.nextFollowUp ? (
+                          <p className="mt-1.5 flex items-center gap-1 text-[10px] font-medium text-amber-700">
+                            <Clock3 className="h-3 w-3" />
+                            Next {formatInteractionDate(interaction.nextFollowUp)}
+                          </p>
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : null}
           </TabsContent>
         </Tabs>
       </div>

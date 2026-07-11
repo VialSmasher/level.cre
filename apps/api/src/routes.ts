@@ -34,6 +34,7 @@ import {
   SalesActivityReviewActionSchema,
   SalesActivityReviewError,
 } from './lib/salesActivityImportService';
+import { buildActivityPulse } from './lib/activityPulse';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Supabase client for server-side OAuth
@@ -4594,6 +4595,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error building Outlook automation brief:', error);
       res.status(500).json({ message: 'Failed to build Outlook brief' });
+    }
+  });
+
+  app.get('/api/automation/activity-pulse', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const days = Math.min(Math.max(Math.trunc(Number(req.query.days) || 28), 14), 90);
+      const rangeStart = new Date(Date.now() - (days + 2) * 24 * 60 * 60 * 1000).toISOString();
+      const rangeEnd = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const interactions = isDemo(req)
+        ? await demo.getInteractions(userId)
+        : await storage.getContactInteractions(userId, undefined, undefined, rangeStart, rangeEnd);
+      const pulse = buildActivityPulse(interactions || [], { days });
+      res.json({ generatedAt: new Date().toISOString(), ...pulse });
+    } catch (error) {
+      console.error('Error building activity pulse:', error);
+      res.status(500).json({ message: 'Failed to build activity pulse' });
     }
   });
 

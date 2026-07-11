@@ -14,9 +14,12 @@ import {
   Mail,
   MapPin,
   MapPinned,
+  Minus,
   RefreshCw,
   Send,
   Target,
+  TrendingDown,
+  TrendingUp,
   UserRoundSearch,
   Wifi,
   WifiOff,
@@ -117,6 +120,28 @@ type HeaderStats = {
   streakDays: number
 }
 
+type ActivityPulseResponse = {
+  generatedAt: string
+  days: number
+  total: number
+  activeDays: number
+  streakDays: number
+  automated: number
+  manual: number
+  currentPeriodTotal: number
+  previousPeriodTotal: number
+  trendPercent: number
+  series: Array<{
+    date: string
+    label: string
+    email: number
+    call: number
+    meeting: number
+    other: number
+    total: number
+  }>
+}
+
 type SalesActivityImportRow = {
   id: string
   source: string
@@ -188,6 +213,13 @@ const actionIcons: Record<ActionType, typeof ListTodo> = {
   research_target: UserRoundSearch,
   outlook_signal: Mail,
 }
+
+const activityChartConfig = {
+  email: { label: 'Email', color: '#2563eb' },
+  call: { label: 'Call', color: '#059669' },
+  meeting: { label: 'Meeting', color: '#ea580c' },
+  other: { label: 'Other', color: '#a855f7' },
+} as const
 
 function formatWhen(value?: string | null) {
   if (!value) return null
@@ -308,16 +340,26 @@ export default function DailyDeskPage() {
 
   const salesBriefQuery = useQuery<SalesBriefResponse>({
     queryKey: ['/api/automation/sales-brief?limit=25'],
-    enabled: !isDemoMode,
+    enabled: !isDemoMode || import.meta.env.DEV,
   })
   const importsQuery = useQuery<{ rows: SalesActivityImportRow[] }>({
     queryKey: ['/api/agent/sales-activity/imports?matchStatus=needs_review&limit=50'],
-    enabled: !isDemoMode,
+    enabled: !isDemoMode || import.meta.env.DEV,
   })
-  const prospectsQuery = useQuery<Prospect[]>({ queryKey: ['/api/prospects'], enabled: !isDemoMode })
-  const outlookQuery = useQuery<OutlookConfig>({ queryKey: ['/api/email/outlook/config'], enabled: !isDemoMode })
-  const inboundQuery = useQuery<InboundConfig>({ queryKey: ['/api/email/inbound/config'], enabled: !isDemoMode })
-  const statsQuery = useQuery<HeaderStats>({ queryKey: ['/api/stats/header'], enabled: !isDemoMode })
+  const prospectsQuery = useQuery<Prospect[]>({ queryKey: ['/api/prospects'], enabled: !isDemoMode || import.meta.env.DEV })
+  const outlookQuery = useQuery<OutlookConfig>({ queryKey: ['/api/email/outlook/config'], enabled: !isDemoMode || import.meta.env.DEV })
+  const inboundQuery = useQuery<InboundConfig>({ queryKey: ['/api/email/inbound/config'], enabled: !isDemoMode || import.meta.env.DEV })
+  const statsQuery = useQuery<HeaderStats>({ queryKey: ['/api/stats/header'], enabled: !isDemoMode || import.meta.env.DEV })
+  const activityPulseQuery = useQuery<ActivityPulseResponse>({
+    queryKey: ['/api/automation/activity-pulse', 28],
+    queryFn: async () => {
+      const response = await apiRequest('GET', '/api/automation/activity-pulse?days=28')
+      return response.json()
+    },
+    enabled: !isDemoMode || import.meta.env.DEV,
+    staleTime: 60_000,
+    refetchOnMount: 'always',
+  })
 
   const actions = salesBriefQuery.data?.actions || []
   const imports = importsQuery.data?.rows || []
@@ -376,6 +418,7 @@ export default function DailyDeskPage() {
     queryClient.invalidateQueries({ queryKey: ['/api/email/outlook/config'] })
     queryClient.invalidateQueries({ queryKey: ['/api/email/inbound/config'] })
     queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] })
+    queryClient.invalidateQueries({ queryKey: ['/api/automation/activity-pulse'] })
   }
 
   const tabCounts: Record<DeskTab, number> = {
@@ -389,10 +432,11 @@ export default function DailyDeskPage() {
   const generatedAt = formatWhen(salesBriefQuery.data?.generatedAt)
   const pulseMetrics = [
     { label: 'Follow-ups this week', value: statsQuery.data?.followupsLogged ?? 0, icon: Send, tone: 'text-emerald-700 bg-emerald-50' },
-    { label: 'Active-day streak', value: `${statsQuery.data?.streakDays ?? 0}d`, icon: Flame, tone: 'text-orange-700 bg-orange-50' },
+    { label: 'Active-day streak', value: `${activityPulseQuery.data?.streakDays ?? statsQuery.data?.streakDays ?? 0}d`, icon: Flame, tone: 'text-orange-700 bg-orange-50' },
     { label: 'Mapped prospects', value: statsQuery.data?.assetsTracked ?? 0, icon: MapPinned, tone: 'text-blue-700 bg-blue-50' },
     { label: 'Needs review', value: tabCounts.review, icon: Inbox, tone: 'text-fuchsia-700 bg-fuchsia-50' },
   ]
+  const maxDailyActivity = Math.max(1, ...(activityPulseQuery.data?.series.map((day) => day.total) || [1]))
 
   return (
     <div className="min-h-full bg-slate-50">
@@ -448,6 +492,66 @@ export default function DailyDeskPage() {
             )
           })}
         </section>
+
+        {activityPulseQuery.data ? (
+          <section className="mt-5 overflow-hidden rounded-md border border-slate-200 bg-white" aria-label="28-day sales momentum">
+            <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-950">28-day momentum</h2>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {activityPulseQuery.data.total} logged touch{activityPulseQuery.data.total === 1 ? '' : 'es'} across {activityPulseQuery.data.activeDays} active day{activityPulseQuery.data.activeDays === 1 ? '' : 's'}
+                </p>
+              </div>
+              <div className="flex items-center gap-4 text-xs">
+                <span className="text-slate-500">{activityPulseQuery.data.automated} captured automatically</span>
+                <span className={cn(
+                  'inline-flex items-center gap-1 font-semibold',
+                  activityPulseQuery.data.trendPercent > 0 && 'text-emerald-700',
+                  activityPulseQuery.data.trendPercent < 0 && 'text-red-700',
+                  activityPulseQuery.data.trendPercent === 0 && 'text-slate-500',
+                )}>
+                  {activityPulseQuery.data.trendPercent > 0 ? <TrendingUp className="h-3.5 w-3.5" /> : null}
+                  {activityPulseQuery.data.trendPercent < 0 ? <TrendingDown className="h-3.5 w-3.5" /> : null}
+                  {activityPulseQuery.data.trendPercent === 0 ? <Minus className="h-3.5 w-3.5" /> : null}
+                  {activityPulseQuery.data.trendPercent > 0 ? '+' : ''}{activityPulseQuery.data.trendPercent}% vs prior 14 days
+                </span>
+              </div>
+            </div>
+            <div className="px-2 pb-3 pt-4 sm:px-4">
+              <div className="relative h-[104px] border-b border-slate-200" role="img" aria-label="Stacked daily activity for the last 28 days">
+                <div className="absolute inset-0 flex items-end gap-1 sm:gap-1.5">
+                  {activityPulseQuery.data.series.map((day) => (
+                    <div key={day.date} className="flex h-full min-w-0 flex-1 items-end" title={`${day.label}: ${day.total} touch${day.total === 1 ? '' : 'es'}`}>
+                      <div
+                        className={cn('flex w-full flex-col-reverse overflow-hidden rounded-t-sm', day.total === 0 && 'bg-slate-100')}
+                        style={{ height: day.total === 0 ? 2 : `${Math.max(8, (day.total / maxDailyActivity) * 100)}%` }}
+                      >
+                        {(Object.keys(activityChartConfig) as Array<keyof typeof activityChartConfig>).map((key) => {
+                          const count = day[key]
+                          if (!count) return null
+                          return <span key={key} style={{ backgroundColor: activityChartConfig[key].color, flexGrow: count }} />
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-1.5 flex justify-between px-0.5 text-[10px] text-slate-400">
+                <span>{activityPulseQuery.data.series[0]?.label}</span>
+                <span>{activityPulseQuery.data.series[13]?.label}</span>
+                <span>{activityPulseQuery.data.series.at(-1)?.label}</span>
+              </div>
+              <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                {Object.entries(activityChartConfig).map(([key, item]) => (
+                  <span key={key} className="inline-flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: item.color }} />
+                    {item.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         <nav className="mt-5 grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white sm:grid-cols-4" aria-label="Daily desk queues">
           {([
