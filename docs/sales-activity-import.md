@@ -56,6 +56,44 @@ Optional query params:
 - `matchStatus`
 - `source`
 
+### `PATCH /api/agent/sales-activity/imports/:id`
+
+Resolves an activity that could not be matched confidently during import.
+
+Link a sent activity to an existing prospect:
+
+```json
+{
+  "action": "link",
+  "prospectId": "existing-prospect-id"
+}
+```
+
+The server verifies prospect ownership, reuses an existing Codex interaction when present, and otherwise creates one interaction before marking the import `matched`.
+
+Archive activity that should not enter the CRM:
+
+```json
+{
+  "action": "ignore"
+}
+```
+
+Activity with an existing interaction cannot be ignored.
+
+## Daily Desk
+
+`/app/desk` is the broker-facing review and action surface. It combines the ranked `/api/automation/sales-brief` output with `needs_review` sales activity imports.
+
+Its working queues are:
+
+- `Do now`: critical and high-priority actions.
+- `Waiting`: Outlook threads waiting on another party.
+- `Review`: captured email and Codex activity that needs context.
+- `Develop`: stale prospects, research targets, and lower-priority pipeline work.
+
+The page keeps `/app` as the map and links matched prospects back to `/app?prospectId=<id>`.
+
 ## Follow-Up Work
 
-The next safe layer is a review UI or agent brief over `needs_review` rows so unmatched sent activity can be linked to existing prospects or converted into new mapped prospects only when a real address/property is known.
+The next safe layer is durable automatic ingestion from Codex-led send workflows, followed by a shared prospect activity timeline. New mapped prospects should still be created only when a real address/property is known.

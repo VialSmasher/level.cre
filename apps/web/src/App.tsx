@@ -13,6 +13,7 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 // Use explicit relative paths for lazy-loaded pages to ensure Vite
 // rewrites dynamic imports correctly in all environments.
 const Home = lazy(() => import("./pages/home"));
+const DailyDesk = lazy(() => import("./pages/daily-desk"));
 const Knowledge = lazy(() => import("./pages/knowledge"));
 const FollowUp = lazy(() => import("./pages/followup"));
 const Inbox = lazy(() => import("./pages/inbox"));
@@ -237,6 +238,18 @@ function Router() {
                   <Home />
                 </Suspense>
               </RouteErrorBoundary>
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/app/desk">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <Suspense fallback={<Spinner />}>
+                <DailyDesk />
+              </Suspense>
             </AppLayout>
           </OnboardingCheck>
         </ProtectedRoute>

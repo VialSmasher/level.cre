@@ -21,7 +21,18 @@ export const SalesActivityBatchSchema = z.object({
   activities: z.array(z.record(z.unknown())).min(1).max(500),
 });
 
+export const SalesActivityReviewActionSchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('link'),
+    prospectId: z.string().trim().min(1),
+  }),
+  z.object({
+    action: z.literal('ignore'),
+  }),
+]);
+
 export type SalesActivityBatchInput = z.infer<typeof SalesActivityBatchSchema>;
+export type SalesActivityReviewAction = z.infer<typeof SalesActivityReviewActionSchema>;
 
 export type SalesActivityImportResult = {
   importId?: string;
@@ -46,6 +57,16 @@ export type SalesActivityImportSummary = {
   errors: number;
   results: SalesActivityImportResult[];
 };
+
+export class SalesActivityReviewError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'SalesActivityReviewError';
+    this.status = status;
+  }
+}
 
 async function resolveSalesActivityProspect(
   pool: Pool,
@@ -390,4 +411,161 @@ export async function listSalesActivityImports(params: {
     queryParams,
   );
   return rows;
+}
+
+export async function reviewSalesActivityImport(params: {
+  pool: Pool;
+  storage: ContactInteractionStorage;
+  userId: string;
+  importId: string;
+  decision: SalesActivityReviewAction;
+}): Promise<Record<string, unknown>> {
+  const importResult = await params.pool.query(
+    `
+      SELECT
+        id,
+        source,
+        run_id,
+        external_activity_id,
+        activity_status,
+        activity_type,
+        contact_name,
+        company,
+        email,
+        subject,
+        notes,
+        activity_at,
+        prospect_id,
+        listing_id,
+        match_status,
+        interaction_id
+      FROM public.sales_activity_imports
+      WHERE id = $1 AND user_id = $2
+      LIMIT 1
+    `,
+    [params.importId, params.userId],
+  );
+  const row = importResult.rows[0];
+  if (!row) {
+    throw new SalesActivityReviewError(404, 'Sales activity import not found');
+  }
+
+  if (params.decision.action === 'ignore') {
+    if (row.interaction_id) {
+      throw new SalesActivityReviewError(409, 'Logged activity cannot be ignored');
+    }
+    const ignored = await params.pool.query(
+      `
+        UPDATE public.sales_activity_imports
+        SET match_status = 'ignored',
+            match_reason = 'manually_ignored',
+            confidence = 100,
+            updated_at = now()
+        WHERE id = $1 AND user_id = $2
+        RETURNING id, match_status, match_reason, prospect_id, interaction_id, updated_at
+      `,
+      [params.importId, params.userId],
+    );
+    return ignored.rows[0];
+  }
+
+  const prospectResult = await params.pool.query(
+    `
+      SELECT id, status
+      FROM public.prospects
+      WHERE id = $1 AND user_id = $2
+      LIMIT 1
+    `,
+    [params.decision.prospectId, params.userId],
+  );
+  const prospect = prospectResult.rows[0];
+  if (!prospect) {
+    throw new SalesActivityReviewError(404, 'Prospect not found');
+  }
+
+  if (row.interaction_id && row.prospect_id !== prospect.id) {
+    throw new SalesActivityReviewError(409, 'Activity is already logged to another prospect');
+  }
+
+  const existingInteraction = await params.pool.query(
+    `
+      SELECT id
+      FROM public.contact_interactions
+      WHERE user_id = $1
+        AND source_provider = 'codex'
+        AND source_message_id = $2
+        AND prospect_id = $3
+      LIMIT 1
+    `,
+    [params.userId, row.external_activity_id, prospect.id],
+  );
+
+  let interactionId = row.interaction_id || existingInteraction.rows[0]?.id || null;
+  if (!interactionId) {
+    if (row.activity_status !== 'sent') {
+      throw new SalesActivityReviewError(409, 'Only sent activity can be logged as an interaction');
+    }
+    const interactionDate = row.activity_at
+      ? new Date(row.activity_at).toISOString()
+      : new Date().toISOString();
+    const context = [row.contact_name, row.company, row.email].filter(Boolean).join(' | ');
+    const noteParts = [
+      row.subject ? `Subject: ${row.subject}` : null,
+      row.notes || null,
+      context ? `Codex activity: ${context}` : null,
+    ].filter(Boolean);
+    const interaction = await params.storage.createContactInteraction({
+      userId: params.userId,
+      prospectId: prospect.id,
+      listingId: row.listing_id,
+      date: interactionDate,
+      type: row.activity_type || 'email',
+      outcome: 'contacted',
+      notes: noteParts.join('\n'),
+      nextFollowUp: null,
+      sourceProvider: 'codex',
+      sourceMessageId: row.external_activity_id,
+      sourceThreadId: null,
+      sourceEmailMessageId: null,
+      sourceMetadata: {
+        source: row.source,
+        runId: row.run_id,
+        importId: row.id,
+        subject: row.subject,
+        email: row.email,
+        company: row.company,
+        contactName: row.contact_name,
+        manuallyLinked: true,
+      },
+    }, { skipXp: true });
+    interactionId = interaction.id;
+
+    await params.pool.query(
+      `
+        UPDATE public.prospects
+        SET last_contact_date = $3,
+            status = CASE WHEN status = 'prospect' THEN 'contacted' ELSE status END,
+            updated_at = now()
+        WHERE id = $1 AND user_id = $2
+      `,
+      [prospect.id, params.userId, interactionDate],
+    );
+  }
+
+  const linked = await params.pool.query(
+    `
+      UPDATE public.sales_activity_imports
+      SET prospect_id = $3,
+          interaction_id = $4,
+          match_status = 'matched',
+          match_reason = 'manual_prospect_link',
+          confidence = 100,
+          updated_at = now()
+      WHERE id = $1 AND user_id = $2
+      RETURNING id, match_status, match_reason, prospect_id, interaction_id, updated_at
+    `,
+    [params.importId, params.userId, prospect.id, interactionId],
+  );
+
+  return linked.rows[0];
 }

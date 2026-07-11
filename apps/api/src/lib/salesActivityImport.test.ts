@@ -7,6 +7,10 @@ import {
   normalizeSalesActivityInput,
   shouldCreateInteractionFromSalesActivity,
 } from './salesActivityImport';
+import {
+  reviewSalesActivityImport,
+  SalesActivityReviewActionSchema,
+} from './salesActivityImportService';
 
 test('normalizes a Codex follow-up send log row into a stable sent email activity', () => {
   const activity = normalizeSalesActivityInput({
@@ -93,4 +97,104 @@ test('interaction notes preserve useful context without raw body dumping', () =>
     buildSalesActivityInteractionNotes(activity),
     'Subject: Catch up\nShort approved send note.\nCodex activity: Brian Beckett | KSM RIG & EQUIPMENT | bb.ksm@ksmrig.com',
   );
+});
+
+test('sales activity review actions accept only link or ignore decisions', () => {
+  assert.equal(SalesActivityReviewActionSchema.safeParse({ action: 'ignore' }).success, true);
+  assert.equal(SalesActivityReviewActionSchema.safeParse({ action: 'link', prospectId: 'prospect-1' }).success, true);
+  assert.equal(SalesActivityReviewActionSchema.safeParse({ action: 'link' }).success, false);
+  assert.equal(SalesActivityReviewActionSchema.safeParse({ action: 'send' }).success, false);
+});
+
+test('manual review can ignore an unmatched activity without creating an interaction', async () => {
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
+  const pool = {
+    query: async (sql: string, params: unknown[]) => {
+      queries.push({ sql, params });
+      if (queries.length === 1) {
+        return { rows: [{ id: 'import-1', interaction_id: null }] };
+      }
+      return { rows: [{ id: 'import-1', match_status: 'ignored', match_reason: 'manually_ignored' }] };
+    },
+  } as any;
+  let created = false;
+  const storage = {
+    createContactInteraction: async () => {
+      created = true;
+      return { id: 'interaction-1' };
+    },
+  };
+
+  const result = await reviewSalesActivityImport({
+    pool,
+    storage,
+    userId: 'user-1',
+    importId: 'import-1',
+    decision: { action: 'ignore' },
+  });
+
+  assert.equal(result.match_status, 'ignored');
+  assert.equal(created, false);
+  assert.equal(queries.length, 2);
+});
+
+test('manual review links sent Codex activity to a prospect exactly once', async () => {
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
+  const pool = {
+    query: async (sql: string, params: unknown[]) => {
+      queries.push({ sql, params });
+      if (queries.length === 1) {
+        return { rows: [{
+          id: 'import-1',
+          source: 'codex_followup',
+          run_id: 'run-1',
+          external_activity_id: 'activity-1',
+          activity_status: 'sent',
+          activity_type: 'email',
+          contact_name: 'Pat Prospect',
+          company: 'Prospect Co',
+          email: 'pat@example.com',
+          subject: 'Follow up',
+          notes: 'Approved and sent.',
+          activity_at: new Date('2026-07-10T15:00:00.000Z'),
+          prospect_id: null,
+          listing_id: null,
+          match_status: 'needs_review',
+          interaction_id: null,
+        }] };
+      }
+      if (queries.length === 2) return { rows: [{ id: 'prospect-1', status: 'prospect' }] };
+      if (queries.length === 3) return { rows: [] };
+      if (queries.length === 4) return { rows: [] };
+      return { rows: [{
+        id: 'import-1',
+        match_status: 'matched',
+        match_reason: 'manual_prospect_link',
+        prospect_id: 'prospect-1',
+        interaction_id: 'interaction-1',
+      }] };
+    },
+  } as any;
+  const created: any[] = [];
+  const storage = {
+    createContactInteraction: async (payload: any, options: any) => {
+      created.push({ payload, options });
+      return { id: 'interaction-1' };
+    },
+  };
+
+  const result = await reviewSalesActivityImport({
+    pool,
+    storage,
+    userId: 'user-1',
+    importId: 'import-1',
+    decision: { action: 'link', prospectId: 'prospect-1' },
+  });
+
+  assert.equal(result.match_status, 'matched');
+  assert.equal(created.length, 1);
+  assert.equal(created[0].payload.sourceProvider, 'codex');
+  assert.equal(created[0].payload.notes.includes('Subject: Follow up'), true);
+  assert.deepEqual(created[0].options, { skipXp: true });
+  assert.equal(queries.length, 5);
 });

@@ -29,7 +29,10 @@ import {
 import {
   importSalesActivityBatch,
   listSalesActivityImports,
+  reviewSalesActivityImport,
   SalesActivityBatchSchema,
+  SalesActivityReviewActionSchema,
+  SalesActivityReviewError,
 } from './lib/salesActivityImportService';
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -3199,6 +3202,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error getting sales activity imports:', error);
       res.status(500).json({ message: 'Failed to get sales activity imports' });
+    }
+  });
+
+  app.patch('/api/agent/sales-activity/imports/:id', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = SalesActivityReviewActionSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid sales activity review action', error: parsed.error.errors });
+      }
+      if (isDemo(req)) {
+        return res.json({
+          id: req.params.id,
+          match_status: parsed.data.action === 'ignore' ? 'ignored' : 'matched',
+          skipped: true,
+          reason: 'demo_mode',
+        });
+      }
+      const result = await reviewSalesActivityImport({
+        pool,
+        storage,
+        userId,
+        importId: req.params.id,
+        decision: parsed.data,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof SalesActivityReviewError) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      console.error('Error reviewing sales activity import:', error);
+      res.status(500).json({ message: 'Failed to review sales activity import' });
     }
   });
 

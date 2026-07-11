@@ -25,7 +25,8 @@ import {
   ChartSpline,
   Bot,
   Trophy,
-  Mail
+  Mail,
+  ListTodo,
 } from 'lucide-react'
 import { Table } from 'lucide-react'
 import { Link, useLocation } from 'wouter'
@@ -72,6 +73,7 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   const navGroups: NavItem[][] = [
     [
+      { label: 'Today', href: '/app/desk', icon: ListTodo, active: isActive('/app/desk') },
       { label: 'Map', href: '/app', icon: Map, active: isActive('/app') },
       { label: 'Workspaces', href: workspacesHref, icon: Briefcase, active: isActive('/app/workspaces') },
       { label: 'Follow-ups', href: '/app/followup', icon: RotateCcw, active: isActive('/app/followup') },
@@ -224,6 +226,27 @@ export function AppLayout({ children }: AppLayoutProps) {
         {mobileMenuOpen && (
           <div className="md:hidden bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
             <div className="px-4 py-3 space-y-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link
+                    href="/app/desk"
+                    className={`flex items-center space-x-3 p-3 rounded-md transition-all duration-200 ${
+                      isActive('/app/desk')
+                        ? 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/30'
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                    onClick={() => setMobileMenuOpen(false)}
+                    aria-label="Today"
+                  >
+                    <ListTodo size={20} />
+                    <span className="font-medium">Today</span>
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  <p>Today</p>
+                </TooltipContent>
+              </Tooltip>
+
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Link 
