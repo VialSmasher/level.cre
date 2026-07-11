@@ -216,6 +216,7 @@ export async function importSalesActivityBatch(params: {
   userId: string;
   payload: SalesActivityBatchInput;
   requireEditAccess?: (listingId: string) => Promise<unknown>;
+  hasCapturedEmailEvidence?: (activity: NormalizedSalesActivity) => Promise<boolean>;
   reconcileEmailEvidence?: (activity: NormalizedSalesActivity) => Promise<number>;
 }): Promise<SalesActivityImportSummary> {
   const summary: SalesActivityImportSummary = {
@@ -276,6 +277,14 @@ export async function importSalesActivityBatch(params: {
           interactionId = existingInteraction.rows[0].id;
           duplicateInteraction = true;
         } else if (!interactionId) {
+          let capturedEmailAlreadyAwardedXp = false;
+          if (params.hasCapturedEmailEvidence) {
+            try {
+              capturedEmailAlreadyAwardedXp = await params.hasCapturedEmailEvidence(activity);
+            } catch (error) {
+              console.warn('Failed to check captured email evidence before creating interaction:', error);
+            }
+          }
           const interactionDate = (activity.activityAt || new Date()).toISOString();
           const interaction = await params.storage.createContactInteraction({
             userId: params.userId,
@@ -299,7 +308,7 @@ export async function importSalesActivityBatch(params: {
               company: activity.company,
               contactName: activity.contactName,
             },
-          });
+          }, capturedEmailAlreadyAwardedXp ? { skipXp: true } : undefined);
           interactionId = interaction.id;
           summary.createdInteractions += 1;
         }

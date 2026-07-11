@@ -8,7 +8,9 @@ import {
   shouldCreateInteractionFromSalesActivity,
 } from './salesActivityImport';
 import {
+  importSalesActivityBatch,
   reviewSalesActivityImport,
+  SalesActivityBatchSchema,
   SalesActivityReviewActionSchema,
 } from './salesActivityImportService';
 
@@ -197,4 +199,48 @@ test('manual review links sent Codex activity to a prospect exactly once', async
   assert.equal(created[0].payload.notes.includes('Subject: Follow up'), true);
   assert.deepEqual(created[0].options, { skipXp: true });
   assert.equal(queries.length, 5);
+});
+
+test('a Postmark-first direct match creates one interaction without duplicate XP', async () => {
+  const pool = {
+    query: async (sql: string) => {
+      if (sql.includes('FROM public.prospects') && sql.includes('LIMIT 1')) return { rows: [{ id: 'prospect-1' }] };
+      if (sql.includes('SELECT id, interaction_id') && sql.includes('sales_activity_imports')) return { rows: [] };
+      if (sql.includes('INSERT INTO public.sales_activity_imports')) {
+        return { rows: [{ id: 'import-1', interaction_id: null, match_status: 'matched', prospect_id: 'prospect-1' }] };
+      }
+      if (sql.includes('FROM public.contact_interactions')) return { rows: [] };
+      return { rows: [], rowCount: 0 };
+    },
+  } as any;
+  const created: any[] = [];
+  const storage = {
+    createContactInteraction: async (payload: any, options: any) => {
+      created.push({ payload, options });
+      return { id: 'interaction-1' };
+    },
+  };
+
+  const result = await importSalesActivityBatch({
+    pool,
+    storage,
+    userId: 'user-1',
+    payload: SalesActivityBatchSchema.parse({
+      source: 'codex_followup',
+      activities: [{
+        externalActivityId: 'activity-1',
+        status: 'sent',
+        activityType: 'email',
+        prospectId: 'prospect-1',
+        email: 'buyer@example.com',
+        subject: 'Follow up',
+        activityAt: '2026-07-11T06:00:00.000Z',
+      }],
+    }),
+    hasCapturedEmailEvidence: async () => true,
+  });
+
+  assert.equal(result.createdInteractions, 1);
+  assert.equal(created.length, 1);
+  assert.deepEqual(created[0].options, { skipXp: true });
 });

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   findMatchingCodexEmailImport,
+  hasMatchingCapturedEmailEvidence,
   isSameEmailActivity,
   normalizeEmailActivitySubject,
   suppressEmailReviewsMatchingSalesActivity,
@@ -102,4 +103,26 @@ test('a later Codex import suppresses only unresolved duplicate email reviews', 
   assert.equal(queries.length, 2);
   assert.match(queries[1].sql, /interaction_id IS NULL/);
   assert.match(queries[1].sql, /duplicate_codex_activity/);
+});
+
+test('detects captured evidence before a direct interaction awards XP', async () => {
+  const pool = {
+    query: async () => ({ rows: [{
+      id: 'email-message-1',
+      subject: '10735 214 St follow-up',
+      recipient_emails: ['buyer@example.com'],
+      sent_at: new Date('2026-07-10T15:03:00.000Z'),
+      received_at: new Date('2026-07-10T15:04:00.000Z'),
+    }] }),
+  } as any;
+  const activity = normalizeSalesActivityInput({
+    source: 'codex_followup',
+    status: 'sent',
+    activityType: 'email',
+    email: 'buyer@example.com',
+    subject: '10735 214 St follow-up',
+    activityAt: '2026-07-10T15:00:00.000Z',
+  });
+
+  assert.equal(await hasMatchingCapturedEmailEvidence({ pool, userId: 'user-1', activity }), true);
 });

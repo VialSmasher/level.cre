@@ -36,6 +36,7 @@ import {
 } from './lib/salesActivityImportService';
 import {
   findMatchingCodexEmailImport,
+  hasMatchingCapturedEmailEvidence,
   suppressEmailReviewsMatchingSalesActivity,
 } from './lib/emailActivityReconciliation';
 import { buildPipelineHealth } from './lib/pipelineHealth';
@@ -3224,6 +3225,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId,
         payload: parsed.data,
         requireEditAccess: async (listingId) => requireEditAccess(req, listingId),
+        hasCapturedEmailEvidence: async (activity) => hasMatchingCapturedEmailEvidence({
+          pool,
+          userId,
+          activity,
+        }),
         reconcileEmailEvidence: async (activity) => suppressEmailReviewsMatchingSalesActivity({
           pool,
           userId,

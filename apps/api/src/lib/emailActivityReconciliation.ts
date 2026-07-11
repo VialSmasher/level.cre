@@ -88,11 +88,11 @@ export async function findMatchingCodexEmailImport(params: {
     : null;
 }
 
-export async function suppressEmailReviewsMatchingSalesActivity(params: {
+async function findMatchingCapturedEmailMessageIds(params: {
   pool: Pool;
   userId: string;
   activity: NormalizedSalesActivity;
-}): Promise<number> {
+}): Promise<string[]> {
   const { activity } = params;
   const occurredAt = parseDate(activity.activityAt);
   const subject = normalizeEmailActivitySubject(activity.subject);
@@ -103,7 +103,7 @@ export async function suppressEmailReviewsMatchingSalesActivity(params: {
     || !activity.email
     || !occurredAt
     || !subject
-  ) return 0;
+  ) return [];
 
   const { rows } = await params.pool.query(
     `
@@ -124,7 +124,7 @@ export async function suppressEmailReviewsMatchingSalesActivity(params: {
     [params.userId, activity.email, occurredAt],
   );
 
-  const matchingMessageIds = rows
+  return rows
     .filter((row) => isSameEmailActivity(
       { subject: activity.subject, counterpartyEmails: [activity.email], occurredAt },
       {
@@ -134,6 +134,23 @@ export async function suppressEmailReviewsMatchingSalesActivity(params: {
       },
     ))
     .map((row) => row.id);
+}
+
+export async function hasMatchingCapturedEmailEvidence(params: {
+  pool: Pool;
+  userId: string;
+  activity: NormalizedSalesActivity;
+}): Promise<boolean> {
+  const matchingMessageIds = await findMatchingCapturedEmailMessageIds(params);
+  return matchingMessageIds.length > 0;
+}
+
+export async function suppressEmailReviewsMatchingSalesActivity(params: {
+  pool: Pool;
+  userId: string;
+  activity: NormalizedSalesActivity;
+}): Promise<number> {
+  const matchingMessageIds = await findMatchingCapturedEmailMessageIds(params);
   if (matchingMessageIds.length === 0) return 0;
 
   const result = await params.pool.query(
