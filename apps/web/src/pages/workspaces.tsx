@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { PageHeader } from '@/components/ui/page-header';
 import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/primitives/Modal';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -66,23 +67,30 @@ function WorkspaceCard({
 
   return (
     <Card
-      className="group relative cursor-pointer overflow-hidden border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+      className="group relative cursor-pointer overflow-hidden border-slate-200 bg-white transition hover:border-blue-300 hover:shadow-[0_4px_12px_rgba(15,23,42,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
       onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.currentTarget !== event.target) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
     >
-      <CardHeader className="space-y-0 pb-3">
+      <CardHeader className="space-y-0 p-4 pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
-              {kind === 'shared' ? <Users className="h-5 w-5" /> : <Briefcase className="h-5 w-5" />}
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-700">
+              {kind === 'shared' ? <Users className="h-4 w-4" /> : <Briefcase className="h-4 w-4" />}
             </div>
             <div className="min-w-0">
               <CardTitle className="truncate text-base leading-tight text-slate-950" title={name}>
                 {name}
               </CardTitle>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="rounded-full border-slate-200 bg-slate-50 px-2 py-0 text-xs text-slate-600">
-                  {kind === 'shared' ? 'Shared' : 'Workspace'}
-                </Badge>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                {kind === 'shared' ? <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">Shared</Badge> : null}
                 <span className="inline-flex items-center gap-1 text-xs text-slate-500">
                   <CalendarDays className="h-3.5 w-3.5" />
                   {formatDate(workspace.createdAt)}
@@ -95,7 +103,7 @@ function WorkspaceCard({
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-8 w-8 shrink-0 rounded-full opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100"
+                className="h-8 w-8 shrink-0 opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100"
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
                 aria-label="Workspace actions"
               >
@@ -120,13 +128,10 @@ function WorkspaceCard({
           </DropdownMenu>
         </div>
       </CardHeader>
-      <CardContent className="pt-0">
-        <div className="flex items-center justify-between border-t border-slate-100 pt-4">
-          <div>
-            <p className="text-2xl font-bold text-slate-950">{count}</p>
-            <p className="text-xs text-slate-500">{prospectLabel(count)}</p>
-          </div>
-          <div className="inline-flex items-center gap-1 text-sm font-semibold text-blue-700 opacity-0 transition-opacity group-hover:opacity-100">
+      <CardContent className="p-4 pt-0">
+        <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+          <p className="text-sm text-slate-600"><span className="font-semibold text-slate-950">{count}</span> {prospectLabel(count)}</p>
+          <div className="inline-flex items-center gap-1 text-sm font-medium text-blue-700">
             Open
             <ArrowRight className="h-4 w-4" />
           </div>
@@ -352,70 +357,66 @@ export default function WorkspacesIndex() {
   });
 
   return (
-    <div className="min-h-screen bg-slate-50 px-6 py-8">
-      <div className="mx-auto max-w-6xl space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div>
-          <Badge variant="outline" className="mb-2 gap-2 rounded-full border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
-            <Briefcase className="h-3.5 w-3.5" />
-            Workspace library
-          </Badge>
-          <h1 className="text-4xl font-bold tracking-tight text-slate-950">Workspace command center</h1>
-          <p className="mt-2 max-w-2xl text-sm text-slate-600">Organize pursuit maps, shared prospect sets, and client-specific canvassing work.</p>
-        </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button onClick={() => setOpen(true)} aria-label="Create Workspace" className="h-10 rounded-full px-4">
-              <Plus className="mr-2 h-4 w-4" />
-              New workspace
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Create Workspace</p>
-          </TooltipContent>
-        </Tooltip>
-      </div>
+    <div className="min-h-full bg-slate-50">
+      <div className="mx-auto max-w-7xl space-y-5 px-4 py-6 sm:px-6 lg:px-8">
+      <PageHeader
+        label="Workspace library"
+        title="Deals"
+        description="Client pursuits, listings, and shared prospecting workspaces."
+        icon={Briefcase}
+        actions={(
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button onClick={() => setOpen(true)} aria-label="Create workspace" className="h-9 px-3">
+                <Plus className="h-4 w-4" />
+                New workspace
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent><p>Create workspace</p></TooltipContent>
+          </Tooltip>
+        )}
+      />
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="border-slate-200 bg-white shadow-sm">
-          <CardContent className="flex items-center justify-between p-5">
+      <section className="grid overflow-hidden rounded-lg border border-slate-200 bg-white sm:grid-cols-3" aria-label="Workspace totals">
+        <div className="border-b border-slate-200 sm:border-b-0 sm:border-r">
+          <div className="flex items-center justify-between p-4">
             <div>
-              <p className="text-sm font-medium text-slate-600">My workspaces</p>
-              <p className="mt-1 text-3xl font-bold text-slate-950">{listings.length}</p>
+              <p className="text-xs font-medium text-slate-500">My workspaces</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-950">{listings.length}</p>
             </div>
-            <div className="rounded-xl bg-blue-50 p-2 text-blue-600">
+            <div className="rounded-md bg-blue-50 p-2 text-blue-600">
               <Briefcase className="h-5 w-5" />
             </div>
-          </CardContent>
-        </Card>
-        <Card className="border-slate-200 bg-white shadow-sm">
-          <CardContent className="flex items-center justify-between p-5">
+          </div>
+        </div>
+        <div className="border-b border-slate-200 sm:border-b-0 sm:border-r">
+          <div className="flex items-center justify-between p-4">
             <div>
-              <p className="text-sm font-medium text-slate-600">My prospects</p>
-              <p className="mt-1 text-3xl font-bold text-slate-950">{totalOwnedProspects}</p>
+              <p className="text-xs font-medium text-slate-500">My prospects</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-950">{totalOwnedProspects}</p>
             </div>
-            <div className="rounded-xl bg-emerald-50 p-2 text-emerald-600">
+            <div className="rounded-md bg-emerald-50 p-2 text-emerald-600">
               <Sparkles className="h-5 w-5" />
             </div>
-          </CardContent>
-        </Card>
-        <Card className="border-slate-200 bg-white shadow-sm">
-          <CardContent className="flex items-center justify-between p-5">
+          </div>
+        </div>
+        <div>
+          <div className="flex items-center justify-between p-4">
             <div>
-              <p className="text-sm font-medium text-slate-600">Shared prospects</p>
-              <p className="mt-1 text-3xl font-bold text-slate-950">{totalSharedProspects}</p>
+              <p className="text-xs font-medium text-slate-500">Shared prospects</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-950">{totalSharedProspects}</p>
             </div>
-            <div className="rounded-xl bg-violet-50 p-2 text-violet-600">
+            <div className="rounded-md bg-violet-50 p-2 text-violet-600">
               <Users className="h-5 w-5" />
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </div>
+      </section>
 
       {isLoading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-40 animate-pulse rounded-2xl bg-white shadow-sm" />
+            <div key={i} className="h-36 animate-pulse rounded-lg border border-slate-200 bg-white" />
           ))}
         </div>
       ) : (
@@ -423,10 +424,10 @@ export default function WorkspacesIndex() {
           <section className="space-y-3">
           <div className="flex items-end justify-between">
             <div>
-              <h2 className="text-xl font-bold text-slate-950">My workspaces</h2>
+              <h2 className="text-base font-semibold text-slate-950">My workspaces</h2>
               <p className="text-sm text-slate-600">Client maps and prospecting boards ready to work.</p>
             </div>
-            <Badge variant="outline" className="rounded-full bg-white">{listings.length}</Badge>
+            <Badge variant="outline" className="bg-white">{listings.length}</Badge>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {listings.length === 0 && (
@@ -461,15 +462,15 @@ export default function WorkspacesIndex() {
         <section className="space-y-3">
           <div className="flex items-end justify-between">
             <div>
-              <h2 className="text-xl font-bold text-slate-950">Shared with me</h2>
+              <h2 className="text-base font-semibold text-slate-950">Shared with me</h2>
               <p className="text-sm text-slate-600">Pursuits and prospect boards other brokers have shared with you.</p>
             </div>
-            <Badge variant="outline" className="rounded-full bg-white">{shared.length}</Badge>
+            <Badge variant="outline" className="bg-white">{shared.length}</Badge>
           </div>
           {isLoadingShared ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-40 animate-pulse rounded-2xl bg-white shadow-sm" />
+                <div key={i} className="h-36 animate-pulse rounded-lg border border-slate-200 bg-white" />
               ))}
             </div>
           ) : shared.length === 0 ? (

@@ -6,6 +6,7 @@ import { Link } from 'wouter'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { PageHeader } from '@/components/ui/page-header'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -316,17 +317,14 @@ export default function InboxPage() {
 
   return (
     <div className="min-h-0 flex-1 bg-slate-50">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-blue-700">
-              <InboxIcon className="h-4 w-4" />
-              Inbox
-            </div>
-            <h1 className="mt-1 text-2xl font-bold text-slate-950">CRM Activity</h1>
-            <p className="mt-1 text-sm text-slate-500">Captured emails, lightweight context cleanup, and sales activity credit.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
+        <PageHeader
+          label="Inbox"
+          title="Activity inbox"
+          description="Captured sales emails waiting for context, logging, or archive."
+          icon={InboxIcon}
+          actions={(
+            <>
             <Badge variant="outline" className="h-8 gap-1.5 bg-white px-3 text-emerald-700">
               <ShieldCheck className="h-3.5 w-3.5" />
               BCC capture {inboundConfig?.configured ? 'ready' : 'needs setup'}
@@ -337,23 +335,26 @@ export default function InboxPage() {
                 Email Settings
               </Link>
             </Button>
-          </div>
-        </div>
+            </>
+          )}
+        />
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {dashboardCards.map((card) => (
-            <Card key={card.label} className="rounded-lg border-slate-200 bg-white shadow-sm">
-              <CardContent className="p-4">
+        <section className="grid overflow-hidden rounded-lg border border-slate-200 bg-white sm:grid-cols-2 lg:grid-cols-4" aria-label="Inbox totals">
+          {dashboardCards.map((card, index) => (
+            <div
+              key={card.label}
+              className={`${index < dashboardCards.length - 1 ? 'border-b border-slate-200 sm:border-r lg:border-b-0' : ''} ${index === 1 ? 'sm:border-r-0 lg:border-r' : ''}`}
+            >
+              <div className="p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{card.label}</p>
-                <div className={`mt-2 text-3xl font-semibold ${card.tone}`}>{card.value.toLocaleString()}</div>
+                <div className={`mt-1 text-2xl font-semibold ${card.tone}`}>{card.value.toLocaleString()}</div>
                 <p className="mt-1 text-xs text-slate-500">{card.helper}</p>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           ))}
-        </div>
+        </section>
 
-        <Card className="rounded-lg border-slate-200 shadow-sm">
-          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 md:flex-row md:items-center md:justify-between">
             <div className="relative w-full md:max-w-md">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
@@ -387,8 +388,7 @@ export default function InboxPage() {
                 <RefreshCcw className="h-4 w-4" />
               </Button>
             </div>
-          </CardContent>
-        </Card>
+        </div>
 
         <Card className="hidden rounded-lg border-slate-200 shadow-sm">
           <CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
@@ -402,7 +402,7 @@ export default function InboxPage() {
               {outlookConfig?.connected ? (
                 <p className="mt-1 text-sm text-slate-500">
                   {outlookConfig.connection?.emailAddress || outlookConfig.connection?.displayName || 'Microsoft 365'}
-                  {outlookConfig.connection?.lastSyncedAt ? ` · synced ${formatDistanceToNow(new Date(outlookConfig.connection.lastSyncedAt), { addSuffix: true })}` : ''}
+                  {outlookConfig.connection?.lastSyncedAt ? ` / synced ${formatDistanceToNow(new Date(outlookConfig.connection.lastSyncedAt), { addSuffix: true })}` : ''}
                 </p>
               ) : outlookConfig?.configured ? (
                 <p className="mt-1 text-sm text-slate-500">Connect Microsoft 365 to start filling the review queue.</p>
@@ -462,13 +462,13 @@ export default function InboxPage() {
           </CardContent>
         </Card>
 
-        <div className="grid gap-3">
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
           {isLoading ? (
-            <Card className="rounded-lg border-slate-200">
+            <Card className="rounded-none border-0 shadow-none">
               <CardContent className="py-10 text-center text-sm text-slate-500">Loading email review...</CardContent>
             </Card>
           ) : filteredItems.length === 0 ? (
-            <Card className="rounded-lg border-slate-200">
+            <Card className="rounded-none border-0 shadow-none">
               <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
                 <Mail className="h-8 w-8 text-slate-300" />
                 <p className="text-sm font-medium text-slate-700">No {statusLabels[status].toLowerCase()} emails</p>
@@ -476,8 +476,8 @@ export default function InboxPage() {
             </Card>
           ) : (
             filteredItems.map((item) => (
-              <Card key={item.id} className="rounded-lg border-slate-200 bg-white shadow-sm">
-                <CardHeader className="space-y-3 p-4 pb-3">
+              <Card key={item.id} className="rounded-none border-0 border-b border-slate-200 bg-white shadow-none last:border-b-0">
+                <CardHeader className="space-y-3 p-4 pb-2">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -498,7 +498,7 @@ export default function InboxPage() {
                         ) : null}
                         <span className="text-xs text-slate-500">{formatEmailDate(item)}</span>
                       </div>
-                      <CardTitle className="mt-2 truncate text-base text-slate-950">
+                      <CardTitle className="mt-2 truncate text-sm text-slate-950 sm:text-base">
                         {item.email.subject || '(No subject)'}
                       </CardTitle>
                       <p className="mt-1 truncate text-sm text-slate-500">
@@ -518,6 +518,7 @@ export default function InboxPage() {
                       <Button
                         variant="outline"
                         size="sm"
+                        className="h-8"
                         disabled={updateStatusMutation.isPending}
                         onClick={() => updateStatusMutation.mutate({ id: item.id, matchStatus: 'ignored' })}
                       >
@@ -526,6 +527,7 @@ export default function InboxPage() {
                       </Button>
                       <Button
                         size="sm"
+                        className="h-8"
                         disabled={!item.prospect || logInteractionMutation.isPending}
                         onClick={() => openLogDialog(item)}
                       >
@@ -536,6 +538,7 @@ export default function InboxPage() {
                         <Button
                           variant="outline"
                           size="sm"
+                          className="h-8"
                           disabled={updateStatusMutation.isPending}
                           onClick={() => updateStatusMutation.mutate({ id: item.id, prospectId: null, listingId: null, matchStatus: 'needs_context' })}
                         >
@@ -545,7 +548,7 @@ export default function InboxPage() {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="grid gap-4 p-4 pt-0 lg:grid-cols-[1fr_320px]">
+                <CardContent className="grid gap-4 p-4 pt-0 lg:grid-cols-[minmax(0,1fr)_300px]">
                   <div className="space-y-2">
                     <p className="line-clamp-3 text-sm leading-6 text-slate-700">
                       {item.suggestedSummary || item.email.snippet || 'No preview available.'}
@@ -554,8 +557,8 @@ export default function InboxPage() {
                       <p className="text-xs text-slate-500">{item.matchReason}</p>
                     ) : null}
                   </div>
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Email Context</p>
+                  <div className="border-t border-slate-200 pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+                    <p className="text-[11px] font-semibold text-slate-500">Email context</p>
                     {item.prospect ? (
                       <div className="mt-2 space-y-1">
                         <p className="text-sm font-semibold text-slate-950">{item.prospect.contactCompany || item.prospect.businessName || item.prospect.name || 'Untitled prospect'}</p>

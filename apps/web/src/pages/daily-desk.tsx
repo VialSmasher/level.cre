@@ -27,6 +27,7 @@ import {
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/ui/page-header'
 import {
   Select,
   SelectContent,
@@ -339,6 +340,68 @@ function EmptyQueue({ tab }: { tab: DeskTab }) {
   )
 }
 
+function ActivityMomentum({ data, maxDailyActivity }: { data: ActivityPulseResponse; maxDailyActivity: number }) {
+  return (
+    <section className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white" aria-label="28-day sales momentum">
+      <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-950">28-day momentum</h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            {data.total} logged touch{data.total === 1 ? '' : 'es'} across {data.activeDays} active day{data.activeDays === 1 ? '' : 's'}
+          </p>
+        </div>
+        <div className="flex items-center gap-4 text-xs">
+          <span className="text-slate-500">{data.automated} captured automatically</span>
+          <span className={cn(
+            'inline-flex items-center gap-1 font-semibold',
+            data.trendPercent > 0 && 'text-emerald-700',
+            data.trendPercent < 0 && 'text-red-700',
+            data.trendPercent === 0 && 'text-slate-500',
+          )}>
+            {data.trendPercent > 0 ? <TrendingUp className="h-3.5 w-3.5" /> : null}
+            {data.trendPercent < 0 ? <TrendingDown className="h-3.5 w-3.5" /> : null}
+            {data.trendPercent === 0 ? <Minus className="h-3.5 w-3.5" /> : null}
+            {data.trendPercent > 0 ? '+' : ''}{data.trendPercent}% vs prior 14 days
+          </span>
+        </div>
+      </div>
+      <div className="px-2 pb-3 pt-4 sm:px-4">
+        <div className="relative h-[104px] border-b border-slate-200" role="img" aria-label="Stacked daily activity for the last 28 days">
+          <div className="absolute inset-0 flex items-end gap-1 sm:gap-1.5">
+            {data.series.map((day) => (
+              <div key={day.date} className="flex h-full min-w-0 flex-1 items-end" title={`${day.label}: ${day.total} touch${day.total === 1 ? '' : 'es'}`}>
+                <div
+                  className={cn('flex w-full flex-col-reverse overflow-hidden rounded-t-sm', day.total === 0 && 'bg-slate-100')}
+                  style={{ height: day.total === 0 ? 2 : `${Math.max(8, (day.total / maxDailyActivity) * 100)}%` }}
+                >
+                  {(Object.keys(activityChartConfig) as Array<keyof typeof activityChartConfig>).map((key) => {
+                    const count = day[key]
+                    if (!count) return null
+                    return <span key={key} style={{ backgroundColor: activityChartConfig[key].color, flexGrow: count }} />
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="mt-1.5 flex justify-between px-0.5 text-[10px] text-slate-400">
+          <span>{data.series[0]?.label}</span>
+          <span>{data.series[13]?.label}</span>
+          <span>{data.series.at(-1)?.label}</span>
+        </div>
+        <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
+          {Object.entries(activityChartConfig).map(([key, item]) => (
+            <span key={key} className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: item.color }} />
+              {item.label}
+            </span>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export default function DailyDeskPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -448,19 +511,14 @@ export default function DailyDeskPage() {
 
   return (
     <div className="min-h-full bg-slate-50">
-      <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        <header className="flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase text-blue-700">
-              <ListTodo className="h-4 w-4" />
-              Daily Desk
-            </div>
-            <h1 className="mt-2 text-2xl font-bold text-slate-950 sm:text-3xl">What moves business today</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-              Level CRE and recent email activity, ranked into a practical working queue.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
+      <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        <PageHeader
+          label="Daily desk"
+          title="Today"
+          description="Your ranked action queue from Level CRE and recent email activity."
+          icon={ListTodo}
+          actions={(
+            <>
             {generatedAt ? <span className="hidden text-xs text-slate-500 sm:inline">Updated {generatedAt}</span> : null}
             <Button variant="outline" size="sm" onClick={refresh} disabled={isLoading}>
               <RefreshCw className={cn('h-4 w-4', isLoading && 'animate-spin')} />
@@ -472,8 +530,9 @@ export default function DailyDeskPage() {
                 Map
               </Link>
             </Button>
-          </div>
-        </header>
+            </>
+          )}
+        />
 
         <section className="mt-5 grid overflow-hidden rounded-md border border-slate-200 bg-white sm:grid-cols-2 lg:grid-cols-4" aria-label="Business development pulse">
           {pulseMetrics.map((metric, index) => {
@@ -500,66 +559,6 @@ export default function DailyDeskPage() {
             )
           })}
         </section>
-
-        {activityPulseQuery.data ? (
-          <section className="mt-5 overflow-hidden rounded-md border border-slate-200 bg-white" aria-label="28-day sales momentum">
-            <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-950">28-day momentum</h2>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  {activityPulseQuery.data.total} logged touch{activityPulseQuery.data.total === 1 ? '' : 'es'} across {activityPulseQuery.data.activeDays} active day{activityPulseQuery.data.activeDays === 1 ? '' : 's'}
-                </p>
-              </div>
-              <div className="flex items-center gap-4 text-xs">
-                <span className="text-slate-500">{activityPulseQuery.data.automated} captured automatically</span>
-                <span className={cn(
-                  'inline-flex items-center gap-1 font-semibold',
-                  activityPulseQuery.data.trendPercent > 0 && 'text-emerald-700',
-                  activityPulseQuery.data.trendPercent < 0 && 'text-red-700',
-                  activityPulseQuery.data.trendPercent === 0 && 'text-slate-500',
-                )}>
-                  {activityPulseQuery.data.trendPercent > 0 ? <TrendingUp className="h-3.5 w-3.5" /> : null}
-                  {activityPulseQuery.data.trendPercent < 0 ? <TrendingDown className="h-3.5 w-3.5" /> : null}
-                  {activityPulseQuery.data.trendPercent === 0 ? <Minus className="h-3.5 w-3.5" /> : null}
-                  {activityPulseQuery.data.trendPercent > 0 ? '+' : ''}{activityPulseQuery.data.trendPercent}% vs prior 14 days
-                </span>
-              </div>
-            </div>
-            <div className="px-2 pb-3 pt-4 sm:px-4">
-              <div className="relative h-[104px] border-b border-slate-200" role="img" aria-label="Stacked daily activity for the last 28 days">
-                <div className="absolute inset-0 flex items-end gap-1 sm:gap-1.5">
-                  {activityPulseQuery.data.series.map((day) => (
-                    <div key={day.date} className="flex h-full min-w-0 flex-1 items-end" title={`${day.label}: ${day.total} touch${day.total === 1 ? '' : 'es'}`}>
-                      <div
-                        className={cn('flex w-full flex-col-reverse overflow-hidden rounded-t-sm', day.total === 0 && 'bg-slate-100')}
-                        style={{ height: day.total === 0 ? 2 : `${Math.max(8, (day.total / maxDailyActivity) * 100)}%` }}
-                      >
-                        {(Object.keys(activityChartConfig) as Array<keyof typeof activityChartConfig>).map((key) => {
-                          const count = day[key]
-                          if (!count) return null
-                          return <span key={key} style={{ backgroundColor: activityChartConfig[key].color, flexGrow: count }} />
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="mt-1.5 flex justify-between px-0.5 text-[10px] text-slate-400">
-                <span>{activityPulseQuery.data.series[0]?.label}</span>
-                <span>{activityPulseQuery.data.series[13]?.label}</span>
-                <span>{activityPulseQuery.data.series.at(-1)?.label}</span>
-              </div>
-              <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
-                {Object.entries(activityChartConfig).map(([key, item]) => (
-                  <span key={key} className="inline-flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: item.color }} />
-                    {item.label}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </section>
-        ) : null}
 
         <nav className="mt-5 grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white sm:grid-cols-4" aria-label="Daily desk queues">
           {([
@@ -807,6 +806,10 @@ export default function DailyDeskPage() {
             </section>
           </aside>
         </div>
+
+        {activityPulseQuery.data ? (
+          <ActivityMomentum data={activityPulseQuery.data} maxDailyActivity={maxDailyActivity} />
+        ) : null}
       </div>
     </div>
   )

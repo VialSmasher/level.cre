@@ -1,5 +1,5 @@
 import { useRef, useState, useMemo, useEffect, useCallback } from 'react';
-import { Search, Square, Star } from 'lucide-react';
+import { Database, MapPin, Search, Square } from 'lucide-react';
 import type { Prospect } from '@level-cre/shared/schema';
 import { getProspectDisplayName, getProspectSecondaryName, isPlaceholderProspectName } from '@/lib/prospectDisplay';
 import type { MapSearchLocation } from './searchTypes';
@@ -499,8 +499,8 @@ export function SearchBar({
     return (
       <>
         {localCount > 0 && (
-          <li className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 bg-amber-50 border-b border-amber-100">
-            Local Results
+          <li className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-500">
+            Level CRE results
           </li>
         )}
         {combinedResults.map((item, idx) => {
@@ -513,14 +513,14 @@ export function SearchBar({
                 aria-selected={activeIndex === idx}
                 onClick={handleLocalSelect(item.prospect)}
                 onMouseEnter={() => setActiveIndex(idx)}
-                className={`p-2 cursor-pointer border-b border-amber-100 ${activeIndex === idx ? 'bg-amber-100' : 'bg-amber-50 hover:bg-amber-100'}`}
+                className={`cursor-pointer border-b border-slate-100 px-3 py-2.5 ${activeIndex === idx ? 'bg-blue-50' : 'bg-white hover:bg-slate-50'}`}
               >
-                <div className="flex items-center gap-1.5">
-                  <Star className="w-3.5 h-3.5 text-amber-600" />
-                  <strong className="text-gray-900">{item.label}</strong>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-200 text-amber-900">CRM</span>
+                <div className="flex items-center gap-2">
+                  <Database className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+                  <strong className="min-w-0 truncate text-sm font-medium text-slate-950">{item.label}</strong>
+                  <span className="rounded-sm border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">CRM</span>
                 </div>
-                {item.secondary && <small className="text-gray-600">{item.secondary}</small>}
+                {item.secondary && <small className="ml-5 block truncate text-xs text-slate-500">{item.secondary}</small>}
               </li>
             );
           }
@@ -532,9 +532,13 @@ export function SearchBar({
               aria-selected={activeIndex === idx}
               onClick={handleSelect(item)}
               onMouseEnter={() => setActiveIndex(idx)}
-              className={`p-2 cursor-pointer ${activeIndex === idx ? 'bg-gray-100' : 'hover:bg-gray-100'}`}
+              className={`flex cursor-pointer items-start gap-2 border-b border-slate-100 px-3 py-2.5 last:border-b-0 ${activeIndex === idx ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
             >
-              <strong>{item.label}</strong> {item.secondary && <small>{item.secondary}</small>}
+              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+              <span className="min-w-0">
+                <strong className="block truncate text-sm font-medium text-slate-950">{item.label}</strong>
+                {item.secondary && <small className="block truncate text-xs text-slate-500">{item.secondary}</small>}
+              </span>
             </li>
           );
         })}
@@ -543,8 +547,8 @@ export function SearchBar({
   };
 
   return (
-    <div className="relative w-full sm:w-[min(85vw,420px)]">
-      <div className="flex items-center gap-2 rounded-md border border-gray-200 bg-white/95 px-2 py-2 shadow-sm sm:py-1.5">
+    <div className="relative w-full sm:w-[min(85vw,460px)]">
+      <div className="flex h-11 items-center gap-2 rounded-lg border border-slate-300 bg-white px-2 shadow-[0_4px_14px_rgba(15,23,42,0.10)]">
         <input
           ref={ref}
           value={value}
@@ -588,8 +592,8 @@ export function SearchBar({
             }
           }}
           disabled={!ready}
-          className="min-w-0 flex-1 bg-transparent text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none"
-          placeholder="Search..."
+          className="min-w-0 flex-1 bg-transparent px-1 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
+          placeholder="Search companies or addresses"
           aria-label="Search"
           role="combobox"
           aria-autocomplete="list"
@@ -601,7 +605,7 @@ export function SearchBar({
           type="button"
           aria-label="Strict bounds"
           title={strictBounds ? 'Strict bounds: on' : 'Strict bounds: off'}
-          className={`grid h-9 w-9 shrink-0 place-items-center rounded text-xs sm:h-7 sm:w-7 ${strictBounds ? 'bg-indigo-600 text-white hover:bg-indigo-500' : 'text-gray-700 hover:bg-gray-100'}`}
+          className={`grid h-8 w-8 shrink-0 place-items-center rounded-md text-xs ${strictBounds ? 'bg-slate-900 text-white hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-100'}`}
           onClick={() => setStrictBounds((v) => !v)}
         >
           <Square className="w-4 h-4" />
@@ -609,7 +613,7 @@ export function SearchBar({
         <button
           type="button"
           aria-label="Search"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded bg-indigo-600 text-xs text-white hover:bg-indigo-500 active:scale-95 sm:h-7 sm:w-7"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-blue-600 text-xs text-white hover:bg-blue-700 active:scale-95"
           onClick={submitFirstResultOrFreeform}
         >
           <Search className="w-4 h-4" strokeWidth={2.5} />
@@ -620,7 +624,7 @@ export function SearchBar({
           id={listboxId}
           role="listbox"
           ref={listRef}
-          className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-lg bg-white shadow-lg"
+          className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.14)]"
         >
           {renderSuggestions()}
         </ul>

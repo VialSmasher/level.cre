@@ -73,22 +73,22 @@ export function AppLayout({ children }: AppLayoutProps) {
   const profileLabel = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'
 
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50 dark:bg-gray-900">
-      <nav className="border-b border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
+    <div className="flex min-h-screen flex-col bg-slate-50 dark:bg-gray-900">
+      <nav className="sticky top-0 z-[100] border-b border-slate-200 bg-white/95 backdrop-blur dark:border-gray-700 dark:bg-gray-800/95">
         <div className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8">
-          <div className="flex h-14 items-center justify-between sm:h-16">
+          <div className="flex h-14 items-center justify-between">
             <Link
               href="/app/desk"
-              className="text-xl font-black text-slate-900 dark:text-gray-100 sm:text-2xl"
+              className="text-xl font-black text-slate-950 dark:text-gray-100"
               aria-label="Go to Today"
             >
               <span className="inline-flex items-center gap-1">
                 level CRE
-                <ChartSpline size={18} className="-mt-px sm:h-5 sm:w-5" />
+                <ChartSpline size={18} className="-mt-px text-blue-600" />
               </span>
             </Link>
 
-            <div className="hidden items-center gap-1 rounded-full border border-slate-200 bg-slate-50/80 p-1 shadow-inner md:flex dark:border-gray-700 dark:bg-gray-900/40">
+            <div className="hidden h-14 items-stretch md:flex">
               {primaryNav.map((item) => {
                 const Icon = item.icon
                 return (
@@ -96,15 +96,15 @@ export function AppLayout({ children }: AppLayoutProps) {
                     <TooltipTrigger asChild>
                       <Link
                         href={item.href}
-                        className={`inline-flex h-10 items-center justify-center gap-2 rounded-full px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                        className={`inline-flex min-w-[84px] items-center justify-center gap-2 border-b-2 px-3 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-inset ${
                           item.active
-                            ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:ring-blue-900'
-                            : 'text-slate-500 hover:bg-white hover:text-slate-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100'
+                            ? 'border-blue-600 bg-blue-50/60 text-slate-950 dark:border-blue-400 dark:bg-blue-950/30 dark:text-white'
+                            : 'border-transparent text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-950 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100'
                         }`}
                         aria-label={item.label}
                       >
-                        <Icon size={20} />
-                        {item.active ? <span>{item.label}</span> : null}
+                        <Icon size={18} />
+                        <span>{item.label}</span>
                       </Link>
                     </TooltipTrigger>
                     <TooltipContent><p>{item.label}</p></TooltipContent>
@@ -127,10 +127,10 @@ export function AppLayout({ children }: AppLayoutProps) {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="flex max-w-[260px] items-center gap-1 rounded-full px-1.5 sm:gap-2 sm:px-2">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100">
+                  <Button variant="ghost" className="flex max-w-[260px] items-center gap-1 rounded-md px-1.5 sm:gap-2 sm:px-2">
+                    <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-md bg-slate-100">
                       {user?.user_metadata?.avatar_url ? (
-                        <img src={user.user_metadata.avatar_url} alt="Profile" className="h-8 w-8 rounded-full" />
+                        <img src={user.user_metadata.avatar_url} alt="Profile" className="h-8 w-8 object-cover" />
                       ) : (
                         <User className="h-4 w-4 text-blue-600" />
                       )}
@@ -196,15 +196,6 @@ export function AppLayout({ children }: AppLayoutProps) {
       </nav>
 
       <main className="flex min-h-0 flex-1 flex-col">{children}</main>
-      {(() => {
-        const sha = (import.meta as any)?.env?.VITE_COMMIT_SHA as string | undefined
-        if (!sha) return null
-        return (
-          <div className="fixed bottom-1 right-2 rounded bg-white/70 px-2 py-0.5 text-[10px] text-gray-500 opacity-80 select-none dark:bg-gray-800/70" style={{ pointerEvents: 'none' }}>
-            build: {String(sha).slice(0, 7)}
-          </div>
-        )
-      })()}
     </div>
   )
 }

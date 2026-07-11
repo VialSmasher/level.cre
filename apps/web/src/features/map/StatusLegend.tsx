@@ -37,7 +37,7 @@ export function StatusLegend({ selected, onToggle, onChange, counts, defaultOpen
 
   return (
     <div
-      className={`z-[90] select-none rounded-lg bg-neutral-950/90 text-white shadow-xl backdrop-blur ${
+      className={`z-[90] select-none rounded-lg border border-slate-300 bg-white text-slate-900 shadow-[0_8px_24px_rgba(15,23,42,0.14)] ${
         open
           ? 'fixed inset-x-3 bottom-3 max-h-[78dvh] overflow-hidden sm:static sm:inset-auto sm:w-72'
           : 'w-fit sm:w-72'
@@ -46,13 +46,13 @@ export function StatusLegend({ selected, onToggle, onChange, counts, defaultOpen
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="flex w-full items-center justify-between gap-3 px-3 py-2"
+        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 hover:bg-slate-50"
         aria-expanded={open}
       >
-        <span className="flex min-w-0 items-center gap-2 text-sm font-semibold opacity-90">
-          <SlidersHorizontal className="h-4 w-4" aria-hidden />
+        <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-800">
+          <SlidersHorizontal className="h-4 w-4 text-blue-600" aria-hidden />
           <span>Status</span>
-          <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs font-medium">
+          <span className="rounded-sm bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
             {selectedCount}/{totalCount}
           </span>
         </span>
@@ -61,13 +61,13 @@ export function StatusLegend({ selected, onToggle, onChange, counts, defaultOpen
       {open && (
         <div className="max-h-[calc(78dvh-2.5rem)] overflow-y-auto px-3 pb-3">
           {canSetPreset && (
-            <div className="grid grid-cols-2 gap-1.5 border-t border-white/10 pt-3 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-1.5 border-t border-slate-200 pt-3 sm:grid-cols-3">
               {STATUS_FILTER_PRESETS.map((preset) => (
                 <button
                   key={preset.id}
                   type="button"
                   onClick={() => handlePreset(preset.statuses)}
-                  className="min-h-8 rounded-md bg-white/10 px-2 py-1 text-left text-xs font-medium text-white/90 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-white/40"
+                  className="min-h-8 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-left text-xs font-medium text-slate-700 hover:border-slate-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {preset.label}
                 </button>
@@ -81,7 +81,7 @@ export function StatusLegend({ selected, onToggle, onChange, counts, defaultOpen
               const active = selected ? selected.has(key as ProspectStatusType) : true;
               const rowClasses = `flex min-h-9 w-full items-center gap-2 rounded-md px-2 py-1 text-left ${
                 onToggle ? 'cursor-pointer' : ''
-              } ${active ? 'bg-white/15 text-white' : 'bg-white/5 text-white/55'}`;
+              } ${active ? 'bg-blue-50 text-slate-950' : 'text-slate-400 hover:bg-slate-50'}`;
               return (
                 <button
                   key={key}
@@ -91,32 +91,32 @@ export function StatusLegend({ selected, onToggle, onChange, counts, defaultOpen
                   aria-pressed={active}
                 >
                   <span
-                    className="inline-block h-3 w-3 shrink-0 rounded-full"
+                    className="inline-block h-3 w-3 shrink-0 rounded-full border border-black/10"
                     style={{ backgroundColor: meta.color }}
                   />
                   <span className="min-w-0 flex-1 text-sm">{meta.label}</span>
-                  <span className="rounded-full bg-black/20 px-2 py-0.5 text-xs tabular-nums text-white/80">
+                  <span className="rounded-sm border border-slate-200 bg-white px-2 py-0.5 text-xs tabular-nums text-slate-600">
                     {counts?.[key] ?? 0}
                   </span>
-                  {active && <Check className="h-4 w-4 text-white/80" aria-hidden />}
+                  {active && <Check className="h-4 w-4 text-blue-600" aria-hidden />}
                 </button>
               );
             })}
           </div>
 
           {canSetPreset && (
-            <div className="mt-2 flex justify-between border-t border-white/10 pt-2">
+            <div className="mt-2 flex justify-between border-t border-slate-200 pt-2">
               <button
                 type="button"
                 onClick={() => handlePreset(MAP_STATUS_KEYS)}
-                className="rounded-md px-2 py-1 text-xs font-medium text-white/75 hover:bg-white/10"
+                className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
               >
                 Select all
               </button>
               <button
                 type="button"
                 onClick={handleClear}
-                className="rounded-md px-2 py-1 text-xs font-medium text-white/75 hover:bg-white/10"
+                className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
               >
                 Clear
               </button>

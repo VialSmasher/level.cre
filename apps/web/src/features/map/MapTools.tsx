@@ -23,13 +23,13 @@ export function MapTools({
   onSelect,
   activeTerraMode = null,
 }: MapToolsProps) {
-  const buttonClass = 'grid h-10 w-10 shrink-0 place-items-center rounded text-[15px] active:scale-95 sm:h-7 sm:w-7';
-  const inactiveClass = 'text-gray-700 hover:bg-gray-100';
-  const activeClass = 'bg-gray-100 text-gray-900';
+  const buttonClass = 'grid h-9 w-9 shrink-0 place-items-center rounded-md text-[15px] transition-colors active:scale-95';
+  const inactiveClass = 'text-slate-600 hover:bg-slate-100 hover:text-slate-950';
+  const activeClass = 'bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-200';
 
   // Wire these to your actual handlers as props or context
   return (
-    <div className="flex w-fit max-w-full items-center gap-1.5 overflow-x-auto rounded-md border border-gray-200 bg-white/95 px-2 py-1.5 shadow-sm sm:py-1">
+    <div className="flex w-fit max-w-full items-center gap-0.5 overflow-x-auto rounded-lg border border-slate-300 bg-white p-1 shadow-[0_4px_14px_rgba(15,23,42,0.10)]">
       <button
         aria-label="Toggle Map Type"
         title={mapType === 'hybrid' ? 'Map' : 'Hybrid'}
