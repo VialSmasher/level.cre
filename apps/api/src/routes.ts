@@ -34,6 +34,11 @@ import {
   SalesActivityReviewActionSchema,
   SalesActivityReviewError,
 } from './lib/salesActivityImportService';
+import {
+  findMatchingCodexEmailImport,
+  suppressEmailReviewsMatchingSalesActivity,
+} from './lib/emailActivityReconciliation';
+import { buildPipelineHealth } from './lib/pipelineHealth';
 import { buildActivityPulse } from './lib/activityPulse';
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -368,6 +373,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return json;
   }
 
+  async function reconcileCapturedEmailWithCodex(
+    userId: string,
+    emailMessageId: string,
+    messageData: any,
+  ) {
+    if (messageData.direction !== 'sent') return null;
+    const codexImport = await findMatchingCodexEmailImport({
+      pool,
+      userId,
+      subject: messageData.subject,
+      counterpartyEmails: messageData.recipientEmails,
+      occurredAt: messageData.sentAt || messageData.receivedAt,
+    });
+    if (!codexImport) return null;
+
+    await pool.query(`
+      UPDATE public.email_prospect_matches
+      SET match_status = 'ignored',
+          match_reason = 'duplicate_codex_activity',
+          reviewed_at = COALESCE(reviewed_at, now()),
+          updated_at = now()
+      WHERE user_id = $1
+        AND email_message_id = $2
+        AND interaction_id IS NULL
+        AND match_status IN ('needs_context', 'pending_review')
+    `, [userId, emailMessageId]);
+    return codexImport;
+  }
+
   async function storeInboundEmailForReview(userId: string, messageData: any) {
     const inserted = await pool.query(`
       INSERT INTO public.email_messages (
@@ -435,6 +469,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     ]);
     const emailMessageId = inserted.rows[0].id;
     const isNewMessage = Boolean(inserted.rows[0]?.inserted);
+    const codexImport = await reconcileCapturedEmailWithCodex(userId, emailMessageId, messageData);
+    if (codexImport) {
+      return {
+        emailMessageId,
+        inserted: isNewMessage,
+        matchesCreated: 0,
+        xpAwarded: false,
+        newXpGained: 0,
+        duplicateSuppressed: true,
+        duplicateOfSalesActivityImportId: codexImport.id,
+      };
+    }
+
     const xpAwarded = await awardCapturedEmailActivity(userId, emailMessageId, isNewMessage);
     let matchesCreated = 0;
     const result = await pool.query(`
@@ -3177,6 +3224,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userId,
         payload: parsed.data,
         requireEditAccess: async (listingId) => requireEditAccess(req, listingId),
+        reconcileEmailEvidence: async (activity) => suppressEmailReviewsMatchingSalesActivity({
+          pool,
+          userId,
+          activity,
+        }),
       });
       res.json(summary);
     } catch (error) {
@@ -3555,6 +3607,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ]);
           const emailMessageId = inserted.rows[0].id;
           if (inserted.rows[0].inserted) messagesStored += 1;
+          const codexImport = await reconcileCapturedEmailWithCodex(userId, emailMessageId, messageData);
+          if (codexImport) continue;
 
           const result = await pool.query(`
             INSERT INTO public.email_prospect_matches (
@@ -3675,6 +3729,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const emailMessageId = inserted.rows[0].id;
         const isNewMessage = Boolean(inserted.rows[0]?.inserted);
         if (isNewMessage) messagesStored += 1;
+        const codexImport = await reconcileCapturedEmailWithCodex(userId, emailMessageId, {
+          direction: 'sent',
+          subject: message.subject || '',
+          recipientEmails: recipients,
+          sentAt: message.sentDateTime ? new Date(message.sentDateTime) : null,
+          receivedAt: message.receivedDateTime ? new Date(message.receivedDateTime) : null,
+        });
+        if (codexImport) continue;
         await awardCapturedEmailActivity(userId, emailMessageId, isNewMessage);
 
         const result = await pool.query(`
@@ -4630,6 +4692,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             listingProgressItems: 0,
             emailCleanupItems: 0,
           },
+          pipelineHealth: {
+            activeProspects: 0,
+            withNextAction: 0,
+            missingNextAction: 0,
+            overdueNextActions: 0,
+            stalledProspects: 0,
+            nextActionCoveragePercent: 100,
+          },
           actions: [],
           buckets: { doToday: [], thisWeek: [], cleanup: [], research: [] },
           nextBestAction: null,
@@ -4674,7 +4744,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             AND COALESCE(p.status, '') <> 'no_go'
           GROUP BY p.id
           ORDER BY COALESCE(p.follow_up_due_date, MAX(ci.created_at), p.updated_at, p.created_at) ASC
-          LIMIT 200
         `, [userId]),
         pool.query(`
           SELECT
@@ -4911,6 +4980,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const rankedActions = uniqueBriefActions(actions).slice(0, limit);
+      const pipelineHealth = buildPipelineHealth(prospectsResult.rows, now);
       const bucket = (predicate: (action: SalesBriefAction) => boolean) => rankedActions.filter(predicate);
       const dueFollowUps = rankedActions.filter((action) => action.type === 'follow_up_due');
       const staleProspects = rankedActions.filter((action) => action.type === 'stale_prospect');
@@ -4929,6 +4999,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           outlookSignals: outlookSignalItems.length,
           researchTargets: rankedActions.filter((action) => action.type === 'research_target').length,
         },
+        pipelineHealth,
         actions: rankedActions,
         buckets: {
           doToday: bucket((action) => action.priority === 'critical' || action.priority === 'high').slice(0, 7),

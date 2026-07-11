@@ -216,6 +216,7 @@ export async function importSalesActivityBatch(params: {
   userId: string;
   payload: SalesActivityBatchInput;
   requireEditAccess?: (listingId: string) => Promise<unknown>;
+  reconcileEmailEvidence?: (activity: NormalizedSalesActivity) => Promise<number>;
 }): Promise<SalesActivityImportSummary> {
   const summary: SalesActivityImportSummary = {
     imported: 0,
@@ -337,6 +338,15 @@ export async function importSalesActivityBatch(params: {
 
       const finalMatchStatus = interactionId ? 'matched' : importRow.match_status;
       const effectiveProspectId = resolved.prospectId || importRow.prospect_id || null;
+
+      if (params.reconcileEmailEvidence) {
+        try {
+          await params.reconcileEmailEvidence(activity);
+        } catch (error) {
+          console.warn('Failed to reconcile Codex activity with captured email evidence:', error);
+        }
+      }
+
       if (finalMatchStatus === 'matched') summary.matched += 1;
       if (finalMatchStatus === 'needs_review') summary.needsReview += 1;
       if (finalMatchStatus === 'ignored') summary.ignored += 1;

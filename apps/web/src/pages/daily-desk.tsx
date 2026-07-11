@@ -101,6 +101,14 @@ type SalesBriefResponse = {
     outlookSignals?: number
     researchTargets?: number
   }
+  pipelineHealth?: {
+    activeProspects: number
+    withNextAction: number
+    missingNextAction: number
+    overdueNextActions: number
+    stalledProspects: number
+    nextActionCoveragePercent: number
+  }
   actions: SalesBriefAction[]
   nextBestAction: SalesBriefAction | null
   outlook?: {
@@ -772,13 +780,29 @@ export default function DailyDeskPage() {
             <section className="rounded-md border border-slate-200 bg-white p-5">
               <div className="flex items-center gap-2">
                 <Building2 className="h-4 w-4 text-slate-600" />
-                <h2 className="text-sm font-semibold text-slate-950">Desk coverage</h2>
+                <h2 className="text-sm font-semibold text-slate-950">Pipeline health</h2>
               </div>
-              <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                <div><dt className="text-xs text-slate-500">Outlook emails</dt><dd className="mt-1 font-semibold text-slate-950">{salesBriefQuery.data?.outlook?.emailsAnalyzed ?? 0}</dd></div>
-                <div><dt className="text-xs text-slate-500">Open actions</dt><dd className="mt-1 font-semibold text-slate-950">{salesBriefQuery.data?.summary.openActions ?? 0}</dd></div>
-                <div><dt className="text-xs text-slate-500">Follow-ups</dt><dd className="mt-1 font-semibold text-slate-950">{salesBriefQuery.data?.summary.dueFollowUps ?? 0}</dd></div>
-                <div><dt className="text-xs text-slate-500">Listings</dt><dd className="mt-1 font-semibold text-slate-950">{salesBriefQuery.data?.summary.listingProgressItems ?? 0}</dd></div>
+              <div className="mt-4">
+                <div className="flex items-end justify-between gap-3">
+                  <div>
+                    <p className="text-2xl font-bold text-slate-950">{salesBriefQuery.data?.pipelineHealth?.nextActionCoveragePercent ?? 0}%</p>
+                    <p className="mt-0.5 text-xs text-slate-500">Active pipeline with a next action</p>
+                  </div>
+                  <span className="text-xs font-medium text-slate-500">
+                    {salesBriefQuery.data?.pipelineHealth?.withNextAction ?? 0}/{salesBriefQuery.data?.pipelineHealth?.activeProspects ?? 0}
+                  </span>
+                </div>
+                <div className="mt-3 h-2 overflow-hidden rounded-sm bg-slate-100" aria-hidden="true">
+                  <div
+                    className="h-full bg-emerald-500 transition-[width]"
+                    style={{ width: `${salesBriefQuery.data?.pipelineHealth?.nextActionCoveragePercent ?? 0}%` }}
+                  />
+                </div>
+              </div>
+              <dl className="mt-4 grid grid-cols-3 gap-2 border-t border-slate-200 pt-4 text-center">
+                <div><dt className="text-[11px] leading-4 text-slate-500">Missing action</dt><dd className="mt-1 text-base font-semibold text-slate-950">{salesBriefQuery.data?.pipelineHealth?.missingNextAction ?? 0}</dd></div>
+                <div><dt className="text-[11px] leading-4 text-slate-500">Overdue</dt><dd className="mt-1 text-base font-semibold text-red-700">{salesBriefQuery.data?.pipelineHealth?.overdueNextActions ?? 0}</dd></div>
+                <div><dt className="text-[11px] leading-4 text-slate-500">Stalled 21d</dt><dd className="mt-1 text-base font-semibold text-amber-700">{salesBriefQuery.data?.pipelineHealth?.stalledProspects ?? 0}</dd></div>
               </dl>
             </section>
           </aside>
