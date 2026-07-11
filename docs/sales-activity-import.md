@@ -97,3 +97,5 @@ The page keeps `/app` as the map and links matched prospects back to `/app?prosp
 ## Follow-Up Work
 
 The `outlook-sales-followup` Codex skill records approved sends through this endpoint. It keeps a local JSONL outbox when credentials or the API are unavailable and flushes that outbox on a later successful run. Approved sales emails also use the configured Postmark BCC as delivery evidence. New mapped prospects should still be created only when a real address/property is known.
+
+The repository copy of the recorder is `scripts/codex/record-levelcre-sales-activity.ps1`, so the workflow travels with the project across Patrick's Codex computers.
