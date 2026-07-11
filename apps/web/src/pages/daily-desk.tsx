@@ -31,6 +31,7 @@ import {
 import { apiRequest } from '@/lib/queryClient'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import { useAuth } from '@/contexts/AuthContext'
 
 type DeskTab = 'today' | 'waiting' | 'review' | 'develop'
 type ActionPriority = 'critical' | 'high' | 'medium' | 'low'
@@ -288,18 +289,21 @@ function EmptyQueue({ tab }: { tab: DeskTab }) {
 export default function DailyDeskPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const { isDemoMode } = useAuth()
   const [activeTab, setActiveTab] = useState<DeskTab>('today')
   const [prospectDrafts, setProspectDrafts] = useState<Record<string, string>>({})
 
   const salesBriefQuery = useQuery<SalesBriefResponse>({
     queryKey: ['/api/automation/sales-brief?limit=25'],
+    enabled: !isDemoMode,
   })
   const importsQuery = useQuery<{ rows: SalesActivityImportRow[] }>({
     queryKey: ['/api/agent/sales-activity/imports?matchStatus=needs_review&limit=50'],
+    enabled: !isDemoMode,
   })
-  const prospectsQuery = useQuery<Prospect[]>({ queryKey: ['/api/prospects'] })
-  const outlookQuery = useQuery<OutlookConfig>({ queryKey: ['/api/email/outlook/config'] })
-  const inboundQuery = useQuery<InboundConfig>({ queryKey: ['/api/email/inbound/config'] })
+  const prospectsQuery = useQuery<Prospect[]>({ queryKey: ['/api/prospects'], enabled: !isDemoMode })
+  const outlookQuery = useQuery<OutlookConfig>({ queryKey: ['/api/email/outlook/config'], enabled: !isDemoMode })
+  const inboundQuery = useQuery<InboundConfig>({ queryKey: ['/api/email/inbound/config'], enabled: !isDemoMode })
 
   const actions = salesBriefQuery.data?.actions || []
   const imports = importsQuery.data?.rows || []
