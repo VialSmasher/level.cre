@@ -74,7 +74,7 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 dark:bg-gray-900">
-      <nav className="sticky top-0 z-[100] border-b border-slate-200 bg-white/95 backdrop-blur dark:border-gray-700 dark:bg-gray-800/95">
+      <nav className="sticky top-0 z-[100] border-b border-slate-200 bg-white dark:border-gray-700 dark:bg-gray-800">
         <div className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8">
           <div className="flex h-14 items-center justify-between">
             <Link

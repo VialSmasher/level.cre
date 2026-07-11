@@ -456,7 +456,7 @@ export default function StatsPage() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="hidden border-b border-slate-100 bg-slate-50 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid lg:grid-cols-[minmax(190px,1fr)_90px_minmax(210px,1.2fr)_minmax(150px,0.8fr)]">
+            <div className="hidden gap-4 border-b border-slate-100 bg-slate-50 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 lg:grid lg:grid-cols-[minmax(190px,1fr)_90px_minmax(210px,1.2fr)_minmax(150px,0.8fr)]">
               <span>Track</span>
               <span className="text-right">Level</span>
               <span>Progress</span>
