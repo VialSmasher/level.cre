@@ -326,8 +326,8 @@ export default function StatsPage() {
           )}
         />
 
-        <section className="grid overflow-hidden rounded-lg border border-slate-200 bg-white sm:grid-cols-2 lg:grid-cols-4" aria-label="Scorecard totals">
-            <div className="border-b border-slate-200 sm:border-r lg:border-b-0">
+        <section className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 bg-white lg:grid-cols-4" aria-label="Scorecard totals">
+            <div className="border-b border-r border-slate-200 lg:border-b-0">
               <div className="flex items-start justify-between gap-4 p-4">
                   <div>
                     <p className="text-xs font-semibold text-slate-500">Broker level</p>
@@ -340,7 +340,7 @@ export default function StatsPage() {
               </div>
             </div>
             
-            <div className="border-b border-slate-200 sm:border-r-0 lg:border-b-0 lg:border-r">
+            <div className="border-b border-slate-200 lg:border-b-0 lg:border-r">
               <div className="flex items-start justify-between gap-4 p-4">
                   <div>
                     <p className="text-xs font-semibold text-slate-500">Assets tracked</p>
@@ -353,7 +353,7 @@ export default function StatsPage() {
               </div>
             </div>
             
-            <div className="border-b border-slate-200 sm:border-b-0 sm:border-r">
+            <div className="border-r border-slate-200">
               <div className="flex items-start justify-between gap-4 p-4">
                   <div>
                     <p className="text-xs font-semibold text-slate-500">Follow-ups</p>

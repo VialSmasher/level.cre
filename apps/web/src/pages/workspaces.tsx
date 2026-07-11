@@ -377,8 +377,8 @@ export default function WorkspacesIndex() {
         )}
       />
 
-      <section className="grid overflow-hidden rounded-lg border border-slate-200 bg-white sm:grid-cols-3" aria-label="Workspace totals">
-        <div className="border-b border-slate-200 sm:border-b-0 sm:border-r">
+      <section className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 bg-white sm:grid-cols-3" aria-label="Workspace totals">
+        <div className="border-b border-r border-slate-200 sm:border-b-0">
           <div className="flex items-center justify-between p-4">
             <div>
               <p className="text-xs font-medium text-slate-500">My workspaces</p>
@@ -400,7 +400,7 @@ export default function WorkspacesIndex() {
             </div>
           </div>
         </div>
-        <div>
+        <div className="col-span-2 sm:col-span-1">
           <div className="flex items-center justify-between p-4">
             <div>
               <p className="text-xs font-medium text-slate-500">Shared prospects</p>

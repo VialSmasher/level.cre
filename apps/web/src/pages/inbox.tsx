@@ -339,11 +339,11 @@ export default function InboxPage() {
           )}
         />
 
-        <section className="grid overflow-hidden rounded-lg border border-slate-200 bg-white sm:grid-cols-2 lg:grid-cols-4" aria-label="Inbox totals">
+        <section className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 bg-white lg:grid-cols-4" aria-label="Inbox totals">
           {dashboardCards.map((card, index) => (
             <div
               key={card.label}
-              className={`${index < dashboardCards.length - 1 ? 'border-b border-slate-200 sm:border-r lg:border-b-0' : ''} ${index === 1 ? 'sm:border-r-0 lg:border-r' : ''}`}
+              className={`${index < 2 ? 'border-b border-slate-200 lg:border-b-0' : ''} ${index % 2 === 0 ? 'border-r border-slate-200' : ''} ${index === 1 ? 'lg:border-r lg:border-slate-200' : ''}`}
             >
               <div className="p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{card.label}</p>

@@ -534,7 +534,7 @@ export default function DailyDeskPage() {
           )}
         />
 
-        <section className="mt-5 grid overflow-hidden rounded-md border border-slate-200 bg-white sm:grid-cols-2 lg:grid-cols-4" aria-label="Business development pulse">
+        <section className="mt-5 grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white lg:grid-cols-4" aria-label="Business development pulse">
           {pulseMetrics.map((metric, index) => {
             const MetricIcon = metric.icon
             return (
@@ -542,10 +542,9 @@ export default function DailyDeskPage() {
                 key={metric.label}
                 className={cn(
                   'flex min-h-20 items-center gap-3 border-slate-200 px-4',
-                  index < 3 && 'border-b',
-                  index % 2 === 0 && 'sm:border-r',
-                  index >= 2 && 'sm:border-b-0',
-                  index < 3 && 'lg:border-r lg:border-b-0',
+                  index < 2 && 'border-b lg:border-b-0',
+                  index % 2 === 0 && 'border-r',
+                  index < 3 && 'lg:border-r',
                 )}
               >
                 <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-md', metric.tone)}>
