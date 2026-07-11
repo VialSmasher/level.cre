@@ -28,6 +28,26 @@ function getConfiguredAgentUser(req: Request): { id: string; email?: string; age
   }
 }
 
+function getConfiguredSalesActivityAgent(req: Request): { id: string; email?: string; agentName?: string } | null {
+  const expectedToken = process.env.SALES_ACTIVITY_AGENT_API_KEY
+  const userId = process.env.SALES_ACTIVITY_AGENT_USER_ID || process.env.INTEL_AGENT_USER_ID
+  if (!expectedToken || !userId) return null
+
+  const authHeader = req.headers.authorization
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
+  const headerToken = typeof req.headers['x-levelcre-sales-key'] === 'string'
+    ? req.headers['x-levelcre-sales-key']
+    : null
+  const suppliedTokens = [bearerToken, headerToken].filter((token): token is string => Boolean(token))
+  if (!suppliedTokens.some((token) => safeTokenEquals(token, expectedToken))) return null
+
+  return {
+    id: userId,
+    email: process.env.SALES_ACTIVITY_AGENT_EMAIL || process.env.INTEL_AGENT_EMAIL || undefined,
+    agentName: process.env.SALES_ACTIVITY_AGENT_NAME || 'codex-sales-activity',
+  }
+}
+
 // Verify JWT using Supabase shared secret (HS256)
 async function verifyBearerJWT(token: string): Promise<JWTPayload | null> {
   try {
@@ -149,4 +169,19 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
 
   return res.status(401).json({ message: 'Authentication required' })
+}
+
+export async function requireSalesActivityAuth(req: Request, res: Response, next: NextFunction) {
+  const salesAgentUser = getConfiguredSalesActivityAgent(req)
+  if (salesAgentUser) {
+    ;(req as any).user = {
+      id: salesAgentUser.id,
+      email: salesAgentUser.email,
+      role: 'sales_activity_agent',
+      agentName: salesAgentUser.agentName,
+    }
+    return next()
+  }
+
+  return requireAuth(req, res, next)
 }

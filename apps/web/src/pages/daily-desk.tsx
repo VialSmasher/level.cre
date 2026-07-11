@@ -8,11 +8,14 @@ import {
   Building2,
   CheckCircle2,
   Clock3,
+  Flame,
   Inbox,
   ListTodo,
   Mail,
   MapPin,
+  MapPinned,
   RefreshCw,
+  Send,
   Target,
   UserRoundSearch,
   Wifi,
@@ -102,6 +105,16 @@ type SalesBriefResponse = {
     signals: unknown[]
     watchTerms: string[]
   }
+  integrations?: {
+    salesActivityAgentConfigured: boolean
+  }
+}
+
+type HeaderStats = {
+  totalLevel: number
+  assetsTracked: number
+  followupsLogged: number
+  streakDays: number
 }
 
 type SalesActivityImportRow = {
@@ -304,6 +317,7 @@ export default function DailyDeskPage() {
   const prospectsQuery = useQuery<Prospect[]>({ queryKey: ['/api/prospects'], enabled: !isDemoMode })
   const outlookQuery = useQuery<OutlookConfig>({ queryKey: ['/api/email/outlook/config'], enabled: !isDemoMode })
   const inboundQuery = useQuery<InboundConfig>({ queryKey: ['/api/email/inbound/config'], enabled: !isDemoMode })
+  const statsQuery = useQuery<HeaderStats>({ queryKey: ['/api/stats/header'], enabled: !isDemoMode })
 
   const actions = salesBriefQuery.data?.actions || []
   const imports = importsQuery.data?.rows || []
@@ -361,6 +375,7 @@ export default function DailyDeskPage() {
     queryClient.invalidateQueries({ queryKey: ['/api/agent/sales-activity/imports?matchStatus=needs_review&limit=50'] })
     queryClient.invalidateQueries({ queryKey: ['/api/email/outlook/config'] })
     queryClient.invalidateQueries({ queryKey: ['/api/email/inbound/config'] })
+    queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] })
   }
 
   const tabCounts: Record<DeskTab, number> = {
@@ -372,6 +387,12 @@ export default function DailyDeskPage() {
   const isLoading = salesBriefQuery.isLoading || importsQuery.isLoading
   const hasError = salesBriefQuery.isError || importsQuery.isError
   const generatedAt = formatWhen(salesBriefQuery.data?.generatedAt)
+  const pulseMetrics = [
+    { label: 'Follow-ups this week', value: statsQuery.data?.followupsLogged ?? 0, icon: Send, tone: 'text-emerald-700 bg-emerald-50' },
+    { label: 'Active-day streak', value: `${statsQuery.data?.streakDays ?? 0}d`, icon: Flame, tone: 'text-orange-700 bg-orange-50' },
+    { label: 'Mapped prospects', value: statsQuery.data?.assetsTracked ?? 0, icon: MapPinned, tone: 'text-blue-700 bg-blue-50' },
+    { label: 'Needs review', value: tabCounts.review, icon: Inbox, tone: 'text-fuchsia-700 bg-fuchsia-50' },
+  ]
 
   return (
     <div className="min-h-full bg-slate-50">
@@ -401,6 +422,32 @@ export default function DailyDeskPage() {
             </Button>
           </div>
         </header>
+
+        <section className="mt-5 grid overflow-hidden rounded-md border border-slate-200 bg-white sm:grid-cols-2 lg:grid-cols-4" aria-label="Business development pulse">
+          {pulseMetrics.map((metric, index) => {
+            const MetricIcon = metric.icon
+            return (
+              <div
+                key={metric.label}
+                className={cn(
+                  'flex min-h-20 items-center gap-3 border-slate-200 px-4',
+                  index < 3 && 'border-b',
+                  index % 2 === 0 && 'sm:border-r',
+                  index >= 2 && 'sm:border-b-0',
+                  index < 3 && 'lg:border-r lg:border-b-0',
+                )}
+              >
+                <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-md', metric.tone)}>
+                  <MetricIcon className="h-4 w-4" />
+                </span>
+                <div>
+                  <p className="text-xl font-bold text-slate-950">{metric.value}</p>
+                  <p className="text-xs font-medium text-slate-500">{metric.label}</p>
+                </div>
+              </div>
+            )
+          })}
+        </section>
 
         <nav className="mt-5 grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white sm:grid-cols-4" aria-label="Daily desk queues">
           {([
@@ -484,7 +531,7 @@ export default function DailyDeskPage() {
                           </div>
                           <h3 className="mt-2 truncate text-sm font-semibold text-slate-950">{item.subject || '(No subject)'}</h3>
                           <p className="mt-1 text-sm text-slate-600">
-                            {[item.contact_name, item.company, item.email].filter(Boolean).join(' · ') || 'No contact context supplied'}
+                            {[item.contact_name, item.company, item.email].filter(Boolean).join(' / ') || 'No contact context supplied'}
                           </p>
                           <p className="mt-2 text-xs text-slate-500">{item.match_reason || 'No confident prospect match.'}</p>
                         </div>
@@ -499,7 +546,7 @@ export default function DailyDeskPage() {
                             <SelectContent>
                               {prospects.slice(0, 300).map((prospect) => (
                                 <SelectItem key={prospect.id} value={prospect.id}>
-                                  {prospectLabel(prospect)}{prospect.address ? ` · ${prospect.address}` : ''}
+                                  {prospectLabel(prospect)}{prospect.address ? ` / ${prospect.address}` : ''}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -536,7 +583,7 @@ export default function DailyDeskPage() {
           </section>
 
           <aside className="space-y-5">
-            <section className="rounded-md border border-slate-200 bg-white p-5">
+            <section className="rounded-md border border-emerald-200 bg-white p-5 shadow-sm">
               <div className="flex items-center gap-2 text-xs font-semibold uppercase text-blue-700">
                 <Target className="h-4 w-4" />
                 Best next move
@@ -576,7 +623,7 @@ export default function DailyDeskPage() {
                     <p className="text-sm font-medium text-slate-950">Outlook</p>
                     <p className="mt-0.5 text-xs leading-5 text-slate-500">
                       {outlookQuery.data?.connected
-                        ? `Connected${outlookQuery.data.connection?.lastSyncedAt ? ` · synced ${formatWhen(outlookQuery.data.connection.lastSyncedAt)}` : ''}`
+                        ? `Connected${outlookQuery.data.connection?.lastSyncedAt ? ` / synced ${formatWhen(outlookQuery.data.connection.lastSyncedAt)}` : ''}`
                         : 'Needs connection or re-authentication'}
                     </p>
                   </div>
@@ -593,11 +640,17 @@ export default function DailyDeskPage() {
                   </div>
                 </div>
                 <div className="flex items-start gap-3 px-5 py-4">
-                  {importsQuery.isError ? <WifiOff className="mt-0.5 h-4 w-4 text-red-600" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />}
+                  {importsQuery.isError || !salesBriefQuery.data?.integrations?.salesActivityAgentConfigured
+                    ? <WifiOff className="mt-0.5 h-4 w-4 text-amber-600" />
+                    : <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />}
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-slate-950">Codex activity bridge</p>
                     <p className="mt-0.5 text-xs leading-5 text-slate-500">
-                      {importsQuery.isError ? 'Bridge could not be reached' : `${imports.length} item${imports.length === 1 ? '' : 's'} waiting for review`}
+                      {importsQuery.isError
+                        ? 'Bridge could not be reached'
+                        : salesBriefQuery.data?.integrations?.salesActivityAgentConfigured
+                          ? `API ready / ${imports.length} item${imports.length === 1 ? '' : 's'} waiting for review`
+                          : 'Recorder key not configured / BCC and local outbox remain active'}
                     </p>
                   </div>
                 </div>

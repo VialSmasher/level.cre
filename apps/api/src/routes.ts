@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import jwt from "jsonwebtoken";
 import { storage } from "./storage";
 import { ensureUser } from './ensureUser';
-import { getUserId, requireAuth, getUserFromBearerAuthHeader } from "./auth";
+import { getUserId, requireAuth, requireSalesActivityAuth, getUserFromBearerAuthHeader } from "./auth";
 import { z } from 'zod';
 import { ProspectGeometry, ProspectStatus, FollowUpTimeframe } from '@level-cre/shared/schema';
 import { createCipheriv, createDecipheriv, createHmac, createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
@@ -3142,7 +3142,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/agent/sales-activity/batch', requireAuth, async (req, res) => {
+  app.post('/api/agent/sales-activity/batch', requireSalesActivityAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
       const email = (req as any)?.user?.email || null;
@@ -4615,6 +4615,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           actions: [],
           buckets: { doToday: [], thisWeek: [], cleanup: [], research: [] },
           nextBestAction: null,
+          integrations: {
+            salesActivityAgentConfigured: false,
+          },
           automationNotes: [
             'Demo mode does not read production prospects or inbox captures.',
           ],
@@ -4922,6 +4925,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           signals: outlookSignals,
           watchTerms,
         },
+        integrations: {
+          salesActivityAgentConfigured: Boolean(
+            (process.env.SALES_ACTIVITY_AGENT_API_KEY && (process.env.SALES_ACTIVITY_AGENT_USER_ID || process.env.INTEL_AGENT_USER_ID))
+            || (process.env.INTEL_AGENT_API_KEY && process.env.INTEL_AGENT_USER_ID)
+          ),
+        },
         automationNotes: [
           'Use this endpoint as the Level CRE source for daily Codex sales automations.',
           'Outlook sent mail is treated as a primary signal for active work when Level CRE records are incomplete.',
@@ -5115,7 +5124,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           if (await tableExists('prospects')) {
             const r = await pool.query(
-              `SELECT COUNT(*)::int AS c FROM prospects`
+              `SELECT COUNT(*)::int AS c FROM prospects WHERE user_id = $1`,
+              [userId]
             );
             assetsTracked = r?.rows?.[0]?.c ?? 0;
           }

@@ -20,10 +20,10 @@ This is the Level CRE bridge for Codex-led sales work. It is intentionally conse
 ### `POST /api/agent/sales-activity/batch`
 
 Requires normal Level CRE auth or the existing agent auth:
-- `Authorization: Bearer <INTEL_AGENT_API_KEY>`, or
-- `x-levelcre-agent-key: <INTEL_AGENT_API_KEY>`
+- `Authorization: Bearer <SALES_ACTIVITY_AGENT_API_KEY>`, or
+- `x-levelcre-sales-key: <SALES_ACTIVITY_AGENT_API_KEY>`
 
-The server uses `INTEL_AGENT_USER_ID` as the target Level CRE user for agent-auth calls.
+The server uses `SALES_ACTIVITY_AGENT_USER_ID` as the target Level CRE user for scoped sales-agent calls. It falls back to `INTEL_AGENT_USER_ID` during migration. The legacy `INTEL_AGENT_API_KEY` route remains accepted, but new Codex workflows should use the scoped sales key so they cannot authenticate unrelated application routes.
 
 Request:
 
@@ -96,4 +96,4 @@ The page keeps `/app` as the map and links matched prospects back to `/app?prosp
 
 ## Follow-Up Work
 
-The next safe layer is durable automatic ingestion from Codex-led send workflows, followed by a shared prospect activity timeline. New mapped prospects should still be created only when a real address/property is known.
+The `outlook-sales-followup` Codex skill records approved sends through this endpoint. It keeps a local JSONL outbox when credentials or the API are unavailable and flushes that outbox on a later successful run. Approved sales emails also use the configured Postmark BCC as delivery evidence. New mapped prospects should still be created only when a real address/property is known.
