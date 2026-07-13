@@ -39,32 +39,9 @@ const BrokerStats = lazy(() => import("./pages/broker-stats"));
 const Leaderboard = lazy(() => import("./pages/leaderboard"));
 const Badges = lazy(() => import("./pages/badges"));
 const TrackRecord = lazy(() => import("./pages/track-record"));
-const IndustrialIntelHomePage = lazy(
-  () => import("./tools/industrial-intel/pages/IndustrialIntelHomePage"),
-);
-const IndustrialIntelInventoryPage = lazy(
-  () => import("./tools/industrial-intel/pages/IndustrialIntelInventoryPage"),
-);
-const IndustrialIntelRequirementsPage = lazy(
-  () => import("./tools/industrial-intel/pages/IndustrialIntelRequirementsPage"),
-);
-const IndustrialIntelDossiersPage = lazy(
-  () => import("./tools/industrial-intel/pages/IndustrialIntelDossiersPage"),
-);
-const IndustrialIntelSurveysPage = lazy(
-  () => import("./tools/industrial-intel/pages/IndustrialIntelSurveysPage"),
-);
-const IndustrialIntelSurveyClientPage = lazy(
-  () => import("./tools/industrial-intel/pages/IndustrialIntelSurveyClientPage"),
-);
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
-import ToolLayout from "./tools/industrial-intel/ToolLayout";
-
-const INDUSTRIAL_INTEL_ENABLED =
-  String(import.meta.env.VITE_ENABLE_INDUSTRIAL_INTEL ?? "").toLowerCase() === "true" ||
-  String(import.meta.env.VITE_ENABLE_INDUSTRIAL_INTEL ?? "").toLowerCase() === "1";
 
 // Component to handle onboarding check and routing
 function OnboardingCheck({ children }: { children: React.ReactNode }) {
@@ -427,74 +404,6 @@ function Router() {
         return null
       }} />}
 
-      {INDUSTRIAL_INTEL_ENABLED && (
-        <Route path="/tools/industrial-intel">
-          <ProtectedRoute>
-            <ToolLayout>
-              <Suspense fallback={<Spinner />}>
-                <IndustrialIntelHomePage />
-              </Suspense>
-            </ToolLayout>
-          </ProtectedRoute>
-        </Route>
-      )}
-
-      {INDUSTRIAL_INTEL_ENABLED && (
-        <Route path="/tools/industrial-intel/listings">
-          <ProtectedRoute>
-            <ToolLayout>
-              <Suspense fallback={<Spinner />}>
-                <IndustrialIntelInventoryPage />
-              </Suspense>
-            </ToolLayout>
-          </ProtectedRoute>
-        </Route>
-      )}
-
-      {INDUSTRIAL_INTEL_ENABLED && (
-        <Route path="/tools/industrial-intel/requirements">
-          <ProtectedRoute>
-            <ToolLayout>
-              <Suspense fallback={<Spinner />}>
-                <IndustrialIntelRequirementsPage />
-              </Suspense>
-            </ToolLayout>
-          </ProtectedRoute>
-        </Route>
-      )}
-
-      {INDUSTRIAL_INTEL_ENABLED && (
-        <Route path="/tools/industrial-intel/dossiers">
-          <ProtectedRoute>
-            <ToolLayout>
-              <Suspense fallback={<Spinner />}>
-                <IndustrialIntelDossiersPage />
-              </Suspense>
-            </ToolLayout>
-          </ProtectedRoute>
-        </Route>
-      )}
-
-      {INDUSTRIAL_INTEL_ENABLED && (
-        <Route path="/tools/industrial-intel/surveys/share/:token">
-          <Suspense fallback={<Spinner />}>
-            <IndustrialIntelSurveyClientPage />
-          </Suspense>
-        </Route>
-      )}
-
-      {INDUSTRIAL_INTEL_ENABLED && (
-        <Route path="/tools/industrial-intel/surveys">
-          <ProtectedRoute>
-            <ToolLayout>
-              <Suspense fallback={<Spinner />}>
-                <IndustrialIntelSurveysPage />
-              </Suspense>
-            </ToolLayout>
-          </ProtectedRoute>
-        </Route>
-      )}
-      
       <Route component={() => (
         <Suspense fallback={<Spinner />}> 
           <NotFound />

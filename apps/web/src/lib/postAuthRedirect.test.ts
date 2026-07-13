@@ -14,10 +14,10 @@ test('sanitizePostAuthRedirect allows supported Tool A routes with params and ha
   )
 })
 
-test('sanitizePostAuthRedirect allows supported Tool B routes', () => {
+test('sanitizePostAuthRedirect rejects parked tool routes', () => {
   assert.equal(
     sanitizePostAuthRedirect('/tools/industrial-intel/requirements?draft=1'),
-    '/tools/industrial-intel/requirements?draft=1',
+    null,
   )
 })
 

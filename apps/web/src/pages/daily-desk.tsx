@@ -385,12 +385,12 @@ function ActivityMomentum({ data, maxDailyActivity }: { data: ActivityPulseRespo
             ))}
           </div>
         </div>
-        <div className="mt-1.5 flex justify-between px-0.5 text-[10px] text-slate-400">
+        <div className="mt-1.5 flex justify-between px-0.5 text-[10px] text-slate-600">
           <span>{data.series[0]?.label}</span>
           <span>{data.series[13]?.label}</span>
           <span>{data.series.at(-1)?.label}</span>
         </div>
-        <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
+        <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1 text-[11px] text-slate-600">
           {Object.entries(activityChartConfig).map(([key, item]) => (
             <span key={key} className="inline-flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: item.color }} />
@@ -502,7 +502,7 @@ export default function DailyDeskPage() {
           icon={ListTodo}
           actions={(
             <>
-            {generatedAt ? <span className="hidden text-xs text-slate-500 sm:inline">Updated {generatedAt}</span> : null}
+            {generatedAt ? <span className="hidden text-xs text-slate-600 sm:inline">Updated {generatedAt}</span> : null}
             <Button variant="outline" size="sm" onClick={refresh} disabled={isLoading}>
               <RefreshCw className={cn('h-4 w-4', isLoading && 'animate-spin')} />
               Refresh
@@ -534,9 +534,9 @@ export default function DailyDeskPage() {
                   <MetricIcon className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-[10px] font-semibold uppercase text-slate-400">{metric.group}</p>
+                  <p className="text-[10px] font-semibold uppercase text-slate-600">{metric.group}</p>
                   <p className="mt-0.5 text-xl font-bold tabular-nums text-slate-950">{metric.value}</p>
-                  <p className="text-[11px] font-medium leading-4 text-slate-500 sm:text-xs">{metric.label}</p>
+                  <p className="text-[11px] font-medium leading-4 text-slate-600 sm:text-xs">{metric.label}</p>
                 </div>
               </div>
             )

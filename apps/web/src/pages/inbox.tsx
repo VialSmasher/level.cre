@@ -366,7 +366,7 @@ export default function InboxPage() {
             </div>
             <div className="flex items-center gap-2">
               <Select value={status} onValueChange={(value) => setStatus(value as EmailReviewStatus)}>
-                <SelectTrigger className="w-[170px] bg-white">
+                <SelectTrigger className="w-[170px] bg-white" aria-label="Filter activity by status">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

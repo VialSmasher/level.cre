@@ -9,7 +9,6 @@ const EXACT_ALLOWLIST = new Set([
 ])
 const PREFIX_ALLOWLIST = [
   '/app',
-  '/tools/industrial-intel',
 ]
 const TOOL_A_EXACT_ALLOWLIST = new Set([
   '/broker-stats',

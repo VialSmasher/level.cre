@@ -83,6 +83,9 @@ generated-icon.png
 # Coverage directory used by tools like istanbul
 coverage/
 *.lcov
+test-results/
+playwright-report/
+artifacts/ux-benchmark/
 
 # Other
 *.tgz

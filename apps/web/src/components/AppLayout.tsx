@@ -8,7 +8,6 @@ import {
   ChartSpline,
   ChevronDown,
   ClipboardList,
-  Database,
   ListTodo,
   LogOut,
   Map,
@@ -44,10 +43,6 @@ type NavItem = {
   active: boolean
 }
 
-const INDUSTRIAL_INTEL_ENABLED =
-  String(import.meta.env.VITE_ENABLE_INDUSTRIAL_INTEL ?? '').toLowerCase() === 'true' ||
-  String(import.meta.env.VITE_ENABLE_INDUSTRIAL_INTEL ?? '').toLowerCase() === '1'
-
 export function AppLayout({ children }: AppLayoutProps) {
   const { user, signOut } = useAuth()
   const [location] = useLocation()
@@ -78,11 +73,6 @@ export function AppLayout({ children }: AppLayoutProps) {
   const secondaryNav = [
     { label: 'Requirements', href: '/app/requirements', icon: ClipboardList },
     { label: 'Follow-ups', href: '/app/followup', icon: RotateCcw },
-    {
-      label: 'Market intel',
-      href: INDUSTRIAL_INTEL_ENABLED ? '/tools/industrial-intel' : '/app/market-comps',
-      icon: Database,
-    },
     { label: 'Knowledge', href: '/app/knowledge', icon: Brain },
   ]
 
@@ -151,7 +141,7 @@ export function AppLayout({ children }: AppLayoutProps) {
             <span>level CRE</span>
             <ChartSpline className="h-4 w-4 text-blue-400" />
           </Link>
-          <div className="mt-1 text-[11px] font-medium text-slate-500">Broker operating system</div>
+          <div className="mt-1 text-[11px] font-medium text-slate-400">Broker operating system</div>
         </div>
 
         <div className="mx-3 mt-2 flex items-center gap-2.5 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2.5">
@@ -161,7 +151,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           </span>
           <span className="min-w-0">
             <span className="block truncate text-xs font-semibold text-slate-200">Edmonton market</span>
-            <span className="block truncate text-[11px] text-slate-500">Alberta, Canada</span>
+            <span className="block truncate text-[11px] text-slate-400">Alberta, Canada</span>
           </span>
         </div>
 
@@ -187,7 +177,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           })}
         </nav>
 
-        <div className="mx-4 mt-6 border-t border-white/10 pt-4 text-[10px] font-semibold uppercase text-slate-600">
+        <div className="mx-4 mt-6 border-t border-white/10 pt-4 text-[10px] font-semibold uppercase text-slate-400">
           Tools
         </div>
         <nav className="mt-2 space-y-0.5 px-3" aria-label="Supporting tools">
@@ -200,7 +190,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 href={item.href}
                 className={cn(
                   'flex h-9 items-center gap-3 rounded-md px-3 text-xs font-medium transition-colors',
-                  active ? 'bg-white/[0.07] text-slate-100' : 'text-slate-500 hover:bg-white/[0.05] hover:text-slate-200',
+                  active ? 'bg-white/[0.07] text-slate-100' : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-200',
                 )}
               >
                 <Icon className="h-4 w-4" />

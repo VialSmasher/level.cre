@@ -43,12 +43,12 @@ const SKILL_TONES = {
   },
   followUp: {
     accent: 'bg-emerald-500',
-    text: 'text-emerald-600',
+    text: 'text-emerald-700',
     fill: 'bg-emerald-500',
   },
   consistency: {
     accent: 'bg-orange-500',
-    text: 'text-orange-600',
+    text: 'text-orange-700',
     fill: 'bg-orange-500',
   },
   marketKnowledge: {

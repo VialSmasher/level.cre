@@ -16,6 +16,11 @@
     "vercel-build": "npm run build:web && rm -rf public && mkdir -p public && cp -a apps/web/dist/. public/",
     "build:web": "npm --workspace @apps/web run build",
     "build:api": "npm --workspace @apps/api run build",
+    "test:web": "npm --workspace @apps/web run test",
+    "test:ux": "playwright test --config playwright.config.ts",
+    "test:ux:map": "playwright test --config playwright.map.config.ts",
+    "test:ux:all": "npm-run-all --sequential test:ux test:ux:map",
+    "test:ux:report": "playwright show-report artifacts/ux-benchmark/playwright-local",
     "start": "npm --workspace @apps/api run start",
     "db:push": "npm --workspace @apps/api run db:push",
     "db:prepare": "npm --workspace @apps/api run db:prepare",
@@ -24,7 +29,9 @@
     "intel:agent-smoke": "npm --workspace @apps/api run intel:agent-smoke"
   },
   "devDependencies": {
-    "npm-run-all": "^4.1.5",
-    "drizzle-kit": "^0.30.4"
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.61.1",
+    "drizzle-kit": "^0.30.4",
+    "npm-run-all": "^4.1.5"
   }
 }

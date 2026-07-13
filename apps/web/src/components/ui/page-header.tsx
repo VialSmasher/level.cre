@@ -15,7 +15,7 @@ export function PageHeader({ label, title, description, icon: Icon, actions, cla
   return (
     <header className={cn('flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between', className)}>
       <div className="min-w-0">
-        <div className="flex items-center gap-2 text-[11px] font-semibold uppercase text-slate-500">
+        <div className="flex items-center gap-2 text-[11px] font-semibold uppercase text-slate-600">
           {Icon ? <Icon className="h-4 w-4 text-blue-600" /> : null}
           <span>{label}</span>
         </div>
