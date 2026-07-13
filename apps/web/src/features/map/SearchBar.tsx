@@ -160,29 +160,35 @@ export function SearchBar({
     }
 
     if (hasNewAutocompleteApi(places)) {
-      const placesLibrary = places as unknown as google.maps.PlacesLibrary;
-      if (!sessionTokenRef.current) {
-        sessionTokenRef.current = new placesLibrary.AutocompleteSessionToken();
+      try {
+        const placesLibrary = places as unknown as google.maps.PlacesLibrary;
+        if (!sessionTokenRef.current) {
+          sessionTokenRef.current = new placesLibrary.AutocompleteSessionToken();
+        }
+        const { suggestions } = await placesLibrary.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+          ...requestOptions,
+          input,
+          sessionToken: sessionTokenRef.current,
+        });
+        const items = suggestions.flatMap((suggestion, idx) => {
+          const prediction = suggestion.placePrediction;
+          if (!prediction) return [];
+          const description = predictionTextToString(prediction.text);
+          return [{
+            type: 'google' as const,
+            api: 'new' as const,
+            key: prediction.placeId ? `google-new-${prediction.placeId}` : `google-new-${idx}-${description}`,
+            prediction,
+            label: predictionTextToString(prediction.mainText) || description,
+            secondary: predictionTextToString(prediction.secondaryText) || undefined,
+            description,
+          }];
+        });
+        if (items.length > 0) return items;
+      } catch (error) {
+        if (!places.AutocompleteService) throw error;
+        if (import.meta.env.DEV) console.warn('New Places autocomplete unavailable; using compatibility fallback.', error);
       }
-      const { suggestions } = await placesLibrary.AutocompleteSuggestion.fetchAutocompleteSuggestions({
-        ...requestOptions,
-        input,
-        sessionToken: sessionTokenRef.current,
-      });
-      return suggestions.flatMap((suggestion, idx) => {
-        const prediction = suggestion.placePrediction;
-        if (!prediction) return [];
-        const description = predictionTextToString(prediction.text);
-        return [{
-          type: 'google' as const,
-          api: 'new' as const,
-          key: prediction.placeId ? `google-new-${prediction.placeId}` : `google-new-${idx}-${description}`,
-          prediction,
-          label: predictionTextToString(prediction.mainText) || description,
-          secondary: predictionTextToString(prediction.secondaryText) || undefined,
-          description,
-        }];
-      });
     }
 
     if (!places.AutocompleteService) {
