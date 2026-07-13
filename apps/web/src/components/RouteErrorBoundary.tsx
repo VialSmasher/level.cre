@@ -25,20 +25,28 @@ export class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, Route
     if (!this.state.error) return this.props.children
 
     return (
-      <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-slate-50 px-6">
-        <div className="max-w-lg rounded-3xl border border-rose-200 bg-white p-6 text-center shadow-sm">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 text-rose-600">
-            <AlertTriangle className="h-6 w-6" />
+      <div className="flex min-h-dvh items-center justify-center bg-[#f3f5f7] px-4 py-10 sm:px-6">
+        <div role="alert" className="w-full max-w-xl rounded-md border border-rose-200 border-t-4 border-t-rose-500 bg-white p-5 shadow-sm sm:p-7">
+          <div className="flex items-start gap-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-rose-50 text-rose-600">
+              <AlertTriangle className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase text-rose-700">Level CRE could not render this view</p>
+              <h1 className="mt-1 text-xl font-semibold text-slate-950">This screen failed to load</h1>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Reload once to clear temporary map or sign-in state. The diagnostic below is preserved if the problem continues.
+              </p>
+            </div>
           </div>
-          <h1 className="mt-4 text-2xl font-semibold text-slate-950">This screen failed to load</h1>
-          <p className="mt-2 text-sm text-slate-600">
-            The route hit a runtime error instead of rendering. Reloading usually clears transient map or auth state.
-          </p>
-          <pre className="mt-4 max-h-28 overflow-auto rounded-2xl bg-slate-100 p-3 text-left text-xs text-slate-600">
-            {this.state.error.message}
-          </pre>
-          <Button className="mt-5 rounded-full" onClick={() => window.location.reload()}>
-            <RefreshCw className="mr-2 h-4 w-4" />
+          <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+            <p className="text-[10px] font-semibold uppercase text-slate-500">Diagnostic</p>
+            <p className="mt-1 max-h-24 overflow-auto break-words font-mono text-xs leading-5 text-slate-700">
+              {this.state.error.message}
+            </p>
+          </div>
+          <Button className="mt-5" onClick={() => window.location.reload()}>
+            <RefreshCw className="h-4 w-4" />
             Reload screen
           </Button>
         </div>

@@ -23,16 +23,16 @@ export function MapTools({
   onSelect,
   activeTerraMode = null,
 }: MapToolsProps) {
-  const buttonClass = 'grid h-9 w-9 shrink-0 place-items-center rounded-md text-[15px] transition-colors active:scale-95';
+  const buttonClass = 'grid h-9 w-9 shrink-0 place-items-center rounded-md text-[15px] transition-colors active:translate-y-px';
   const inactiveClass = 'text-slate-600 hover:bg-slate-100 hover:text-slate-950';
-  const activeClass = 'bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-200';
+  const activeClass = 'bg-blue-600 text-white shadow-sm';
 
   // Wire these to your actual handlers as props or context
   return (
-    <div className="flex w-fit max-w-full items-center gap-0.5 overflow-x-auto rounded-lg border border-slate-300 bg-white p-1 shadow-[0_4px_14px_rgba(15,23,42,0.10)]">
+    <div className="flex w-fit max-w-full items-center gap-0.5 overflow-x-auto rounded-md border border-slate-300 bg-white p-1 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
       <button
-        aria-label="Toggle Map Type"
-        title={mapType === 'hybrid' ? 'Map' : 'Hybrid'}
+        aria-label={mapType === 'hybrid' ? 'Show road map' : 'Show aerial map'}
+        title={mapType === 'hybrid' ? 'Road map' : 'Aerial map'}
         className={`${buttonClass} ${inactiveClass}`}
         onClick={() => onMapTypeChange?.(mapType === 'roadmap' ? 'hybrid' : 'roadmap')}
       >
@@ -42,6 +42,7 @@ export function MapTools({
           <Satellite className="w-4 h-4" strokeWidth={1.5} />
         )}
       </button>
+      <span className="mx-0.5 h-5 w-px shrink-0 bg-slate-200" aria-hidden />
       <button aria-label="Pan" title="Pan" className={`${buttonClass} ${activeTerraMode === 'select' ? activeClass : inactiveClass}`} onClick={onSelect}>
         <MousePointer className="w-4 h-4" strokeWidth={1.5} />
       </button>
@@ -54,6 +55,7 @@ export function MapTools({
       <button aria-label="Draw Rectangle" title="Rectangle" className={`${buttonClass} ${activeTerraMode === 'rectangle' ? activeClass : inactiveClass}`} onClick={onRectangle}>
         <Square className="w-4 h-4" strokeWidth={1.5} />
       </button>
+      <span className="mx-0.5 h-5 w-px shrink-0 bg-slate-200" aria-hidden />
       <button aria-label="My Location" title="My Location" className={`${buttonClass} ${inactiveClass}`} onClick={onMyLocation}>
         <LocateFixed className="w-4 h-4" strokeWidth={1.5} />
       </button>

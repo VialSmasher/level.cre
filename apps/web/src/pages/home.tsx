@@ -1762,7 +1762,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden">
+    <div className="relative min-h-0 flex-1 overflow-hidden bg-slate-200">
       {/* Map Canvas */}
       <div className="absolute inset-0 z-0" ref={mapContainerRef}>
         {(isProspectsLoading || prospectsErrorMessage) && (
@@ -1914,12 +1914,11 @@ export default function HomePage() {
       />
 
       {/* Developer Settings - Keep at bottom right but with margin */}
-      <div 
-        className="absolute bottom-4 right-4 z-30 hidden sm:block"
-        style={{ pointerEvents: 'auto' }}
-      >
-        <DeveloperSettings />
-      </div>
+      {import.meta.env.DEV ? (
+        <div className="absolute bottom-4 right-4 z-30 hidden sm:block" style={{ pointerEvents: 'auto' }}>
+          <DeveloperSettings />
+        </div>
+      ) : null}
 
       {/* Control Panel - Slides in from left */}
       {isControlPanelOpen && (
@@ -2114,7 +2113,7 @@ export default function HomePage() {
         </div>
       )}
       {/* Status Legend (bottom-left) with built-in chevron */}
-      <div className="absolute bottom-3 left-3 z-40 sm:bottom-4 sm:left-4" style={{ pointerEvents: 'auto' }}>
+      <div className="absolute bottom-20 left-3 z-40 sm:bottom-4 sm:left-4" style={{ pointerEvents: 'auto' }}>
         <StatusLegend
           selected={statusFilters}
           counts={statusCounts}

@@ -1,20 +1,19 @@
+import { useEffect, useRef, useState } from 'react'
+import { Activity, ArrowRight, ChartSpline, Loader2, MapPinned, Target } from 'lucide-react'
+import { useLocation } from 'wouter'
+
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/contexts/AuthContext'
-import { getOAuthCallbackPath } from '@/lib/authUtils'
-import { supabase } from '@/lib/supabase'
-import { useLocation } from 'wouter'
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { Loader2, ArrowRight, CheckCircle, ChartSpline, CreditCard } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { getOAuthCallbackPath } from '@/lib/authUtils'
+import edmontonIndustrialAerial from '@/assets/edmonton-industrial-aerial.png'
 import {
   clearStoredPostAuthRedirect,
   getStoredPostAuthRedirect,
   isToolAPostAuthRedirect,
   setStoredPostAuthRedirect,
 } from '@/lib/postAuthRedirect'
-
-// Lazy-load the feature cards so the login route stays fast
-const FeatureCards = lazy(() => import('../components/FeatureCards'))
+import { supabase } from '@/lib/supabase'
 
 export default function Landing() {
   const { user, loading, signInWithGoogle } = useAuth()
@@ -23,15 +22,14 @@ export default function Landing() {
   const [isDemoMode, setIsDemoMode] = useState(false)
   const { toast } = useToast()
   const hasPrefetched = useRef(false)
-  const ENABLE_GOOGLE = (import.meta.env.VITE_ENABLE_GOOGLE_AUTH === '1' || import.meta.env.VITE_ENABLE_GOOGLE_AUTH === 'true')
+  const enableGoogle = import.meta.env.VITE_ENABLE_GOOGLE_AUTH === '1' || import.meta.env.VITE_ENABLE_GOOGLE_AUTH === 'true'
 
   const redirectAuthenticatedUser = () => {
-    const nextPath = getStoredPostAuthRedirect() || '/launcher'
+    const nextPath = getStoredPostAuthRedirect() || '/app/desk'
     clearStoredPostAuthRedirect()
     setLocation(nextPath)
   }
 
-  // Prefetch app modules when CTA is visible or hovered
   const prefetchApp = () => {
     if (hasPrefetched.current) return
     hasPrefetched.current = true
@@ -40,59 +38,45 @@ export default function Landing() {
   }
 
   useEffect(() => {
-    // Prefetch app modules shortly after landing load
-    const t = setTimeout(prefetchApp, 300)
-    return () => clearTimeout(t)
+    const timer = window.setTimeout(prefetchApp, 300)
+    return () => window.clearTimeout(timer)
   }, [])
 
   useEffect(() => {
     if (typeof window === 'undefined' || loading || user) return
-
     const oauthCallbackPath = getOAuthCallbackPath({ includeHashTokens: false })
-    if (!oauthCallbackPath) return
-
-    if (import.meta?.env?.DEV) console.log('[auth] Landing forwarding OAuth code ->', oauthCallbackPath)
-    window.location.replace(oauthCallbackPath)
+    if (oauthCallbackPath) window.location.replace(oauthCallbackPath)
   }, [loading, user])
 
   useEffect(() => {
-    if (typeof window === 'undefined' || loading || user || !supabase) return
+    const authClient = supabase
+    if (typeof window === 'undefined' || loading || user || !authClient) return
+    const auth = authClient.auth
 
     const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
     const accessToken = hash.get('access_token')
     const refreshToken = hash.get('refresh_token')
     if (!accessToken || !refreshToken) return
+    const sessionTokens = { access_token: accessToken, refresh_token: refreshToken }
 
     let cancelled = false
-
     async function restoreImplicitSession() {
       setIsSigningIn(true)
       try {
-        const { error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        })
+        const { error } = await auth.setSession(sessionTokens)
         if (error) throw error
+        if (!cancelled) window.location.replace('/')
+      } catch (error: any) {
         if (cancelled) return
-        window.location.replace('/')
-      } catch (err: any) {
-        console.error('Implicit OAuth session restore failed:', err)
-        if (cancelled) return
-
         const params = new URLSearchParams({ error: 'oauth_callback_failed' })
-        if (err?.message) {
-          params.set('error_description', err.message)
-        }
-        const nextLocation = `/?${params.toString()}`
-        window.location.replace(nextLocation)
+        if (error?.message) params.set('error_description', error.message)
+        window.location.replace(`/?${params.toString()}`)
       } finally {
-        if (!cancelled) {
-          setIsSigningIn(false)
-        }
+        if (!cancelled) setIsSigningIn(false)
       }
     }
 
-    restoreImplicitSession()
+    void restoreImplicitSession()
     return () => { cancelled = true }
   }, [loading, user])
 
@@ -106,8 +90,7 @@ export default function Landing() {
     if (user && user.id !== 'demo-user') {
       url.searchParams.delete('error')
       url.searchParams.delete('error_description')
-      const cleanedUrl = `${url.pathname}${url.search}${url.hash}`
-      window.history.replaceState(window.history.state, '', cleanedUrl)
+      window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
       redirectAuthenticatedUser()
       return
     }
@@ -128,48 +111,43 @@ export default function Landing() {
 
     url.searchParams.delete('error')
     url.searchParams.delete('error_description')
-    const cleanedUrl = `${url.pathname}${url.search}${url.hash}`
-    window.history.replaceState(window.history.state, '', cleanedUrl)
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
   }, [toast, user, setLocation])
 
   useEffect(() => {
-    if (!loading && user && user.id !== 'demo-user') {
-      redirectAuthenticatedUser()
-    }
+    if (!loading && user && user.id !== 'demo-user') redirectAuthenticatedUser()
   }, [loading, user, setLocation])
 
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (loading || !user || user.id === 'demo-user') return
+    if (typeof window === 'undefined' || loading || !user || user.id === 'demo-user') return
     const hash = window.location.hash || ''
-    const returnedFromImplicitOAuth =
-      hash.includes('access_token=') || hash.includes('refresh_token=')
-    if (!returnedFromImplicitOAuth) return
+    if (!hash.includes('access_token=') && !hash.includes('refresh_token=')) return
 
-    const nextPath = getStoredPostAuthRedirect() || '/launcher'
+    const nextPath = getStoredPostAuthRedirect() || '/app/desk'
     clearStoredPostAuthRedirect()
     window.history.replaceState({}, '', nextPath)
     setLocation(nextPath)
   }, [loading, user, setLocation])
 
   const handleGoogle = async () => {
-    if (!ENABLE_GOOGLE) return
-    if (isSigningIn) return
+    if (!enableGoogle || isSigningIn) return
     setIsSigningIn(true)
     try {
-      await signInWithGoogle(getStoredPostAuthRedirect() || '/launcher')
-    } catch (err: any) {
-      console.error('Google sign-in error:', err)
-      toast({ title: 'Sign-in unavailable', description: err?.message || 'Please try again later', variant: 'destructive' })
+      await signInWithGoogle(getStoredPostAuthRedirect() || '/app/desk')
+    } catch (error: any) {
+      toast({
+        title: 'Sign-in unavailable',
+        description: error?.message || 'Please try again later',
+        variant: 'destructive',
+      })
     } finally {
       setIsSigningIn(false)
     }
   }
 
   const handleDemoMode = () => {
-    if (isDemoMode) return // Prevent double-clicks
+    if (isDemoMode) return
     setIsDemoMode(true)
-    // Set demo flag and reload page to ensure proper initialization
     localStorage.setItem('demo-mode', 'true')
     const nextPath = getStoredPostAuthRedirect()
     const demoRedirect = isToolAPostAuthRedirect(nextPath) ? nextPath! : '/app'
@@ -179,166 +157,141 @@ export default function Landing() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading...</p>
+      <div className="flex min-h-screen items-center justify-center bg-[#0b1220] text-white">
+        <div className="flex items-center gap-3">
+          <span className="inline-flex items-center gap-1 text-xl font-black">
+            level CRE
+            <ChartSpline className="h-4 w-4 text-blue-400" />
+          </span>
+          <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen overflow-hidden bg-[#f7f9fc] bg-[linear-gradient(rgba(15,23,42,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.035)_1px,transparent_1px)] [background-size:32px_32px]">
-      <div className="container mx-auto px-4 md:px-6 lg:px-8 py-10 md:py-14">
-        <div className="grid min-h-[calc(100vh-7rem)] grid-cols-1 lg:grid-cols-[0.78fr_1.22fr] gap-10 lg:gap-16 items-center">
-          {/* Left column: Branding + Login */}
-          <div className="flex flex-col gap-6">
-            {/* Text logo */}
-            <div className="text-3xl md:text-4xl font-black tracking-tight text-slate-950">
-              <span className="inline-flex items-center gap-1">
-                level CRE
-                <ChartSpline className="-mt-px" size={22} />
-              </span>
-            </div>
+    <div className="min-h-screen bg-white text-slate-950">
+      <section className="relative min-h-[82svh] overflow-hidden bg-[#0b1220] text-white">
+        <img
+          src={edmontonIndustrialAerial}
+          alt="Aerial view of Edmonton's west and northwest industrial market"
+          className="absolute inset-0 h-full w-full object-cover object-center opacity-55"
+        />
+        <div className="absolute inset-0 bg-[#07101f]/75" />
 
-            {/* Headline + Subheadline */}
-            <div className="space-y-3">
-              <div className="inline-flex rounded-md border border-blue-100 bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-blue-700 shadow-sm">
-                Built for CRE brokers
-              </div>
-              <h1 className="max-w-xl text-5xl font-semibold leading-[0.95] tracking-tight text-slate-950 md:text-6xl">
-                Map faster.
-                <br />
-                Track cleaner.
-                <br />
-                Win more.
-              </h1>
-              <p className="max-w-xl text-base leading-7 text-slate-600 md:text-lg">
-                Turn property coverage into client-ready surveys, live pipeline, and broker follow-up in one mapped workspace.
-              </p>
-            </div>
+        <header className="relative z-10 mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-5 sm:px-8 lg:px-10">
+          <a href="/" className="inline-flex items-center gap-1.5 text-xl font-black text-white" aria-label="Level CRE home">
+            <span>level CRE</span>
+            <ChartSpline className="h-4 w-4 text-blue-400" />
+          </a>
+          <div className="flex items-center gap-4 text-xs text-slate-300">
+            <span className="hidden items-center gap-2 sm:inline-flex">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              Edmonton, Alberta
+            </span>
+            <a href="/privacy" className="hover:text-white">Privacy</a>
+          </div>
+        </header>
 
-            {/* CTAs */}
-            <div className="flex flex-col gap-3 w-full">
-              {/* If already authenticated, offer a clear path into the app */}
-              {!loading && user && user.id !== 'demo-user' ? (
-                <>
-                  <Button
-                    onMouseEnter={prefetchApp}
-                    onClick={() => setLocation('/launcher')}
-                    className="group h-8 px-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-sm focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 w-auto self-start"
-                    aria-label="Continue to broker tools"
-                  >
-                    Continue to broker tools
-                    <ArrowRight className="w-3 h-3 ml-2 group-hover:translate-x-1 transition-transform" />
-                  </Button>
-                  <div className="text-xs text-slate-600">Signed in as {user.email}</div>
-                </>
+        <div className="relative z-10 mx-auto flex min-h-[calc(82svh-76px)] w-full max-w-7xl flex-col justify-end px-5 pb-12 sm:px-8 sm:pb-16 lg:px-10">
+          <div className="max-w-3xl">
+            <p className="mb-4 text-xs font-semibold uppercase text-blue-300">Map-first business development</p>
+            <h1 className="text-5xl font-black leading-[0.96] text-white sm:text-6xl lg:text-7xl">level CRE</h1>
+            <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-200 sm:text-xl">
+              Your visual market memory and daily business-development control center.
+            </p>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400 sm:text-base">
+              See the companies, properties, conversations, pursuits, and next moves that make up your market without rebuilding the context every morning.
+            </p>
+
+            <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
+              {user && user.id !== 'demo-user' ? (
+                <Button
+                  onMouseEnter={prefetchApp}
+                  onClick={() => setLocation('/app/desk')}
+                  className="h-11 w-full bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-500 sm:w-auto"
+                >
+                  Open today
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
               ) : (
                 <>
-                  <div className="flex flex-wrap gap-3 items-center">
-                    {ENABLE_GOOGLE && (
-                      <Button
-                        onMouseEnter={prefetchApp}
-                        onClick={handleGoogle}
-                        disabled={isSigningIn || isDemoMode}
-                        className="group h-11 px-5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md disabled:opacity-50 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 w-full sm:w-auto"
-                        aria-label="Continue with Google"
-                      >
-                        {isSigningIn ? (
-                          <>
-                            <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                            Signing in...
-                          </>
-                        ) : (
-                          <>
-                            <svg className="w-3 h-3 mr-2" viewBox="0 0 533.5 544.3" aria-hidden="true">
-                              <path fill="#4285F4" d="M533.5 278.4c0-18.6-1.6-37-5-54.8H272v103.8h147.5c-6.4 34.7-26 64.1-55.4 83.8v69.6h89.4c52.4-48.2 80-119.3 80-202.4z"/>
-                              <path fill="#34A853" d="M272 544.3c72.6 0 133.6-24 178.2-65.2l-89.4-69.6c-24.8 16.7-56.6 26.5-88.8 26.5-68.3 0-126.2-46.1-147-108.1h-92.2v67.9C77.6 486.8 168.3 544.3 272 544.3z"/>
-                              <path fill="#FBBC05" d="M125 327.9c-10.2-30.6-10.2-64.9 0-95.6v-67.9H32.8c-43.7 86.8-43.7 188.7 0 275.5L125 327.9z"/>
-                              <path fill="#EA4335" d="M272 106.1c37.8-.6 74.2 13.6 101.9 39.9l76.1-76.1C408.6 23.6 341.7-.5 272 0 168.3 0 77.6 57.5 32.8 160.5l92.2 71.8C145.8 152.3 203.7 106.1 272 106.1z"/>
-                            </svg>
-                            Continue with Google
-                            <ArrowRight className="w-3 h-3 ml-2 group-hover:translate-x-1 transition-transform" />
-                          </>
-                        )}
-                      </Button>
-                    )}
-                    <Button 
+                  {enableGoogle ? (
+                    <Button
                       onMouseEnter={prefetchApp}
-                      onClick={handleDemoMode}
+                      onClick={handleGoogle}
                       disabled={isSigningIn || isDemoMode}
-                      variant="outline"
-                      className="group h-11 px-5 border-slate-300 bg-white text-slate-900 hover:bg-slate-50 hover:text-slate-950 text-sm font-medium rounded-md disabled:opacity-50 focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 w-full sm:w-auto"
-                      aria-label="Try Level CRE Demo"
-                      title="Open the Level CRE demo"
+                      className="h-11 w-full bg-blue-600 px-5 text-sm font-semibold text-white hover:bg-blue-500 sm:w-auto"
                     >
-                      {isDemoMode ? (
-                        <>
-                          <Loader2 className="w-3 h-3 mr-2 animate-spin" />
-                          Loading Demo...
-                        </>
-                      ) : (
-                        <>
-                          Explore demo
-                          <ArrowRight className="w-3 h-3 ml-2 group-hover:translate-x-1 transition-transform" />
-                        </>
-                      )}
+                      {isSigningIn ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      {isSigningIn ? 'Signing in...' : 'Continue with Google'}
+                      {!isSigningIn ? <ArrowRight className="h-4 w-4" /> : null}
                     </Button>
-                  </div>
-                  <p className="text-sm text-slate-600 mt-1 max-w-xl">
-                    Explore the sandbox now. Upgrade when you are ready to save live data, share surveys, or add team seats.
-                    <button
-                      type="button"
-                      onClick={() => setLocation('/pricing')}
-                      className="ml-2 font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900"
-                    >
-                      View paid plans
-                    </button>
-                  </p>
+                  ) : null}
+                  <Button
+                    onMouseEnter={prefetchApp}
+                    onClick={handleDemoMode}
+                    disabled={isSigningIn || isDemoMode}
+                    variant="outline"
+                    className="h-11 w-full border-white/25 bg-white/10 px-5 text-sm font-semibold text-white hover:bg-white/15 hover:text-white sm:w-auto"
+                  >
+                    {isDemoMode ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    {isDemoMode ? 'Opening demo...' : 'Explore the demo'}
+                  </Button>
                 </>
               )}
             </div>
-
-            {/* Trust indicators */}
-            <div className="grid gap-3 border-y border-slate-200 py-4 text-sm text-slate-600 sm:grid-cols-2">
-              <div className="flex items-center gap-2">
-                <CheckCircle className="w-4 h-4 text-emerald-500" />
-                Client survey workflow
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle className="w-4 h-4 text-emerald-500" />
-                Requirements and follow-ups
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle className="w-4 h-4 text-emerald-500" />
-                Live map coverage
-              </div>
-              <div className="flex items-center gap-2">
-                <CreditCard className="w-4 h-4 text-blue-500" />
-                Paid workspace upgrade
-              </div>
-            </div>
-
-            {/* Footer links */}
-            <div className="pt-2 text-xs text-slate-500 flex items-center gap-3">
-              <a href="/privacy" className="hover:text-slate-700 underline underline-offset-2">Privacy</a>
-              <span>•</span>
-              <a href="/terms" className="hover:text-slate-700 underline underline-offset-2">Terms</a>
-              <span>•</span>
-              <a href="mailto:support@example.com" className="hover:text-slate-700 underline underline-offset-2">Contact</a>
-            </div>
+            {user && user.id !== 'demo-user' ? <p className="mt-3 text-xs text-slate-400">Signed in as {user.email}</p> : null}
           </div>
 
-          {/* Right column: Product preview */}
-          <div>
-            <Suspense fallback={<div className="h-40" />}> 
-              <FeatureCards />
-            </Suspense>
+          <div className="mt-10 grid max-w-3xl grid-cols-1 gap-3 border-t border-white/15 pt-5 text-sm text-slate-300 sm:grid-cols-3 sm:gap-6">
+            <span className="flex items-center gap-2"><MapPinned className="h-4 w-4 text-blue-300" />Visual market memory</span>
+            <span className="flex items-center gap-2"><Activity className="h-4 w-4 text-emerald-300" />Automatic activity capture</span>
+            <span className="flex items-center gap-2"><Target className="h-4 w-4 text-amber-300" />Ranked revenue actions</span>
           </div>
         </div>
-      </div>
+
+        <div className="absolute bottom-2 right-3 z-10 text-[9px] text-white/45">Imagery: Esri World Imagery</div>
+      </section>
+
+      <section className="border-b border-slate-200 bg-white">
+        <div className="mx-auto grid max-w-7xl gap-10 px-5 py-14 sm:px-8 lg:grid-cols-[0.8fr_1.2fr] lg:px-10 lg:py-20">
+          <div>
+            <p className="text-xs font-semibold uppercase text-blue-700">One broker workspace</p>
+            <h2 className="mt-3 max-w-md text-3xl font-semibold leading-tight text-slate-950">Work the day. Remember the market.</h2>
+            <p className="mt-4 max-w-lg text-base leading-7 text-slate-600">
+              Level CRE keeps the map, activity evidence, pursuits, and scorecard together while Codex helps research, draft, and decide what to do next.
+            </p>
+          </div>
+          <div className="grid gap-8 sm:grid-cols-3">
+            <div className="border-l-2 border-blue-500 pl-4">
+              <MapPinned className="h-5 w-5 text-blue-700" />
+              <h3 className="mt-3 text-sm font-semibold text-slate-950">Map</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-600">Properties, companies, requirements, and relationship history in place.</p>
+            </div>
+            <div className="border-l-2 border-emerald-500 pl-4">
+              <Activity className="h-5 w-5 text-emerald-700" />
+              <h3 className="mt-3 text-sm font-semibold text-slate-950">Today</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-600">A short queue built from current activity, follow-ups, and live pursuits.</p>
+            </div>
+            <div className="border-l-2 border-amber-500 pl-4">
+              <Target className="h-5 w-5 text-amber-700" />
+              <h3 className="mt-3 text-sm font-semibold text-slate-950">Scorecard</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-600">Effort, momentum, pipeline health, and production without duplicate entry.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer className="bg-[#0b1220] px-5 py-5 text-xs text-slate-500 sm:px-8">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
+          <span>level CRE</span>
+          <span className="flex gap-4">
+            <a href="/privacy" className="hover:text-slate-300">Privacy</a>
+            <a href="/terms" className="hover:text-slate-300">Terms</a>
+          </span>
+        </div>
+      </footer>
     </div>
   )
 }

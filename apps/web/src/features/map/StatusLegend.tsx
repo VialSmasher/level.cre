@@ -16,7 +16,7 @@ interface StatusLegendProps {
   defaultOpen?: boolean;
 }
 
-export function StatusLegend({ selected, onToggle, onChange, counts, defaultOpen = true }: StatusLegendProps) {
+export function StatusLegend({ selected, onToggle, onChange, counts, defaultOpen = false }: StatusLegendProps) {
   const [open, setOpen] = useState<boolean>(() => {
     if (typeof window === 'undefined') return defaultOpen;
     return window.matchMedia('(min-width: 640px)').matches ? defaultOpen : false;
@@ -37,10 +37,10 @@ export function StatusLegend({ selected, onToggle, onChange, counts, defaultOpen
 
   return (
     <div
-      className={`z-[90] select-none rounded-lg border border-slate-300 bg-white text-slate-900 shadow-[0_8px_24px_rgba(15,23,42,0.14)] ${
+      className={`z-[90] select-none rounded-md border border-slate-300 bg-white text-slate-900 shadow-[0_10px_28px_rgba(15,23,42,0.14)] ${
         open
-          ? 'fixed inset-x-3 bottom-3 max-h-[78dvh] overflow-hidden sm:static sm:inset-auto sm:w-72'
-          : 'w-fit sm:w-72'
+          ? 'fixed inset-x-3 bottom-20 max-h-[72dvh] overflow-hidden sm:static sm:inset-auto sm:w-72'
+          : 'w-fit'
       }`}
     >
       <button
@@ -59,7 +59,7 @@ export function StatusLegend({ selected, onToggle, onChange, counts, defaultOpen
         <ChevronDown className={`h-4 w-4 transition-transform ${open ? '' : '-rotate-90'}`} aria-hidden />
       </button>
       {open && (
-        <div className="max-h-[calc(78dvh-2.5rem)] overflow-y-auto px-3 pb-3">
+        <div className="max-h-[calc(72dvh-2.5rem)] overflow-y-auto px-3 pb-3">
           {canSetPreset && (
             <div className="grid grid-cols-2 gap-1.5 border-t border-slate-200 pt-3 sm:grid-cols-3">
               {STATUS_FILTER_PRESETS.map((preset) => (

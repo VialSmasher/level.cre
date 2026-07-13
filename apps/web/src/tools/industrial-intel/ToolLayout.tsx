@@ -31,7 +31,7 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
             </span>
           </Link>
 
-          <nav className="flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1 shadow-sm">
+          <nav className="flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 p-1 shadow-sm">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive =
@@ -42,7 +42,7 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                className={`inline-flex items-center gap-2 rounded-sm px-4 py-2 text-sm font-semibold transition ${
                   isActive
                     ? "bg-white text-blue-700 shadow-sm ring-1 ring-blue-200"
                     : "text-slate-600 hover:bg-white hover:text-slate-950"
@@ -57,17 +57,17 @@ export default function ToolLayout({ children }: ToolLayoutProps) {
 
           <div className="flex items-center gap-2">
             <Link
-              href="/launcher"
-              className="inline-flex h-10 items-center gap-2 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:border-blue-200 hover:text-blue-700"
+              href="/app/desk"
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:border-blue-200 hover:text-blue-700"
             >
               <Home className="h-4 w-4" />
-              Tools
+              Today
             </Link>
             <Link
               href="/app"
-              className="inline-flex h-10 items-center gap-2 rounded-full bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
             >
-              Level CRE
+              Map
               <ArrowUpRight className="h-4 w-4" />
             </Link>
           </div>

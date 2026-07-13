@@ -83,10 +83,10 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   if (loading || (!user && hasOAuthReturn) || (!user && postAuthPending && !authGraceExpired)) {
     if (import.meta?.env?.DEV && loading) console.log('[gate] ProtectedRoute loading...')
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading...</p>
+      <div className="flex min-h-dvh items-center justify-center bg-[#f3f5f7] px-4">
+        <div className="flex items-center gap-3 text-sm font-medium text-slate-600">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" aria-hidden="true" />
+          <span>Opening Level CRE</span>
         </div>
       </div>
     )

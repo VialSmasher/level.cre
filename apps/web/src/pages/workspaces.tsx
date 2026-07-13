@@ -63,7 +63,7 @@ function WorkspaceCard({
   deleteDisabled?: boolean;
 }) {
   const count = workspace.prospectCount ?? 0;
-  const name = workspace.title || workspace.address || 'Untitled workspace';
+  const name = workspace.title || workspace.address || 'Untitled pursuit';
 
   return (
     <Card
@@ -105,7 +105,7 @@ function WorkspaceCard({
                 variant="ghost"
                 className="h-8 w-8 shrink-0 opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100"
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                aria-label="Workspace actions"
+                aria-label="Pursuit actions"
               >
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
@@ -186,7 +186,7 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
     onSuccess: (listing: any) => {
       onOpenChange(false);
       setTitle('');
-      toast({ title: isDemoMode ? 'Workspace created (demo)' : 'Workspace created', description: 'Opening workspace...' });
+      toast({ title: isDemoMode ? 'Pursuit created (demo)' : 'Pursuit created', description: 'Opening pursuit...' });
 
       // In demo mode, cache + persist locally so the UI lists and opens it
       if (isDemoMode) {
@@ -216,8 +216,8 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
       setLocation(`/app/workspaces/${listing.id}`);
     },
     onError: async (err: any) => {
-      const message = err?.message || 'Failed to create workspace';
-      toast({ title: 'Could not create workspace', description: message, variant: 'destructive' });
+      const message = err?.message || 'Failed to create pursuit';
+      toast({ title: 'Could not create pursuit', description: message, variant: 'destructive' });
     }
   });
 
@@ -227,17 +227,17 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
     <Modal open={open} onOpenChange={onOpenChange}>
       <ModalContent className="max-w-lg">
         <ModalHeader>
-          <ModalTitle>Create Workspace</ModalTitle>
+          <ModalTitle>Create Pursuit</ModalTitle>
         </ModalHeader>
         <div className="space-y-4">
           <div>
-            <Label>Workspace Name</Label>
+            <Label>Pursuit Name</Label>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., NW Distributors" />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button onClick={() => createMutation.mutate()} disabled={!canSubmit || createMutation.isPending}>
-              {createMutation.isPending ? 'Creating...' : 'Create Workspace'}
+              {createMutation.isPending ? 'Creating...' : 'Create Pursuit'}
             </Button>
           </div>
         </div>
@@ -304,8 +304,8 @@ export default function WorkspacesIndex() {
       if (isDemoMode) {
         const when = new Date().toISOString();
         // Update caches
-        queryClient.setQueryData<any[]>(['/api/listings'], (prev) => Array.isArray(prev) ? prev.map(l => l.id === id ? { ...l, archivedAt: when } : l) : prev);
-        queryClient.setQueryData<any>(['/api/listings', id], (prev) => prev ? { ...prev, archivedAt: when } : prev);
+        queryClient.setQueryData<any[]>(['/api/listings'], (prev: any[] | undefined) => Array.isArray(prev) ? prev.map(l => l.id === id ? { ...l, archivedAt: when } : l) : prev);
+        queryClient.setQueryData<any>(['/api/listings', id], (prev: any) => prev ? { ...prev, archivedAt: when } : prev);
         // Persist user + shared
         const kUser = nsKey(user?.id, 'listings');
         const kShared = nsKey(null, 'listings');
@@ -319,10 +319,10 @@ export default function WorkspacesIndex() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/listings'], refetchType: 'active' });
-      toast({ title: 'Workspace archived' });
+      toast({ title: 'Pursuit archived' });
     },
     onError: (err: any) => {
-      toast({ title: 'Could not archive workspace', description: err?.message || 'Unknown error', variant: 'destructive' });
+      toast({ title: 'Could not archive pursuit', description: err?.message || 'Unknown error', variant: 'destructive' });
     }
   });
 
@@ -349,39 +349,39 @@ export default function WorkspacesIndex() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/listings'], refetchType: 'active' });
-      toast({ title: 'Workspace deleted' });
+      toast({ title: 'Pursuit deleted' });
     },
     onError: (err: any) => {
-      toast({ title: 'Could not delete workspace', description: err?.message || 'Unknown error', variant: 'destructive' });
+      toast({ title: 'Could not delete pursuit', description: err?.message || 'Unknown error', variant: 'destructive' });
     }
   });
 
   return (
-    <div className="min-h-full bg-slate-50">
+    <div className="min-h-full bg-[#f3f5f7]">
       <div className="mx-auto max-w-7xl space-y-5 px-4 py-6 sm:px-6 lg:px-8">
       <PageHeader
-        label="Workspace library"
-        title="Deals"
-        description="Client pursuits, listings, and shared prospecting workspaces."
+        label="Prospecting workspaces"
+        title="Pursuits"
+        description="Farm a listing, territory, owner target, or client requirement with a shared market view."
         icon={Briefcase}
         actions={(
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button onClick={() => setOpen(true)} aria-label="Create workspace" className="h-9 px-3">
+              <Button onClick={() => setOpen(true)} aria-label="Create pursuit" className="h-9 px-3">
                 <Plus className="h-4 w-4" />
-                New workspace
+                New pursuit
               </Button>
             </TooltipTrigger>
-            <TooltipContent><p>Create workspace</p></TooltipContent>
+            <TooltipContent><p>Create pursuit</p></TooltipContent>
           </Tooltip>
         )}
       />
 
-      <section className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 bg-white sm:grid-cols-3" aria-label="Workspace totals">
+      <section className="grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white sm:grid-cols-3" aria-label="Pursuit totals">
         <div className="border-b border-r border-slate-200 sm:border-b-0">
           <div className="flex items-center justify-between p-4">
             <div>
-              <p className="text-xs font-medium text-slate-500">My workspaces</p>
+              <p className="text-xs font-medium text-slate-500">My pursuits</p>
               <p className="mt-1 text-2xl font-semibold text-slate-950">{listings.length}</p>
             </div>
             <div className="rounded-md bg-blue-50 p-2 text-blue-600">
@@ -392,7 +392,7 @@ export default function WorkspacesIndex() {
         <div className="border-b border-slate-200 sm:border-b-0 sm:border-r">
           <div className="flex items-center justify-between p-4">
             <div>
-              <p className="text-xs font-medium text-slate-500">My prospects</p>
+              <p className="text-xs font-medium text-slate-500">Prospects mapped</p>
               <p className="mt-1 text-2xl font-semibold text-slate-950">{totalOwnedProspects}</p>
             </div>
             <div className="rounded-md bg-emerald-50 p-2 text-emerald-600">
@@ -416,7 +416,7 @@ export default function WorkspacesIndex() {
       {isLoading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-36 animate-pulse rounded-lg border border-slate-200 bg-white" />
+            <div key={i} className="h-36 animate-pulse rounded-md border border-slate-200 bg-white" />
           ))}
         </div>
       ) : (
@@ -424,8 +424,8 @@ export default function WorkspacesIndex() {
           <section className="space-y-3">
           <div className="flex items-end justify-between">
             <div>
-              <h2 className="text-base font-semibold text-slate-950">My workspaces</h2>
-              <p className="text-sm text-slate-600">Client maps and prospecting boards ready to work.</p>
+              <h2 className="text-base font-semibold text-slate-950">My pursuits</h2>
+              <p className="text-sm text-slate-600">Listing farms, target areas, and client searches ready to work.</p>
             </div>
             <Badge variant="outline" className="bg-white">{listings.length}</Badge>
           </div>
@@ -433,10 +433,10 @@ export default function WorkspacesIndex() {
           {listings.length === 0 && (
             <Card className="col-span-full border-dashed border-slate-300 bg-white">
               <CardHeader>
-                <CardTitle>No workspaces yet</CardTitle>
+                <CardTitle>No pursuits yet</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-slate-600">Create a workspace for a pursuit, client, territory, or listing assignment.</p>
+                <p className="text-sm text-slate-600">Start with a listing assignment, owner target, territory, or client requirement.</p>
               </CardContent>
             </Card>
           )}
@@ -450,7 +450,7 @@ export default function WorkspacesIndex() {
               onRename={() => toast({ title: 'Rename', description: 'Coming soon.' })}
               onShare={() => toast({ title: 'Share', description: 'Coming soon.' })}
               onDelete={() => {
-                if (confirm('Delete this workspace? This cannot be undone.')) deleteMutation.mutate(l.id);
+                if (confirm('Delete this pursuit? This cannot be undone.')) deleteMutation.mutate(l.id);
               }}
               deleteDisabled={deleteMutation.isPending}
             />
@@ -470,12 +470,12 @@ export default function WorkspacesIndex() {
           {isLoadingShared ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-36 animate-pulse rounded-lg border border-slate-200 bg-white" />
+                <div key={i} className="h-36 animate-pulse rounded-md border border-slate-200 bg-white" />
               ))}
             </div>
           ) : shared.length === 0 ? (
             <Card className="border-dashed border-slate-300 bg-white">
-              <CardContent className="p-5 text-sm text-slate-600">No shared workspaces yet.</CardContent>
+              <CardContent className="p-5 text-sm text-slate-600">No shared pursuits yet.</CardContent>
             </Card>
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

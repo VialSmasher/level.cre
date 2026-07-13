@@ -1,5 +1,5 @@
 import { useRef, useState, useMemo, useEffect, useCallback } from 'react';
-import { Database, MapPin, Search, Square } from 'lucide-react';
+import { Database, MapPin, MapPinned, Search } from 'lucide-react';
 import type { Prospect } from '@level-cre/shared/schema';
 import { getProspectDisplayName, getProspectSecondaryName, isPlaceholderProspectName } from '@/lib/prospectDisplay';
 import type { MapSearchLocation } from './searchTypes';
@@ -52,7 +52,7 @@ const DEFAULT_MARKET_BOUNDS = {
   west: -114.25,
 } as const;
 
-const predictionTextToString = (text?: google.maps.places.PredictionText) => text?.toString() || text?.text || '';
+const predictionTextToString = (text?: google.maps.places.FormattableText | null) => text?.text || '';
 
 const withMarketLocation = (query: string, marketLocation: string) => {
   const trimmedQuery = query.trim();
@@ -110,6 +110,7 @@ export function SearchBar({
   const placesServiceRef = useRef<google.maps.places.PlacesService | null>(null);
   const listboxId = 'places-suggestions-listbox';
   const normalizedInput = value.trim().toLowerCase();
+  const marketName = marketLocation.split(',')[0]?.trim() || 'Market';
   const marketQuery = useCallback((query: string) => withMarketLocation(query, marketLocation), [marketLocation]);
 
   const requestOptions = useMemo((): Omit<google.maps.places.AutocompleteRequest, 'input'> => {
@@ -190,15 +191,14 @@ export function SearchBar({
 
     const service = new places.AutocompleteService();
     const searchBounds = makeBounds(bounds || (strictBounds ? DEFAULT_MARKET_BOUNDS : null));
-    const fallbackLocation = new window.google.maps.LatLng(defaultCenter.lat, defaultCenter.lng);
     const predictions = await new Promise<google.maps.places.AutocompletePrediction[]>((resolve, reject) => {
       service.getPlacePredictions({
         input,
         componentRestrictions: { country: 'ca' },
-        bounds: searchBounds,
-        strictBounds: Boolean(strictBounds && searchBounds),
-        location: searchBounds ? undefined : fallbackLocation,
-        radius: searchBounds ? undefined : FALLBACK_RADIUS_METERS,
+        locationRestriction: strictBounds && searchBounds ? searchBounds : undefined,
+        locationBias: !strictBounds && searchBounds
+          ? searchBounds
+          : { center: defaultCenter, radius: FALLBACK_RADIUS_METERS },
       }, (results, status) => {
         if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
           resolve(results);
@@ -496,34 +496,39 @@ export function SearchBar({
 
   const renderSuggestions = () => {
     const localCount = localResults.length;
+    const localItems = combinedResults.slice(0, localCount).filter((item) => item.type === 'local');
     return (
       <>
         {localCount > 0 && (
-          <li className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-500">
-            Level CRE results
+          <li className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase text-slate-500">
+            Saved market
           </li>
         )}
-        {combinedResults.map((item, idx) => {
-          if (item.type === 'local') {
-            return (
-              <li
-                key={item.key}
-                id={`places-option-${idx}`}
-                role="option"
-                aria-selected={activeIndex === idx}
-                onClick={handleLocalSelect(item.prospect)}
-                onMouseEnter={() => setActiveIndex(idx)}
-                className={`cursor-pointer border-b border-slate-100 px-3 py-2.5 ${activeIndex === idx ? 'bg-blue-50' : 'bg-white hover:bg-slate-50'}`}
-              >
-                <div className="flex items-center gap-2">
-                  <Database className="h-3.5 w-3.5 shrink-0 text-blue-600" />
-                  <strong className="min-w-0 truncate text-sm font-medium text-slate-950">{item.label}</strong>
-                  <span className="rounded-sm border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">CRM</span>
-                </div>
-                {item.secondary && <small className="ml-5 block truncate text-xs text-slate-500">{item.secondary}</small>}
-              </li>
-            );
-          }
+        {localItems.map((item, idx) => (
+          <li
+            key={item.key}
+            id={`places-option-${idx}`}
+            role="option"
+            aria-selected={activeIndex === idx}
+            onClick={handleLocalSelect(item.prospect)}
+            onMouseEnter={() => setActiveIndex(idx)}
+            className={`cursor-pointer border-b border-slate-100 px-3 py-2.5 ${activeIndex === idx ? 'bg-blue-50' : 'bg-white hover:bg-slate-50'}`}
+          >
+            <div className="flex items-center gap-2">
+              <Database className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+              <strong className="min-w-0 truncate text-sm font-medium text-slate-950">{item.label}</strong>
+              <span className="rounded-sm border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">Level CRE</span>
+            </div>
+            {item.secondary && <small className="ml-5 block truncate text-xs text-slate-500">{item.secondary}</small>}
+          </li>
+        ))}
+        {googleResults.length > 0 ? (
+          <li className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase text-slate-500">
+            Google Places near {marketName}
+          </li>
+        ) : null}
+        {googleResults.map((item, resultIndex) => {
+          const idx = localCount + resultIndex;
           return (
             <li
               key={item.key}
@@ -547,8 +552,9 @@ export function SearchBar({
   };
 
   return (
-    <div className="relative w-full sm:w-[min(85vw,460px)]">
-      <div className="flex h-11 items-center gap-2 rounded-lg border border-slate-300 bg-white px-2 shadow-[0_4px_14px_rgba(15,23,42,0.10)]">
+    <div className="relative w-full sm:w-[min(72vw,520px)]">
+      <div className="flex h-12 items-center gap-2 rounded-md border border-slate-300 bg-white px-2 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
+        <Search className="ml-1 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
         <input
           ref={ref}
           value={value}
@@ -592,8 +598,8 @@ export function SearchBar({
             }
           }}
           disabled={!ready}
-          className="min-w-0 flex-1 bg-transparent px-1 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
-          placeholder="Search companies or addresses"
+          className="min-w-0 flex-1 bg-transparent px-1 text-sm font-medium text-slate-900 placeholder:font-normal placeholder:text-slate-400 focus:outline-none"
+          placeholder={`Search ${marketName} companies or addresses`}
           aria-label="Search"
           role="combobox"
           aria-autocomplete="list"
@@ -603,17 +609,19 @@ export function SearchBar({
         />
         <button
           type="button"
-          aria-label="Strict bounds"
-          title={strictBounds ? 'Strict bounds: on' : 'Strict bounds: off'}
-          className={`grid h-8 w-8 shrink-0 place-items-center rounded-md text-xs ${strictBounds ? 'bg-slate-900 text-white hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-100'}`}
+          aria-label={`Limit search to the ${marketName} market`}
+          aria-pressed={strictBounds}
+          title={strictBounds ? `${marketName} market only` : `Prefer ${marketName}, allow nearby results`}
+          className={`flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-semibold ${strictBounds ? 'bg-slate-900 text-white hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-100'}`}
           onClick={() => setStrictBounds((v) => !v)}
         >
-          <Square className="w-4 h-4" />
+          <MapPinned className="h-4 w-4" />
+          <span className="hidden sm:inline">{marketName}</span>
         </button>
         <button
           type="button"
           aria-label="Search"
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-blue-600 text-xs text-white hover:bg-blue-700 active:scale-95"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-blue-600 text-xs text-white shadow-sm hover:bg-blue-700 active:translate-y-px"
           onClick={submitFirstResultOrFreeform}
         >
           <Search className="w-4 h-4" strokeWidth={2.5} />
@@ -624,7 +632,7 @@ export function SearchBar({
           id={listboxId}
           role="listbox"
           ref={listRef}
-          className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-[0_12px_30px_rgba(15,23,42,0.14)]"
+          className="absolute z-[120] mt-1.5 max-h-80 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.16)]"
         >
           {renderSuggestions()}
         </ul>

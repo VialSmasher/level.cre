@@ -7,7 +7,7 @@ export default function AuthCallback() {
     let cancelled = false
 
     const redirectToPostAuthDestination = () => {
-      const nextPath = getStoredPostAuthRedirect() || '/launcher'
+      const nextPath = getStoredPostAuthRedirect() || '/app/desk'
       markPostAuthPending()
       window.location.replace(nextPath)
     }
@@ -19,14 +19,14 @@ export default function AuthCallback() {
     }
 
     async function run() {
-      try {
-        if (!supabase) {
-          // Surface clearer signal when auth isn't configured in this environment
-          console.error('[auth] Supabase client not configured; cannot exchange PKCE code')
-          redirectToLanding(new URLSearchParams({ error: 'auth_not_configured' }))
-          return
-        }
+      const authClient = supabase
+      if (!authClient) {
+        console.error('[auth] Supabase client not configured; cannot exchange PKCE code')
+        redirectToLanding(new URLSearchParams({ error: 'auth_not_configured' }))
+        return
+      }
 
+      try {
         const url = new URL(window.location.href)
         const authError = url.searchParams.get('error')
         const authErrorDescription = url.searchParams.get('error_description')
@@ -44,7 +44,7 @@ export default function AuthCallback() {
         const accessToken = hash.get('access_token')
         const refreshToken = hash.get('refresh_token')
         if (accessToken && refreshToken) {
-          const { error } = await supabase.auth.setSession({
+          const { error } = await authClient.auth.setSession({
             access_token: accessToken,
             refresh_token: refreshToken,
           })
@@ -58,7 +58,7 @@ export default function AuthCallback() {
 
         const code = url.searchParams.get('code')
         if (!code) {
-          const { data: { session } } = await supabase.auth.getSession()
+          const { data: { session } } = await authClient.auth.getSession()
           if (cancelled) return
           if (session) {
             redirectToPostAuthDestination()
@@ -68,7 +68,7 @@ export default function AuthCallback() {
           return
         }
 
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+        const { data, error } = await authClient.auth.exchangeCodeForSession(code)
         if (error) {
           throw error
         }
@@ -81,7 +81,7 @@ export default function AuthCallback() {
       } catch (err: any) {
         console.error('[auth] PKCE exchange failed', err)
         try {
-          const { data: { session } } = await supabase.auth.getSession()
+          const { data: { session } } = await authClient.auth.getSession()
           if (!cancelled && session) {
             redirectToPostAuthDestination()
             return

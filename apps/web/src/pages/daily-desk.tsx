@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'wouter'
 import {
+  Activity,
   Archive,
   ArrowRight,
   BriefcaseBusiness,
@@ -13,7 +14,6 @@ import {
   ListTodo,
   Mail,
   MapPin,
-  MapPinned,
   Minus,
   RefreshCw,
   Send,
@@ -485,20 +485,20 @@ export default function DailyDeskPage() {
   const hasError = salesBriefQuery.isError || importsQuery.isError
   const generatedAt = formatWhen(salesBriefQuery.data?.generatedAt)
   const pulseMetrics = [
-    { label: 'Follow-ups this week', value: statsQuery.data?.followupsLogged ?? 0, icon: Send, tone: 'text-emerald-700 bg-emerald-50' },
-    { label: 'Active-day streak', value: `${activityPulseQuery.data?.streakDays ?? statsQuery.data?.streakDays ?? 0}d`, icon: Flame, tone: 'text-orange-700 bg-orange-50' },
-    { label: 'Mapped prospects', value: statsQuery.data?.assetsTracked ?? 0, icon: MapPinned, tone: 'text-blue-700 bg-blue-50' },
-    { label: 'Needs review', value: tabCounts.review, icon: Inbox, tone: 'text-fuchsia-700 bg-fuchsia-50' },
+    { group: 'Effort', label: 'Touches / 28 days', value: activityPulseQuery.data?.total ?? 0, icon: Activity, tone: 'text-blue-700 bg-blue-50' },
+    { group: 'Momentum', label: 'Active-day streak', value: `${activityPulseQuery.data?.streakDays ?? statsQuery.data?.streakDays ?? 0}d`, icon: Flame, tone: 'text-orange-700 bg-orange-50' },
+    { group: 'Pipeline', label: 'With a next move', value: `${salesBriefQuery.data?.pipelineHealth?.nextActionCoveragePercent ?? 0}%`, icon: Target, tone: 'text-violet-700 bg-violet-50' },
+    { group: 'Follow-up', label: 'Completed this week', value: statsQuery.data?.followupsLogged ?? 0, icon: Send, tone: 'text-emerald-700 bg-emerald-50' },
   ]
   const maxDailyActivity = Math.max(1, ...(activityPulseQuery.data?.series.map((day) => day.total) || [1]))
 
   return (
-    <div className="min-h-full bg-slate-50">
-      <div className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+    <div className="min-h-full bg-[#f3f5f7]">
+      <div className="mx-auto w-full max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8">
         <PageHeader
-          label="Daily desk"
+          label="Broker desk"
           title="Today"
-          description="Your ranked action queue from Level CRE and recent email activity."
+          description="The shortest path from current market activity to revenue-moving work."
           icon={ListTodo}
           actions={(
             <>
@@ -517,32 +517,33 @@ export default function DailyDeskPage() {
           )}
         />
 
-        <section className="mt-5 grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white lg:grid-cols-4" aria-label="Business development pulse">
+        <section className="mt-5 grid grid-cols-2 overflow-hidden border-y border-slate-200 bg-white lg:grid-cols-4" aria-label="Business development pulse">
           {pulseMetrics.map((metric, index) => {
             const MetricIcon = metric.icon
             return (
               <div
                 key={metric.label}
                 className={cn(
-                  'flex min-h-20 items-center gap-3 border-slate-200 px-4',
+                  'flex min-h-[108px] items-center gap-2 border-slate-200 px-3 sm:min-h-24 sm:gap-3 sm:px-5',
                   index < 2 && 'border-b lg:border-b-0',
                   index % 2 === 0 && 'border-r',
                   index < 3 && 'lg:border-r',
                 )}
               >
-                <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-md', metric.tone)}>
+                <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-md sm:h-9 sm:w-9', metric.tone)}>
                   <MetricIcon className="h-4 w-4" />
                 </span>
-                <div>
-                  <p className="text-xl font-bold text-slate-950">{metric.value}</p>
-                  <p className="text-xs font-medium text-slate-500">{metric.label}</p>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase text-slate-400">{metric.group}</p>
+                  <p className="mt-0.5 text-xl font-bold tabular-nums text-slate-950">{metric.value}</p>
+                  <p className="text-[11px] font-medium leading-4 text-slate-500 sm:text-xs">{metric.label}</p>
                 </div>
               </div>
             )
           })}
         </section>
 
-        <nav className="mt-5 grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white sm:grid-cols-4" aria-label="Daily desk queues">
+        <nav className="mt-5 grid grid-cols-2 gap-1 rounded-md border border-slate-200 bg-slate-200/70 p-1 sm:grid-cols-4" aria-label="Daily desk queues">
           {([
             ['today', 'Do now'],
             ['waiting', 'Waiting'],
@@ -555,12 +556,12 @@ export default function DailyDeskPage() {
               onClick={() => setActiveTab(id)}
               aria-pressed={activeTab === id}
               className={cn(
-                'flex min-h-14 items-center justify-between border-b border-r border-slate-200 px-4 text-left text-sm font-semibold transition-colors even:border-r-0 [&:nth-child(n+3)]:border-b-0 sm:border-b-0 sm:border-r sm:even:border-r sm:last:border-r-0',
-                activeTab === id ? 'bg-slate-950 text-white' : 'text-slate-700 hover:bg-slate-50',
+                'flex min-h-11 items-center justify-between rounded-sm px-3 text-left text-sm font-semibold transition-colors',
+                activeTab === id ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:bg-white/60 hover:text-slate-950',
               )}
             >
               {label}
-              <span className={cn('text-lg', activeTab === id ? 'text-white' : 'text-slate-950')}>{tabCounts[id]}</span>
+              <span className={cn('rounded-sm px-1.5 py-0.5 text-xs tabular-nums', activeTab === id ? 'bg-blue-50 text-blue-700' : 'bg-white/60 text-slate-700')}>{tabCounts[id]}</span>
             </button>
           ))}
         </nav>
@@ -571,7 +572,7 @@ export default function DailyDeskPage() {
           </div>
         ) : null}
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
           <section className="overflow-hidden rounded-md border border-slate-200 bg-white" aria-live="polite">
             <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-5">
               <div>
@@ -676,17 +677,17 @@ export default function DailyDeskPage() {
           </section>
 
           <aside className="space-y-5">
-            <section className="rounded-md border border-emerald-200 bg-white p-5 shadow-sm">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase text-blue-700">
+            <section className="rounded-md border border-slate-900 bg-[#0b1220] p-5 text-white shadow-md">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase text-blue-300">
                 <Target className="h-4 w-4" />
                 Best next move
               </div>
               {salesBriefQuery.data?.nextBestAction ? (
                 <div className="mt-3">
-                  <h2 className="text-base font-semibold leading-6 text-slate-950">{salesBriefQuery.data.nextBestAction.title}</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">{salesBriefQuery.data.nextBestAction.suggestedAction}</p>
+                  <h2 className="text-base font-semibold leading-6 text-white">{salesBriefQuery.data.nextBestAction.title}</h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">{salesBriefQuery.data.nextBestAction.suggestedAction}</p>
                   {actionHref(salesBriefQuery.data.nextBestAction) ? (
-                    <Button asChild className="mt-4 w-full" size="sm">
+                    <Button asChild className="mt-4 w-full bg-blue-600 hover:bg-blue-500" size="sm">
                       <Link href={actionHref(salesBriefQuery.data.nextBestAction)!}>
                         Work this now
                         <ArrowRight className="h-4 w-4" />
@@ -696,66 +697,12 @@ export default function DailyDeskPage() {
                 </div>
               ) : (
                 <div className="mt-3">
-                  <p className="text-sm leading-6 text-slate-600">No ranked action yet. Add prospects or connect activity sources to build the queue.</p>
-                  <Button asChild variant="outline" size="sm" className="mt-4 w-full">
+                  <p className="text-sm leading-6 text-slate-300">No ranked action yet. Add prospects or connect activity sources to build the queue.</p>
+                  <Button asChild variant="outline" size="sm" className="mt-4 w-full border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white">
                     <Link href="/app"><MapPin className="h-4 w-4" />Open map</Link>
                   </Button>
                 </div>
               )}
-            </section>
-
-            <section className="rounded-md border border-slate-200 bg-white">
-              <div className="border-b border-slate-200 px-5 py-4">
-                <h2 className="text-sm font-semibold text-slate-950">Activity sources</h2>
-                <p className="mt-1 text-xs text-slate-500">The evidence feeding this desk.</p>
-              </div>
-              <div className="divide-y divide-slate-200">
-                <div className="flex items-start gap-3 px-5 py-4">
-                  {outlookQuery.data?.connected ? <Wifi className="mt-0.5 h-4 w-4 text-emerald-600" /> : <WifiOff className="mt-0.5 h-4 w-4 text-amber-600" />}
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-950">Outlook</p>
-                    <p className="mt-0.5 text-xs leading-5 text-slate-500">
-                      {outlookQuery.data?.connected
-                        ? `Connected${outlookQuery.data.connection?.lastSyncedAt ? ` / synced ${formatWhen(outlookQuery.data.connection.lastSyncedAt)}` : ''}`
-                        : 'Needs connection or re-authentication'}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 px-5 py-4">
-                  {inboundQuery.data?.configured && inboundQuery.data?.domainConfigured
-                    ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
-                    : <WifiOff className="mt-0.5 h-4 w-4 text-amber-600" />}
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-950">Postmark BCC</p>
-                    <p className="mt-0.5 text-xs leading-5 text-slate-500">
-                      {inboundQuery.data?.configured && inboundQuery.data?.domainConfigured ? 'Inbound capture configured' : 'Inbound capture needs setup'}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 px-5 py-4">
-                  {importsQuery.isError || !salesBriefQuery.data?.integrations?.salesActivityAgentConfigured
-                    ? <WifiOff className="mt-0.5 h-4 w-4 text-amber-600" />
-                    : <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />}
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-slate-950">Codex activity bridge</p>
-                    <p className="mt-0.5 text-xs leading-5 text-slate-500">
-                      {importsQuery.isError
-                        ? 'Bridge could not be reached'
-                        : salesBriefQuery.data?.integrations?.salesActivityAgentConfigured
-                          ? `API ready / ${imports.length} item${imports.length === 1 ? '' : 's'} waiting for review`
-                          : 'Recorder key not configured / BCC and local outbox remain active'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div className="px-5 py-4">
-                <Button asChild variant="outline" size="sm" className="w-full">
-                  <Link href="/app/inbox">
-                    <Inbox className="h-4 w-4" />
-                    Open activity inbox
-                  </Link>
-                </Button>
-              </div>
             </section>
 
             <section className="rounded-md border border-slate-200 bg-white p-5">
@@ -792,6 +739,60 @@ export default function DailyDeskPage() {
         {activityPulseQuery.data ? (
           <ActivityMomentum data={activityPulseQuery.data} maxDailyActivity={maxDailyActivity} />
         ) : null}
+
+        <details className="mt-5 border-y border-slate-200 bg-white">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 text-sm font-semibold text-slate-700 sm:px-5">
+            <span className="flex items-center gap-2">
+              <Activity className="h-4 w-4 text-slate-500" />
+              Data capture health
+            </span>
+            <span className="text-xs font-normal text-slate-500">Outlook, Postmark, and Codex</span>
+          </summary>
+          <div className="grid border-t border-slate-200 sm:grid-cols-3">
+            <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-4 sm:border-b-0 sm:border-r">
+              {outlookQuery.data?.connected ? <Wifi className="mt-0.5 h-4 w-4 text-emerald-600" /> : <WifiOff className="mt-0.5 h-4 w-4 text-amber-600" />}
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-slate-950">Outlook</p>
+                <p className="mt-0.5 text-xs leading-5 text-slate-500">
+                  {outlookQuery.data?.connected
+                    ? `Connected${outlookQuery.data.connection?.lastSyncedAt ? ` / synced ${formatWhen(outlookQuery.data.connection.lastSyncedAt)}` : ''}`
+                    : 'Needs connection or re-authentication'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-4 sm:border-b-0 sm:border-r">
+              {inboundQuery.data?.configured && inboundQuery.data?.domainConfigured
+                ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
+                : <WifiOff className="mt-0.5 h-4 w-4 text-amber-600" />}
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-slate-950">Postmark BCC</p>
+                <p className="mt-0.5 text-xs leading-5 text-slate-500">
+                  {inboundQuery.data?.configured && inboundQuery.data?.domainConfigured ? 'Inbound capture configured' : 'Inbound capture needs setup'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start justify-between gap-3 px-5 py-4">
+              <div className="flex min-w-0 gap-3">
+                {importsQuery.isError || !salesBriefQuery.data?.integrations?.salesActivityAgentConfigured
+                  ? <WifiOff className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />}
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-950">Codex bridge</p>
+                  <p className="mt-0.5 text-xs leading-5 text-slate-500">
+                    {importsQuery.isError
+                      ? 'Bridge could not be reached'
+                      : salesBriefQuery.data?.integrations?.salesActivityAgentConfigured
+                        ? `${imports.length} item${imports.length === 1 ? '' : 's'} waiting for review`
+                        : 'Recorder key not configured'}
+                  </p>
+                </div>
+              </div>
+              <Button asChild variant="outline" size="icon" className="h-8 w-8 shrink-0" title="Open activity">
+                <Link href="/app/inbox" aria-label="Open activity"><Inbox className="h-4 w-4" /></Link>
+              </Button>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
   )

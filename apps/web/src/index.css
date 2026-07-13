@@ -9,8 +9,8 @@ html, body, #root {
 
 
 :root {
-  --background: hsl(210 20% 98%);
-  --foreground: hsl(222 47% 11%);
+  --background: hsl(210 20% 97%);
+  --foreground: hsl(221 45% 10%);
   --card: hsl(0 0% 100%);
   --card-foreground: hsl(222 47% 11%);
   --popover: hsl(0 0% 100%);
@@ -19,49 +19,49 @@ html, body, #root {
   --primary-foreground: hsl(0 0% 100%);
   --secondary: hsl(222 47% 11%);
   --secondary-foreground: hsl(0 0% 100%);
-  --muted: hsl(210 20% 96%);
-  --muted-foreground: hsl(215 16% 47%);
-  --accent: hsl(214 32% 94%);
+  --muted: hsl(210 18% 95%);
+  --muted-foreground: hsl(215 14% 42%);
+  --accent: hsl(214 28% 93%);
   --accent-foreground: hsl(221 83% 45%);
   --destructive: hsl(356.3033 90.5579% 54.3137%);
   --destructive-foreground: hsl(0 0% 100%);
-  --border: hsl(214 24% 88%);
-  --input: hsl(214 24% 88%);
+  --border: hsl(214 19% 86%);
+  --input: hsl(214 19% 83%);
   --ring: hsl(221 83% 53%);
   --chart-1: hsl(203.8863 88.2845% 53.1373%);
   --chart-2: hsl(159.7826 100% 36.0784%);
   --chart-3: hsl(42.0290 92.8251% 56.2745%);
   --chart-4: hsl(147.1429 78.5047% 41.9608%);
   --chart-5: hsl(341.4894 75.2000% 50.9804%);
-  --sidebar: hsl(210 20% 98%);
-  --sidebar-foreground: hsl(222 47% 11%);
+  --sidebar: hsl(220 49% 8%);
+  --sidebar-foreground: hsl(210 25% 96%);
   --sidebar-primary: hsl(221 83% 53%);
   --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: hsl(214 32% 94%);
-  --sidebar-accent-foreground: hsl(221 83% 45%);
-  --sidebar-border: hsl(214 24% 88%);
+  --sidebar-accent: hsl(220 35% 14%);
+  --sidebar-accent-foreground: hsl(210 25% 96%);
+  --sidebar-border: hsl(218 23% 20%);
   --sidebar-ring: hsl(221 83% 53%);
-  --font-sans: 'Inter', Open Sans, sans-serif;
+  --font-sans: 'Aptos', 'Inter', 'Segoe UI', Arial, sans-serif;
   --font-serif: Georgia, serif;
   --font-mono: Menlo, monospace;
-  --radius: 0.5rem;
-  --shadow-2xs: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-xs: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-sm: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 1px 2px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 1px 2px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-md: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 2px 4px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-lg: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 4px 6px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-xl: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00), 0px 8px 10px -1px hsl(202.8169 89.1213% 53.1373% / 0.00);
-  --shadow-2xl: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0.00);
+  --radius: 0.375rem;
+  --shadow-2xs: 0 1px 1px hsl(221 45% 10% / 0.03);
+  --shadow-xs: 0 1px 2px hsl(221 45% 10% / 0.05);
+  --shadow-sm: 0 1px 2px hsl(221 45% 10% / 0.05), 0 4px 12px hsl(221 45% 10% / 0.03);
+  --shadow: 0 1px 3px hsl(221 45% 10% / 0.08), 0 6px 18px hsl(221 45% 10% / 0.04);
+  --shadow-md: 0 2px 5px hsl(221 45% 10% / 0.08), 0 12px 28px hsl(221 45% 10% / 0.05);
+  --shadow-lg: 0 4px 10px hsl(221 45% 10% / 0.10), 0 18px 42px hsl(221 45% 10% / 0.08);
+  --shadow-xl: 0 8px 18px hsl(221 45% 10% / 0.12), 0 24px 54px hsl(221 45% 10% / 0.10);
+  --shadow-2xl: 0 16px 40px hsl(221 45% 10% / 0.16);
   --tracking-normal: 0em;
   --spacing: 0.25rem;
   
   /* Custom prospect status colors */
-  --prospect: hsl(0 69% 58%);
-  --contacted: hsl(20 75% 45%);
-  --followup: hsl(36 77% 52%);
-  --listing: hsl(258 56% 45%);
-  --client: hsl(141 53% 42%);
+  --prospect: hsl(43 92% 50%);
+  --contacted: hsl(211 80% 52%);
+  --followup: hsl(26 90% 52%);
+  --listing: hsl(263 61% 52%);
+  --client: hsl(157 70% 38%);
   --no-go: hsl(210 9% 53%);
 }
 
@@ -121,7 +121,36 @@ html, body, #root {
     @apply font-sans antialiased bg-background text-foreground;
     font-family: var(--font-sans);
     letter-spacing: 0;
+    text-rendering: optimizeLegibility;
   }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  ::selection {
+    background: hsl(221 83% 53% / 0.2);
+  }
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(215 16% 70%) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: hsl(215 16% 70%);
+  background-clip: padding-box;
 }
 
 /* Custom status colors */

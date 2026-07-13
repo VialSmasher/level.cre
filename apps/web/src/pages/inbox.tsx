@@ -316,12 +316,12 @@ export default function InboxPage() {
   }
 
   return (
-    <div className="min-h-0 flex-1 bg-slate-50">
+    <div className="min-h-0 flex-1 bg-[#f3f5f7]">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
         <PageHeader
-          label="Inbox"
-          title="Activity inbox"
-          description="Captured sales emails waiting for context, logging, or archive."
+          label="Business development ledger"
+          title="Activity"
+          description="Captured sales touches waiting for context, logging, or archive."
           icon={InboxIcon}
           actions={(
             <>
@@ -339,7 +339,7 @@ export default function InboxPage() {
           )}
         />
 
-        <section className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 bg-white lg:grid-cols-4" aria-label="Inbox totals">
+        <section className="grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white lg:grid-cols-4" aria-label="Activity totals">
           {dashboardCards.map((card, index) => (
             <div
               key={card.label}
@@ -354,7 +354,7 @@ export default function InboxPage() {
           ))}
         </section>
 
-        <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-3 rounded-md border border-slate-200 bg-white p-3 md:flex-row md:items-center md:justify-between">
             <div className="relative w-full md:max-w-md">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <Input
@@ -462,7 +462,7 @@ export default function InboxPage() {
           </CardContent>
         </Card>
 
-        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
           {isLoading ? (
             <Card className="rounded-none border-0 shadow-none">
               <CardContent className="py-10 text-center text-sm text-slate-500">Loading email review...</CardContent>
