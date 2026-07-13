@@ -61,6 +61,7 @@ test('real Google map supports Edmonton search and aerial mode', async ({ page }
     await journey.action('Switch to aerial imagery', () => page.getByRole('button', { name: 'Show aerial map' }).click());
     await expect(page.getByRole('button', { name: 'Show road map' })).toBeVisible();
     await waitForMapTilesToCoverViewport(page, '!1e1!');
+    await expect(page.getByRole('listbox')).toHaveCount(0);
   });
 
   expect(metrics.consoleErrors).toEqual([]);

@@ -104,6 +104,7 @@ export function SearchBar({
   const [googleResults, setGoogleResults] = useState<GoogleSearchItem[]>([]);
   const requestIdRef = useRef(0);
   const suppressNextFetchRef = useRef(false);
+  const selectedValueRef = useRef<string | null>(null);
   const sessionTokenRef = useRef<google.maps.places.AutocompleteSessionToken | null>(null);
   const ref = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -237,8 +238,15 @@ export function SearchBar({
     if (!ready || !input) {
       clearSuggestions();
       if (!input) {
+        selectedValueRef.current = null;
         sessionTokenRef.current = null;
       }
+      return undefined;
+    }
+
+    if (selectedValueRef.current === value) {
+      suppressNextFetchRef.current = false;
+      clearSuggestions();
       return undefined;
     }
 
@@ -306,17 +314,23 @@ export function SearchBar({
     if (typeof clearSignal === 'number') {
       setValue('');
       clearSuggestions();
+      suppressNextFetchRef.current = false;
+      selectedValueRef.current = null;
       sessionTokenRef.current = null;
       setActiveIndex(-1);
     }
   }, [clearSignal, clearSuggestions]);
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    suppressNextFetchRef.current = false;
+    selectedValueRef.current = null;
     setValue(e.target.value);
   };
 
   const handleLocalSelect = (prospect: Prospect) => () => {
-    setValueWithoutFetch(getProspectDisplayName(prospect));
+    const selectedValue = getProspectDisplayName(prospect);
+    selectedValueRef.current = selectedValue;
+    setValueWithoutFetch(selectedValue);
     clearSuggestions();
     sessionTokenRef.current = null;
     setActiveIndex(-1);
@@ -436,6 +450,7 @@ export function SearchBar({
     (item: GoogleSearchItem) =>
     () => {
       const { description } = item;
+      selectedValueRef.current = description;
       setValueWithoutFetch(description);
       clearSuggestions();
       setActiveIndex(-1);
@@ -460,6 +475,7 @@ export function SearchBar({
     const query = value.trim();
     if (!query || !ready) return;
 
+    selectedValueRef.current = query;
     setValueWithoutFetch(query);
     clearSuggestions();
     setActiveIndex(-1);
@@ -472,6 +488,7 @@ export function SearchBar({
         if (!first) {
           throw new Error('No Google Places prediction found for freeform search.');
         }
+        selectedValueRef.current = first.description;
         setValueWithoutFetch(first.description);
         onSearch(await resolveGoogleItem(first));
       } catch (error) {
