@@ -57,11 +57,38 @@ test('activity ledger finds the email tied to a live property', async ({ page },
     await page.goto('/app/desk');
     await journey.action('Open Activity', () => page.locator('aside').getByRole('link', { name: 'Activity' }).click());
     await expect(page.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible();
-    await expect(page.getByText('BCC capture ready')).toBeVisible();
+    await expect(page.getByText('Postmark fallback ready')).toBeVisible();
 
     await journey.action('Search for 10735 214 St', () => page.getByPlaceholder('Search emails, prospects, addresses').fill('10735 214 St'));
     await expect(page.getByText('Re: 10735 214 St - next steps')).toBeVisible();
     await expect(page.getByText('West End Distribution').last()).toBeVisible();
+  });
+});
+
+test('public demo stays useful without authenticated API calls', async ({ page }, testInfo) => {
+  await runBrokerJourney(page, testInfo, {
+    journey: 'Explore the public broker demo',
+    persona: 'A broker evaluating Level CRE before connecting a real account',
+    targetSeconds: 12,
+    targetActions: 2,
+  }, async (journey) => {
+    const apiRequests: string[] = [];
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname.startsWith('/api/')) apiRequests.push(request.url());
+    });
+
+    await page.goto('/app/desk');
+    await expect(page.getByRole('heading', { name: 'Advance 10735 214 St' }).first()).toBeVisible();
+    await journey.action('Open Activity', () => page.locator('aside').getByRole('link', { name: 'Activity' }).click());
+    await expect(page.getByText('Re: 10735 214 St - next steps')).toBeVisible();
+    await journey.action('Open Pursuits', () => page.locator('aside').getByRole('link', { name: 'Pursuits' }).click());
+    await expect(page.getByText('14840 134 Ave Listing Farm')).toBeVisible();
+
+    journey.trust(
+      'The public demo does not depend on an authenticated production API',
+      apiRequests.length === 0,
+      `Unexpected API requests: ${apiRequests.join(', ')}`,
+    );
   });
 });
 

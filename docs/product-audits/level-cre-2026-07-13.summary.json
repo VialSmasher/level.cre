@@ -1,0 +1,15 @@
+{
+  "product": "Level CRE",
+  "auditDate": "2026-07-13",
+  "baseline": 70.5,
+  "current": 75.2,
+  "delta": 4.8,
+  "grade": "B",
+  "confidence": "B",
+  "verdict": "Controlled pilot",
+  "blockingFailures": [],
+  "partialClaims": [
+    "Hands-off capture claim",
+    "Team-ready claim"
+  ]
+}

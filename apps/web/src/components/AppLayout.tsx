@@ -4,15 +4,14 @@ import {
   Activity,
   BarChart3,
   Bot,
-  Brain,
   ChartSpline,
   ChevronDown,
   ClipboardList,
+  Database,
   ListTodo,
   LogOut,
   Map,
   MapPinned,
-  RotateCcw,
   Settings,
   Target,
   Trophy,
@@ -72,8 +71,7 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   const secondaryNav = [
     { label: 'Requirements', href: '/app/requirements', icon: ClipboardList },
-    { label: 'Follow-ups', href: '/app/followup', icon: RotateCcw },
-    { label: 'Knowledge', href: '/app/knowledge', icon: Brain },
+    { label: 'Market memory', href: '/app/knowledge', icon: Database },
   ]
 
   const profileLabel = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Account'

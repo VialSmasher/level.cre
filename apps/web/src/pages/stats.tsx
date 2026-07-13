@@ -274,7 +274,7 @@ export default function StatsPage() {
     },
     {
       label: 'Review stale prospects',
-      description: 'Use Knowledge to find records that need a touch or cleanup.',
+      description: 'Use Market Memory to find records that need a touch or cleanup.',
       href: '/app/knowledge',
       icon: Brain,
       tone: 'blue',
@@ -291,7 +291,7 @@ export default function StatsPage() {
   const weeklyRings = [
     { key: 'prospecting', label: 'Prospecting', color: 'bg-blue-500', value: weeklySummary.sums['prospecting'] || 0, goal: 250 },
     { key: 'followUp', label: 'Follow-up', color: 'bg-emerald-500', value: weeklySummary.sums['followUp'] || 0, goal: 400 },
-    { key: 'marketKnowledge', label: 'Knowledge', color: 'bg-violet-500', value: weeklySummary.sums['marketKnowledge'] || 0, goal: 200 },
+    { key: 'marketKnowledge', label: 'Market memory', color: 'bg-violet-500', value: weeklySummary.sums['marketKnowledge'] || 0, goal: 200 },
   ];
 
   return (
@@ -489,7 +489,7 @@ export default function StatsPage() {
               progressLabelOverride={`${header?.streakDays ?? 0}/5 active days`}
             />
             <SkillTrackRow
-              name="Market Knowledge"
+              name="Market Memory"
               xp={skills?.marketKnowledge || 0}
               icon={Brain}
               description="Requirements tracking, market research, and industry insights"

@@ -1,6 +1,7 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { supabase } from "./supabase";
 import { apiUrl } from "./api";
+import { demoJsonResponse, getDemoApiResult } from "./demoApi";
 
 // Lightweight in-memory auth cache to avoid calling getSession repeatedly
 let cachedAuthHeader: string | null = null;
@@ -82,6 +83,9 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  const demoResult = getDemoApiResult(method, url, data);
+  if (demoResult?.handled) return demoJsonResponse(demoResult);
+
   const fullUrl = apiUrl(url);
   const authHeaders = await getAuthHeaders();
   const headers: Record<string, string> = { ...authHeaders };
@@ -126,8 +130,11 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const authHeaders = await getAuthHeaders();
     const key = queryKey.join("/") as string;
+    const demoResult = getDemoApiResult('GET', key);
+    if (demoResult?.handled) return demoResult.payload as any;
+
+    const authHeaders = await getAuthHeaders();
     const url = apiUrl(key.startsWith('/api') ? key : `/api${key.startsWith('/') ? '' : '/'}${key}`);
     const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     const res = await fetch(url, {

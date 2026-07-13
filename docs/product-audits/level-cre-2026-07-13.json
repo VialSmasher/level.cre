@@ -1,0 +1,214 @@
+{
+  "product": "Level CRE",
+  "auditDate": "2026-07-13",
+  "deploymentUrl": "https://level-cre.vercel.app",
+  "frameworkVersion": "Broker Operating Software Report Card v1.0",
+  "categories": [
+    {
+      "id": "core-value",
+      "name": "Core broker value and positioning",
+      "weight": 10,
+      "baseline": 78,
+      "current": 82,
+      "confidence": "B",
+      "rationale": "The product now presents one coherent map-first broker operating system rather than a collection of unrelated tools.",
+      "evidence": [
+        "The landing page, authenticated shell, and primary navigation consistently center Today, Map, Pursuits, Activity, and Scorecard.",
+        "The retired launcher redirects into Today instead of forcing a tool-selection step.",
+        "Market Memory is framed as database health and spatial recall, not a second command center."
+      ]
+    },
+    {
+      "id": "daily-execution",
+      "name": "Daily execution and workflow speed",
+      "weight": 12,
+      "baseline": 77,
+      "current": 82,
+      "confidence": "B",
+      "rationale": "Today provides ranked work, waiting threads, review exceptions, development work, pipeline coverage, and a single best move in one scan.",
+      "evidence": [
+        "Deterministic broker simulations cover morning triage, waiting work, review, and mobile use.",
+        "The public demo now loads a realistic ranked day instead of an empty desk.",
+        "The detailed follow-up route remains available as a drill-down but no longer competes in persistent navigation."
+      ]
+    },
+    {
+      "id": "hands-off-capture",
+      "name": "Hands-off capture and integration",
+      "weight": 15,
+      "baseline": 55,
+      "current": 58,
+      "confidence": "C",
+      "rationale": "Codex-assisted sends have a direct recorder with durable retry and Postmark remains a fallback, but continuous multi-source capture is not yet complete.",
+      "evidence": [
+        "The Codex recorder supports email, call, meeting, and note activity with a durable local outbox.",
+        "The interface now describes Codex as the primary bridge and Postmark as fallback capture.",
+        "Calendar events, phone calls, tours, proposals, and full Outlook history are not yet all captured automatically in production."
+      ]
+    },
+    {
+      "id": "data-trust",
+      "name": "Data trust and explainability",
+      "weight": 12,
+      "baseline": 82,
+      "current": 84,
+      "confidence": "B",
+      "rationale": "The ingestion architecture has strong evidence, confidence, idempotency, review, and terminal-stage safeguards.",
+      "evidence": [
+        "Attempted or drafted email is not recorded as sent; delivery confirmation is required.",
+        "Uncertain matches stay in review and cannot create map pins or confirmed facts.",
+        "Provider identity and stable activity identity are preserved for retry safety."
+      ]
+    },
+    {
+      "id": "map-intelligence",
+      "name": "Map and market intelligence",
+      "weight": 12,
+      "baseline": 72,
+      "current": 78,
+      "confidence": "B",
+      "rationale": "The deployed map supports Edmonton-focused discovery, unsaved address search, prospect context, and satellite mode, and the demo now includes useful market pins.",
+      "evidence": [
+        "A deployed real-map run confirmed address search, result selection, map focus, and satellite mode.",
+        "Prospect editing and recent activity are available from the map panel.",
+        "The modern Places implementation is retained behind an explicit flag until the deployed browser key is allowed to use the new service, avoiding a doomed production request."
+      ]
+    },
+    {
+      "id": "pursuit-system",
+      "name": "Prospecting and pursuit system",
+      "weight": 10,
+      "baseline": 68,
+      "current": 72,
+      "confidence": "C",
+      "rationale": "Pursuits are now clearly anchored to a listing, property, territory, owner target, or requirement, but the complete listing-activity-report loop is not finished.",
+      "evidence": [
+        "Pursuit creation requires both a useful name and a property or market anchor.",
+        "Owned and shared pursuits show owner, role, prospect counts, and direct entry into the shared workspace.",
+        "Client-ready monthly activity report export remains a future workflow."
+      ]
+    },
+    {
+      "id": "team-collaboration",
+      "name": "Team collaboration",
+      "weight": 8,
+      "baseline": 61,
+      "current": 63,
+      "confidence": "C",
+      "rationale": "Roles, sharing, ownership, and shared pursuit context exist, but the evidence is still simulated rather than a full live two-account proof.",
+      "evidence": [
+        "Team lead, assistant, and junior-broker scenarios pass in the deterministic suite.",
+        "Viewer/editor/owner states and share controls are represented.",
+        "A real invitation, acceptance, concurrent edit, and handoff run has not yet been completed."
+      ]
+    },
+    {
+      "id": "reliability",
+      "name": "Performance and reliability",
+      "weight": 8,
+      "baseline": 74,
+      "current": 84,
+      "confidence": "B",
+      "rationale": "The core deterministic suite passes, production map behavior works, and the public demo no longer leaks authenticated API 401s across supporting screens.",
+      "evidence": [
+        "Web production build completes successfully.",
+        "Desktop, mobile, and team broker simulations complete without critical accessibility or console failures.",
+        "Demo API responses are local, deterministic, and read safely without enabling a shared production demo account."
+      ]
+    },
+    {
+      "id": "ux-coherence",
+      "name": "UX coherence and accessibility",
+      "weight": 8,
+      "baseline": 71,
+      "current": 81,
+      "confidence": "B",
+      "rationale": "The product now uses a consistent work rail, shared page headers, tighter language, and fewer competing destinations.",
+      "evidence": [
+        "Persistent navigation is limited to five core jobs plus Requirements and Market Memory.",
+        "Activity and capture-health language matches the Codex-first, source-aware architecture.",
+        "Focused axe runs report no critical or serious violations in the simulated core journeys."
+      ]
+    },
+    {
+      "id": "motivation",
+      "name": "Motivation and production feedback",
+      "weight": 5,
+      "baseline": 68,
+      "current": 72,
+      "confidence": "C",
+      "rationale": "The Scorecard connects follow-up, prospecting, market memory, streaks, and pipeline coverage, but production conversion math is still shallow.",
+      "evidence": [
+        "Today shows effort, momentum, pipeline coverage, follow-up completion, and a 28-day activity pulse.",
+        "Scorecard rewards controllable actions rather than only closed revenue.",
+        "Meeting-to-tour-to-proposal-to-offer conversion and production forecasting are not yet fully modeled."
+      ]
+    }
+  ],
+  "gates": [
+    {
+      "name": "Core broker flow",
+      "status": "pass",
+      "blocking": true,
+      "evidence": "Today, Map, Pursuits, Activity, and Scorecard complete their primary simulated jobs."
+    },
+    {
+      "name": "Factual integrity and capture honesty",
+      "status": "pass",
+      "blocking": true,
+      "evidence": "Review, provider identity, idempotency, delivery confirmation, and terminal-stage protections are enforced in code and API tests."
+    },
+    {
+      "name": "Public demo reliability",
+      "status": "pass",
+      "blocking": false,
+      "evidence": "The public demo uses realistic local evidence and avoids authenticated API calls on audited screens."
+    },
+    {
+      "name": "Production map",
+      "status": "pass",
+      "blocking": false,
+      "evidence": "Deployed search, result selection, map focus, and satellite mode pass without console errors; modern Places remains an opt-in migration."
+    },
+    {
+      "name": "Hands-off capture claim",
+      "status": "partial",
+      "blocking": false,
+      "evidence": "Codex-assisted sends can record directly, but the advertised full activity universe is not yet automatically captured."
+    },
+    {
+      "name": "Team-ready claim",
+      "status": "partial",
+      "blocking": false,
+      "evidence": "Deterministic team simulations pass; a real two-account collaboration run remains outstanding."
+    }
+  ],
+  "nextTuneUps": [
+    {
+      "title": "Make source capture observable",
+      "reason": "Add last-success, last-failure, queued count, and source-specific freshness so hands-off operation is measurable rather than assumed."
+    },
+    {
+      "title": "Close the activity-to-pipeline loop",
+      "reason": "Automatically classify meetings, tours, proposals, and offers so the dashboard can calculate the path to production."
+    },
+    {
+      "title": "Complete one live team proof",
+      "reason": "Invite a second real account, test role boundaries and concurrent pursuit work, and export a client activity report."
+    },
+    {
+      "title": "Finish the modern Places migration",
+      "reason": "Enable Places API (New) for the deployed browser key, turn on the feature flag, and rerun the real-map benchmark before retiring compatibility mode."
+    },
+    {
+      "title": "Add broker outcome telemetry",
+      "reason": "Measure time to first action, unlogged activity, queue completion, follow-up aging, and conversion by stage."
+    }
+  ],
+  "evidenceLimits": [
+    "Most workflow evidence comes from deterministic broker simulations and a single production environment, not a multi-broker field study.",
+    "No live two-account collaboration run was completed in this audit.",
+    "No phone-log integration was included, by design.",
+    "The hands-off capture score reflects architecture and focused tests; it is not a 30-day production reconciliation against Outlook and calendar activity."
+  ]
+}

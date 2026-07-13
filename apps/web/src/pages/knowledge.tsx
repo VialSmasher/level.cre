@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { PageHeader } from '@/components/ui/page-header';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowRight, Building2, Calendar, CheckCircle2, Clock, Mail, MapPin, MessageSquare, Phone, Target, Trophy, Users, Wrench } from 'lucide-react';
+import { ArrowRight, Building2, Calendar, CheckCircle2, Clock, Database, Mail, MapPin, MessageSquare, Phone, Trophy, Users, Wrench } from 'lucide-react';
 import { Prospect, Submarket } from '@level-cre/shared/schema';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
@@ -478,32 +479,29 @@ export default function Knowledge() {
   return (
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-              <Target className="h-3.5 w-3.5" />
-              Command center
-            </div>
-            <h1 className="text-3xl font-bold text-slate-950 mb-2">Knowledge Dashboard</h1>
-            <p className="text-slate-600">Pick a queue, clean the data, and move the next best prospects forward.</p>
-          </div>
-
-          <Button
-            type="button"
-            className="w-full gap-2 bg-slate-950 text-white hover:bg-slate-800 md:w-auto"
-            onClick={() => setLocation('/app/followup')}
-          >
-            Open Follow-ups
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-        </div>
+        <PageHeader
+          label="Database health"
+          title="Market Memory"
+          description="Keep companies, properties, contacts, and recent activity useful enough to trust on the map."
+          icon={Database}
+          actions={(
+            <Button
+              type="button"
+              className="w-full gap-2 bg-slate-950 text-white hover:bg-slate-800 md:w-auto"
+              onClick={() => setLocation('/app/followup')}
+            >
+              Open call queue
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          )}
+        />
 
         <Card className="border-slate-200 bg-white/90 shadow-sm">
           <CardContent className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <label className="text-sm font-medium text-slate-700">Submarket</label>
               <Select value={selectedSubmarket} onValueChange={setSelectedSubmarket}>
-                <SelectTrigger className="h-10 w-full rounded-full border-slate-200 bg-slate-50 sm:w-56">
+              <SelectTrigger className="h-10 w-full rounded-md border-slate-200 bg-slate-50 sm:w-56">
                   <SelectValue placeholder="All Submarkets" />
                 </SelectTrigger>
                 <SelectContent>
@@ -525,7 +523,7 @@ export default function Knowledge() {
                   <button
                     key={queue}
                     type="button"
-                    className={`inline-flex min-h-10 items-center gap-2 rounded-full border px-3 text-sm font-medium transition-colors ${queueButtonClass(queue)}`}
+                    className={`inline-flex min-h-10 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors ${queueButtonClass(queue)}`}
                     onClick={() => setActiveQueue(queue)}
                   >
                     <Icon className="h-4 w-4" />
@@ -877,7 +875,7 @@ export default function Knowledge() {
                       type="button"
                       className="gap-2"
                       disabled={logInteractionMutation.isPending}
-                      onClick={() => logInteractionMutation.mutate({ prospect: selectedProspect, type: 'call', outcome: 'contacted', notes: 'Call logged from Knowledge Dashboard.' })}
+                      onClick={() => logInteractionMutation.mutate({ prospect: selectedProspect, type: 'call', outcome: 'contacted', notes: 'Call logged from Market Memory.' })}
                     >
                       <Phone className="h-4 w-4" />
                       {drawerMode === 'new' ? 'Log first call' : 'Log call'}
@@ -887,7 +885,7 @@ export default function Knowledge() {
                       variant="outline"
                       className="gap-2"
                       disabled={logInteractionMutation.isPending}
-                      onClick={() => logInteractionMutation.mutate({ prospect: selectedProspect, type: 'email', outcome: 'contacted', notes: 'Email logged from Knowledge Dashboard.' })}
+                      onClick={() => logInteractionMutation.mutate({ prospect: selectedProspect, type: 'email', outcome: 'contacted', notes: 'Email logged from Market Memory.' })}
                     >
                       <Mail className="h-4 w-4" />
                       Log email

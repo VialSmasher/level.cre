@@ -43,6 +43,7 @@ type CombinedSearchItem =
 
 const FALLBACK_RADIUS_METERS = 50000;
 const PLACES_DEBOUNCE_MS = 300;
+const NEW_PLACES_AUTOCOMPLETE_ENABLED = import.meta.env.VITE_GOOGLE_PLACES_NEW_API === 'true';
 const DEFAULT_SEARCH_CENTER = { lat: 53.5461, lng: -113.4938 } as const;
 const DEFAULT_MARKET_LOCATION = 'Edmonton, Alberta, Canada';
 const DEFAULT_MARKET_BOUNDS = {
@@ -139,7 +140,7 @@ export function SearchBar({
 
   useEffect(() => {
     const places = getPlacesNamespace();
-    setReady(Boolean(places && (hasNewAutocompleteApi(places) || places.AutocompleteService)));
+    setReady(Boolean(places && (places.AutocompleteService || (NEW_PLACES_AUTOCOMPLETE_ENABLED && hasNewAutocompleteApi(places)))));
   }, []);
 
   const clearSuggestions = useCallback(() => {
@@ -160,7 +161,7 @@ export function SearchBar({
       throw new Error('Google Places library is not loaded.');
     }
 
-    if (hasNewAutocompleteApi(places)) {
+    if (NEW_PLACES_AUTOCOMPLETE_ENABLED && hasNewAutocompleteApi(places)) {
       try {
         const placesLibrary = places as unknown as google.maps.PlacesLibrary;
         if (!sessionTokenRef.current) {

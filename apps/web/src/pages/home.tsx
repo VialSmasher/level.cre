@@ -397,7 +397,7 @@ export default function HomePage() {
     isLoading: isProspectsLoading,
   } = useQuery<Prospect[]>({
     queryKey: ['/api/prospects'],
-    enabled: !!currentUser && !isDemoMode,
+    enabled: !!currentUser,
     retry: false,
   });
 

@@ -39,7 +39,6 @@ import { apiRequest } from '@/lib/queryClient'
 import { buildDailyDeskQueues } from '@/lib/dailyDeskQueues'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
-import { useAuth } from '@/contexts/AuthContext'
 
 type DeskTab = 'today' | 'waiting' | 'review' | 'develop'
 type ActionPriority = 'critical' | 'high' | 'medium' | 'low'
@@ -317,11 +316,11 @@ function EmptyQueue({ tab }: { tab: DeskTab }) {
   const copy: Record<DeskTab, { title: string; body: string }> = {
     today: {
       title: 'No urgent work is queued',
-      body: 'When Level CRE sees an overdue follow-up, live listing action, or strong Outlook signal, it will appear here.',
+      body: 'When Level CRE sees an overdue follow-up, live pursuit action, or verified sales signal, it will appear here.',
     },
     waiting: {
       title: 'Nothing is waiting on a reply',
-      body: 'Sent Outlook threads that have gone quiet will collect here so they do not disappear into the inbox.',
+      body: 'Sent email threads that have gone quiet will collect here so they do not disappear into the inbox.',
     },
     review: {
       title: 'The review queue is clear',
@@ -406,29 +405,25 @@ function ActivityMomentum({ data, maxDailyActivity }: { data: ActivityPulseRespo
 export default function DailyDeskPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
-  const { isDemoMode } = useAuth()
   const [activeTab, setActiveTab] = useState<DeskTab>('today')
   const [prospectDrafts, setProspectDrafts] = useState<Record<string, string>>({})
 
   const salesBriefQuery = useQuery<SalesBriefResponse>({
     queryKey: ['/api/automation/sales-brief?limit=25'],
-    enabled: !isDemoMode || import.meta.env.DEV,
   })
   const importsQuery = useQuery<{ rows: SalesActivityImportRow[] }>({
     queryKey: ['/api/agent/sales-activity/imports?matchStatus=needs_review&limit=50'],
-    enabled: !isDemoMode || import.meta.env.DEV,
   })
-  const prospectsQuery = useQuery<Prospect[]>({ queryKey: ['/api/prospects'], enabled: !isDemoMode || import.meta.env.DEV })
-  const outlookQuery = useQuery<OutlookConfig>({ queryKey: ['/api/email/outlook/config'], enabled: !isDemoMode || import.meta.env.DEV })
-  const inboundQuery = useQuery<InboundConfig>({ queryKey: ['/api/email/inbound/config'], enabled: !isDemoMode || import.meta.env.DEV })
-  const statsQuery = useQuery<HeaderStats>({ queryKey: ['/api/stats/header'], enabled: !isDemoMode || import.meta.env.DEV })
+  const prospectsQuery = useQuery<Prospect[]>({ queryKey: ['/api/prospects'] })
+  const outlookQuery = useQuery<OutlookConfig>({ queryKey: ['/api/email/outlook/config'] })
+  const inboundQuery = useQuery<InboundConfig>({ queryKey: ['/api/email/inbound/config'] })
+  const statsQuery = useQuery<HeaderStats>({ queryKey: ['/api/stats/header'] })
   const activityPulseQuery = useQuery<ActivityPulseResponse>({
     queryKey: ['/api/automation/activity-pulse', 28],
     queryFn: async () => {
       const response = await apiRequest('GET', '/api/automation/activity-pulse?days=28')
       return response.json()
     },
-    enabled: !isDemoMode || import.meta.env.DEV,
     staleTime: 60_000,
     refetchOnMount: 'always',
   })
@@ -568,7 +563,7 @@ export default function DailyDeskPage() {
 
         {hasError ? (
           <div role="alert" className="mt-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-            The Daily Desk could not load all of its sources. Refresh once; if it persists, check Outlook and API health in Settings.
+            The Daily Desk could not load all of its sources. Refresh once; if it persists, check capture and API health in Settings.
           </div>
         ) : null}
 
@@ -583,7 +578,7 @@ export default function DailyDeskPage() {
                   {activeTab === 'develop' && 'Pipeline development'}
                 </h2>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  {activeTab === 'review' ? 'Nothing is written to a prospect until you link it.' : 'Ranked from current Level CRE and Outlook evidence.'}
+                  {activeTab === 'review' ? 'Nothing is written to a prospect until you link it.' : 'Ranked from current Level CRE and captured sales evidence.'}
                 </p>
               </div>
               <Badge variant="outline" className="rounded bg-slate-50 text-slate-700">
@@ -746,32 +741,10 @@ export default function DailyDeskPage() {
               <Activity className="h-4 w-4 text-slate-500" />
               Data capture health
             </span>
-            <span className="text-xs font-normal text-slate-500">Outlook, Postmark, and Codex</span>
+            <span className="text-xs font-normal text-slate-500">Codex, Outlook, and Postmark fallback</span>
           </summary>
           <div className="grid border-t border-slate-200 sm:grid-cols-3">
-            <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-4 sm:border-b-0 sm:border-r">
-              {outlookQuery.data?.connected ? <Wifi className="mt-0.5 h-4 w-4 text-emerald-600" /> : <WifiOff className="mt-0.5 h-4 w-4 text-amber-600" />}
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-slate-950">Outlook</p>
-                <p className="mt-0.5 text-xs leading-5 text-slate-500">
-                  {outlookQuery.data?.connected
-                    ? `Connected${outlookQuery.data.connection?.lastSyncedAt ? ` / synced ${formatWhen(outlookQuery.data.connection.lastSyncedAt)}` : ''}`
-                    : 'Needs connection or re-authentication'}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-4 sm:border-b-0 sm:border-r">
-              {inboundQuery.data?.configured && inboundQuery.data?.domainConfigured
-                ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
-                : <WifiOff className="mt-0.5 h-4 w-4 text-amber-600" />}
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-slate-950">Postmark BCC</p>
-                <p className="mt-0.5 text-xs leading-5 text-slate-500">
-                  {inboundQuery.data?.configured && inboundQuery.data?.domainConfigured ? 'Inbound capture configured' : 'Inbound capture needs setup'}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-start justify-between gap-3 px-5 py-4">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4 sm:border-b-0 sm:border-r">
               <div className="flex min-w-0 gap-3">
                 {importsQuery.isError || !salesBriefQuery.data?.integrations?.salesActivityAgentConfigured
                   ? <WifiOff className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
@@ -790,6 +763,28 @@ export default function DailyDeskPage() {
               <Button asChild variant="outline" size="icon" className="h-8 w-8 shrink-0" title="Open activity">
                 <Link href="/app/inbox" aria-label="Open activity"><Inbox className="h-4 w-4" /></Link>
               </Button>
+            </div>
+            <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-4 sm:border-b-0 sm:border-r">
+              {outlookQuery.data?.connected ? <Wifi className="mt-0.5 h-4 w-4 text-emerald-600" /> : <WifiOff className="mt-0.5 h-4 w-4 text-amber-600" />}
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-slate-950">Outlook</p>
+                <p className="mt-0.5 text-xs leading-5 text-slate-500">
+                  {outlookQuery.data?.connected
+                    ? `Connected${outlookQuery.data.connection?.lastSyncedAt ? ` / synced ${formatWhen(outlookQuery.data.connection.lastSyncedAt)}` : ''}`
+                    : 'Needs connection or re-authentication'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 px-5 py-4">
+              {inboundQuery.data?.configured && inboundQuery.data?.domainConfigured
+                ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
+                : <WifiOff className="mt-0.5 h-4 w-4 text-amber-600" />}
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-slate-950">Postmark fallback</p>
+                <p className="mt-0.5 text-xs leading-5 text-slate-500">
+                  {inboundQuery.data?.configured && inboundQuery.data?.domainConfigured ? 'BCC capture available for outside sends' : 'Fallback capture needs setup'}
+                </p>
+              </div>
             </div>
           </div>
         </details>

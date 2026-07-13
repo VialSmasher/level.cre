@@ -11,7 +11,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { CalendarDays, Clock3, Edit3, Mail, MapPin, MessageSquareText, Phone, Save, Trash2, X } from 'lucide-react';
 import { apiRequest } from '@/lib/queryClient';
-import { useAuth } from '@/contexts/AuthContext';
 import {
   STATUS_META,
   type FollowUpTimeframeType,
@@ -201,14 +200,13 @@ export function ProspectEditPanel({
   onContactPhoneChange,
   onContactPhoneBlur,
 }: ProspectEditPanelProps) {
-  const { isDemoMode } = useAuth();
   const interactionsQuery = useQuery<ContactInteraction[]>({
     queryKey: ['/api/interactions', prospect.id],
     queryFn: async () => {
       const response = await apiRequest('GET', `/api/interactions?prospectId=${encodeURIComponent(prospect.id)}`);
       return response.json();
     },
-    enabled: !isDemoMode || import.meta.env.DEV,
+    enabled: Boolean(prospect.id),
     staleTime: 60_000,
   });
   const recentInteractions = useMemo(

@@ -215,7 +215,7 @@ export default function InboxPage() {
   )
   const estimatedEmailXp = capturedCount * 10
   const dashboardCards = [
-    { label: 'Captured', value: capturedCount, helper: 'BCC email activity', tone: 'text-slate-950' },
+    { label: 'Captured', value: capturedCount, helper: 'Automatic email activity', tone: 'text-slate-950' },
     { label: 'Needs Context', value: counts?.needsContext ?? 0, helper: 'Optional cleanup', tone: 'text-amber-700' },
     { label: 'Logged', value: counts?.autoLogged ?? 0, helper: 'Prospect interactions', tone: 'text-emerald-700' },
     { label: 'Email XP', value: estimatedEmailXp, helper: 'Captured activity value', tone: 'text-blue-700' },
@@ -327,12 +327,12 @@ export default function InboxPage() {
             <>
             <Badge variant="outline" className="h-8 gap-1.5 bg-white px-3 text-emerald-700">
               <ShieldCheck className="h-3.5 w-3.5" />
-              BCC capture {inboundConfig?.configured ? 'ready' : 'needs setup'}
+              Postmark fallback {inboundConfig?.configured ? 'ready' : 'needs setup'}
             </Badge>
             <Button variant="outline" size="sm" asChild>
               <Link href="/app/profile">
                 <Settings className="mr-2 h-4 w-4" />
-                Email Settings
+                Capture settings
               </Link>
             </Button>
             </>
@@ -383,7 +383,7 @@ export default function InboxPage() {
                 onClick={refreshInbox}
                 disabled={syncBccMutation.isPending}
                 aria-label="Refresh"
-                title={outlookConfig?.connected ? 'Refresh and recover recent BCC captures from Outlook' : 'Refresh'}
+                title={outlookConfig?.connected ? 'Refresh captured activity and recover recent fallback copies' : 'Refresh captured activity'}
               >
                 <RefreshCcw className="h-4 w-4" />
               </Button>
