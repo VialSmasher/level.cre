@@ -30,6 +30,7 @@ import { StatusLegend } from '@/features/map/StatusLegend';
 import { ProspectEditPanel, computeFollowUpDue, formatSfWithCommas, getDisplayAddressValue } from '@/features/map/ProspectEditPanel';
 import { useTerraDrawGoogleMaps, type MapDrawMode, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
 import { AdvancedMapMarker } from '@/features/map/AdvancedMapMarker';
+import { SearchResultCard } from '@/features/map/SearchResultCard';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
 import { createStatusFilterSet, getStatusCounts } from '@/features/map/statusFilters';
 
@@ -1831,33 +1832,13 @@ export default function HomePage() {
               <InfoWindow
                 position={{ lat: searchPin.lat, lng: searchPin.lng }}
                 onCloseClick={() => setSearchPin(null)}
+                options={{ maxWidth: 244 }}
               >
-                <div className="p-2 max-w-xs">
-                  <h3 className="font-medium text-sm">{searchPin.businessName || searchPin.address}</h3>
-                  {searchPin.businessName && (
-                    <p className="mb-2 text-xs text-gray-600">{searchPin.address}</p>
-                  )}
-                  {(searchPin.contactPhone || searchPin.websiteUrl) && (
-                    <div className="mb-2 space-y-0.5 text-xs text-gray-600">
-                      {searchPin.contactPhone && <div>{searchPin.contactPhone}</div>}
-                      {searchPin.websiteUrl && <div className="truncate">{searchPin.websiteUrl}</div>}
-                    </div>
-                  )}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={handleSaveSearchPin}
-                      className="flex-1 bg-blue-500 hover:bg-blue-600 text-white text-xs px-3 py-1.5 rounded transition-colors"
-                    >
-                      Add to Map
-                    </button>
-                    <button
-                      onClick={() => setSearchPin(null)}
-                      className="px-2 py-1.5 text-gray-500 hover:text-gray-700 text-xs"
-                    >
-                      x
-                    </button>
-                  </div>
-                </div>
+                <SearchResultCard
+                  location={searchPin}
+                  actionLabel="Add to map"
+                  onAction={handleSaveSearchPin}
+                />
               </InfoWindow>
             </>
           )}

@@ -24,6 +24,7 @@ import { useGeocode } from '@/hooks/useGeocode';
 import { GOOGLE_MAPS_API_KEY_HELP_TEXT, getGoogleMapsApiKey, getGoogleMapsMapId } from '@/lib/googleMapsApiKey';
 import { nsKey, readJSON, removeKey, writeJSON } from '@/lib/storage';
 import { clearAdvancedMarker, type AdvancedAssetMarker } from '@/features/map/advancedMarkers';
+import { SearchResultCard } from '@/features/map/SearchResultCard';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
 import { createAllStatusFilterSet, createStatusFilterSet, getStatusCounts } from '@/features/map/statusFilters';
 import { ProspectEditPanel, formatSfWithCommas, getDisplayAddressValue } from '@/features/map/ProspectEditPanel';
@@ -1429,39 +1430,29 @@ function WorkspaceMap() {
             {/* Confirm search selection */}
             {searchPin && (
               <div className="absolute left-3 right-3 top-[10.5rem] z-[60] sm:left-4 sm:right-auto sm:top-[76px]">
-                <div className="bg-white p-2 rounded shadow border">
-                  <div className="text-sm font-medium">{searchPin.businessName || searchPin.address}</div>
-                  {searchPin.businessName && (
-                    <div className="mb-2 text-xs text-slate-600">{searchPin.address}</div>
-                  )}
-                  {(searchPin.contactPhone || searchPin.websiteUrl) && (
-                    <div className="mb-2 space-y-0.5 text-xs text-slate-600">
-                      {searchPin.contactPhone && <div>{searchPin.contactPhone}</div>}
-                      {searchPin.websiteUrl && <div className="max-w-xs truncate">{searchPin.websiteUrl}</div>}
-                    </div>
-                  )}
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      if (!searchPin || !can.edit) return;
-                      const prospectDetails = searchLocationToProspectDetails(searchPin);
-                      const name = (searchPin.address || searchPin.businessName?.trim() || 'New Prospect').trim() || 'New Prospect';
-                      createProspectMutation.mutate({
-                        source: 'search',
-                        payload: {
-                          name,
-                          geometry: { type: 'Point', coordinates: [searchPin.lng, searchPin.lat] as [number, number] },
-                          status: 'prospect',
-                          notes: '',
-                          ...prospectDetails,
-                        },
-                      });
-                    }}
-                    disabled={createProspectMutation.isPending || !can.edit}
-                  >
-                    {createProspectMutation.isPending ? 'Adding...' : 'Add as Prospect'}
-                  </Button>
-                </div>
+                <SearchResultCard
+                  location={searchPin}
+                  actionLabel="Add prospect"
+                  onClose={() => setSearchPin(null)}
+                  onAction={() => {
+                    if (!searchPin || !can.edit) return;
+                    const prospectDetails = searchLocationToProspectDetails(searchPin);
+                    const name = (searchPin.address || searchPin.businessName?.trim() || 'New Prospect').trim() || 'New Prospect';
+                    createProspectMutation.mutate({
+                      source: 'search',
+                      payload: {
+                        name,
+                        geometry: { type: 'Point', coordinates: [searchPin.lng, searchPin.lat] as [number, number] },
+                        status: 'prospect',
+                        notes: '',
+                        ...prospectDetails,
+                      },
+                    });
+                  }}
+                  isPending={createProspectMutation.isPending}
+                  disabled={!can.edit}
+                  className="rounded-md border border-slate-200 p-2.5 shadow-[0_8px_24px_rgba(15,23,42,0.14)]"
+                />
               </div>
             )}
             </GoogleMap>
