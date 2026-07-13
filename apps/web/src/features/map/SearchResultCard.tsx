@@ -72,7 +72,7 @@ export function SearchResultCard({
         type="button"
         onClick={onAction}
         disabled={disabled || isPending}
-        className="mt-1.5 inline-flex h-7 items-center gap-1 rounded-sm px-1.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:pointer-events-none disabled:opacity-50"
+        className="mt-1.5 inline-flex h-7 items-center gap-1 rounded-sm px-1.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 disabled:pointer-events-none disabled:opacity-50"
       >
         <Plus className="h-3.5 w-3.5" aria-hidden="true" />
         {isPending ? pendingLabel : actionLabel}

@@ -1833,6 +1833,7 @@ export default function HomePage() {
                 position={{ lat: searchPin.lat, lng: searchPin.lng }}
                 onCloseClick={() => setSearchPin(null)}
                 options={{ maxWidth: 244 }}
+                shouldFocus={false}
               >
                 <SearchResultCard
                   location={searchPin}
