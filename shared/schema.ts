@@ -414,7 +414,7 @@ export const activityEvents = pgTable(
     eventType: varchar("event_type").notNull(),
     direction: varchar("direction"),
     evidenceStatus: varchar("evidence_status").notNull().default("observed"),
-    occurredAt: timestamp("occurred_at").notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     recordedAt: timestamp("recorded_at").defaultNow(),
     contactName: varchar("contact_name"),
     company: varchar("company"),

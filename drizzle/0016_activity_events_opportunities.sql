@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS public.activity_events (
   event_type varchar NOT NULL,
   direction varchar,
   evidence_status varchar NOT NULL DEFAULT 'observed',
-  occurred_at timestamp NOT NULL,
+  occurred_at timestamptz NOT NULL,
   recorded_at timestamp DEFAULT now(),
   contact_name varchar,
   company varchar,
@@ -70,6 +70,25 @@ CREATE INDEX IF NOT EXISTS "IDX_activity_events_user_type" ON public.activity_ev
 CREATE INDEX IF NOT EXISTS "IDX_activity_events_user_match" ON public.activity_events(user_id, match_status);
 CREATE INDEX IF NOT EXISTS "IDX_activity_events_prospect" ON public.activity_events(prospect_id);
 CREATE INDEX IF NOT EXISTS "IDX_activity_events_opportunity" ON public.activity_events(opportunity_id);
+
+-- Early V1 deployments briefly created this as timestamp without time zone.
+-- Those values were written in the database's UTC timezone, so make the
+-- conversion explicit and run it only once.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'activity_events'
+      AND column_name = 'occurred_at'
+      AND data_type = 'timestamp without time zone'
+  ) THEN
+    ALTER TABLE public.activity_events
+      ALTER COLUMN occurred_at TYPE timestamptz
+      USING occurred_at AT TIME ZONE 'UTC';
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS public.activity_event_links (
   id varchar PRIMARY KEY DEFAULT gen_random_uuid()::text,
