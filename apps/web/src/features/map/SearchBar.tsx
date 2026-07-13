@@ -1,8 +1,9 @@
 import { useRef, useState, useMemo, useEffect, useCallback } from 'react';
-import { Database, MapPin, MapPinned, Search } from 'lucide-react';
+import { Database, LoaderCircle, MapPin, MapPinned, Search } from 'lucide-react';
 import type { Prospect } from '@level-cre/shared/schema';
 import { getProspectDisplayName, getProspectSecondaryName, isPlaceholderProspectName } from '@/lib/prospectDisplay';
 import type { MapSearchLocation } from './searchTypes';
+import { buildMarketGeocodeQuery, buildPlacesAutocompleteQuery, isLikelyAddressQuery } from './searchQueries';
 
 interface SearchBarProps {
   onSearch: (location: MapSearchLocation) => void;
@@ -41,6 +42,8 @@ type CombinedSearchItem =
   | { type: 'local'; key: string; prospect: Prospect; label: string; secondary?: string }
   | GoogleSearchItem;
 
+type GoogleSearchState = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
+
 const FALLBACK_RADIUS_METERS = 50000;
 const PLACES_DEBOUNCE_MS = 300;
 const NEW_PLACES_AUTOCOMPLETE_ENABLED = import.meta.env.VITE_GOOGLE_PLACES_NEW_API === 'true';
@@ -54,25 +57,6 @@ const DEFAULT_MARKET_BOUNDS = {
 } as const;
 
 const predictionTextToString = (text?: google.maps.places.FormattableText | null) => text?.text || '';
-
-const withMarketLocation = (query: string, marketLocation: string) => {
-  const trimmedQuery = query.trim();
-  const trimmedMarket = marketLocation.trim();
-  if (!trimmedQuery || !trimmedMarket) return trimmedQuery;
-
-  const normalizedQuery = trimmedQuery.toLowerCase();
-  const marketParts = trimmedMarket
-    .toLowerCase()
-    .split(',')
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  if (marketParts.some((part) => normalizedQuery.includes(part))) {
-    return trimmedQuery;
-  }
-
-  return `${trimmedQuery}, ${trimmedMarket}`;
-};
 
 const getPlacesNamespace = () => window.google?.maps?.places;
 
@@ -103,6 +87,7 @@ export function SearchBar({
   const [ready, setReady] = useState(false);
   const [value, setValue] = useState('');
   const [googleResults, setGoogleResults] = useState<GoogleSearchItem[]>([]);
+  const [googleSearchState, setGoogleSearchState] = useState<GoogleSearchState>('idle');
   const requestIdRef = useRef(0);
   const suppressNextFetchRef = useRef(false);
   const selectedValueRef = useRef<string | null>(null);
@@ -113,7 +98,7 @@ export function SearchBar({
   const listboxId = 'places-suggestions-listbox';
   const normalizedInput = value.trim().toLowerCase();
   const marketName = marketLocation.split(',')[0]?.trim() || 'Market';
-  const marketQuery = useCallback((query: string) => withMarketLocation(query, marketLocation), [marketLocation]);
+  const geocodeQuery = useCallback((query: string) => buildMarketGeocodeQuery(query, marketLocation), [marketLocation]);
 
   const requestOptions = useMemo((): Omit<google.maps.places.AutocompleteRequest, 'input'> => {
     const base: Omit<google.maps.places.AutocompleteRequest, 'input'> = {
@@ -145,6 +130,7 @@ export function SearchBar({
 
   const clearSuggestions = useCallback(() => {
     setGoogleResults([]);
+    setGoogleSearchState('idle');
     requestIdRef.current += 1;
   }, []);
 
@@ -198,6 +184,9 @@ export function SearchBar({
     }
 
     const service = new places.AutocompleteService();
+    if (!sessionTokenRef.current) {
+      sessionTokenRef.current = new places.AutocompleteSessionToken();
+    }
     const searchBounds = makeBounds(bounds || (strictBounds ? DEFAULT_MARKET_BOUNDS : null));
     const predictions = await new Promise<google.maps.places.AutocompletePrediction[]>((resolve, reject) => {
       service.getPlacePredictions({
@@ -207,6 +196,7 @@ export function SearchBar({
         locationBias: !strictBounds && searchBounds
           ? searchBounds
           : { center: defaultCenter, radius: FALLBACK_RADIUS_METERS },
+        sessionToken: sessionTokenRef.current ?? undefined,
       }, (results, status) => {
         if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
           resolve(results);
@@ -259,17 +249,21 @@ export function SearchBar({
 
     let cancelled = false;
     const requestId = ++requestIdRef.current;
+    setGoogleResults([]);
+    setGoogleSearchState('loading');
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const results = await fetchGoogleResults(marketQuery(input));
+          const results = await fetchGoogleResults(buildPlacesAutocompleteQuery(input));
           if (!cancelled && requestId === requestIdRef.current) {
             setGoogleResults(results);
+            setGoogleSearchState(results.length > 0 ? 'ready' : 'empty');
           }
         } catch (error) {
           if (!cancelled && requestId === requestIdRef.current) {
             console.error('Failed to fetch Google Places suggestions', error);
             setGoogleResults([]);
+            setGoogleSearchState('error');
           }
         }
       })();
@@ -279,7 +273,7 @@ export function SearchBar({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [clearSuggestions, fetchGoogleResults, marketQuery, ready, value]);
+  }, [clearSuggestions, fetchGoogleResults, ready, value]);
 
   const localResults = useMemo(() => {
     if (!normalizedInput) return [] as Prospect[];
@@ -404,6 +398,7 @@ export function SearchBar({
     const place = await new Promise<google.maps.places.PlaceResult>((resolve, reject) => {
       placesServiceRef.current?.getDetails({
         placeId: prediction.place_id,
+        sessionToken: sessionTokenRef.current ?? undefined,
         fields: [
           'name',
           'formatted_address',
@@ -461,7 +456,7 @@ export function SearchBar({
           onSearch(await resolveGoogleItem(item));
         } catch (error) {
           try {
-            const fallback = await geocodeAddress(marketQuery(description));
+            const fallback = await geocodeAddress(geocodeQuery(description));
             onSearch({ ...fallback, businessName: undefined, websiteUrl: undefined });
           } catch (fallbackError) {
             console.error('Failed to resolve selected Google Places suggestion', error, fallbackError);
@@ -479,31 +474,51 @@ export function SearchBar({
     selectedValueRef.current = query;
     setValueWithoutFetch(query);
     clearSuggestions();
+    setGoogleSearchState('loading');
     setActiveIndex(-1);
 
     void (async () => {
-      const searchQuery = marketQuery(query);
+      let autocompleteError: unknown;
       try {
-        const results = await fetchGoogleResults(searchQuery);
+        const results = await fetchGoogleResults(buildPlacesAutocompleteQuery(query));
         const first = results[0];
-        if (!first) {
-          throw new Error('No Google Places prediction found for freeform search.');
+        if (first) {
+          selectedValueRef.current = first.description;
+          setValueWithoutFetch(first.description);
+          setGoogleSearchState('idle');
+          onSearch(await resolveGoogleItem(first));
+          sessionTokenRef.current = null;
+          return;
         }
-        selectedValueRef.current = first.description;
-        setValueWithoutFetch(first.description);
-        onSearch(await resolveGoogleItem(first));
       } catch (error) {
-        try {
-          const fallback = await geocodeAddress(searchQuery);
-          onSearch({ ...fallback, businessName: undefined, websiteUrl: undefined });
-        } catch (fallbackError) {
-          console.error('Failed to resolve freeform Google search', error, fallbackError);
+        autocompleteError = error;
+      }
+
+      if (!isLikelyAddressQuery(query)) {
+        if (autocompleteError) {
+          console.error('Failed to complete freeform Google Places search', autocompleteError);
+          setGoogleSearchState('error');
+        } else {
+          setGoogleSearchState('empty');
         }
+        sessionTokenRef.current = null;
+        return;
+      }
+
+      try {
+        const fallback = await geocodeAddress(geocodeQuery(query));
+        setGoogleSearchState('idle');
+        onSearch({ ...fallback, businessName: undefined, websiteUrl: undefined });
+      } catch (fallbackError) {
+        console.error('Failed to resolve freeform Google search', autocompleteError, fallbackError);
+        setGoogleSearchState('error');
       } finally {
         sessionTokenRef.current = null;
       }
     })();
-  }, [clearSuggestions, fetchGoogleResults, geocodeAddress, marketQuery, onSearch, ready, resolveGoogleItem, setValueWithoutFetch, value]);
+  }, [clearSuggestions, fetchGoogleResults, geocodeAddress, geocodeQuery, onSearch, ready, resolveGoogleItem, setValueWithoutFetch, value]);
+
+  const showSuggestions = combinedResults.length > 0 || googleSearchState === 'loading' || googleSearchState === 'empty' || googleSearchState === 'error';
 
   const submitFirstResultOrFreeform = useCallback(() => {
     if (combinedResults.length > 0) {
@@ -517,6 +532,35 @@ export function SearchBar({
     }
     submitFreeformSearch();
   }, [combinedResults, handleLocalSelect, handleSelect, submitFreeformSearch]);
+
+  const renderGoogleStatus = () => {
+    if (googleSearchState === 'loading') {
+      return (
+        <li role="presentation" className="flex items-center gap-2 px-3 py-2.5 text-xs text-slate-500">
+          <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          <span role="status">Searching Google Places</span>
+        </li>
+      );
+    }
+
+    if (googleSearchState === 'empty') {
+      return (
+        <li role="presentation" className="px-3 py-2.5 text-xs text-slate-500">
+          <span role="status">No Google place matched this search.</span>
+        </li>
+      );
+    }
+
+    if (googleSearchState === 'error') {
+      return (
+        <li role="presentation" className="px-3 py-2.5 text-xs text-red-700">
+          <span role="status">Google search is temporarily unavailable.</span>
+        </li>
+      );
+    }
+
+    return null;
+  };
 
   const renderSuggestions = () => {
     const localCount = localResults.length;
@@ -571,6 +615,7 @@ export function SearchBar({
             </li>
           );
         })}
+        {renderGoogleStatus()}
       </>
     );
   };
@@ -627,7 +672,7 @@ export function SearchBar({
           aria-label="Search"
           role="combobox"
           aria-autocomplete="list"
-          aria-expanded={combinedResults.length > 0}
+          aria-expanded={showSuggestions}
           aria-controls={listboxId}
           aria-activedescendant={activeIndex >= 0 ? `places-option-${activeIndex}` : undefined}
         />
@@ -651,7 +696,7 @@ export function SearchBar({
           <Search className="w-4 h-4" strokeWidth={2.5} />
         </button>
       </div>
-      {combinedResults.length > 0 && (
+      {showSuggestions && (
         <ul
           id={listboxId}
           role="listbox"

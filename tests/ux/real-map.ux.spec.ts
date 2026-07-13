@@ -53,6 +53,10 @@ test('real Google map supports Edmonton search and aerial mode', async ({ page }
     await expect(page.getByText("This page can't load Google Maps correctly.")).toHaveCount(0);
     await waitForMapTilesToCoverViewport(page);
 
+    await journey.action('Search for a partial Edmonton company name', () => search.fill('Nucor'));
+    await expect(page.getByText('Google Places near Edmonton')).toBeVisible();
+    await expect(page.getByRole('option').filter({ hasText: 'Nucor' })).not.toHaveCount(0);
+
     await journey.action('Search for an unsaved Edmonton address', () => search.fill('10060 Jasper Avenue'));
     await expect(page.getByText('Google Places near Edmonton')).toBeVisible();
     await journey.action('Choose the first Google Places result', () => page.getByRole('option').first().click());
