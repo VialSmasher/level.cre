@@ -217,6 +217,10 @@ export async function importSalesActivityBatch(params: {
   payload: SalesActivityBatchInput;
   requireEditAccess?: (listingId: string) => Promise<unknown>;
   hasCapturedEmailEvidence?: (activity: NormalizedSalesActivity) => Promise<boolean>;
+  findCapturedEmailInteraction?: (activity: NormalizedSalesActivity) => Promise<{
+    interactionId: string;
+    prospectId: string;
+  } | null>;
   reconcileEmailEvidence?: (activity: NormalizedSalesActivity) => Promise<number>;
 }): Promise<SalesActivityImportSummary> {
   const summary: SalesActivityImportSummary = {
@@ -240,18 +244,44 @@ export async function importSalesActivityBatch(params: {
         await params.requireEditAccess(activity.listingId);
       }
 
-      const resolved = await resolveSalesActivityProspect(params.pool, params.userId, activity);
-      const match = decideSalesActivityMatch(activity, resolved.prospectId, resolved.matchReason);
+      let resolved = await resolveSalesActivityProspect(params.pool, params.userId, activity);
+      let capturedEmailInteraction: { interactionId: string; prospectId: string } | null = null;
+      if (params.findCapturedEmailInteraction && shouldCreateInteractionFromSalesActivity(activity)) {
+        try {
+          capturedEmailInteraction = await params.findCapturedEmailInteraction(activity);
+        } catch (error) {
+          console.warn('Failed to find a matching captured email interaction:', error);
+        }
+      }
+      const capturedProspectConflict = Boolean(
+        capturedEmailInteraction
+        && resolved.prospectId
+        && resolved.prospectId !== capturedEmailInteraction.prospectId,
+      );
+      if (capturedEmailInteraction && !capturedProspectConflict) {
+        resolved = {
+          prospectId: capturedEmailInteraction.prospectId,
+          matchReason: 'matching_captured_email_interaction',
+        };
+      }
+      const match = capturedProspectConflict
+        ? {
+            matchStatus: 'needs_review',
+            matchReason: 'conflicting_captured_email_prospect',
+            confidence: 50,
+          }
+        : decideSalesActivityMatch(activity, resolved.prospectId, resolved.matchReason);
       const { row: importRow, existing } = await upsertSalesActivityImport(
         params.pool,
         params.userId,
         activity,
         match,
         resolved.prospectId,
-        null,
+        capturedProspectConflict ? null : capturedEmailInteraction?.interactionId || null,
       );
       summary.imported += 1;
       if (existing) summary.duplicates += 1;
+      if (!existing && capturedEmailInteraction && !capturedProspectConflict) summary.duplicates += 1;
 
       let interactionId: string | null = importRow.interaction_id || existing?.interaction_id || null;
       let duplicateInteraction = Boolean(interactionId);
@@ -259,6 +289,7 @@ export async function importSalesActivityBatch(params: {
         params.payload.createInteractions
         && shouldCreateInteractionFromSalesActivity(activity)
         && resolved.prospectId
+        && !capturedProspectConflict
       ) {
         const existingInteraction = await params.pool.query(
           `

@@ -244,3 +244,60 @@ test('a Postmark-first direct match creates one interaction without duplicate XP
   assert.equal(created.length, 1);
   assert.deepEqual(created[0].options, { skipXp: true });
 });
+
+test('a captured interaction is reused when Codex records the same sent email later', async () => {
+  const pool = {
+    query: async (sql: string) => {
+      if (sql.includes('FROM public.prospects') && sql.includes('LIMIT 1')) {
+        return { rows: [{ id: 'prospect-1' }] };
+      }
+      if (sql.includes('SELECT id, interaction_id') && sql.includes('sales_activity_imports')) {
+        return { rows: [] };
+      }
+      if (sql.includes('INSERT INTO public.sales_activity_imports')) {
+        return { rows: [{
+          id: 'import-1',
+          interaction_id: 'captured-interaction-1',
+          match_status: 'matched',
+          prospect_id: 'prospect-1',
+        }] };
+      }
+      if (sql.includes('FROM public.contact_interactions')) return { rows: [] };
+      return { rows: [], rowCount: 0 };
+    },
+  } as any;
+  let created = false;
+  const storage = {
+    createContactInteraction: async () => {
+      created = true;
+      return { id: 'new-interaction' };
+    },
+  };
+
+  const result = await importSalesActivityBatch({
+    pool,
+    storage,
+    userId: 'user-1',
+    payload: SalesActivityBatchSchema.parse({
+      source: 'codex_followup',
+      activities: [{
+        externalActivityId: 'activity-1',
+        status: 'sent',
+        activityType: 'email',
+        prospectId: 'prospect-1',
+        email: 'buyer@example.com',
+        subject: '10735 214 St follow-up',
+        activityAt: '2026-07-11T06:00:00.000Z',
+      }],
+    }),
+    findCapturedEmailInteraction: async () => ({
+      interactionId: 'captured-interaction-1',
+      prospectId: 'prospect-1',
+    }),
+  });
+
+  assert.equal(created, false);
+  assert.equal(result.createdInteractions, 0);
+  assert.equal(result.duplicates, 1);
+  assert.equal(result.results[0].interactionId, 'captured-interaction-1');
+});

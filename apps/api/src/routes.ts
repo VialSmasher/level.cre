@@ -36,11 +36,22 @@ import {
 } from './lib/salesActivityImportService';
 import {
   findMatchingCodexEmailImport,
+  findMatchingCapturedEmailMessage,
+  findMatchingCapturedEmailInteraction,
   hasMatchingCapturedEmailEvidence,
+  shouldSuppressDuplicateCapture,
   suppressEmailReviewsMatchingSalesActivity,
 } from './lib/emailActivityReconciliation';
+import {
+  resolveEmailProspectMatch,
+  sanitizeCapturedEmailSnippet,
+  type CapturedEmailEvidence,
+  type EmailProspectCandidate,
+  type EmailProspectMatchDecision,
+} from './lib/emailProspectMatching';
 import { buildPipelineHealth } from './lib/pipelineHealth';
 import { buildActivityPulse } from './lib/activityPulse';
+import { rankEmailCleanup, rankFollowUpReminder } from './lib/salesBriefRanking';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Supabase client for server-side OAuth
@@ -403,6 +414,366 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return codexImport;
   }
 
+  async function loadEmailProspectCandidates(userId: string): Promise<EmailProspectCandidate[]> {
+    const { rows } = await pool.query(`
+      SELECT
+        id,
+        name,
+        address,
+        status,
+        contact_name,
+        contact_email,
+        contact_company,
+        business_name,
+        website_url
+      FROM public.prospects
+      WHERE user_id = $1
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+    `, [userId]);
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      address: row.address,
+      status: row.status,
+      contactName: row.contact_name,
+      contactEmail: row.contact_email,
+      contactCompany: row.contact_company,
+      businessName: row.business_name,
+      websiteUrl: row.website_url,
+    }));
+  }
+
+  function capturedEmailEvidence(messageData: any): CapturedEmailEvidence {
+    return {
+      direction: messageData.direction,
+      subject: messageData.subject,
+      snippet: messageData.snippet,
+      senderEmail: messageData.senderEmail,
+      recipientEmails: messageData.recipientEmails || [],
+      ccEmails: messageData.ccEmails || [],
+    };
+  }
+
+  function capturedEmailSummary(messageData: any): string {
+    const snippet = sanitizeCapturedEmailSnippet(messageData.snippet);
+    return [
+      messageData.subject ? `Subject: ${String(messageData.subject).trim()}` : '',
+      snippet,
+    ].filter(Boolean).join('\n').slice(0, 1200);
+  }
+
+  async function upsertCapturedEmailMatch(params: {
+    userId: string;
+    emailMessageId: string;
+    decision: EmailProspectMatchDecision;
+    summary: string;
+  }): Promise<{ id: string; interactionId: string | null; created: boolean }> {
+    let existing: any = null;
+    if (params.decision.prospectId) {
+      const exact = await pool.query(`
+        SELECT id, interaction_id
+        FROM public.email_prospect_matches
+        WHERE user_id = $1 AND email_message_id = $2 AND prospect_id = $3
+        ORDER BY updated_at DESC NULLS LAST
+        LIMIT 1
+      `, [params.userId, params.emailMessageId, params.decision.prospectId]);
+      existing = exact.rows[0] || null;
+    }
+    if (!existing) {
+      const unresolved = await pool.query(`
+        SELECT id, interaction_id
+        FROM public.email_prospect_matches
+        WHERE user_id = $1
+          AND email_message_id = $2
+          AND interaction_id IS NULL
+          AND match_status IN ('needs_context', 'pending_review')
+        ORDER BY updated_at DESC NULLS LAST
+        LIMIT 1
+      `, [params.userId, params.emailMessageId]);
+      existing = unresolved.rows[0] || null;
+    }
+
+    const initialStatus = params.decision.status === 'auto_log'
+      ? 'pending_review'
+      : params.decision.status;
+    const reason = params.decision.evidence.length > 0
+      ? `${params.decision.reason}: ${params.decision.evidence.join('; ')}`
+      : params.decision.reason;
+    if (existing) {
+      const updated = await pool.query(`
+        UPDATE public.email_prospect_matches
+        SET prospect_id = $4,
+            confidence = $5,
+            match_status = $6,
+            match_reason = $7,
+            suggested_interaction_type = 'email',
+            suggested_outcome = 'contacted',
+            suggested_summary = $8,
+            reviewed_at = NULL,
+            reviewed_by_user_id = NULL,
+            updated_at = now()
+        WHERE id = $1 AND user_id = $2 AND email_message_id = $3
+        RETURNING id, interaction_id
+      `, [
+        existing.id,
+        params.userId,
+        params.emailMessageId,
+        params.decision.prospectId,
+        params.decision.confidence,
+        initialStatus,
+        reason,
+        params.summary,
+      ]);
+      return { id: updated.rows[0].id, interactionId: updated.rows[0].interaction_id || null, created: false };
+    }
+
+    const inserted = await pool.query(`
+      INSERT INTO public.email_prospect_matches (
+        user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
+        suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, 'email', 'contacted', $7, now())
+      RETURNING id, interaction_id
+    `, [
+      params.userId,
+      params.emailMessageId,
+      params.decision.prospectId,
+      params.decision.confidence,
+      initialStatus,
+      reason,
+      params.summary,
+    ]);
+    return { id: inserted.rows[0].id, interactionId: inserted.rows[0].interaction_id || null, created: true };
+  }
+
+  async function markCapturedEmailDuplicate(params: {
+    userId: string;
+    emailMessageId: string;
+    duplicate: {
+      id: string;
+      interactionId: string | null;
+      prospectId: string | null;
+    };
+  }) {
+    const reason = `duplicate_captured_email:${params.duplicate.id}`;
+    const updated = await pool.query(`
+      UPDATE public.email_prospect_matches
+      SET match_status = 'ignored',
+          match_reason = $3,
+          interaction_id = COALESCE(interaction_id, $4),
+          reviewed_at = COALESCE(reviewed_at, now()),
+          updated_at = now()
+      WHERE user_id = $1
+        AND email_message_id = $2
+        AND interaction_id IS NULL
+        AND match_status IN ('needs_context', 'pending_review')
+      RETURNING id
+    `, [params.userId, params.emailMessageId, reason, params.duplicate.interactionId]);
+    if (updated.rows[0]) return;
+
+    await pool.query(`
+      INSERT INTO public.email_prospect_matches (
+        user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
+        suggested_interaction_type, suggested_outcome, suggested_summary, interaction_id,
+        reviewed_at, updated_at
+      )
+      SELECT $1, $2, $3, 100, 'ignored', $4, 'email', 'contacted',
+             'Duplicate capture suppressed.', $5, now(), now()
+      WHERE NOT EXISTS (
+        SELECT 1 FROM public.email_prospect_matches
+        WHERE user_id = $1 AND email_message_id = $2
+      )
+    `, [
+      params.userId,
+      params.emailMessageId,
+      params.duplicate.prospectId,
+      reason,
+      params.duplicate.interactionId,
+    ]);
+  }
+
+  async function processCapturedEmailMessage(params: {
+    userId: string;
+    emailMessageId: string;
+    isNewMessage: boolean;
+    messageData: any;
+    prospects?: EmailProspectCandidate[];
+  }) {
+    const existingResult = await pool.query(`
+      SELECT interaction_id, match_status, match_reason
+      FROM public.email_prospect_matches
+      WHERE user_id = $1 AND email_message_id = $2
+      ORDER BY (interaction_id IS NOT NULL) DESC, updated_at DESC NULLS LAST
+      LIMIT 1
+    `, [params.userId, params.emailMessageId]);
+    const existing = existingResult.rows[0];
+    if (existing?.interaction_id) {
+      return {
+        matchesCreated: 0,
+        xpAwarded: false,
+        newXpGained: 0,
+        duplicateSuppressed: false,
+        interactionId: existing.interaction_id,
+      };
+    }
+    if (existing?.match_status === 'ignored' && /^duplicate_(?:codex|captured)_/.test(existing.match_reason || '')) {
+      return { matchesCreated: 0, xpAwarded: false, newXpGained: 0, duplicateSuppressed: true };
+    }
+    const isLegacyUnmatched = /Captured email activity|Captured from Outlook BCC fallback/i.test(
+      existing?.match_reason || '',
+    );
+    if (!params.isNewMessage && existing && !isLegacyUnmatched) {
+      return {
+        matchesCreated: 0,
+        xpAwarded: false,
+        newXpGained: 0,
+        duplicateSuppressed: false,
+        matchStatus: existing.match_status,
+      };
+    }
+
+    const codexImport = await reconcileCapturedEmailWithCodex(
+      params.userId,
+      params.emailMessageId,
+      params.messageData,
+    );
+    if (codexImport) {
+      return {
+        matchesCreated: 0,
+        xpAwarded: false,
+        newXpGained: 0,
+        duplicateSuppressed: true,
+        duplicateOfSalesActivityImportId: codexImport.id,
+      };
+    }
+
+    const duplicate = await findMatchingCapturedEmailMessage({
+      pool,
+      userId: params.userId,
+      emailMessageId: params.emailMessageId,
+      direction: params.messageData.direction,
+      subject: params.messageData.subject,
+      senderEmail: params.messageData.senderEmail,
+      recipientEmails: params.messageData.recipientEmails,
+      occurredAt: params.messageData.sentAt || params.messageData.receivedAt,
+    });
+    if (duplicate && shouldSuppressDuplicateCapture(params.emailMessageId, duplicate)) {
+      await markCapturedEmailDuplicate({
+        userId: params.userId,
+        emailMessageId: params.emailMessageId,
+        duplicate,
+      });
+      return {
+        matchesCreated: 0,
+        xpAwarded: false,
+        newXpGained: 0,
+        duplicateSuppressed: true,
+        duplicateOfEmailMessageId: duplicate.id,
+      };
+    }
+
+    const xpAwarded = String(params.messageData.direction || '').toLowerCase() === 'sent'
+      ? await awardCapturedEmailActivity(
+          params.userId,
+          params.emailMessageId,
+          params.isNewMessage,
+        )
+      : false;
+    const prospects = params.prospects || await loadEmailProspectCandidates(params.userId);
+    const decision = resolveEmailProspectMatch(capturedEmailEvidence(params.messageData), prospects);
+    const summary = capturedEmailSummary(params.messageData);
+    const match = await upsertCapturedEmailMatch({
+      userId: params.userId,
+      emailMessageId: params.emailMessageId,
+      decision,
+      summary,
+    });
+
+    if (decision.status !== 'auto_log' || !decision.prospectId) {
+      return {
+        matchesCreated: match.created ? 1 : 0,
+        xpAwarded,
+        newXpGained: xpAwarded ? xpForInteractionType('email') : 0,
+        matchStatus: decision.status,
+        matchConfidence: decision.confidence,
+      };
+    }
+
+    const duplicateInteraction = await pool.query(`
+      SELECT id
+      FROM public.contact_interactions
+      WHERE user_id = $1
+        AND prospect_id = $2
+        AND (
+          source_email_message_id = $3
+          OR (source_provider = $4 AND source_message_id = $5)
+        )
+      LIMIT 1
+    `, [
+      params.userId,
+      decision.prospectId,
+      params.emailMessageId,
+      params.messageData.provider,
+      params.messageData.providerMessageId,
+    ]);
+    let interactionId = duplicateInteraction.rows[0]?.id || match.interactionId || null;
+    const interactionDate = new Date(
+      params.messageData.sentAt || params.messageData.receivedAt || new Date(),
+    ).toISOString();
+    if (!interactionId) {
+      const interaction = await storage.createContactInteraction({
+        userId: params.userId,
+        prospectId: decision.prospectId,
+        listingId: null,
+        date: interactionDate,
+        type: 'email',
+        outcome: 'contacted',
+        notes: summary,
+        nextFollowUp: null,
+        sourceProvider: params.messageData.provider,
+        sourceMessageId: params.messageData.providerMessageId,
+        sourceThreadId: params.messageData.providerThreadId || null,
+        sourceEmailMessageId: params.emailMessageId,
+        sourceMetadata: {
+          matchReason: decision.reason,
+          matchConfidence: decision.confidence,
+          matchEvidence: decision.evidence,
+          captureDirection: params.messageData.direction,
+          autoLogged: true,
+        },
+      }, { skipXp: true });
+      interactionId = interaction.id;
+    }
+
+    await pool.query(`
+      UPDATE public.email_prospect_matches
+      SET interaction_id = $3,
+          match_status = 'auto_logged',
+          reviewed_at = COALESCE(reviewed_at, now()),
+          updated_at = now()
+      WHERE id = $1 AND user_id = $2
+    `, [match.id, params.userId, interactionId]);
+    await pool.query(`
+      UPDATE public.prospects
+      SET last_contact_date = CASE
+            WHEN last_contact_date IS NULL OR last_contact_date < $3 THEN $3
+            ELSE last_contact_date
+          END,
+          status = CASE WHEN status = 'prospect' THEN 'contacted' ELSE status END,
+          updated_at = now()
+      WHERE id = $1 AND user_id = $2
+    `, [decision.prospectId, params.userId, interactionDate]);
+
+    return {
+      matchesCreated: match.created ? 1 : 0,
+      xpAwarded,
+      newXpGained: xpAwarded ? xpForInteractionType('email') : 0,
+      matchStatus: 'auto_logged',
+      matchConfidence: decision.confidence,
+      interactionId,
+    };
+  }
+
   async function storeInboundEmailForReview(userId: string, messageData: any) {
     const inserted = await pool.query(`
       INSERT INTO public.email_messages (
@@ -470,40 +841,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     ]);
     const emailMessageId = inserted.rows[0].id;
     const isNewMessage = Boolean(inserted.rows[0]?.inserted);
-    const codexImport = await reconcileCapturedEmailWithCodex(userId, emailMessageId, messageData);
-    if (codexImport) {
-      return {
-        emailMessageId,
-        inserted: isNewMessage,
-        matchesCreated: 0,
-        xpAwarded: false,
-        newXpGained: 0,
-        duplicateSuppressed: true,
-        duplicateOfSalesActivityImportId: codexImport.id,
-      };
-    }
-
-    const xpAwarded = await awardCapturedEmailActivity(userId, emailMessageId, isNewMessage);
-    let matchesCreated = 0;
-    const result = await pool.query(`
-      INSERT INTO public.email_prospect_matches (
-        user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
-        suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
-      )
-      SELECT $1::varchar, $2::varchar, NULL, 0, 'needs_context', $3::text, 'email', 'contacted', $4::text, now()
-      WHERE NOT EXISTS (
-        SELECT 1 FROM public.email_prospect_matches
-        WHERE user_id = $1::varchar AND email_message_id = $2::varchar AND prospect_id IS NULL
-      )
-      RETURNING id
-    `, [
+    const processed = await processCapturedEmailMessage({
       userId,
       emailMessageId,
-      'Captured email activity; no automatic prospect matching.',
-      [messageData.subject, messageData.snippet].filter(Boolean).join('\n').slice(0, 1000),
-    ]);
-    if (result.rows[0]) matchesCreated += 1;
-    return { emailMessageId, inserted: isNewMessage, matchesCreated, xpAwarded, newXpGained: xpAwarded ? xpForInteractionType('email') : 0 };
+      isNewMessage,
+      messageData,
+    });
+    return { emailMessageId, inserted: isNewMessage, ...processed };
   }
 
   function getInboundWebhookSecret() {
@@ -611,25 +955,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   function cleanInboundSnippet(value: string) {
-    const normalized = String(value || '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/mailto:[^\s>]+/gi, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (!normalized) return '';
-    const signatureMarkers = [
-      /\bassociate partner\b/i,
-      /\bmain office:\b/i,
-      /\bdirect:\b/i,
-      /\bmobile:\b/i,
-      /\bwww\./i,
-    ];
-    const cutoff = signatureMarkers
-      .map((pattern) => normalized.search(pattern))
-      .filter((index) => index >= 0)
-      .sort((a, b) => a - b)[0];
-    const trimmed = cutoff !== undefined ? normalized.slice(0, cutoff).trim() : normalized;
-    return trimmed.slice(0, 4000);
+    return sanitizeCapturedEmailSnippet(value);
   }
 
   function getInboundAddressDomain(email: string) {
@@ -3230,6 +3556,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userId,
           activity,
         }),
+        findCapturedEmailInteraction: async (activity) => findMatchingCapturedEmailInteraction({
+          pool,
+          userId,
+          activity,
+        }),
         reconcileEmailEvidence: async (activity) => suppressEmailReviewsMatchingSalesActivity({
           pool,
           userId,
@@ -3519,6 +3850,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let messagesSeen = 0;
     let messagesStored = 0;
     let matchesCreated = 0;
+    let duplicatesSuppressed = 0;
+    let autoLogged = 0;
+    const prospects = await loadEmailProspectCandidates(userId);
 
     const maxPagesPerFolder = Math.min(Math.max(Number(process.env.OUTLOOK_SYNC_MAX_PAGES || 5), 1), 20);
     for (const folder of folders) {
@@ -3612,28 +3946,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
             JSON.stringify({ hasAttachments: Boolean(message.hasAttachments), folder: folder.mailbox, bccRecipients }),
           ]);
           const emailMessageId = inserted.rows[0].id;
-          if (inserted.rows[0].inserted) messagesStored += 1;
-          const codexImport = await reconcileCapturedEmailWithCodex(userId, emailMessageId, messageData);
-          if (codexImport) continue;
-
-          const result = await pool.query(`
-            INSERT INTO public.email_prospect_matches (
-              user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
-              suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
-            )
-            SELECT $1, $2, NULL, 0, 'needs_context', $3, 'email', 'contacted', $4, now()
-            WHERE NOT EXISTS (
-              SELECT 1 FROM public.email_prospect_matches
-              WHERE user_id = $1 AND email_message_id = $2 AND prospect_id IS NULL
-            )
-            RETURNING id
-          `, [
+          const isNewMessage = Boolean(inserted.rows[0].inserted);
+          if (isNewMessage) messagesStored += 1;
+          const processed = await processCapturedEmailMessage({
             userId,
             emailMessageId,
-            'Captured email activity; no automatic prospect matching.',
-            [messageData.subject, messageData.snippet].filter(Boolean).join('\n').slice(0, 1000),
-          ]);
-          if (result.rows[0]) matchesCreated += 1;
+            isNewMessage,
+            messageData,
+            prospects,
+          });
+          matchesCreated += processed.matchesCreated || 0;
+          if (processed.duplicateSuppressed) duplicatesSuppressed += 1;
+          if (processed.matchStatus === 'auto_logged') autoLogged += 1;
         }
       }
     }
@@ -3642,7 +3966,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       SET last_synced_at = now(), status = 'connected', error_message = NULL, updated_at = now()
       WHERE id = $1 AND user_id = $2
     `, [connectionId, userId]);
-    return { messagesSeen, messagesStored, matchesCreated };
+    return { messagesSeen, messagesStored, matchesCreated, autoLogged, duplicatesSuppressed };
   }
 
   async function syncOutlookBccCapturesForConnection(userId: string, connectionId: string, days: number) {
@@ -3652,6 +3976,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let bccCapturesSeen = 0;
     let messagesStored = 0;
     let matchesCreated = 0;
+    let duplicatesSuppressed = 0;
+    let autoLogged = 0;
+    const prospects = await loadEmailProspectCandidates(userId);
 
     const maxPages = Math.min(Math.max(Number(process.env.OUTLOOK_BCC_SYNC_MAX_PAGES || 2), 1), 10);
     const url = new URL('https://graph.microsoft.com/v1.0/me/mailFolders/sentitems/messages');
@@ -3735,34 +4062,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const emailMessageId = inserted.rows[0].id;
         const isNewMessage = Boolean(inserted.rows[0]?.inserted);
         if (isNewMessage) messagesStored += 1;
-        const codexImport = await reconcileCapturedEmailWithCodex(userId, emailMessageId, {
+        const messageData = {
+          provider: 'outlook',
+          providerMessageId: message.id,
+          providerThreadId: message.conversationId || null,
+          mailbox: 'sent',
           direction: 'sent',
           subject: message.subject || '',
+          senderEmail: sender.address || '',
+          senderName: sender.name || '',
           recipientEmails: recipients,
+          ccEmails: ccRecipients,
           sentAt: message.sentDateTime ? new Date(message.sentDateTime) : null,
           receivedAt: message.receivedDateTime ? new Date(message.receivedDateTime) : null,
-        });
-        if (codexImport) continue;
-        await awardCapturedEmailActivity(userId, emailMessageId, isNewMessage);
-
-        const result = await pool.query(`
-          INSERT INTO public.email_prospect_matches (
-            user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
-            suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
-          )
-          SELECT $1, $2, NULL, 0, 'needs_context', $3, 'email', 'contacted', $4, now()
-          WHERE NOT EXISTS (
-            SELECT 1 FROM public.email_prospect_matches
-            WHERE user_id = $1 AND email_message_id = $2 AND prospect_id IS NULL
-          )
-          RETURNING id
-        `, [
+          snippet: message.bodyPreview || '',
+          attachmentNames: [],
+          sourceUrl: message.webLink || '',
+        };
+        const processed = await processCapturedEmailMessage({
           userId,
           emailMessageId,
-          'Captured from Outlook BCC fallback; Postmark webhook may not have delivered.',
-          [message.subject || '', message.bodyPreview || ''].filter(Boolean).join('\n').slice(0, 1000),
-        ]);
-        if (result.rows[0]) matchesCreated += 1;
+          isNewMessage,
+          messageData,
+          prospects,
+        });
+        matchesCreated += processed.matchesCreated || 0;
+        if (processed.duplicateSuppressed) duplicatesSuppressed += 1;
+        if (processed.matchStatus === 'auto_logged') autoLogged += 1;
       }
     }
 
@@ -3771,7 +4097,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       SET last_synced_at = now(), status = 'connected', error_message = NULL, updated_at = now()
       WHERE id = $1 AND user_id = $2
     `, [connectionId, userId]);
-    return { messagesSeen, bccCapturesSeen, messagesStored, matchesCreated };
+    return {
+      messagesSeen,
+      bccCapturesSeen,
+      messagesStored,
+      matchesCreated,
+      autoLogged,
+      duplicatesSuppressed,
+    };
   }
 
   app.post('/api/email/outlook/sync-bcc', requireAuth, async (req, res) => {
@@ -4824,17 +5157,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
 
         if (dueIn !== null && dueIn <= 7) {
-          const overdueBoost = dueIn < 0 ? Math.min(Math.abs(dueIn) * 4, 24) : 0;
-          const score = 76 + overdueBoost + (row.status === 'listing' ? 12 : 0);
+          const reminderRank = rankFollowUpReminder({
+            dueInDays: dueIn,
+            prospectStatus: row.status,
+          });
+          const score = reminderRank.score;
           actions.push({
             id: `followup:${row.id}`,
             type: 'follow_up_due',
             priority: briefPriority(score),
             priorityScore: score,
-            title: dueIn < 0 ? `Overdue follow-up: ${name}` : `Upcoming follow-up: ${name}`,
-            reason: dueIn < 0
-              ? `Follow-up is ${Math.abs(dueIn)} day${Math.abs(dueIn) === 1 ? '' : 's'} overdue.`
-              : `Follow-up is due in ${dueIn} day${dueIn === 1 ? '' : 's'}.`,
+            title: `${reminderRank.titlePrefix}: ${name}`,
+            reason: reminderRank.reason,
             suggestedAction: row.contact_phone
               ? 'Call first, then log the outcome and set the next follow-up.'
               : 'Send a short follow-up email, then log the outcome and set the next follow-up.',
@@ -4921,7 +5255,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const row of emailResult.rows) {
         const ageDays = daysSince(row.sent_at || row.received_at || row.match_created_at, now) || 0;
         const hasContext = Boolean(row.prospect_id || row.listing_id);
-        const score = (hasContext ? 62 : 72) + Math.min(ageDays * 3, 18);
+        const score = rankEmailCleanup(ageDays, hasContext);
         actions.push({
           id: `email:${row.match_id}`,
           type: 'email_cleanup',

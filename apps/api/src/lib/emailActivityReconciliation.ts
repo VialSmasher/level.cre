@@ -10,6 +10,16 @@ type EmailEvidence = {
   occurredAt?: Date | string | null;
 };
 
+function counterpartyEmailsForMessage(params: {
+  direction?: string | null;
+  senderEmail?: string | null;
+  recipientEmails?: Array<string | null | undefined>;
+}): string[] {
+  return String(params.direction || '').toLowerCase() === 'received'
+    ? normalizeEmailList([params.senderEmail])
+    : normalizeEmailList(params.recipientEmails);
+}
+
 function normalizeEmailList(values: Array<string | null | undefined> = []): string[] {
   return [...new Set(values
     .map((value) => String(value || '').trim().toLowerCase())
@@ -88,6 +98,90 @@ export async function findMatchingCodexEmailImport(params: {
     : null;
 }
 
+export async function findMatchingCapturedEmailMessage(params: {
+  pool: Pool;
+  userId: string;
+  emailMessageId: string;
+  direction?: string | null;
+  subject?: string | null;
+  senderEmail?: string | null;
+  recipientEmails?: Array<string | null | undefined>;
+  occurredAt?: Date | string | null;
+}): Promise<{
+  id: string;
+  interactionId: string | null;
+  prospectId: string | null;
+  matchStatus: string | null;
+} | null> {
+  const occurredAt = parseDate(params.occurredAt);
+  const subject = normalizeEmailActivitySubject(params.subject);
+  const counterparties = counterpartyEmailsForMessage(params);
+  if (!occurredAt || !subject || counterparties.length === 0) return null;
+
+  const { rows } = await params.pool.query(
+    `
+      SELECT
+        em.id,
+        em.direction,
+        em.subject,
+        em.sender_email,
+        em.recipient_emails,
+        em.sent_at,
+        em.received_at,
+        match.interaction_id,
+        match.prospect_id,
+        match.match_status
+      FROM public.email_messages em
+      LEFT JOIN LATERAL (
+        SELECT interaction_id, prospect_id, match_status
+        FROM public.email_prospect_matches epm
+        WHERE epm.user_id = $1
+          AND epm.email_message_id = em.id
+        ORDER BY (interaction_id IS NOT NULL) DESC, updated_at DESC NULLS LAST
+        LIMIT 1
+      ) match ON true
+      WHERE em.user_id = $1
+        AND em.id <> $2
+        AND em.direction = $3
+        AND COALESCE(em.sent_at, em.received_at)
+          BETWEEN $4::timestamp - interval '${RECONCILIATION_WINDOW_MINUTES} minutes'
+              AND $4::timestamp + interval '${RECONCILIATION_WINDOW_MINUTES} minutes'
+      ORDER BY ABS(EXTRACT(EPOCH FROM (COALESCE(em.sent_at, em.received_at) - $4::timestamp))) ASC
+      LIMIT 50
+    `,
+    [params.userId, params.emailMessageId, params.direction || 'unknown', occurredAt],
+  );
+
+  const matching = rows.find((row) => isSameEmailActivity(
+    { subject: params.subject, counterpartyEmails: counterparties, occurredAt },
+    {
+      subject: row.subject,
+      counterpartyEmails: counterpartyEmailsForMessage({
+        direction: row.direction,
+        senderEmail: row.sender_email,
+        recipientEmails: row.recipient_emails || [],
+      }),
+      occurredAt: row.sent_at || row.received_at,
+    },
+  ));
+  return matching ? {
+    id: matching.id,
+    interactionId: matching.interaction_id || null,
+    prospectId: matching.prospect_id || null,
+    matchStatus: matching.match_status || null,
+  } : null;
+}
+
+export function shouldSuppressDuplicateCapture(
+  currentEmailMessageId: string,
+  duplicate: { id: string; interactionId: string | null; matchStatus: string | null },
+): boolean {
+  if (duplicate.interactionId) return true;
+  if (duplicate.matchStatus && duplicate.matchStatus !== 'ignored') return true;
+  if (duplicate.matchStatus === 'ignored') return false;
+  return duplicate.id.localeCompare(currentEmailMessageId) < 0;
+}
+
 async function findMatchingCapturedEmailMessageIds(params: {
   pool: Pool;
   userId: string;
@@ -143,6 +237,30 @@ export async function hasMatchingCapturedEmailEvidence(params: {
 }): Promise<boolean> {
   const matchingMessageIds = await findMatchingCapturedEmailMessageIds(params);
   return matchingMessageIds.length > 0;
+}
+
+export async function findMatchingCapturedEmailInteraction(params: {
+  pool: Pool;
+  userId: string;
+  activity: NormalizedSalesActivity;
+}): Promise<{ interactionId: string; prospectId: string } | null> {
+  const matchingMessageIds = await findMatchingCapturedEmailMessageIds(params);
+  if (matchingMessageIds.length === 0) return null;
+
+  const { rows } = await params.pool.query(
+    `
+      SELECT id, prospect_id
+      FROM public.contact_interactions
+      WHERE user_id = $1
+        AND source_email_message_id = ANY($2::varchar[])
+      ORDER BY created_at DESC NULLS LAST
+      LIMIT 1
+    `,
+    [params.userId, matchingMessageIds],
+  );
+  return rows[0]
+    ? { interactionId: rows[0].id, prospectId: rows[0].prospect_id }
+    : null;
 }
 
 export async function suppressEmailReviewsMatchingSalesActivity(params: {

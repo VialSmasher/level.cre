@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { apiRequest } from '@/lib/queryClient'
+import { buildDailyDeskQueues } from '@/lib/dailyDeskQueues'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useAuth } from '@/contexts/AuthContext'
@@ -439,25 +440,7 @@ export default function DailyDeskPage() {
     [prospectsQuery.data],
   )
 
-  const queues = useMemo(() => {
-    const waiting = actions.filter(
-      (action) => action.type === 'outlook_signal' && action.automationHints?.stage === 'waiting_on_reply',
-    )
-    const waitingIds = new Set(waiting.map((action) => action.id))
-    const today = actions.filter(
-      (action) =>
-        (action.priority === 'critical' || action.priority === 'high')
-        && !waitingIds.has(action.id)
-        && action.type !== 'email_cleanup'
-        && action.type !== 'research_target',
-    )
-    const review = actions.filter((action) => action.type === 'email_cleanup')
-    const usedIds = new Set([...today, ...waiting, ...review].map((action) => action.id))
-    const develop = actions.filter(
-      (action) => !usedIds.has(action.id) || action.type === 'research_target' || action.type === 'stale_prospect',
-    )
-    return { today, waiting, review, develop }
-  }, [actions])
+  const queues = useMemo(() => buildDailyDeskQueues(actions), [actions])
 
   const reviewMutation = useMutation({
     mutationFn: async ({ importId, action, prospectId }: { importId: string; action: 'link' | 'ignore'; prospectId?: string }) => {
