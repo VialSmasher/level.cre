@@ -575,7 +575,7 @@ export default function InboxPage() {
                           value={prospectDrafts[item.id] || ''}
                           onValueChange={(value) => setProspectDrafts((prev) => ({ ...prev, [item.id]: value }))}
                         >
-                          <SelectTrigger className="bg-white">
+                          <SelectTrigger className="bg-white" aria-label="Attach activity to company or prospect">
                             <SelectValue placeholder="Choose company or prospect" />
                           </SelectTrigger>
                           <SelectContent>

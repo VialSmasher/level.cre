@@ -30,7 +30,7 @@ test('broker creates a focused pursuit without leaving the workflow', async ({ p
     journey: 'Create a listing pursuit',
     persona: 'Patrick setting up a prospecting farm around an active listing',
     targetSeconds: 12,
-    targetActions: 4,
+    targetActions: 5,
   }, async (journey) => {
     await page.goto('/app/desk');
     await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible();
@@ -41,6 +41,7 @@ test('broker creates a focused pursuit without leaving the workflow', async ({ p
 
     await journey.action('Start a new pursuit', () => page.getByRole('button', { name: 'Create pursuit' }).click());
     await journey.action('Name the pursuit', () => page.getByPlaceholder('e.g., NW Distributors').fill('West Edmonton Owner Hunt'));
+    await journey.action('Anchor the pursuit', () => page.getByPlaceholder('e.g., 14840 134 Ave or Northwest Edmonton').fill('West Edmonton, Alberta'));
     await journey.action('Create the pursuit', () => page.getByRole('button', { name: 'Create Pursuit' }).click());
     await expect(page).toHaveURL(/\/app\/workspaces\//);
   });

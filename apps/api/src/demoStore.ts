@@ -430,9 +430,22 @@ export async function getListingsSharedWith(userId: string): Promise<any[]> {
   const lm = cache!.listingMembers || {};
   for (const listingId of Object.keys(lm)) {
     const arr = lm[listingId] || [];
-    if (arr.find((m) => m.userId === userId)) {
+    const membership = arr.find((m) => m.userId === userId);
+    if (membership) {
       const listing = await getListingAny(listingId);
-      if (listing && !listing.archivedAt) result.push({ ...listing, prospectCount: 0 });
+      if (listing && !listing.archivedAt) {
+        const ownerProfile = cache!.profiles?.[listing.userId] || {};
+        const ownerName = ownerProfile.name
+          || [ownerProfile.firstName, ownerProfile.lastName].filter(Boolean).join(' ')
+          || null;
+        result.push({
+          ...listing,
+          prospectCount: 0,
+          ownerName,
+          ownerEmail: ownerProfile.email || null,
+          memberRole: membership.role,
+        });
+      }
     }
   }
   return result;

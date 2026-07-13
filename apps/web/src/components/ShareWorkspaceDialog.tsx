@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { apiRequest } from '@/lib/queryClient';
-import { Trash2 } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { Modal, ModalContent, ModalHeader, ModalTitle, ModalClose } from '@/components/primitives/Modal';
@@ -49,7 +49,8 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
   const qc = useQueryClient();
   const { isDemoMode } = useAuth();
   const { toast } = useToast();
-  const { data: members = [] } = useQuery<ShareEntry[]>({ queryKey: ['/api/listings', listingId, 'members'], enabled: open && !!listingId });
+  const { data: membersResponse = [] } = useQuery<ShareEntry[]>({ queryKey: ['/api/listings', listingId, 'members'], enabled: open && !!listingId });
+  const members = Array.isArray(membersResponse) ? membersResponse : [];
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'viewer'|'editor'>('viewer');
@@ -165,7 +166,7 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
               <div>
                 <Label>Role</Label>
                 <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as any)}>
-                  <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="w-[140px]" aria-label="Invite permission"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="viewer">Viewer</SelectItem>
                     <SelectItem value="editor">Editor</SelectItem>
@@ -201,7 +202,7 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
                       <span className="text-xs">{m.role}</span>
                     ) : (
                       <Select value={m.role} onValueChange={(role) => updateRoleMutation.mutate({ userId: m.userId!, role: role as any })} disabled={!canManage}>
-                        <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="w-[120px]" aria-label={`Permission for ${m.email || m.userId}`}><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="viewer">viewer</SelectItem>
                           <SelectItem value="editor">editor</SelectItem>
@@ -232,7 +233,7 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
             className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
             aria-label="Close"
           >
-            <span aria-hidden className="inline-block h-4 w-4">✕</span>
+            <X aria-hidden className="h-4 w-4" />
           </button>
         </ModalClose>
       </ModalContent>

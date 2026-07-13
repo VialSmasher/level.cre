@@ -22,8 +22,14 @@ function parseMetrics(result: TestResult): JourneyMetrics | null {
 }
 
 function markdownFor(rows: ReportRow[], runStatus: string) {
-  const average = rows.length
+  const averageMechanical = rows.length
     ? Math.round((rows.reduce((sum, row) => sum + row.score, 0) / rows.length) * 10) / 10
+    : 0;
+  const averageTrust = rows.length
+    ? Math.round((rows.reduce((sum, row) => sum + row.trustScore, 0) / rows.length) * 10) / 10
+    : 0;
+  const averageReadiness = rows.length
+    ? Math.round((rows.reduce((sum, row) => sum + row.readinessScore, 0) / rows.length) * 10) / 10
     : 0;
   const completed = rows.filter((row) => row.completed && row.status === 'passed').length;
   const generatedAt = new Date().toISOString();
@@ -33,13 +39,15 @@ function markdownFor(rows: ReportRow[], runStatus: string) {
     '',
     `Generated: ${generatedAt}`,
     `Run status: ${runStatus}`,
-    `Mechanical benchmark score: ${average}/100`,
+    `Mechanical benchmark score: ${averageMechanical}/100`,
+    `Trust score: ${averageTrust}/100`,
+    `Team-readiness score: ${averageReadiness}/100`,
     `Completed journeys: ${completed}/${rows.length}`,
     '',
-    '| Journey | Surface | Score | Time | Actions | Console errors | A11y critical/serious |',
-    '| --- | --- | ---: | ---: | ---: | ---: | ---: |',
+    '| Journey | Surface | Mechanical | Trust | Readiness | Time | Actions | Console errors | A11y critical/serious |',
+    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
     ...rows.map((row) => (
-      `| ${row.journey} | ${row.project} | ${row.score} | ${(row.elapsedMs / 1000).toFixed(1)}s / ${row.targetSeconds}s | ${row.actionCount} / ${row.targetActions} | ${row.consoleErrors.length} | ${row.accessibility.critical}/${row.accessibility.serious} |`
+      `| ${row.journey} | ${row.project} | ${row.score} | ${row.trustScore} | ${row.readinessScore} | ${(row.elapsedMs / 1000).toFixed(1)}s / ${row.targetSeconds}s | ${row.actionCount} / ${row.targetActions} | ${row.consoleErrors.length} | ${row.accessibility.critical}/${row.accessibility.serious} |`
     )),
     '',
     '## Journey Notes',
@@ -49,6 +57,8 @@ function markdownFor(rows: ReportRow[], runStatus: string) {
       '',
       `Persona: ${row.persona}`,
       `Steps: ${row.steps.length ? row.steps.join(' -> ') : 'No completed steps'}`,
+      `Trust checks: ${row.trustChecks.length ? row.trustChecks.map((item) => `${item.passed ? 'PASS' : 'GAP'} ${item.label}${item.detail ? ` (${item.detail})` : ''}`).join(' | ') : 'No additional trust checks'}`,
+      `Screenshots: ${row.screenshots.length ? row.screenshots.join(' | ') : 'None'}`,
       `Accessibility findings: ${row.accessibility.violations.length ? row.accessibility.violations.map((item) => `${item.id} (${item.impact}, ${item.nodes}; ${item.targets.join(', ')})`).join(' | ') : 'None detected by axe'}`,
       `Console errors: ${row.consoleErrors.length ? row.consoleErrors.join(' | ') : 'None'}`,
       '',
@@ -83,8 +93,14 @@ export default class UxBenchmarkReporter implements Reporter {
     const payload = {
       generatedAt: new Date().toISOString(),
       status: result.status,
-      averageScore: this.rows.length
+      averageMechanicalScore: this.rows.length
         ? Math.round((this.rows.reduce((sum, row) => sum + row.score, 0) / this.rows.length) * 10) / 10
+        : 0,
+      averageTrustScore: this.rows.length
+        ? Math.round((this.rows.reduce((sum, row) => sum + row.trustScore, 0) / this.rows.length) * 10) / 10
+        : 0,
+      averageReadinessScore: this.rows.length
+        ? Math.round((this.rows.reduce((sum, row) => sum + row.readinessScore, 0) / this.rows.length) * 10) / 10
         : 0,
       rows: this.rows,
     };

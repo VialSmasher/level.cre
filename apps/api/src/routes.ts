@@ -1247,13 +1247,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   async function getListingsViaSupabase(userId: string, scope: 'owned' | 'shared'): Promise<any[]> {
     const admin = requireSupabaseAdmin();
     let listingRows: any[] = [];
+    const membershipRoleByListingId = new Map<string, string>();
 
     if (scope === 'shared') {
       const { data: memberRows, error: memberError } = await admin
         .from('listing_members')
-        .select('listing_id')
+        .select('listing_id,role')
         .eq('user_id', userId);
       if (memberError) throw memberError;
+      for (const row of memberRows || []) {
+        membershipRoleByListingId.set(row.listing_id, row.role || 'viewer');
+      }
       const listingIds = Array.from(new Set((memberRows || []).map((row: any) => row.listing_id)));
       if (listingIds.length === 0) return [];
       const { data, error } = await admin
@@ -1286,10 +1290,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
 
-    return listingRows.map((row: any) => ({
-      ...mapListingRow(row),
-      prospectCount: countByListingId.get(row.id) || 0,
-    }));
+    const ownerIds = Array.from(new Set(listingRows.map((row: any) => row.user_id).filter(Boolean)));
+    const ownerProfileById = new Map<string, any>();
+    if (ownerIds.length > 0) {
+      const { data: ownerProfiles, error: ownerProfileError } = await admin
+        .from('profiles')
+        .select('id,name,first_name,last_name,email')
+        .in('id', ownerIds);
+      if (ownerProfileError) throw ownerProfileError;
+      for (const profile of ownerProfiles || []) ownerProfileById.set(profile.id, profile);
+    }
+
+    return listingRows.map((row: any) => {
+      const ownerProfile = ownerProfileById.get(row.user_id);
+      const ownerName = ownerProfile?.name
+        || [ownerProfile?.first_name, ownerProfile?.last_name].filter(Boolean).join(' ')
+        || null;
+      return {
+        ...mapListingRow(row),
+        prospectCount: countByListingId.get(row.id) || 0,
+        ownerName,
+        ownerEmail: ownerProfile?.email || null,
+        memberRole: scope === 'shared' ? membershipRoleByListingId.get(row.id) || 'viewer' : 'owner',
+      };
+    });
   }
 
   async function getListingViaSupabase(listingId: string): Promise<any | null> {
@@ -2296,16 +2320,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
               submarket: listings.submarket,
               createdAt: listings.createdAt,
               archivedAt: listings.archivedAt,
+              ownerEmail: users.email,
+              ownerFirstName: users.firstName,
+              ownerLastName: users.lastName,
+              memberRole: listingMembers.role,
               prospectCount: sql<number>`COALESCE((SELECT COUNT(*)::int FROM ${listingProspects} lp WHERE lp.listing_id = ${listings.id}), 0)`,
             })
             .from(listings)
             .innerJoin(listingMembers, and(eq(listingMembers.listingId, listings.id), eq(listingMembers.userId, userId)))
+            .leftJoin(users, eq(users.id, listings.userId))
             .where(and(eq(sql`COALESCE(${listings.archivedAt} IS NULL, TRUE)`, true)));
         } catch (error) {
           if (!shouldUseSupabaseReadFallback(error) || !supabaseAdmin) throw error;
           rows = await getListingsViaSupabase(userId, 'shared');
         }
-        return res.json(rows);
+        return res.json(rows.map((row: any) => ({
+          ...row,
+          ownerName: row.ownerName || [row.ownerFirstName, row.ownerLastName].filter(Boolean).join(' ') || null,
+          ownerFirstName: undefined,
+          ownerLastName: undefined,
+        })));
       }
       if (isDemo(req)) {
         const list = await demo.getListings(userId);

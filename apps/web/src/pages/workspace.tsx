@@ -91,6 +91,21 @@ const clearLegacyDemoMapData = () => {
 };
 
 export default function Workspace() {
+  if (!GOOGLE_MAPS_API_KEY) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
+        <div className="max-w-lg space-y-2">
+          <div className="text-base font-medium text-slate-700">Missing Google Maps API key</div>
+          <div className="text-sm text-slate-600">{GOOGLE_MAPS_API_KEY_HELP_TEXT}</div>
+        </div>
+      </div>
+    );
+  }
+
+  return <WorkspaceMap />;
+}
+
+function WorkspaceMap() {
   const [, params] = useRoute('/app/workspaces/:id');
   const listingId = params?.id as string;
   const [, setLocation] = useLocation();
@@ -1250,7 +1265,7 @@ export default function Workspace() {
           <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
             <div className="max-w-lg space-y-2">
               <div className="text-base font-medium text-gray-700">Missing Google Maps API key</div>
-              <div className="text-sm text-gray-500">{GOOGLE_MAPS_API_KEY_HELP_TEXT}</div>
+              <div className="text-sm text-slate-600">{GOOGLE_MAPS_API_KEY_HELP_TEXT}</div>
             </div>
           </div>
         )}

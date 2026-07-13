@@ -249,8 +249,11 @@ const sharedListings = [
   {
     id: 'listing-jack',
     userId: 'jack-user',
-    title: '16520 111 Ave - Jack',
+    title: '16520 111 Ave',
     address: '16520 111 Ave NW, Edmonton, AB',
+    ownerName: 'Jack Norris',
+    ownerEmail: 'jack@levelcre.test',
+    memberRole: 'viewer',
     createdAt: isoDaysAgo(20),
     archivedAt: null,
     prospectCount: 5,
@@ -284,6 +287,11 @@ export async function installBrokerScenario(page: Page) {
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    const appUrl = new URL(process.env.LEVELCRE_UX_BASE_URL || 'http://localhost:5175');
+    if (url.host !== appUrl.host) {
+      await route.continue();
+      return;
+    }
     const path = url.pathname;
     const method = request.method();
 
@@ -345,11 +353,19 @@ export async function installBrokerScenario(page: Page) {
         rejected: 0,
       });
     }
-    if (path === '/api/email/review' && method === 'GET') return fulfillJson(route, emailItems);
+    if (path === '/api/email/review' && method === 'GET') {
+      const requestedStatus = url.searchParams.get('status');
+      const matchingItems = !requestedStatus || requestedStatus === 'all'
+        ? emailItems
+        : emailItems.filter((item) => item.matchStatus === requestedStatus);
+      return fulfillJson(route, matchingItems);
+    }
     if (path.startsWith('/api/email/review/') && method !== 'GET') return fulfillJson(route, { ok: true });
     if (path === '/api/prospects') return fulfillJson(route, prospects);
     if (path === '/api/listings' && url.searchParams.get('scope') === 'shared') return fulfillJson(route, sharedListings);
     if (path === '/api/listings') return fulfillJson(route, listings);
+    if (/^\/api\/listings\/[^/]+\/members$/.test(path)) return fulfillJson(route, []);
+    if (/^\/api\/listings\/[^/]+\/prospects$/.test(path)) return fulfillJson(route, []);
     if (path === '/api/stats/header') {
       return fulfillJson(route, { totalLevel: 8, assetsTracked: 137, followupsLogged: 4, streakDays: 4 });
     }

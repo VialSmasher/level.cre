@@ -13,7 +13,8 @@ import { apiRequest } from '@/lib/queryClient';
 import { prospectLabel } from '@/lib/copy';
 import { useAuth } from '@/contexts/AuthContext';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
-import { ArrowRight, Briefcase, CalendarDays, MoreHorizontal, Pencil, Plus, Share2, Sparkles, Trash2, Users } from 'lucide-react';
+import { ShareWorkspaceDialog } from '@/components/ShareWorkspaceDialog';
+import { ArrowRight, Briefcase, CalendarDays, MoreHorizontal, Plus, Share2, Sparkles, Trash2, Users } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
@@ -36,6 +37,9 @@ type ListingRow = {
   createdAt?: string | Date | null;
   archivedAt?: string | Date | null;
   prospectCount: number;
+  ownerName?: string | null;
+  ownerEmail?: string | null;
+  memberRole?: 'owner' | 'editor' | 'viewer' | null;
 }
 
 const formatDate = (value?: string | Date | null) => {
@@ -49,7 +53,6 @@ function WorkspaceCard({
   workspace,
   kind,
   onOpen,
-  onRename,
   onShare,
   onDelete,
   deleteDisabled,
@@ -57,29 +60,24 @@ function WorkspaceCard({
   workspace: ListingRow;
   kind: 'owned' | 'shared';
   onOpen: () => void;
-  onRename: () => void;
-  onShare: () => void;
-  onDelete: () => void;
+  onShare?: () => void;
+  onDelete?: () => void;
   deleteDisabled?: boolean;
 }) {
   const count = workspace.prospectCount ?? 0;
   const name = workspace.title || workspace.address || 'Untitled pursuit';
+  const ownerLabel = workspace.ownerName || workspace.ownerEmail || 'Team member';
+  const memberRole = workspace.memberRole || 'viewer';
 
   return (
-    <Card
-      className="group relative cursor-pointer overflow-hidden border-slate-200 bg-white transition hover:border-blue-300 hover:shadow-[0_4px_12px_rgba(15,23,42,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-      onClick={onOpen}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.currentTarget !== event.target) return;
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onOpen();
-        }
-      }}
-    >
-      <CardHeader className="space-y-0 p-4 pb-3">
+    <Card className="group relative overflow-hidden border-slate-200 bg-white transition hover:border-blue-300 hover:shadow-[0_4px_12px_rgba(15,23,42,0.06)]">
+      <button
+        type="button"
+        className="absolute inset-0 z-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
+        onClick={onOpen}
+        aria-label={`Open ${name}`}
+      />
+      <CardHeader className="pointer-events-none relative z-10 space-y-0 p-4 pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-700">
@@ -96,39 +94,42 @@ function WorkspaceCard({
                   {formatDate(workspace.createdAt)}
                 </span>
               </div>
+              {kind === 'shared' ? (
+                <p className="mt-2 text-xs text-slate-600">
+                  <span className="font-medium text-slate-800">Owner: {ownerLabel}</span>
+                  <span aria-hidden> / </span>
+                  <span className="capitalize">{memberRole} access</span>
+                </p>
+              ) : null}
             </div>
           </div>
-          <DropdownMenu>
+          {kind === 'owned' ? <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-8 w-8 shrink-0 opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100"
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                aria-label="Pursuit actions"
+                className="pointer-events-auto relative z-20 h-8 w-8 shrink-0 opacity-100 md:opacity-0 md:transition-opacity md:group-hover:opacity-100"
+                aria-label={`Pursuit actions for ${name}`}
               >
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRename(); }}>
-                <Pencil className="mr-2 h-4 w-4" /> Rename
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={(e) => { e.preventDefault(); e.stopPropagation(); onShare(); }}>
+              <DropdownMenuItem onClick={() => onShare?.()}>
                 <Share2 className="mr-2 h-4 w-4" /> Share
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="text-red-600 focus:text-red-700"
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(); }}
+                onClick={() => onDelete?.()}
                 disabled={deleteDisabled}
               >
                 <Trash2 className="mr-2 h-4 w-4" /> Delete
               </DropdownMenuItem>
             </DropdownMenuContent>
-          </DropdownMenu>
+          </DropdownMenu> : null}
         </div>
       </CardHeader>
-      <CardContent className="p-4 pt-0">
+      <CardContent className="pointer-events-none relative z-10 p-4 pt-0">
         <div className="flex items-center justify-between border-t border-slate-100 pt-3">
           <p className="text-sm text-slate-600"><span className="font-semibold text-slate-950">{count}</span> {prospectLabel(count)}</p>
           <div className="inline-flex items-center gap-1 text-sm font-medium text-blue-700">
@@ -147,6 +148,7 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
   const { user, isDemoMode } = useAuth();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
+  const [anchor, setAnchor] = useState('');
 
   const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
     ? crypto.randomUUID()
@@ -155,12 +157,13 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
   const createMutation = useMutation({
     mutationFn: async () => {
       const trimmed = title.trim();
+      const trimmedAnchor = anchor.trim();
       if (isDemoMode) {
         const listing = {
           id: genId(),
           userId: user?.id || 'demo-user',
           title: trimmed,
-          address: null,
+          address: trimmedAnchor,
           lat: null,
           lng: null,
           submarket: null,
@@ -173,7 +176,7 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
         } as any;
         return listing;
       }
-      const payload = { title: trimmed };
+      const payload = { title: trimmed, address: trimmedAnchor };
       const res = await apiRequest('POST', '/api/listings', payload);
       const ct = res.headers.get('content-type') || '';
       if (!ct.includes('application/json')) {
@@ -186,6 +189,7 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
     onSuccess: (listing: any) => {
       onOpenChange(false);
       setTitle('');
+      setAnchor('');
       toast({ title: isDemoMode ? 'Pursuit created (demo)' : 'Pursuit created', description: 'Opening pursuit...' });
 
       // In demo mode, cache + persist locally so the UI lists and opens it
@@ -221,7 +225,7 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
     }
   });
 
-  const canSubmit = !!title.trim();
+  const canSubmit = Boolean(title.trim() && anchor.trim());
 
   return (
     <Modal open={open} onOpenChange={onOpenChange}>
@@ -231,8 +235,18 @@ function CreateWorkspaceModal({ open, onOpenChange }: { open: boolean; onOpenCha
         </ModalHeader>
         <div className="space-y-4">
           <div>
-            <Label>Pursuit Name</Label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., NW Distributors" />
+            <Label htmlFor="pursuit-name">Pursuit name</Label>
+            <Input id="pursuit-name" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., NW Distributors" />
+          </div>
+          <div>
+            <Label htmlFor="pursuit-anchor">Property or market area</Label>
+            <Input
+              id="pursuit-anchor"
+              value={anchor}
+              onChange={(e) => setAnchor(e.target.value)}
+              placeholder="e.g., 14840 134 Ave or Northwest Edmonton"
+            />
+            <p className="mt-1.5 text-xs text-slate-500">This keeps the pursuit anchored to a place from day one.</p>
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -252,6 +266,7 @@ export default function WorkspacesIndex() {
   const queryClient = useQueryClient();
   const { user, isDemoMode } = useAuth();
   const [open, setOpen] = useState(false);
+  const [shareWorkspaceId, setShareWorkspaceId] = useState<string | null>(null);
   const { data: listingsResponse = [], isLoading } = useQuery<ListingRow[]>({ queryKey: ['/api/listings'] });
   const { data: sharedResponse = [], isLoading: isLoadingShared } = useQuery<ListingRow[]>({ queryKey: ['/api/listings', 'shared'], queryFn: async () => {
     const res = await apiRequest('GET', '/api/listings?scope=shared');
@@ -447,8 +462,7 @@ export default function WorkspacesIndex() {
               workspace={l}
               kind="owned"
               onOpen={() => openWorkspace(l)}
-              onRename={() => toast({ title: 'Rename', description: 'Coming soon.' })}
-              onShare={() => toast({ title: 'Share', description: 'Coming soon.' })}
+              onShare={() => setShareWorkspaceId(l.id)}
               onDelete={() => {
                 if (confirm('Delete this pursuit? This cannot be undone.')) deleteMutation.mutate(l.id);
               }}
@@ -485,9 +499,6 @@ export default function WorkspacesIndex() {
                   workspace={l}
                   kind="shared"
                   onOpen={() => openWorkspace(l)}
-                  onRename={() => toast({ title: 'Rename', description: 'Coming soon.' })}
-                  onShare={() => toast({ title: 'Share', description: 'Coming soon.' })}
-                  onDelete={() => toast({ title: 'Delete', description: 'Coming soon.' })}
                 />
               ))}
             </div>
@@ -497,6 +508,14 @@ export default function WorkspacesIndex() {
       )}
 
       <CreateWorkspaceModal open={open} onOpenChange={setOpen} />
+      {shareWorkspaceId ? (
+        <ShareWorkspaceDialog
+          listingId={shareWorkspaceId}
+          open
+          onOpenChange={(nextOpen) => { if (!nextOpen) setShareWorkspaceId(null); }}
+          canManage
+        />
+      ) : null}
       </div>
     </div>
   );

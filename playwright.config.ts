@@ -50,5 +50,10 @@ export default defineConfig({
         hasTouch: true,
       },
     },
+    {
+      name: 'broker-team',
+      testMatch: '**/broker-team.ux.spec.ts',
+      use: { viewport: { width: 1440, height: 1000 } },
+    },
   ],
 });
