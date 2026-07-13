@@ -362,6 +362,162 @@ export const listingProspects = pgTable(
 export type ListingProspect = typeof listingProspects.$inferSelect;
 export type InsertListingProspect = typeof listingProspects.$inferInsert;
 
+// Canonical business-development opportunities. These sit above legacy listings
+// and prospects so activity can describe the work without forcing a map pin.
+export const opportunities = pgTable(
+  "opportunities",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    type: varchar("type").notNull(),
+    title: varchar("title").notNull(),
+    stage: varchar("stage").notNull().default("target"),
+    status: varchar("status").notNull().default("active"),
+    company: varchar("company"),
+    contactName: varchar("contact_name"),
+    contactEmail: varchar("contact_email"),
+    propertyAddress: text("property_address"),
+    prospectId: varchar("prospect_id").references(() => prospects.id, { onDelete: "set null" }),
+    listingId: varchar("listing_id").references(() => listings.id, { onDelete: "set null" }),
+    estimatedFee: numeric("estimated_fee", { precision: 14, scale: 2 }),
+    probabilityPercent: integer("probability_percent"),
+    ownershipSharePercent: numeric("ownership_share_percent", { precision: 5, scale: 2 }),
+    expectedCloseDate: timestamp("expected_close_date"),
+    confidence: integer("confidence").notNull().default(0),
+    source: varchar("source").notNull().default("manual"),
+    notes: text("notes"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+    archivedAt: timestamp("archived_at"),
+  },
+  (table) => [
+    index("IDX_opportunities_user_status").on(table.userId, table.status),
+    index("IDX_opportunities_user_stage").on(table.userId, table.stage),
+    index("IDX_opportunities_prospect").on(table.prospectId),
+    index("IDX_opportunities_listing").on(table.listingId),
+  ],
+);
+
+export type Opportunity = typeof opportunities.$inferSelect;
+export type InsertOpportunity = typeof opportunities.$inferInsert;
+
+// Provider-neutral event ledger. It intentionally stores brief evidence and
+// provenance, not full email bodies or other source documents.
+export const activityEvents = pgTable(
+  "activity_events",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    source: varchar("source").notNull(),
+    externalEventId: varchar("external_event_id").notNull(),
+    eventType: varchar("event_type").notNull(),
+    direction: varchar("direction"),
+    evidenceStatus: varchar("evidence_status").notNull().default("observed"),
+    occurredAt: timestamp("occurred_at").notNull(),
+    recordedAt: timestamp("recorded_at").defaultNow(),
+    contactName: varchar("contact_name"),
+    company: varchar("company"),
+    email: varchar("email"),
+    phone: varchar("phone"),
+    subject: text("subject"),
+    summary: text("summary"),
+    propertyAddress: text("property_address"),
+    confidence: integer("confidence").notNull().default(0),
+    matchStatus: varchar("match_status").notNull().default("unassigned"),
+    matchReason: text("match_reason"),
+    prospectId: varchar("prospect_id").references(() => prospects.id, { onDelete: "set null" }),
+    listingId: varchar("listing_id").references(() => listings.id, { onDelete: "set null" }),
+    opportunityId: varchar("opportunity_id").references(() => opportunities.id, { onDelete: "set null" }),
+    interactionId: varchar("interaction_id").references(() => contactInteractions.id, { onDelete: "set null" }),
+    evidenceUrl: text("evidence_url"),
+    sourceMetadata: jsonb("source_metadata").$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    unique("UQ_activity_events_external").on(table.userId, table.source, table.externalEventId),
+    index("IDX_activity_events_user_occurred").on(table.userId, table.occurredAt),
+    index("IDX_activity_events_user_type").on(table.userId, table.eventType),
+    index("IDX_activity_events_user_match").on(table.userId, table.matchStatus),
+    index("IDX_activity_events_prospect").on(table.prospectId),
+    index("IDX_activity_events_opportunity").on(table.opportunityId),
+  ],
+);
+
+export type ActivityEvent = typeof activityEvents.$inferSelect;
+export type InsertActivityEvent = typeof activityEvents.$inferInsert;
+
+export const activityEventLinks = pgTable(
+  "activity_event_links",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    eventId: varchar("event_id").notNull().references(() => activityEvents.id, { onDelete: "cascade" }),
+    entityType: varchar("entity_type").notNull(),
+    entityId: varchar("entity_id").notNull(),
+    role: varchar("role").notNull().default("related"),
+    confidence: integer("confidence").notNull().default(0),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    unique("UQ_activity_event_link").on(table.eventId, table.entityType, table.entityId, table.role),
+    index("IDX_activity_event_links_entity").on(table.userId, table.entityType, table.entityId),
+  ],
+);
+
+export type ActivityEventLink = typeof activityEventLinks.$inferSelect;
+export type InsertActivityEventLink = typeof activityEventLinks.$inferInsert;
+
+export const opportunityStageEvents = pgTable(
+  "opportunity_stage_events",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    opportunityId: varchar("opportunity_id").notNull().references(() => opportunities.id, { onDelete: "cascade" }),
+    fromStage: varchar("from_stage"),
+    toStage: varchar("to_stage").notNull(),
+    changedAt: timestamp("changed_at").notNull().defaultNow(),
+    evidenceStatus: varchar("evidence_status").notNull().default("confirmed"),
+    confidence: integer("confidence").notNull().default(100),
+    source: varchar("source").notNull().default("manual"),
+    sourceEventId: varchar("source_event_id").references(() => activityEvents.id, { onDelete: "set null" }),
+    reason: text("reason"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_opportunity_stage_events_opportunity").on(table.opportunityId, table.changedAt),
+  ],
+);
+
+export type OpportunityStageEvent = typeof opportunityStageEvents.$inferSelect;
+export type InsertOpportunityStageEvent = typeof opportunityStageEvents.$inferInsert;
+
+export const opportunityPlaybookSteps = pgTable(
+  "opportunity_playbook_steps",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    opportunityId: varchar("opportunity_id").notNull().references(() => opportunities.id, { onDelete: "cascade" }),
+    stepType: varchar("step_type").notNull(),
+    status: varchar("status").notNull().default("pending"),
+    completedAt: timestamp("completed_at"),
+    sourceEventId: varchar("source_event_id").references(() => activityEvents.id, { onDelete: "set null" }),
+    notes: text("notes"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("IDX_opportunity_playbook_steps_opportunity").on(table.opportunityId, table.status),
+  ],
+);
+
+export type OpportunityPlaybookStep = typeof opportunityPlaybookSteps.$inferSelect;
+export type InsertOpportunityPlaybookStep = typeof opportunityPlaybookSteps.$inferInsert;
+
 export const salesActivityImports = pgTable(
   "sales_activity_imports",
   {

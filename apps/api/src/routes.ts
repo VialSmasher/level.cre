@@ -52,6 +52,22 @@ import {
 import { buildPipelineHealth } from './lib/pipelineHealth';
 import { buildActivityPulse } from './lib/activityPulse';
 import { rankEmailCleanup, rankFollowUpReminder } from './lib/salesBriefRanking';
+import {
+  ActivityEventBatchSchema,
+  importActivityEventBatch,
+  listActivityEvents,
+  recordActivityEventFromSalesActivity,
+} from './lib/activityEventService';
+import {
+  OpportunityCreateSchema,
+  OpportunityPlaybookStepSchema,
+  OpportunityServiceError,
+  OpportunityStageChangeSchema,
+  changeOpportunityStage,
+  createOpportunity,
+  listOpportunities,
+  recordOpportunityPlaybookStep,
+} from './lib/opportunityService';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Supabase client for server-side OAuth
@@ -237,6 +253,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   await ensureSalesActivityImportTables();
+
+  async function ensureActivityEventTables(): Promise<void> {
+    try {
+      const candidatePaths = [
+        path.resolve(process.cwd(), 'drizzle/0016_activity_events_opportunities.sql'),
+        path.resolve(process.cwd(), '../../drizzle/0016_activity_events_opportunities.sql'),
+      ];
+      const migrationPath = candidatePaths.find((candidate) => fs.existsSync(candidate));
+      if (!migrationPath) return;
+      await pool.query(fs.readFileSync(migrationPath, 'utf8'));
+    } catch (error: any) {
+      console.error('Failed to ensure activity event and opportunity tables:', error?.message || error);
+    }
+  }
+
+  await ensureActivityEventTables();
 
   const OUTLOOK_SCOPES = ['offline_access', 'User.Read', 'Mail.Read'];
 
@@ -3566,6 +3598,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userId,
           activity,
         }),
+        recordActivityEvent: async (input) => recordActivityEventFromSalesActivity({
+          pool,
+          userId,
+          ...input,
+        }),
       });
       res.json(summary);
     } catch (error) {
@@ -3617,6 +3654,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         importId: req.params.id,
         decision: parsed.data,
       });
+      try {
+        await pool.query(
+          `
+            UPDATE public.activity_events event
+            SET prospect_id = CASE WHEN $3 = 'link' THEN activity.prospect_id ELSE event.prospect_id END,
+                interaction_id = CASE WHEN $3 = 'link' THEN activity.interaction_id ELSE event.interaction_id END,
+                match_status = CASE WHEN $3 = 'link' THEN 'matched' ELSE 'ignored' END,
+                match_reason = CASE WHEN $3 = 'link' THEN 'manual_prospect_link' ELSE 'manually_ignored' END,
+                confidence = CASE WHEN $3 = 'link' THEN 100 ELSE event.confidence END,
+                updated_at = now()
+            FROM public.sales_activity_imports activity
+            WHERE activity.id = $1
+              AND activity.user_id = $2
+              AND event.user_id = activity.user_id
+              AND event.source = activity.source
+              AND event.external_event_id = activity.external_activity_id
+          `,
+          [req.params.id, userId, parsed.data.action],
+        );
+      } catch (activityEventError) {
+        console.warn('Failed to mirror sales activity review into canonical event ledger:', activityEventError);
+      }
       res.json(result);
     } catch (error) {
       if (error instanceof SalesActivityReviewError) {
@@ -3624,6 +3683,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.error('Error reviewing sales activity import:', error);
       res.status(500).json({ message: 'Failed to review sales activity import' });
+    }
+  });
+
+  app.post('/api/agent/activity-events/batch', requireSalesActivityAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) await ensureUser(userId, email);
+      const parsed = ActivityEventBatchSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid activity event payload', error: parsed.error.errors });
+      }
+      if (isDemo(req)) {
+        return res.json({ imported: 0, inserted: 0, duplicates: 0, errors: 0, results: [], skipped: true, reason: 'demo_mode' });
+      }
+      const summary = await importActivityEventBatch({ pool, userId, payload: parsed.data });
+      res.json(summary);
+    } catch (error) {
+      console.error('Error importing activity events:', error);
+      res.status(500).json({ message: 'Failed to import activity events' });
+    }
+  });
+
+  app.get('/api/activity-events', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) return res.json({ rows: [] });
+      const limit = Math.min(Math.max(Number.parseInt(String(req.query.limit || '100'), 10) || 100, 1), 250);
+      const rows = await listActivityEvents({
+        pool,
+        userId,
+        limit,
+        eventType: typeof req.query.eventType === 'string' ? req.query.eventType.trim() : undefined,
+        matchStatus: typeof req.query.matchStatus === 'string' ? req.query.matchStatus.trim() : undefined,
+        opportunityId: typeof req.query.opportunityId === 'string' ? req.query.opportunityId.trim() : undefined,
+      });
+      res.json({ rows });
+    } catch (error) {
+      console.error('Error getting activity events:', error);
+      res.status(500).json({ message: 'Failed to get activity events' });
+    }
+  });
+
+  app.get('/api/opportunities', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      if (isDemo(req)) return res.json({ rows: [] });
+      const limit = Math.min(Math.max(Number.parseInt(String(req.query.limit || '100'), 10) || 100, 1), 250);
+      const rows = await listOpportunities({
+        pool,
+        userId,
+        limit,
+        status: typeof req.query.status === 'string' ? req.query.status.trim() : undefined,
+        type: typeof req.query.type === 'string' ? req.query.type.trim() : undefined,
+      });
+      res.json({ rows });
+    } catch (error) {
+      console.error('Error getting opportunities:', error);
+      res.status(500).json({ message: 'Failed to get opportunities' });
+    }
+  });
+
+  app.post('/api/opportunities', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = OpportunityCreateSchema.safeParse(req.body || {});
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid opportunity', error: parsed.error.errors });
+      if (isDemo(req)) return res.status(201).json({ id: randomUUID(), stage: 'target', status: 'active', ...parsed.data, skipped: true });
+      const opportunity = await createOpportunity({ pool, userId, input: parsed.data });
+      res.status(201).json(opportunity);
+    } catch (error) {
+      if (error instanceof OpportunityServiceError) return res.status(error.status).json({ message: error.message });
+      console.error('Error creating opportunity:', error);
+      res.status(500).json({ message: 'Failed to create opportunity' });
+    }
+  });
+
+  app.patch('/api/opportunities/:id/stage', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = OpportunityStageChangeSchema.safeParse(req.body || {});
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid opportunity stage change', error: parsed.error.errors });
+      if (isDemo(req)) return res.json({ id: req.params.id, stage: parsed.data.toStage, skipped: true });
+      const opportunity = await changeOpportunityStage({ pool, userId, opportunityId: req.params.id, input: parsed.data });
+      res.json(opportunity);
+    } catch (error) {
+      if (error instanceof OpportunityServiceError) return res.status(error.status).json({ message: error.message });
+      console.error('Error changing opportunity stage:', error);
+      res.status(500).json({ message: 'Failed to change opportunity stage' });
+    }
+  });
+
+  app.patch('/api/opportunities/:id/playbook', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = OpportunityPlaybookStepSchema.safeParse(req.body || {});
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid opportunity playbook step', error: parsed.error.errors });
+      if (isDemo(req)) return res.json({ opportunityId: req.params.id, ...parsed.data, skipped: true });
+      const step = await recordOpportunityPlaybookStep({ pool, userId, opportunityId: req.params.id, input: parsed.data });
+      res.json(step);
+    } catch (error) {
+      if (error instanceof OpportunityServiceError) return res.status(error.status).json({ message: error.message });
+      console.error('Error updating opportunity playbook:', error);
+      res.status(500).json({ message: 'Failed to update opportunity playbook' });
     }
   });
 

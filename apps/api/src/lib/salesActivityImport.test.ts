@@ -301,3 +301,40 @@ test('a captured interaction is reused when Codex records the same sent email la
   assert.equal(result.duplicates, 1);
   assert.equal(result.results[0].interactionId, 'captured-interaction-1');
 });
+
+test('a confirmed sales send is handed to the canonical event ledger after matching', async () => {
+  const pool = {
+    query: async (sql: string) => {
+      if (sql.includes('FROM public.prospects') && sql.includes('LIMIT 1')) return { rows: [{ id: 'prospect-1' }] };
+      if (sql.includes('SELECT id, interaction_id') && sql.includes('sales_activity_imports')) return { rows: [] };
+      if (sql.includes('INSERT INTO public.sales_activity_imports')) {
+        return { rows: [{ id: 'import-1', interaction_id: null, match_status: 'matched', prospect_id: 'prospect-1' }] };
+      }
+      if (sql.includes('FROM public.contact_interactions')) return { rows: [{ id: 'interaction-1' }] };
+      return { rows: [], rowCount: 0 };
+    },
+  } as any;
+  const recorded: any[] = [];
+
+  await importSalesActivityBatch({
+    pool,
+    storage: { createContactInteraction: async () => ({ id: 'unused' }) },
+    userId: 'user-1',
+    payload: SalesActivityBatchSchema.parse({
+      activities: [{
+        externalActivityId: 'provider-message-1',
+        status: 'sent',
+        email: 'buyer@example.com',
+        prospectId: 'prospect-1',
+        subject: 'Follow up',
+      }],
+    }),
+    recordActivityEvent: async (input) => { recorded.push(input); },
+  });
+
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].importId, 'import-1');
+  assert.equal(recorded[0].prospectId, 'prospect-1');
+  assert.equal(recorded[0].interactionId, 'interaction-1');
+  assert.equal(recorded[0].matchStatus, 'matched');
+});

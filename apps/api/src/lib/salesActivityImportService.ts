@@ -222,6 +222,16 @@ export async function importSalesActivityBatch(params: {
     prospectId: string;
   } | null>;
   reconcileEmailEvidence?: (activity: NormalizedSalesActivity) => Promise<number>;
+  recordActivityEvent?: (input: {
+    activity: NormalizedSalesActivity;
+    importId: string;
+    prospectId: string | null;
+    listingId: string | null;
+    interactionId: string | null;
+    matchStatus: string;
+    matchReason: string | null;
+    confidence: number;
+  }) => Promise<unknown>;
 }): Promise<SalesActivityImportSummary> {
   const summary: SalesActivityImportSummary = {
     imported: 0,
@@ -384,6 +394,25 @@ export async function importSalesActivityBatch(params: {
           await params.reconcileEmailEvidence(activity);
         } catch (error) {
           console.warn('Failed to reconcile Codex activity with captured email evidence:', error);
+        }
+      }
+
+      if (params.recordActivityEvent) {
+        try {
+          await params.recordActivityEvent({
+            activity,
+            importId: importRow.id,
+            prospectId: effectiveProspectId,
+            listingId: activity.listingId,
+            interactionId,
+            matchStatus: finalMatchStatus,
+            matchReason: interactionId ? (resolved.matchReason || match.matchReason) : match.matchReason,
+            confidence: match.confidence,
+          });
+        } catch (error) {
+          // Keep the legacy recorder available during rollout; the canonical event
+          // endpoint can safely replay the same provider identity later.
+          console.warn('Failed to dual-write canonical activity event:', error);
         }
       }
 
