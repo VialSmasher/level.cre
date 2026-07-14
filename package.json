@@ -22,6 +22,7 @@
     "test:ux:all": "npm-run-all --sequential test:ux test:ux:map",
     "test:ux:report": "playwright show-report artifacts/ux-benchmark/playwright-local",
     "audit:product": "node scripts/product-audit/report-card.mjs",
+    "normalize:property-spreadsheet": "tsx scripts/codex/normalize-property-spreadsheet.ts",
     "start": "npm --workspace @apps/api run start",
     "db:push": "npm --workspace @apps/api run db:push",
     "db:prepare": "npm --workspace @apps/api run db:prepare",

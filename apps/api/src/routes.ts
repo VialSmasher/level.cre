@@ -73,6 +73,10 @@ import {
 const PursuitBulkImportRecordSchema = z.object({
   sourceRow: z.number().int().positive(),
   sourceSheet: z.string().trim().min(1).max(120),
+  sourceSystem: z.enum(['gettel', 'costar', 'generic']).default('generic'),
+  importKind: z.enum(['ownership', 'availability', 'tenancy', 'mixed']).default('ownership'),
+  sourceRecordId: z.string().trim().max(200).optional().default(''),
+  sourceUrl: z.string().trim().max(2000).optional().default(''),
   address: z.string().trim().min(3).max(500),
   propertyName: z.string().trim().max(300).optional().default(''),
   status: ProspectStatus.default('prospect'),
@@ -81,6 +85,16 @@ const PursuitBulkImportRecordSchema = z.object({
   submarket: z.string().trim().max(160).optional().default(''),
   submarketBucket: z.string().trim().max(80).nullable().optional(),
   ownerCompany: z.string().trim().max(300).optional().default(''),
+  tenantName: z.string().trim().max(300).optional().default(''),
+  suite: z.string().trim().max(120).optional().default(''),
+  occupancySf: z.number().nonnegative().nullable().optional(),
+  availableSf: z.number().nonnegative().nullable().optional(),
+  leaseCommencementDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  leaseExpirationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  renewalNoticeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  leaseTermMonths: z.number().int().nonnegative().nullable().optional(),
+  askingRentPsf: z.number().nonnegative().nullable().optional(),
+  listingType: z.string().trim().max(120).optional().default(''),
   contactName: z.string().trim().max(200).optional().default(''),
   contactEmail: z.string().trim().max(320).optional().default(''),
   contactPhone: z.string().trim().max(80).optional().default(''),
@@ -2665,22 +2679,102 @@ export async function registerRoutes(app: Express): Promise<Server> {
         currentProspects = await storage.getListingProspectsAny(req.params.id);
       }
 
-      const addressKeys = new Set<string>();
+      const prospectByAddress = new Map<string, any>();
       for (const prospect of currentProspects as any[]) {
         const nameKey = normalizeImportedProspectAddress(prospect.name);
         const businessKey = normalizeImportedProspectAddress(prospect.businessName);
-        if (nameKey) addressKeys.add(nameKey);
-        if (businessKey) addressKeys.add(businessKey);
+        if (nameKey) prospectByAddress.set(nameKey, prospect);
+        if (businessKey) prospectByAddress.set(businessKey, prospect);
       }
 
       const createdProspects: any[] = [];
+      const updatedProspects: any[] = [];
       const errors: Array<{ row: number; message: string }> = [];
       let skipped = 0;
 
       for (const record of parsed.data.records) {
         const addressKey = normalizeImportedProspectAddress(record.address);
-        if (addressKey && addressKeys.has(addressKey)) {
+        const existingProspect = addressKey ? prospectByAddress.get(addressKey) : null;
+        if (existingProspect && record.importKind === 'ownership') {
           skipped += 1;
+          continue;
+        }
+
+        const observedAt = new Date().toISOString();
+        const observationKey = [
+          record.sourceSystem,
+          record.sourceRecordId || normalizeImportedProspectAddress(record.address),
+          record.tenantName,
+          record.suite,
+          record.leaseExpirationDate,
+          record.importKind,
+        ].join('|').toLowerCase();
+        const sourceObservation = {
+          key: observationKey,
+          sourceSystem: record.sourceSystem,
+          importKind: record.importKind,
+          sourceName: parsed.data.sourceName,
+          sourceSheet: record.sourceSheet,
+          sourceRow: record.sourceRow,
+          sourceRecordId: record.sourceRecordId || null,
+          sourceUrl: record.sourceUrl || null,
+          observedAt,
+          ownerCompany: record.ownerCompany || null,
+          tenantName: record.tenantName || null,
+          suite: record.suite || null,
+          occupancySf: record.occupancySf ?? null,
+          availableSf: record.availableSf ?? null,
+          leaseCommencementDate: record.leaseCommencementDate ?? null,
+          leaseExpirationDate: record.leaseExpirationDate ?? null,
+          renewalNoticeDate: record.renewalNoticeDate ?? null,
+          leaseTermMonths: record.leaseTermMonths ?? null,
+          askingRentPsf: record.askingRentPsf ?? null,
+          listingType: record.listingType || null,
+        };
+
+        if (existingProspect) {
+          try {
+            const currentMetadata = existingProspect.aiMetadata && typeof existingProspect.aiMetadata === 'object'
+              ? existingProspect.aiMetadata as Record<string, unknown>
+              : {};
+            const currentObservations = Array.isArray(currentMetadata.sourceObservations)
+              ? currentMetadata.sourceObservations.filter((item: any) => item?.key !== observationKey)
+              : [];
+            const sourceObservations = [...currentObservations, sourceObservation].slice(-50);
+            const leaseSummary = [
+              record.tenantName ? `Tenant: ${record.tenantName}.` : '',
+              record.leaseExpirationDate ? `Lease expiry: ${record.leaseExpirationDate}.` : '',
+              record.renewalNoticeDate ? `Renewal notice: ${record.renewalNoticeDate}.` : '',
+            ].filter(Boolean).join(' ');
+            const currentNotes = String(existingProspect.notes || '');
+            const notes = leaseSummary && !currentNotes.includes(leaseSummary)
+              ? [currentNotes, leaseSummary].filter(Boolean).join(' ')
+              : currentNotes;
+            const updatePayload = {
+              notes,
+              aiMetadata: {
+                ...currentMetadata,
+                latestImportSource: record.sourceSystem,
+                latestImportAt: observedAt,
+                sourceObservations,
+              },
+              ...(!existingProspect.buildingSf && record.buildingSf ? { buildingSf: record.buildingSf } : {}),
+              ...(!existingProspect.lotSizeAcres && record.lotSizeAcres ? { lotSizeAcres: record.lotSizeAcres } : {}),
+            };
+            if (isDemo(req)) {
+              const updated = await demo.updateProspect(userId, existingProspect.id, updatePayload);
+              if (!updated) throw new Error('Could not update the existing pursuit asset');
+              updatedProspects.push(updated);
+              prospectByAddress.set(addressKey, updated);
+            } else {
+              const updated = await storage.updateProspect(existingProspect.id, userId, updatePayload, { skipXp: true });
+              if (!updated) throw new Error('Could not update the existing pursuit asset');
+              updatedProspects.push(updated.prospect);
+              prospectByAddress.set(addressKey, updated.prospect);
+            }
+          } catch (error) {
+            errors.push({ row: record.sourceRow, message: error instanceof Error ? error.message : 'Could not update row' });
+          }
           continue;
         }
 
@@ -2701,12 +2795,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
           businessName: record.propertyName || record.address,
           aiMetadata: {
             source: 'pursuit_spreadsheet_import',
+            sourceSystem: record.sourceSystem,
+            importKind: record.importKind,
             sourceName: parsed.data.sourceName,
             sourceSheet: record.sourceSheet,
             sourceRow: record.sourceRow,
+            sourceRecordId: record.sourceRecordId || null,
+            sourceUrl: record.sourceUrl || null,
             originalAddress: record.address,
             exactSubmarket: record.submarket || null,
-            importedAt: new Date().toISOString(),
+            importedPropertyData: {
+              ownerCompany: record.ownerCompany || null,
+              tenantName: record.tenantName || null,
+              suite: record.suite || null,
+              occupancySf: record.occupancySf ?? null,
+              availableSf: record.availableSf ?? null,
+              leaseCommencementDate: record.leaseCommencementDate ?? null,
+              leaseExpirationDate: record.leaseExpirationDate ?? null,
+              renewalNoticeDate: record.renewalNoticeDate ?? null,
+              leaseTermMonths: record.leaseTermMonths ?? null,
+              askingRentPsf: record.askingRentPsf ?? null,
+              listingType: record.listingType || null,
+            },
+            sourceObservations: [sourceObservation],
+            importedAt: observedAt,
           },
         };
 
@@ -2726,7 +2838,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
             createdProspects.push(prospect);
           }
-          if (addressKey) addressKeys.add(addressKey);
+          if (addressKey) prospectByAddress.set(addressKey, createdProspects[createdProspects.length - 1]);
         } catch (error) {
           errors.push({ row: record.sourceRow, message: error instanceof Error ? error.message : 'Could not import row' });
         }
@@ -2734,6 +2846,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       return res.status(201).json({
         created: createdProspects.length,
+        updated: updatedProspects.length,
         skipped,
         failed: errors.length,
         prospects: createdProspects,

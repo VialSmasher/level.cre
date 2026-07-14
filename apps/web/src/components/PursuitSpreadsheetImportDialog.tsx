@@ -10,7 +10,9 @@ import { apiRequest } from '@/lib/queryClient';
 import { useGeocode } from '@/hooks/useGeocode';
 import { useToast } from '@/hooks/use-toast';
 import {
+  applyPropertyImportSource,
   chooseBestPursuitImportSheet,
+  detectPropertyImportSource,
   normalizePursuitAddress,
   parsePursuitImportSheet,
   preparePursuitImportRows,
@@ -20,6 +22,7 @@ import {
 
 type BulkImportResult = {
   created: number;
+  updated: number;
   skipped: number;
   failed: number;
   prospects: Prospect[];
@@ -50,6 +53,7 @@ function formatNumber(value: number | null): string {
 
 function rowLocationLabel(row: PreparedPursuitImportRow): string {
   if (row.duplicateReason) return row.duplicateReason;
+  if (row.updateReason) return row.updateReason;
   if (row.latitude !== null && row.longitude !== null) return 'Ready';
   if (row.geocodeError) return 'Could not locate';
   return 'Needs location';
@@ -150,10 +154,11 @@ export function PursuitSpreadsheetImportDialog({ listingId, open, onOpenChange, 
         throw new Error('Choose an Excel (.xlsx or .xls) or CSV file.');
       }
 
-      const best = chooseBestPursuitImportSheet(candidates);
-      if (!best) {
+      const detectedSheet = chooseBestPursuitImportSheet(candidates);
+      if (!detectedSheet) {
         throw new Error('No usable property rows were found. The spreadsheet needs an Address column.');
       }
+      const best = applyPropertyImportSource(detectedSheet, detectPropertyImportSource(file.name, detectedSheet));
       setSourceName(fileStem(file.name));
       setSelectedSheet(best);
       setRows(preparePursuitImportRows(best.rows, existingProspects));
@@ -206,6 +211,10 @@ export function PursuitSpreadsheetImportDialog({ listingId, open, onOpenChange, 
         records: readyRows.map((row) => ({
           sourceRow: row.sourceRow,
           sourceSheet: row.sourceSheet,
+          sourceSystem: row.sourceSystem,
+          importKind: row.importKind,
+          sourceRecordId: row.sourceRecordId,
+          sourceUrl: row.sourceUrl,
           address: row.formattedAddress || row.address,
           propertyName: row.propertyName,
           status: row.status,
@@ -214,6 +223,16 @@ export function PursuitSpreadsheetImportDialog({ listingId, open, onOpenChange, 
           submarket: row.submarket,
           submarketBucket: row.submarketBucket,
           ownerCompany: row.ownerCompany,
+          tenantName: row.tenantName,
+          suite: row.suite,
+          occupancySf: row.occupancySf,
+          availableSf: row.availableSf,
+          leaseCommencementDate: row.leaseCommencementDate,
+          leaseExpirationDate: row.leaseExpirationDate,
+          renewalNoticeDate: row.renewalNoticeDate,
+          leaseTermMonths: row.leaseTermMonths,
+          askingRentPsf: row.askingRentPsf,
+          listingType: row.listingType,
           contactName: row.contactName,
           contactEmail: row.contactEmail,
           contactPhone: row.contactPhone,
@@ -229,8 +248,8 @@ export function PursuitSpreadsheetImportDialog({ listingId, open, onOpenChange, 
       queryClient.invalidateQueries({ queryKey: ['/api/prospects'] });
       queryClient.invalidateQueries({ queryKey: ['/api/listings'] });
       toast({
-        title: `${result.created} asset${result.created === 1 ? '' : 's'} imported`,
-        description: result.skipped > 0 ? `${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped.` : 'The shared pursuit map is up to date.',
+        title: `${result.created} added · ${result.updated} updated`,
+        description: result.skipped > 0 ? `${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped.` : 'The shared pursuit map and source data are up to date.',
       });
       handleOpenChange(false);
     },
@@ -303,7 +322,7 @@ export function PursuitSpreadsheetImportDialog({ listingId, open, onOpenChange, 
               <div className="grid gap-3 sm:grid-cols-4">
                 <SummaryCard label="Rows found" value={rows.length} />
                 <SummaryCard label="Selected" value={selectedRows.length} tone="blue" />
-                <SummaryCard label="Ready to map" value={readyRows.length} tone="green" />
+                <SummaryCard label="Ready to import" value={readyRows.length} tone="green" />
                 <SummaryCard label="Duplicates" value={duplicateCount} tone="amber" />
               </div>
 
@@ -311,7 +330,7 @@ export function PursuitSpreadsheetImportDialog({ listingId, open, onOpenChange, 
                 <div>
                   <p className="text-sm font-semibold text-slate-900">{sourceName}</p>
                   <p className="text-xs text-slate-500">
-                    Using “{selectedSheet?.sheetName}” · header row {selectedSheet?.headerRow} · detected {selectedSheet?.detectedFields.length || 0} useful columns
+                    {selectedSheet?.sourceSystem === 'generic' ? 'Flexible import' : `${selectedSheet?.sourceSystem === 'costar' ? 'CoStar' : 'Gettel Network'} import`} · using “{selectedSheet?.sheetName}” · {selectedSheet?.importKind} data · header row {selectedSheet?.headerRow}
                   </p>
                 </div>
                 <Button type="button" variant="outline" size="sm" onClick={reset} disabled={isLocating || importMutation.isPending}>
@@ -327,7 +346,7 @@ export function PursuitSpreadsheetImportDialog({ listingId, open, onOpenChange, 
                         <th className="w-12 px-3 py-3">Add</th>
                         <th className="min-w-[240px] px-3 py-3">Address</th>
                         <th className="px-3 py-3">Building SF</th>
-                        <th className="min-w-[180px] px-3 py-3">Owner / contact</th>
+                        <th className="min-w-[180px] px-3 py-3">Owner / tenant</th>
                         <th className="min-w-[150px] px-3 py-3">Map status</th>
                       </tr>
                     </thead>
@@ -352,6 +371,8 @@ export function PursuitSpreadsheetImportDialog({ listingId, open, onOpenChange, 
                           <td className="px-3 py-3 align-top">
                             <p className="text-slate-700">{row.ownerCompany || '—'}</p>
                             {row.contactName && <p className="mt-0.5 text-xs text-slate-500">{row.contactName}</p>}
+                            {row.tenantName && <p className="mt-0.5 text-xs font-medium text-violet-700">Tenant: {row.tenantName}</p>}
+                            {row.leaseExpirationDate && <p className="mt-0.5 text-xs text-slate-500">Expires {row.leaseExpirationDate}</p>}
                           </td>
                           <td className="px-3 py-3 align-top">
                             <RowStatus row={row} />
@@ -419,6 +440,9 @@ function RowStatus({ row }: { row: PreparedPursuitImportRow }) {
   const label = rowLocationLabel(row);
   if (row.duplicateReason) {
     return <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800"><AlertCircle className="h-3.5 w-3.5" />{label}</span>;
+  }
+  if (row.updateReason) {
+    return <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-800"><CheckCircle2 className="h-3.5 w-3.5" />{label}</span>;
   }
   if (row.latitude !== null && row.longitude !== null) {
     return <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800"><CheckCircle2 className="h-3.5 w-3.5" />{label}</span>;
