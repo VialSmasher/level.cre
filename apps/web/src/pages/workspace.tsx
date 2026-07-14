@@ -1296,9 +1296,9 @@ function WorkspaceMap() {
                   <Briefcase className="h-4 w-4" />
                 </div>
                 <div className="min-w-0">
-                  <p className="hidden text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:block">Workspace</p>
-                  <p className="max-w-[150px] truncate text-sm font-semibold text-slate-950 sm:max-w-[220px]" title={listing?.title || listing?.address || 'Workspace'}>
-                    {listing?.title || listing?.address || 'Workspace'}
+                  <p className="hidden text-[10px] font-semibold uppercase tracking-wide text-slate-500 sm:block">Pursuit</p>
+                  <p className="max-w-[150px] truncate text-sm font-semibold text-slate-950 sm:max-w-[220px]" title={listing?.title || listing?.address || 'Pursuit'}>
+                    {listing?.title || listing?.address || 'Pursuit'}
                   </p>
                 </div>
               </div>
@@ -1318,8 +1318,8 @@ function WorkspaceMap() {
                 size="sm"
                 onClick={() => setShareOpen(true)}
                 className="h-9 w-9 rounded-xl p-0 text-slate-700 hover:bg-blue-50 hover:text-blue-700"
-                aria-label="Share workspace"
-                title="Share workspace"
+                aria-label="Share pursuit"
+                title="Share pursuit"
               >
                 <Share2 className="h-4 w-4" />
               </Button>
