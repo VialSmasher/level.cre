@@ -70,6 +70,47 @@ import {
   recordOpportunityPlaybookStep,
 } from './lib/opportunityService';
 
+const PursuitBulkImportRecordSchema = z.object({
+  sourceRow: z.number().int().positive(),
+  sourceSheet: z.string().trim().min(1).max(120),
+  address: z.string().trim().min(3).max(500),
+  propertyName: z.string().trim().max(300).optional().default(''),
+  status: ProspectStatus.default('prospect'),
+  buildingSf: z.number().int().nonnegative().nullable().optional(),
+  lotSizeAcres: z.number().nonnegative().nullable().optional(),
+  submarket: z.string().trim().max(160).optional().default(''),
+  submarketBucket: z.string().trim().max(80).nullable().optional(),
+  ownerCompany: z.string().trim().max(300).optional().default(''),
+  contactName: z.string().trim().max(200).optional().default(''),
+  contactEmail: z.string().trim().max(320).optional().default(''),
+  contactPhone: z.string().trim().max(80).optional().default(''),
+  notes: z.string().trim().max(5000).optional().default(''),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+});
+
+const PursuitBulkImportSchema = z.object({
+  sourceName: z.string().trim().min(1).max(200),
+  records: z.array(PursuitBulkImportRecordSchema).min(1).max(200),
+});
+
+function normalizeImportedProspectAddress(value: unknown): string {
+  const firstLine = String(value ?? '').split(',')[0] || '';
+  return firstLine
+    .toUpperCase()
+    .replace(/\bNORTHWEST\b|\bNORTHEAST\b|\bSOUTHWEST\b|\bSOUTHEAST\b/g, '')
+    .replace(/\bNW\b|\bNE\b|\bSW\b|\bSE\b/g, '')
+    .replace(/\bSTREET\b|\bST\b/g, 'ST')
+    .replace(/\bAVENUE\b|\bAVE\b/g, 'AVE')
+    .replace(/\bROAD\b|\bRD\b/g, 'RD')
+    .replace(/\bDRIVE\b|\bDR\b/g, 'DR')
+    .replace(/\bTRAIL\b|\bTRL\b/g, 'TRL')
+    .replace(/\bBOULEVARD\b|\bBLVD\b/g, 'BLVD')
+    .replace(/[^A-Z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Supabase client for server-side OAuth
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -2599,6 +2640,108 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('Error linking prospect:', error);
       // Handle unique violation gracefully
       return res.status(200).json({ ok: true });
+    }
+  });
+
+  app.post('/api/listings/:id/prospects/bulk', requireAuth, async (req, res) => {
+    try {
+      await requireEditAccess(req, req.params.id);
+      const parsed = PursuitBulkImportSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid pursuit import', error: parsed.error.errors });
+      }
+
+      const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) await ensureUser(userId, email);
+
+      let currentProspects: any[];
+      if (isDemo(req)) {
+        const links = await demo.getListingLinksAll(req.params.id);
+        const linkedIds = new Set(links.map((link: any) => link.prospectId));
+        const allDemoProspects = await demo.getProspectsAll();
+        currentProspects = allDemoProspects.filter((prospect: any) => linkedIds.has(prospect.id));
+      } else {
+        currentProspects = await storage.getListingProspectsAny(req.params.id);
+      }
+
+      const addressKeys = new Set<string>();
+      for (const prospect of currentProspects as any[]) {
+        const nameKey = normalizeImportedProspectAddress(prospect.name);
+        const businessKey = normalizeImportedProspectAddress(prospect.businessName);
+        if (nameKey) addressKeys.add(nameKey);
+        if (businessKey) addressKeys.add(businessKey);
+      }
+
+      const createdProspects: any[] = [];
+      const errors: Array<{ row: number; message: string }> = [];
+      let skipped = 0;
+
+      for (const record of parsed.data.records) {
+        const addressKey = normalizeImportedProspectAddress(record.address);
+        if (addressKey && addressKeys.has(addressKey)) {
+          skipped += 1;
+          continue;
+        }
+
+        const sourceNote = `Imported from ${parsed.data.sourceName} · ${record.sourceSheet} row ${record.sourceRow}.`;
+        const notes = [sourceNote, record.notes].filter(Boolean).join(' ');
+        const prospectInput = {
+          name: record.address,
+          status: record.status,
+          notes,
+          geometry: { type: 'Point' as const, coordinates: [record.longitude, record.latitude] as [number, number] },
+          ...(record.submarketBucket ? { submarketId: record.submarketBucket } : {}),
+          ...(record.contactName ? { contactName: record.contactName } : {}),
+          ...(record.contactEmail ? { contactEmail: record.contactEmail } : {}),
+          ...(record.contactPhone ? { contactPhone: record.contactPhone } : {}),
+          ...(record.ownerCompany ? { contactCompany: record.ownerCompany } : {}),
+          ...(record.buildingSf !== undefined ? { buildingSf: record.buildingSf } : {}),
+          ...(record.lotSizeAcres !== undefined ? { lotSizeAcres: record.lotSizeAcres } : {}),
+          businessName: record.propertyName || record.address,
+          aiMetadata: {
+            source: 'pursuit_spreadsheet_import',
+            sourceName: parsed.data.sourceName,
+            sourceSheet: record.sourceSheet,
+            sourceRow: record.sourceRow,
+            originalAddress: record.address,
+            exactSubmarket: record.submarket || null,
+            importedAt: new Date().toISOString(),
+          },
+        };
+
+        try {
+          if (isDemo(req)) {
+            const prospect = { id: randomUUID(), ...prospectInput, createdDate: new Date().toISOString() };
+            await demo.addProspect(userId, prospect);
+            await demo.linkProspect(userId, req.params.id, prospect.id);
+            createdProspects.push(prospect);
+          } else {
+            const prospect = await storage.createProspect({ ...prospectInput, userId });
+            try {
+              await storage.linkProspectToListingAny({ listingId: req.params.id, prospectId: prospect.id });
+            } catch (linkError) {
+              await storage.deleteProspect(prospect.id, userId).catch(() => undefined);
+              throw linkError;
+            }
+            createdProspects.push(prospect);
+          }
+          if (addressKey) addressKeys.add(addressKey);
+        } catch (error) {
+          errors.push({ row: record.sourceRow, message: error instanceof Error ? error.message : 'Could not import row' });
+        }
+      }
+
+      return res.status(201).json({
+        created: createdProspects.length,
+        skipped,
+        failed: errors.length,
+        prospects: createdProspects,
+        errors,
+      });
+    } catch (error) {
+      console.error('Error bulk importing pursuit prospects:', error);
+      res.status(500).json({ message: 'Failed to import pursuit prospects' });
     }
   });
 

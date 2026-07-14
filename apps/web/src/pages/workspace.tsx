@@ -11,10 +11,11 @@ import { apiRequest } from '@/lib/queryClient';
 import type { Prospect, ProspectGeometryType } from '@level-cre/shared/schema';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
-import { ArrowLeft, Briefcase, Share2 } from 'lucide-react';
+import { ArrowLeft, Briefcase, FileUp, Share2 } from 'lucide-react';
 import { Modal, ModalContent, ModalHeader, ModalFooter, ModalTitle, ModalDescription, ModalClose } from '@/components/primitives/Modal';
 // TerraDraw handles new map asset creation; saved assets continue to render as Google map overlays.
 import { ShareWorkspaceDialog } from '@/components/ShareWorkspaceDialog';
+import { PursuitSpreadsheetImportDialog } from '@/components/PursuitSpreadsheetImportDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { STATUS_META, type ProspectStatusType } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
@@ -134,6 +135,7 @@ function WorkspaceMap() {
     share: isOwner,
   };
   const [shareOpen, setShareOpen] = useState(false);
+  const [spreadsheetImportOpen, setSpreadsheetImportOpen] = useState(false);
 
   useEffect(() => {
     // Remember last opened workspace
@@ -1313,6 +1315,18 @@ function WorkspaceMap() {
               >
                 <ArrowLeft className="h-4 w-4" />
               </Button>
+              {can.edit && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSpreadsheetImportOpen(true)}
+                  className="h-9 w-9 rounded-xl p-0 text-slate-700 hover:bg-emerald-50 hover:text-emerald-700"
+                  aria-label="Import pursuit assets"
+                  title="Import Excel or CSV"
+                >
+                  <FileUp className="h-4 w-4" />
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -1556,6 +1570,13 @@ function WorkspaceMap() {
           onContactPhoneBlur={handleContactPhoneBlur}
         />
       )}
+      <PursuitSpreadsheetImportDialog
+        listingId={listingId}
+        open={spreadsheetImportOpen}
+        onOpenChange={setSpreadsheetImportOpen}
+        existingProspects={linkedProspects}
+        canImport={can.edit}
+      />
       <ShareWorkspaceDialog listingId={listingId} open={shareOpen} onOpenChange={setShareOpen} canManage={can.share} />
       <Modal open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <ModalContent>
