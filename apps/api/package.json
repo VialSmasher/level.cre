@@ -8,7 +8,7 @@
     "dev": "DOTENV_CONFIG_PATH=../../.env tsx -r dotenv/config src/index.ts",
     "build": "esbuild src/index.ts --platform=node --bundle --format=esm --target=node22 --legal-comments=none --outdir=dist --external:@supabase/supabase-js --external:cookie-parser --external:cors --external:dotenv --external:drizzle-orm --external:express --external:helmet --external:jose --external:jsonwebtoken --external:pg --external:zod",
     "start": "npm run build && NODE_ENV=production node dist/index.js",
-    "test": "node --import tsx --test src/auth.test.ts src/lib/activityEventService.test.ts src/lib/activityPulse.test.ts src/lib/emailActivityReconciliation.test.ts src/lib/emailProspectMatching.test.ts src/lib/opportunityService.test.ts src/lib/pipelineHealth.test.ts src/lib/salesBriefRanking.test.ts src/lib/toolAReview.test.ts src/lib/salesActivityImport.test.ts src/modules/industrial-intel/surveySyncExtraction.test.ts",
+    "test": "node --import tsx --test src/auth.test.ts src/lib/activityEventService.test.ts src/lib/activityPulse.test.ts src/lib/emailActivityReconciliation.test.ts src/lib/emailProspectMatching.test.ts src/lib/opportunityService.test.ts src/lib/pipelineHealth.test.ts src/lib/salesBriefRanking.test.ts src/lib/toolAReview.test.ts src/lib/salesActivityImport.test.ts src/lib/supabaseAuthUsers.test.ts src/modules/industrial-intel/surveySyncExtraction.test.ts",
     "check": "tsc --noEmit",
     "db:push": "drizzle-kit push",
     "db:prepare": "node ./scripts/ensure_pgcrypto.mjs && drizzle-kit push",

@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { apiRequest } from '@/lib/queryClient';
-import { Trash2, X } from 'lucide-react';
+import { CheckCircle2, Clock3, Mail, Trash2, Users, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { Modal, ModalContent, ModalHeader, ModalTitle, ModalClose } from '@/components/primitives/Modal';
@@ -33,24 +33,22 @@ function errorMessage(err: any): string {
   return raw || 'Failed to invite';
 }
 
-function deliveryLabel(status: ShareEntry['emailDelivery']): string {
-  if (status === 'sent') return 'Email sent';
-  if (status === 'failed') return 'Email failed';
-  return 'Email not configured';
-}
-
-function deliveryClassName(status: ShareEntry['emailDelivery']): string {
-  if (status === 'sent') return 'bg-emerald-50 text-emerald-800 ring-emerald-200';
-  if (status === 'failed') return 'bg-red-50 text-red-800 ring-red-200';
-  return 'bg-slate-50 text-slate-700 ring-slate-200';
+function deliveryMessage(status: ShareEntry['emailDelivery']): string {
+  if (status === 'sent') return 'Invitation emailed';
+  if (status === 'failed') return 'Email delivery failed';
+  return 'Copy and share the pursuit link';
 }
 
 export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage }: { listingId: string; open: boolean; onOpenChange: (v: boolean) => void; canManage: boolean; }) {
   const qc = useQueryClient();
   const { isDemoMode } = useAuth();
   const { toast } = useToast();
-  const { data: membersResponse = [] } = useQuery<ShareEntry[]>({ queryKey: ['/api/listings', listingId, 'members'], enabled: open && !!listingId });
+  const { data: membersResponse = [], refetch: refetchMembers } = useQuery<ShareEntry[]>({ queryKey: ['/api/listings', listingId, 'members'], enabled: open && !!listingId });
   const members = Array.isArray(membersResponse) ? membersResponse : [];
+
+  useEffect(() => {
+    if (open && listingId) void refetchMembers();
+  }, [listingId, open, refetchMembers]);
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'viewer'|'editor'>('viewer');
@@ -74,12 +72,12 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
       setInviteEmail('');
       setInviteRole('viewer');
       toast({
-        title: member.kind === 'invite' ? 'Invite pending' : 'Workspace shared',
+        title: member.kind === 'invite' ? 'Invitation sent' : 'Pursuit shared',
         description: member.kind === 'invite'
           ? member.emailDelivery === 'sent'
             ? 'Email sent. They will get access once they sign in with this email.'
             : 'They will get access once they sign in with this email. Email delivery is not configured yet.'
-          : `${member.email || member.userId} now has ${member.role} access.`,
+          : `${member.email || member.userId} now has ${member.role} access to this pursuit.`,
       });
     },
     onError: async (err: any) => {
@@ -138,86 +136,112 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
 
   return (
     <Modal open={open} onOpenChange={onOpenChange}>
-      <ModalContent>
-        <ModalHeader>
-          <ModalTitle>Share Workspace</ModalTitle>
+      <ModalContent className="max-w-2xl gap-0 overflow-hidden p-0">
+        <ModalHeader className="border-b border-slate-200 px-6 py-5 pr-14">
+          <div className="flex items-start gap-3 text-left">
+            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700">
+              <Users className="h-5 w-5" aria-hidden />
+            </span>
+            <div>
+              <ModalTitle className="text-xl text-slate-950">Share pursuit</ModalTitle>
+              <p className="mt-1 text-sm leading-5 text-slate-600">
+                Invite colleagues using the work email they will use to sign in to Level CRE.
+              </p>
+            </div>
+          </div>
         </ModalHeader>
-        <div className="space-y-4">
+        <div className="space-y-5 px-6 py-5">
           {isDemoMode && (
-            <div className="text-sm p-2 rounded border bg-amber-50 text-amber-900 border-amber-200">
-              Demo mode: sharing is local-only and does not carry over to Google sign-in. Invites are disabled.
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+              Sharing is unavailable in the demo. Sign in to invite your team.
             </div>
           )}
           {/* Invite */}
-          <div className="flex gap-2 items-end">
-              <div className="flex-1">
-                <Label>Email</Label>
+          <form
+            className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px_auto] sm:items-end"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (inviteEmail.trim() && !addMutation.isPending) addMutation.mutate();
+            }}
+          >
+              <div className="min-w-0">
+                <Label htmlFor="pursuit-invite-email">Work email</Label>
                 <Input
+                  id="pursuit-invite-email"
+                  type="email"
+                  autoComplete="email"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && inviteEmail.trim() && !addMutation.isPending) {
-                      addMutation.mutate();
-                    }
-                  }}
-                  placeholder="name@example.com"
+                  placeholder="name@company.com"
+                  disabled={!canManage || isDemoMode || addMutation.isPending}
+                  required
                 />
               </div>
-              <div>
-                <Label>Role</Label>
+              <div className="min-w-0">
+                <Label htmlFor="pursuit-invite-role">Access</Label>
                 <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as any)}>
-                  <SelectTrigger className="w-[140px]" aria-label="Invite permission"><SelectValue /></SelectTrigger>
+                  <SelectTrigger id="pursuit-invite-role" className="w-full" aria-label="Invite permission" disabled={!canManage || isDemoMode || addMutation.isPending}><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="viewer">Viewer</SelectItem>
                     <SelectItem value="editor">Editor</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <Button type="button" onClick={() => addMutation.mutate()} disabled={!inviteEmail.trim() || addMutation.isPending} title={isDemoMode ? 'Demo mode: invites disabled (server will reject)' : undefined}>Invite</Button>
-            </div>
+              <Button type="submit" disabled={!canManage || isDemoMode || !inviteEmail.trim() || addMutation.isPending}>
+                <Mail className="h-4 w-4" aria-hidden />
+                {addMutation.isPending ? 'Sending...' : 'Send invite'}
+              </Button>
+          </form>
+
+          <p className="-mt-2 text-xs leading-5 text-slate-500">
+            Editors can add and update prospects. Viewers can review the pursuit without making changes.
+          </p>
 
           {/* Members list */}
-          <div className="border rounded">
-            <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-3 py-2 text-xs font-medium text-gray-500 border-b"> 
-              <div>Member</div><div>Role</div><div></div>
+          <div className="overflow-hidden rounded-md border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-600">People and invitations</h3>
+              <span className="text-xs text-slate-500">{members.length} {members.length === 1 ? 'entry' : 'entries'}</span>
             </div>
             <div className="max-h-72 overflow-auto">
               {members.map((m) => {
                 const isInvite = m.kind === 'invite' || m.status === 'pending';
                 const key = isInvite ? `invite-${m.id || m.email}` : `member-${m.userId}`;
                 return (
-                <div key={key} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 px-3 py-2 border-b last:border-b-0">
-                  <div className="text-sm">
-                    {m.email || m.userId}
-                    {m.role === 'owner' && <span className="ml-2 text-xs text-gray-500">(Owner)</span>}
-                    {isInvite && <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-amber-200">Pending</span>}
+                <div key={key} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-slate-200 px-4 py-3 last:border-b-0">
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      {isInvite ? <Clock3 className="h-4 w-4 shrink-0 text-amber-600" aria-hidden /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />}
+                      <span className="truncate text-sm font-medium text-slate-900">{m.email || m.userId}</span>
+                      {m.role === 'owner' && <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">Owner</span>}
+                    </div>
                     {isInvite && (
-                      <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${deliveryClassName(m.emailDelivery)}`}>
-                        {deliveryLabel(m.emailDelivery)}
-                      </span>
+                      <p className={`mt-1 pl-6 text-xs ${m.emailDelivery === 'failed' ? 'text-red-700' : 'text-slate-500'}`}>
+                        Pending sign-in · {deliveryMessage(m.emailDelivery)}
+                      </p>
                     )}
                   </div>
                   <div>
                     {m.role === 'owner' || isInvite ? (
-                      <span className="text-xs">{m.role}</span>
+                      <span className="text-xs font-medium capitalize text-slate-600">{m.role}</span>
                     ) : (
                       <Select value={m.role} onValueChange={(role) => updateRoleMutation.mutate({ userId: m.userId!, role: role as any })} disabled={!canManage}>
                         <SelectTrigger className="w-[120px]" aria-label={`Permission for ${m.email || m.userId}`}><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="viewer">viewer</SelectItem>
-                          <SelectItem value="editor">editor</SelectItem>
+                          <SelectItem value="viewer">Viewer</SelectItem>
+                          <SelectItem value="editor">Editor</SelectItem>
                         </SelectContent>
                       </Select>
                     )}
                   </div>
                   <div className="flex items-center justify-end">
                     {isInvite && canManage && m.id && (
-                      <Button variant="ghost" size="icon" onClick={() => revokeInviteMutation.mutate(m.id!)} aria-label="Revoke invite">
+                      <Button variant="ghost" size="icon" onClick={() => revokeInviteMutation.mutate(m.id!)} aria-label={`Revoke invitation for ${m.email || 'this email'}`} title="Revoke invitation">
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     )}
                     {!isInvite && m.role !== 'owner' && canManage && m.userId && (
-                      <Button variant="ghost" size="icon" onClick={() => removeMutation.mutate(m.userId!)} aria-label="Remove">
+                      <Button variant="ghost" size="icon" onClick={() => removeMutation.mutate(m.userId!)} aria-label={`Remove ${m.email || 'member'} from pursuit`} title="Remove access">
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     )}
@@ -226,11 +250,14 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
               )})}
             </div>
           </div>
+          <p className="text-xs leading-5 text-slate-500">
+            Access is granted only when the recipient signs in with the exact email shown above.
+          </p>
         </div>
         <ModalClose asChild>
           <button
             type="button"
-            className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+            className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
             aria-label="Close"
           >
             <X aria-hidden className="h-4 w-4" />

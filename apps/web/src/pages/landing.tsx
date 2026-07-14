@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Activity, ArrowRight, ChartSpline, Loader2, MapPinned, Target } from 'lucide-react'
 import { useLocation } from 'wouter'
 
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
 import { getOAuthCallbackPath } from '@/lib/authUtils'
@@ -16,10 +17,13 @@ import {
 import { supabase } from '@/lib/supabase'
 
 export default function Landing() {
-  const { user, loading, signInWithGoogle } = useAuth()
+  const { user, loading, signInWithEmail, signInWithGoogle } = useAuth()
   const [, setLocation] = useLocation()
   const [isSigningIn, setIsSigningIn] = useState(false)
   const [isDemoMode, setIsDemoMode] = useState(false)
+  const [workEmail, setWorkEmail] = useState('')
+  const [isEmailSending, setIsEmailSending] = useState(false)
+  const [emailLinkSent, setEmailLinkSent] = useState(false)
   const { toast } = useToast()
   const hasPrefetched = useRef(false)
   const enableGoogle = import.meta.env.VITE_ENABLE_GOOGLE_AUTH === '1' || import.meta.env.VITE_ENABLE_GOOGLE_AUTH === 'true'
@@ -155,6 +159,24 @@ export default function Landing() {
     window.location.href = demoRedirect
   }
 
+  const handleWorkEmail = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!workEmail.trim() || isEmailSending) return
+    setIsEmailSending(true)
+    try {
+      await signInWithEmail(workEmail, getStoredPostAuthRedirect() || '/app/desk')
+      setEmailLinkSent(true)
+    } catch (error: any) {
+      toast({
+        title: 'Email sign-in unavailable',
+        description: error?.message || 'Please try again later',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsEmailSending(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0b1220] text-white">
@@ -241,6 +263,34 @@ export default function Landing() {
                 </>
               )}
             </div>
+            {!user && !emailLinkSent ? (
+              <form onSubmit={handleWorkEmail} className="mt-4 flex max-w-md flex-col gap-2 sm:flex-row">
+                <Input
+                  type="email"
+                  autoComplete="email"
+                  value={workEmail}
+                  onChange={(event) => setWorkEmail(event.target.value)}
+                  placeholder="Work email"
+                  aria-label="Work email"
+                  required
+                  className="h-11 border-white/20 bg-white/10 text-white placeholder:text-slate-400 focus-visible:ring-blue-400"
+                />
+                <Button
+                  type="submit"
+                  variant="outline"
+                  disabled={!workEmail.trim() || isEmailSending || isDemoMode}
+                  className="h-11 shrink-0 border-white/25 bg-white/10 px-4 text-white hover:bg-white/15 hover:text-white"
+                >
+                  {isEmailSending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  {isEmailSending ? 'Sending...' : 'Email me a sign-in link'}
+                </Button>
+              </form>
+            ) : null}
+            {!user && emailLinkSent ? (
+              <p className="mt-4 max-w-md rounded-md border border-emerald-300/30 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100">
+                Check {workEmail.trim()} for your secure sign-in link.
+              </p>
+            ) : null}
             {user && user.id !== 'demo-user' ? <p className="mt-3 text-xs text-slate-400">Signed in as {user.email}</p> : null}
           </div>
 

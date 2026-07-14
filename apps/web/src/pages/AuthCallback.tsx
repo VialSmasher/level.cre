@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
-import { getStoredPostAuthRedirect, markPostAuthPending } from '@/lib/postAuthRedirect'
+import { getStoredPostAuthRedirect, markPostAuthPending, sanitizePostAuthRedirect, setStoredPostAuthRedirect } from '@/lib/postAuthRedirect'
 
 export default function AuthCallback() {
   useEffect(() => {
@@ -28,6 +28,8 @@ export default function AuthCallback() {
 
       try {
         const url = new URL(window.location.href)
+        const inviteDestination = sanitizePostAuthRedirect(url.searchParams.get('next'))
+        if (inviteDestination) setStoredPostAuthRedirect(inviteDestination)
         const authError = url.searchParams.get('error')
         const authErrorDescription = url.searchParams.get('error_description')
         if (authError) {

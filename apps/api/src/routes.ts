@@ -52,6 +52,7 @@ import {
 import { buildPipelineHealth } from './lib/pipelineHealth';
 import { buildActivityPulse } from './lib/activityPulse';
 import { rankEmailCleanup, rankFollowUpReminder } from './lib/salesBriefRanking';
+import { findSupabaseAuthUserByEmail } from './lib/supabaseAuthUsers';
 import {
   ActivityEventBatchSchema,
   importActivityEventBatch,
@@ -1509,19 +1510,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return result;
   }
 
+  async function persistListingMembership(params: {
+    listingId: string;
+    userId: string;
+    email: string;
+    role: 'editor' | 'viewer';
+    inviteId?: string;
+  }): Promise<void> {
+    await db.transaction(async (tx) => {
+      await tx
+        .insert(users)
+        .values({ id: params.userId, email: params.email })
+        .onConflictDoUpdate({ target: users.id, set: { email: params.email } });
+
+      await tx
+        .insert(listingMembers)
+        .values({ listingId: params.listingId, userId: params.userId, role: params.role })
+        .onConflictDoUpdate({
+          target: [listingMembers.listingId, listingMembers.userId],
+          set: { role: params.role },
+        });
+
+      if (params.inviteId) {
+        await tx
+          .update(listingInvites)
+          .set({ status: 'accepted', acceptedAt: new Date() })
+          .where(eq(listingInvites.id, params.inviteId));
+      }
+    });
+  }
+
   async function acceptPendingListingInvites(userId: string, email?: string | null): Promise<number> {
     const normalized = normalizeInviteEmail(email);
     if (!normalized) return 0;
 
-    const pending = await db
+    const matchingInvites = await db
       .select()
       .from(listingInvites)
-      .where(and(eq(listingInvites.email, normalized), eq(listingInvites.status, 'pending')));
+      .where(and(
+        eq(listingInvites.email, normalized),
+        inArray(listingInvites.status, ['pending', 'accepted']),
+      ));
 
     let accepted = 0;
-    for (const invite of pending) {
+    for (const invite of matchingInvites) {
       const [listing] = await db.select().from(listings).where(eq(listings.id, invite.listingId));
-      if (!listing || listing.userId === userId) {
+      if (!listing) continue;
+      if (listing.userId === userId) {
         await db
           .update(listingInvites)
           .set({ status: 'accepted', acceptedAt: new Date() })
@@ -1529,18 +1564,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         continue;
       }
 
-      await db
-        .insert(listingMembers)
-        .values({ listingId: invite.listingId, userId, role: normalizeWorkspaceRole(invite.role) })
-        .onConflictDoUpdate({
-          target: [listingMembers.listingId, listingMembers.userId],
-          set: { role: normalizeWorkspaceRole(invite.role) },
-        });
+      const [existingMember] = await db
+        .select({ userId: listingMembers.userId })
+        .from(listingMembers)
+        .where(and(
+          eq(listingMembers.listingId, invite.listingId),
+          eq(listingMembers.userId, userId),
+        ));
+      if (existingMember) {
+        if (invite.status !== 'accepted') {
+          await db.update(listingInvites)
+            .set({ status: 'accepted', acceptedAt: new Date() })
+            .where(eq(listingInvites.id, invite.id));
+        }
+        continue;
+      }
 
-      await db
-        .update(listingInvites)
-        .set({ status: 'accepted', acceptedAt: new Date() })
-        .where(eq(listingInvites.id, invite.id));
+      await persistListingMembership({
+        listingId: invite.listingId,
+        userId,
+        email: normalized,
+        role: normalizeWorkspaceRole(invite.role),
+        inviteId: invite.id,
+      });
       accepted += 1;
     }
 
@@ -1561,23 +1607,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return `${inferredProtocol}://${host}`;
   }
 
-  async function sendWorkspaceInviteEmail(req: Request, email: string): Promise<'sent' | 'not_configured' | 'failed'> {
-    if (!supabaseAdmin) return 'not_configured';
+  async function sendWorkspaceInviteEmail(req: Request, email: string, listingId: string): Promise<{
+    status: 'sent' | 'not_configured' | 'failed';
+    user?: { id: string; email?: string | null };
+  }> {
+    if (!supabaseAdmin) return { status: 'not_configured' };
     const appOrigin = getPrimaryAppOrigin(req);
-    const redirectTo = appOrigin ? `${appOrigin}/auth/callback` : undefined;
+    const pursuitPath = `/app/workspaces/${encodeURIComponent(listingId)}`;
+    const redirectTo = appOrigin
+      ? `${appOrigin}/auth/callback?next=${encodeURIComponent(pursuitPath)}`
+      : undefined;
     try {
-      const { error } = await (supabaseAdmin as any).auth.admin.inviteUserByEmail(email, {
+      const { data, error } = await (supabaseAdmin as any).auth.admin.inviteUserByEmail(email, {
         redirectTo,
       });
       if (error) {
         console.warn('Supabase invite email failed:', error?.message || error);
-        return 'failed';
+        return { status: 'failed' };
       }
-      return 'sent';
+      return { status: 'sent', user: data?.user || undefined };
     } catch (error: any) {
       console.warn('Supabase invite email failed:', error?.message || error);
-      return 'failed';
+      return { status: 'failed' };
     }
+  }
+
+  async function repairListingInviteMemberships(listingId: string): Promise<number> {
+    if (!supabaseAdmin) return 0;
+    const invites = await db
+      .select()
+      .from(listingInvites)
+      .where(and(
+        eq(listingInvites.listingId, listingId),
+        inArray(listingInvites.status, ['pending', 'accepted']),
+      ));
+    if (invites.length === 0) return 0;
+
+    const [listing] = await db.select().from(listings).where(eq(listings.id, listingId));
+    if (!listing) return 0;
+
+    const existingMemberEmails = new Set(
+      (await db
+        .select({ email: users.email })
+        .from(listingMembers)
+        .innerJoin(users, eq(users.id, listingMembers.userId))
+        .where(eq(listingMembers.listingId, listingId)))
+        .map((row) => normalizeInviteEmail(row.email))
+        .filter(Boolean),
+    );
+
+    let repaired = 0;
+    for (const invite of invites) {
+      if (existingMemberEmails.has(normalizeInviteEmail(invite.email))) continue;
+      const authUser = await findSupabaseAuthUserByEmail(supabaseAdmin as any, invite.email);
+      if (!authUser || authUser.id === listing.userId) continue;
+
+      await persistListingMembership({
+        listingId,
+        userId: authUser.id,
+        email: normalizeInviteEmail(authUser.email || invite.email),
+        role: normalizeWorkspaceRole(invite.role),
+        inviteId: invite.id,
+      });
+      repaired += 1;
+    }
+    return repaired;
   }
 
   async function requireViewAccess(req: Request, listingId: string): Promise<'owner' | 'editor' | 'viewer'> {
@@ -1762,13 +1856,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch {}
     try {
       if (supabaseAdmin) {
-        // @ts-ignore - admin API types may vary
-        const { data, error } = await (supabaseAdmin as any).auth.admin.getUserByEmail(normalized);
-        if (!error && data?.user) {
-          return { id: data.user.id, email: data.user.email || normalized };
-        }
+        const authUser = await findSupabaseAuthUserByEmail(supabaseAdmin as any, normalized);
+        if (authUser) return { id: authUser.id, email: authUser.email || normalized };
       }
-    } catch {}
+    } catch (error: any) {
+      console.warn('Supabase auth user lookup failed:', error?.message || error);
+    }
     return null;
   }
 
@@ -2599,7 +2692,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/listings/:id/members', requireAuth, async (req, res) => {
     try {
       // Any member (viewer/editor/owner) can view members list
-      await requireViewAccess(req, req.params.id);
+      const requesterRole = await requireViewAccess(req, req.params.id);
       if (isDemo(req)) {
         const list = await demo.getListingMembers(req.params.id);
         // Include owner
@@ -2609,6 +2702,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       let results;
       try {
+        if (requesterRole === 'owner') {
+          await repairListingInviteMemberships(req.params.id);
+        }
         // Fetch owner
         const [listRow] = await db.select().from(listings).where(eq(listings.id, req.params.id));
         if (!listRow) return res.status(404).json({ message: 'Listing not found' });
@@ -2683,16 +2779,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(409).json({ code: 'already_member', message: 'That email is already a member.' });
         }
 
-        // Ensure target user exists for FK, then add member.
-        await ensureUser(found.id, found.email);
-        await db
-          .insert(listingMembers)
-          .values({ listingId: req.params.id, userId: found.id, role: roleValue })
-          .onConflictDoUpdate({ target: [listingMembers.listingId, listingMembers.userId], set: { role: roleValue } });
-        await db
-          .update(listingInvites)
+        await persistListingMembership({
+          listingId: req.params.id,
+          userId: found.id,
+          email: found.email,
+          role: roleValue,
+        });
+        await db.update(listingInvites)
           .set({ status: 'accepted', acceptedAt: new Date() })
-          .where(and(eq(listingInvites.listingId, req.params.id), eq(listingInvites.email, normalizedEmail), eq(listingInvites.status, 'pending')));
+          .where(and(
+            eq(listingInvites.listingId, req.params.id),
+            eq(listingInvites.email, normalizedEmail),
+            inArray(listingInvites.status, ['pending', 'accepted']),
+          ));
         return res.status(201).json({ userId: found.id, email: found.email, role: roleValue, kind: 'member' });
       }
 
@@ -2715,11 +2814,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
         .returning();
 
-      const emailDelivery = await sendWorkspaceInviteEmail(req, normalizedEmail);
+      const delivery = await sendWorkspaceInviteEmail(req, normalizedEmail, req.params.id);
       await db
         .update(listingInvites)
-        .set({ emailDelivery })
+        .set({ emailDelivery: delivery.status })
         .where(eq(listingInvites.id, invite.id));
+
+      if (delivery.user?.id) {
+        const memberEmail = normalizeInviteEmail(delivery.user.email || normalizedEmail);
+        await persistListingMembership({
+          listingId: req.params.id,
+          userId: delivery.user.id,
+          email: memberEmail,
+          role: roleValue,
+          inviteId: invite.id,
+        });
+        return res.status(201).json({
+          userId: delivery.user.id,
+          email: memberEmail,
+          role: roleValue,
+          kind: 'member',
+          emailDelivery: delivery.status,
+        });
+      }
 
       return res.status(201).json({
         id: invite.id,
@@ -2728,7 +2845,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: invite.status,
         createdAt: invite.createdAt,
         kind: 'invite',
-        emailDelivery,
+        emailDelivery: delivery.status,
       });
     } catch (error: any) {
       const status = (error && typeof error === 'object' && (error as any).status) || 500;

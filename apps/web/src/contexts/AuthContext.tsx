@@ -12,7 +12,7 @@ interface AuthContextType {
   needsOnboarding: boolean
   isDemoMode: boolean
   signInWithGoogle: (redirectPath?: string) => Promise<void>
-  signInWithEmail: (email: string) => Promise<void>
+  signInWithEmail: (email: string, redirectPath?: string) => Promise<void>
   signOut: () => Promise<void>
   setNeedsOnboarding: (needs: boolean) => void
   resetClientState: () => void
@@ -30,7 +30,7 @@ const defaultAuthContext: AuthContextType = {
   signInWithGoogle: async (_redirectPath?: string) => {
     try { window.location.assign('/api/auth/google') } catch {}
   },
-  signInWithEmail: async () => { throw new Error('Magic link disabled') },
+  signInWithEmail: async () => { throw new Error('Email sign-in is not configured') },
   signOut: async () => { try { localStorage.removeItem('demo-mode') } catch {}; window.location.replace('/') },
   setNeedsOnboarding: () => {},
   resetClientState: () => {},
@@ -309,6 +309,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }
 
+  const signInWithEmail = async (email: string, redirectPath?: string) => {
+    if (!supabase) {
+      throw new Error('Email sign-in is not configured')
+    }
+
+    const normalizedEmail = email.trim().toLowerCase()
+    if (!normalizedEmail) throw new Error('Enter your work email')
+
+    try {
+      localStorage.removeItem('demo-mode')
+      setStoredPostAuthRedirect(redirectPath ?? '/app/desk')
+      const { error } = await supabase.auth.signInWithOtp({
+        email: normalizedEmail,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          shouldCreateUser: true,
+        },
+      })
+      if (error) throw error
+    } catch (error: any) {
+      throw new Error(error?.message || 'Could not send the sign-in link')
+    }
+  }
+
   const signingOutRef = useRef(false)
   const signOut = async () => {
     if (signingOutRef.current) return
@@ -350,8 +374,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     needsOnboarding,
     isDemoMode,
     signInWithGoogle,
-    // Magic Link removed; we will rely on Google OAuth
-    signInWithEmail: async (_email: string) => { throw new Error('Magic link disabled') },
+    signInWithEmail,
     signOut,
     setNeedsOnboarding,
     resetClientState,
