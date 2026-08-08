@@ -8,6 +8,9 @@ import { MapContextMenu } from '@/features/map/MapContextMenu';
 
 import { SearchComponent } from '@/components/SearchComponent';
 import { CSVUploader } from '@/components/CSVUploader';
+import { MarketMemoryLayerControl, type MarketMemoryLayer } from '@/components/MarketMemoryLayerControl';
+import { MarketMemoryPreviewDialog } from '@/components/MarketMemoryPreviewDialog';
+import { MarketMemoryStoryPanel } from '@/components/MarketMemoryStoryPanel';
 import { DeveloperSettings } from '@/components/DeveloperSettings';
 import { GamificationToast } from '@/components/GamificationToast';
 import { useToast } from '@/hooks/use-toast';
@@ -33,6 +36,7 @@ import { AdvancedMapMarker } from '@/features/map/AdvancedMapMarker';
 import { SearchResultCard } from '@/features/map/SearchResultCard';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
 import { createStatusFilterSet, getStatusCounts } from '@/features/map/statusFilters';
+import type { CurrentProjectsMarketMemoryPreview, MarketMemoryAnchor } from '@/lib/currentProjectsMarketMemory';
 
 // Import all necessary types and data
 import type { 
@@ -62,6 +66,7 @@ const MAP_OPTIONS: google.maps.MapOptions = {
 const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton
 const DEFAULT_ZOOM = 11;
 const EMPTY_PROSPECTS: Prospect[] = [];
+const EMPTY_MARKET_MEMORY_ANCHORS: MarketMemoryAnchor[] = [];
 const DEMO_MAP_RESET_VERSION = '2026-06-terradraw-clean-map-v1';
 const DEMO_MAP_RESET_KEY = 'levelcre:demoMapResetVersion';
 
@@ -156,6 +161,45 @@ const MapOverlayLayer = memo(function MapOverlayLayer({
               draggable: savedOverlaysInteractive && editingProspectId === entry.id,
               zIndex: editingProspectId === entry.id ? 2 : 1,
             }}
+          />
+        );
+      })}
+    </>
+  );
+});
+
+const MARKET_MEMORY_MARKER_META: Record<MarketMemoryLayer, { color: string; label: string; title: string }> = {
+  existing: { color: '#0F766E', label: 'E', title: 'Existing Level CRE match' },
+  market_memory: { color: '#2563EB', label: 'M', title: 'Verified market memory' },
+  review: { color: '#D97706', label: '?', title: 'Review before merge' },
+};
+
+const MarketMemoryOverlayLayer = memo(function MarketMemoryOverlayLayer({
+  anchors,
+  visibleLayers,
+  onAnchorClick,
+}: {
+  anchors: MarketMemoryAnchor[];
+  visibleLayers: Set<MarketMemoryLayer>;
+  onAnchorClick: (anchor: MarketMemoryAnchor) => void;
+}) {
+  return (
+    <>
+      {anchors.map((anchor) => {
+        const layer = anchor.previewLayer || anchor.baseLayer;
+        if (!visibleLayers.has(layer)) return null;
+        const marker = MARKET_MEMORY_MARKER_META[layer];
+        return (
+          <AdvancedMapMarker
+            key={anchor.id}
+            position={{ lat: anchor.latitude, lng: anchor.longitude }}
+            title={`${marker.title}: ${anchor.address}`}
+            color={marker.color}
+            borderColor="#ffffff"
+            label={marker.label}
+            scale={11}
+            zIndex={5}
+            onClick={() => onAnchorClick(anchor)}
           />
         );
       })}
@@ -290,6 +334,12 @@ export default function HomePage() {
   const polygonRefs = useRef<Map<string, google.maps.Polygon>>(new Map());
   const polygonPathListenersRef = useRef<Map<string, google.maps.MapsEventListener[]>>(new Map());
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [marketMemoryDialogOpen, setMarketMemoryDialogOpen] = useState(false);
+  const [marketMemoryPreview, setMarketMemoryPreview] = useState<CurrentProjectsMarketMemoryPreview | null>(null);
+  const [selectedMarketMemoryAnchor, setSelectedMarketMemoryAnchor] = useState<MarketMemoryAnchor | null>(null);
+  const [visibleMarketMemoryLayers, setVisibleMarketMemoryLayers] = useState<Set<MarketMemoryLayer>>(
+    () => new Set<MarketMemoryLayer>(['existing', 'market_memory', 'review']),
+  );
   const [xpToast, setXpToast] = useState<{ id: number; xp: number; label?: string } | null>(null);
   const [savePulse, setSavePulse] = useState(false);
   const [quickLogPendingType, setQuickLogPendingType] = useState<'call' | 'email' | 'meeting' | null>(null);
@@ -766,6 +816,7 @@ export default function HomePage() {
   // Prospect click handler
   const handleProspectClick = useCallback((prospect: Prospect) => {
     console.log('Prospect clicked:', prospect);
+    setSelectedMarketMemoryAnchor(null);
     setSelectedProspect(prospect);
     setProspectSaveStatus('saved');
     setIsEditPanelOpen(true);
@@ -1824,9 +1875,47 @@ export default function HomePage() {
     setTerraModeSafe('rectangle');
   }, [setTerraModeSafe]);
 
+  const handleMarketMemoryPreviewReady = useCallback((preview: CurrentProjectsMarketMemoryPreview) => {
+    setMarketMemoryPreview(preview);
+    setSelectedMarketMemoryAnchor(null);
+    setVisibleMarketMemoryLayers(new Set<MarketMemoryLayer>(['existing', 'market_memory', 'review']));
+    if (!map || preview.anchors.length === 0) return;
+    const previewBounds = new google.maps.LatLngBounds();
+    for (const anchor of preview.anchors) {
+      previewBounds.extend({ lat: anchor.latitude, lng: anchor.longitude });
+    }
+    map.fitBounds(previewBounds, 48);
+  }, [map]);
+
+  const handleMarketMemoryAnchorClick = useCallback((anchor: MarketMemoryAnchor) => {
+    if (isEditPanelOpen) {
+      toast({
+        title: 'Finish the open prospect first',
+        description: 'Close the prospect editor after its changes are saved, then inspect this property story.',
+      });
+      return;
+    }
+    setSelectedMarketMemoryAnchor(anchor);
+  }, [isEditPanelOpen, toast]);
+
+  const toggleMarketMemoryLayer = useCallback((layer: MarketMemoryLayer) => {
+    setVisibleMarketMemoryLayers((current) => {
+      const next = new Set(current);
+      if (next.has(layer)) next.delete(layer); else next.add(layer);
+      return next;
+    });
+    setSelectedMarketMemoryAnchor((current) => current?.previewLayer === layer ? null : current);
+  }, []);
+
+  const clearMarketMemoryPreview = useCallback(() => {
+    setMarketMemoryPreview(null);
+    setSelectedMarketMemoryAnchor(null);
+  }, []);
+
   const prospectsErrorMessage = prospectsError instanceof Error
     ? prospectsError.message
     : null;
+  const marketMemoryAnchors = marketMemoryPreview?.anchors || EMPTY_MARKET_MEMORY_ANCHORS;
 
   if (!isLoaded) {
     return (
@@ -1894,6 +1983,12 @@ export default function HomePage() {
             editingProspectId={editingProspectId}
             onProspectClick={handleProspectClick}
             polygonRefs={polygonRefs}
+          />
+
+          <MarketMemoryOverlayLayer
+            anchors={marketMemoryAnchors}
+            visibleLayers={visibleMarketMemoryLayers}
+            onAnchorClick={handleMarketMemoryAnchorClick}
           />
 
           {/* Search Pin */}
@@ -1970,6 +2065,16 @@ export default function HomePage() {
         onSelect={() => setTerraModeSafe('select')}
         activeTerraMode={terraMode as any}
       />
+
+      <div className="absolute right-3 top-3 z-40" style={{ pointerEvents: 'auto' }}>
+        <MarketMemoryLayerControl
+          anchors={marketMemoryAnchors}
+          visibleLayers={visibleMarketMemoryLayers}
+          onOpenPreview={() => setMarketMemoryDialogOpen(true)}
+          onToggleLayer={toggleMarketMemoryLayer}
+          onClear={clearMarketMemoryPreview}
+        />
+      </div>
 
       {/* Developer Settings - Keep at bottom right but with margin */}
       {import.meta.env.DEV ? (
@@ -2147,6 +2252,13 @@ export default function HomePage() {
         />
       )}
 
+      {selectedMarketMemoryAnchor ? (
+        <MarketMemoryStoryPanel
+          anchor={selectedMarketMemoryAnchor}
+          onClose={() => setSelectedMarketMemoryAnchor(null)}
+        />
+      ) : null}
+
       {/* Import Dialog */}
       {showImportDialog && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -2171,6 +2283,14 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      <MarketMemoryPreviewDialog
+        open={marketMemoryDialogOpen}
+        prospects={prospects}
+        onOpenChange={setMarketMemoryDialogOpen}
+        onPreviewReady={handleMarketMemoryPreviewReady}
+      />
+
       {/* Status Legend (bottom-left) with built-in chevron */}
       <div className="absolute bottom-20 left-3 z-40 sm:bottom-4 sm:left-4" style={{ pointerEvents: 'auto' }}>
         <StatusLegend
