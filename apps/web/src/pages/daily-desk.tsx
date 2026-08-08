@@ -220,6 +220,32 @@ type OpportunityProposalRow = {
   } | null
 }
 
+type PropertyEvidenceRow = {
+  id: string
+  source: string
+  external_event_id: string
+  event_type: 'title_pulled' | 'owner_identified' | 'note'
+  occurred_at: string
+  company: string | null
+  subject: string | null
+  summary: string | null
+  property_address: string | null
+  confidence: number
+  match_reason: string | null
+  source_metadata?: {
+    caseId?: string
+    sourceRelativePath?: string
+    recordKind?: string
+    titleNumber?: string
+    linc?: string
+    plan?: string
+    block?: string
+    lot?: string
+    municipality?: string
+    verifiedAddressStatus?: string
+  } | null
+}
+
 type IntelWatchlistResponse = {
   generatedAt: string
   summary: { signals: number; activeRequirements: number; highPriority: number }
@@ -510,6 +536,9 @@ export default function DailyDeskPage() {
   const opportunityProposalsQuery = useQuery<{ rows: OpportunityProposalRow[] }>({
     queryKey: ['/api/activity-events?eventType=opportunity_promotion_proposed&matchStatus=needs_review&limit=50'],
   })
+  const propertyEvidenceQuery = useQuery<{ rows: PropertyEvidenceRow[] }>({
+    queryKey: ['/api/activity-events?source=codex_property_title_audit&matchStatus=needs_review&limit=250'],
+  })
   const watchlistQuery = useQuery<IntelWatchlistResponse>({
     queryKey: ['/api/intel/watchlist?days=30&limit=12'],
   })
@@ -558,6 +587,7 @@ export default function DailyDeskPage() {
   const imports = importsQuery.data?.rows || []
   const marketProposals = marketProposalsQuery.data?.rows || []
   const opportunityProposals = opportunityProposalsQuery.data?.rows || []
+  const propertyEvidence = propertyEvidenceQuery.data?.rows || []
   const prospects = useMemo(
     () => [...(prospectsQuery.data || [])].sort((left, right) => prospectLabel(left).localeCompare(prospectLabel(right))),
     [prospectsQuery.data],
@@ -630,11 +660,35 @@ export default function DailyDeskPage() {
     },
   })
 
+  const propertyEvidenceMutation = useMutation({
+    mutationFn: async ({ eventId, action, prospectId }: { eventId: string; action: 'link' | 'ignore'; prospectId?: string }) => {
+      const response = await apiRequest('PATCH', `/api/activity-events/${eventId}/review`, {
+        action,
+        ...(action === 'link' ? { prospectId } : {}),
+      })
+      return response.json()
+    },
+    onSuccess: (_result, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/activity-events?source=codex_property_title_audit&matchStatus=needs_review&limit=250'] })
+      queryClient.invalidateQueries({ queryKey: ['/api/automation/reconciliation?limit=25'] })
+      toast({
+        title: variables.action === 'link' ? 'Property evidence linked' : 'Property evidence archived',
+        description: variables.action === 'link'
+          ? 'The audited evidence is now attached to the selected Level CRE record.'
+          : 'The evidence decision is preserved and will not reopen on a repeat import.',
+      })
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Could not review property evidence', description: error.message, variant: 'destructive' })
+    },
+  })
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['/api/automation/sales-brief?limit=25'] })
     queryClient.invalidateQueries({ queryKey: ['/api/agent/sales-activity/imports?matchStatus=needs_review&limit=50'] })
     queryClient.invalidateQueries({ queryKey: ['/api/activity-events?eventType=market_record_proposed&matchStatus=needs_review&limit=50'] })
     queryClient.invalidateQueries({ queryKey: ['/api/activity-events?eventType=opportunity_promotion_proposed&matchStatus=needs_review&limit=50'] })
+    queryClient.invalidateQueries({ queryKey: ['/api/activity-events?source=codex_property_title_audit&matchStatus=needs_review&limit=250'] })
     queryClient.invalidateQueries({ queryKey: ['/api/intel/watchlist?days=30&limit=12'] })
     queryClient.invalidateQueries({ queryKey: ['/api/automation/reconciliation?limit=25'] })
     queryClient.invalidateQueries({ queryKey: ['/api/email/outlook/config'] })
@@ -646,11 +700,11 @@ export default function DailyDeskPage() {
   const tabCounts: Record<DeskTab, number> = {
     today: queues.today.length,
     waiting: queues.waiting.length,
-    review: queues.review.length + imports.length + marketProposals.length + opportunityProposals.length,
+    review: queues.review.length + imports.length + marketProposals.length + opportunityProposals.length + propertyEvidence.length,
     develop: queues.develop.length,
   }
-  const isLoading = salesBriefQuery.isLoading || importsQuery.isLoading || marketProposalsQuery.isLoading || opportunityProposalsQuery.isLoading
-  const hasError = salesBriefQuery.isError || importsQuery.isError || marketProposalsQuery.isError || opportunityProposalsQuery.isError
+  const isLoading = salesBriefQuery.isLoading || importsQuery.isLoading || marketProposalsQuery.isLoading || opportunityProposalsQuery.isLoading || propertyEvidenceQuery.isLoading
+  const hasError = salesBriefQuery.isError || importsQuery.isError || marketProposalsQuery.isError || opportunityProposalsQuery.isError || propertyEvidenceQuery.isError
   const generatedAt = formatWhen(salesBriefQuery.data?.generatedAt)
   const pulseMetrics = [
     { group: 'Effort', label: 'Touches / 28 days', value: activityPulseQuery.data?.total ?? 0, icon: Activity, tone: 'text-blue-700 bg-blue-50' },
@@ -747,11 +801,11 @@ export default function DailyDeskPage() {
                 <h2 className="text-sm font-semibold text-slate-950">
                   {activeTab === 'today' && 'Revenue-moving actions'}
                   {activeTab === 'waiting' && 'Sent work waiting on others'}
-                  {activeTab === 'review' && 'Activity and map proposals needing context'}
+                  {activeTab === 'review' && 'Activity, property evidence, and proposals needing context'}
                   {activeTab === 'develop' && 'Pipeline development'}
                 </h2>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  {activeTab === 'review' ? 'Nothing is written to a prospect until you link it.' : 'Ranked from current Level CRE and captured sales evidence.'}
+                  {activeTab === 'review' ? 'Evidence stays reviewable; only your approval can link or create a map record.' : 'Ranked from current Level CRE and captured sales evidence.'}
                 </p>
               </div>
               <Badge variant="outline" className="rounded bg-slate-50 text-slate-700">
@@ -882,6 +936,74 @@ export default function DailyDeskPage() {
                     </article>
                   )
                 })}
+                {propertyEvidence.map((item) => {
+                  const selectedProspect = prospectDrafts[item.id] || ''
+                  const metadata = item.source_metadata || {}
+                  const legalIdentity = [
+                    metadata.titleNumber ? `Title ${metadata.titleNumber}` : null,
+                    metadata.linc ? `LINC ${metadata.linc}` : null,
+                    [metadata.plan && `Plan ${metadata.plan}`, metadata.block && `Block ${metadata.block}`, metadata.lot && `Lot ${metadata.lot}`].filter(Boolean).join(' / '),
+                  ].filter(Boolean).join(' / ')
+                  return (
+                    <article key={item.id} className="border-b border-slate-200 px-4 py-4 sm:px-5">
+                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className="rounded border-amber-200 bg-amber-50 text-amber-800">
+                              {item.event_type === 'title_pulled' ? 'Land title' : item.event_type === 'owner_identified' ? 'Title owner' : 'Corporate evidence'}
+                            </Badge>
+                            <span className="text-xs text-slate-500">{formatWhen(item.occurred_at)}</span>
+                            <span className="text-xs font-medium text-slate-500">{item.confidence}% confidence</span>
+                          </div>
+                          <h3 className="mt-2 text-sm font-semibold text-slate-950">{item.subject || item.company || 'Property evidence'}</h3>
+                          <p className="mt-1 text-sm text-slate-700">{item.property_address || 'Subject address not verified'}</p>
+                          {legalIdentity ? <p className="mt-2 text-xs font-medium text-slate-600">{legalIdentity}</p> : null}
+                          <p className="mt-2 text-xs leading-5 text-slate-500">{item.summary || item.match_reason || 'Awaiting evidence review.'}</p>
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            {[metadata.caseId, metadata.sourceRelativePath].filter(Boolean).join(' / ')}
+                          </p>
+                        </div>
+                        <div className="flex flex-col gap-2 sm:flex-row xl:flex-col">
+                          <Select
+                            value={selectedProspect}
+                            onValueChange={(value) => setProspectDrafts((current) => ({ ...current, [item.id]: value }))}
+                          >
+                            <SelectTrigger className="bg-white">
+                              <SelectValue placeholder="Link to an existing map record" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {prospects.slice(0, 300).map((prospect) => (
+                                <SelectItem key={prospect.id} value={prospect.id}>
+                                  {prospectLabel(prospect)}{prospect.address ? ` / ${prospect.address}` : ''}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              disabled={!selectedProspect || propertyEvidenceMutation.isPending}
+                              onClick={() => propertyEvidenceMutation.mutate({ eventId: item.id, action: 'link', prospectId: selectedProspect })}
+                            >
+                              <CheckCircle2 className="h-4 w-4" />
+                              Link evidence
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              title="Archive this evidence"
+                              aria-label="Archive this evidence"
+                              disabled={propertyEvidenceMutation.isPending}
+                              onClick={() => propertyEvidenceMutation.mutate({ eventId: item.id, action: 'ignore' })}
+                            >
+                              <Archive className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                  )
+                })}
                 {imports.map((item) => {
                   const selectedProspect = prospectDrafts[item.id] || ''
                   return (
@@ -940,7 +1062,7 @@ export default function DailyDeskPage() {
                   )
                 })}
                 {queues.review.map((action) => <ActionRow key={action.id} action={action} />)}
-                {marketProposals.length === 0 && opportunityProposals.length === 0 && imports.length === 0 && queues.review.length === 0 ? <EmptyQueue tab="review" /> : null}
+                {marketProposals.length === 0 && opportunityProposals.length === 0 && propertyEvidence.length === 0 && imports.length === 0 && queues.review.length === 0 ? <EmptyQueue tab="review" /> : null}
               </div>
             ) : null}
           </section>

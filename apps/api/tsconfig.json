@@ -4,6 +4,7 @@
     "target": "ES2022",
     "baseUrl": ".",
     "paths": {
+      "@level-cre/shared": ["../../packages/shared/src/index.ts"],
       "@level-cre/shared/*": ["../../packages/shared/src/*"]
     }
   },

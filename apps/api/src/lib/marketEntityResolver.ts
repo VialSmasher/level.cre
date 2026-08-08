@@ -24,7 +24,13 @@ export async function resolveMarketEntitiesForUser(params: {
     params.pool.query(`
       SELECT id, name, address, location_lat, location_lng, market_key,
              contact_phone, contact_email, website_url, business_name, contact_company,
-             ai_metadata -> 'googlePlace' ->> 'placeId' AS place_id
+             ai_metadata -> 'googlePlace' ->> 'placeId' AS place_id,
+             ai_metadata -> 'legalIdentity' ->> 'municipality' AS municipality,
+             ai_metadata -> 'legalIdentity' ->> 'titleNumber' AS title_number,
+             ai_metadata -> 'legalIdentity' ->> 'linc' AS linc,
+             ai_metadata -> 'legalIdentity' ->> 'plan' AS plan,
+             ai_metadata -> 'legalIdentity' ->> 'block' AS block,
+             ai_metadata -> 'legalIdentity' ->> 'lot' AS lot
       FROM public.prospects
       WHERE user_id = $1
       ORDER BY updated_at DESC NULLS LAST, created_at DESC
@@ -53,6 +59,12 @@ export async function resolveMarketEntitiesForUser(params: {
       email: row.contact_email || null,
       websiteUrl: row.website_url || null,
       businessName: row.business_name || row.contact_company || null,
+      municipality: row.municipality || null,
+      titleNumber: row.title_number || null,
+      linc: row.linc || null,
+      plan: row.plan || null,
+      block: row.block || null,
+      lot: row.lot || null,
     });
   }
   for (const row of listings.rows) {

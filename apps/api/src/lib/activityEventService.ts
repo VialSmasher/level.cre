@@ -101,6 +101,15 @@ export const ActivityEventBatchSchema = z.object({
   events: z.array(ActivityEventInputSchema).min(1).max(500),
 });
 
+export const ActivityEventReviewSchema = z.object({
+  action: z.enum(['link', 'ignore']),
+  prospectId: z.string().trim().min(1).optional(),
+}).superRefine((value, context) => {
+  if (value.action === 'link' && !value.prospectId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['prospectId'], message: 'prospectId is required when linking evidence' });
+  }
+});
+
 export type ActivityEventInput = z.infer<typeof ActivityEventInputSchema>;
 export type ActivityEventBatchInput = z.infer<typeof ActivityEventBatchSchema>;
 
@@ -335,6 +344,7 @@ export async function listActivityEvents(params: {
   eventType?: string;
   matchStatus?: string;
   opportunityId?: string;
+  source?: string;
 }): Promise<unknown[]> {
   const values: unknown[] = [params.userId];
   const filters = ['event.user_id = $1'];
@@ -346,6 +356,7 @@ export async function listActivityEvents(params: {
   addFilter('event.event_type', params.eventType);
   addFilter('event.match_status', params.matchStatus);
   addFilter('event.opportunity_id', params.opportunityId);
+  addFilter('event.source', params.source);
   values.push(params.limit);
   const { rows } = await params.pool.query(
     `
@@ -394,4 +405,83 @@ export async function listActivityEvents(params: {
     values,
   );
   return rows;
+}
+
+export async function reviewActivityEvent(params: {
+  pool: Pool;
+  userId: string;
+  eventId: string;
+  review: z.infer<typeof ActivityEventReviewSchema>;
+}) {
+  const existing = await params.pool.query(
+    `SELECT id, match_status, prospect_id FROM public.activity_events WHERE id = $1 AND user_id = $2 LIMIT 1`,
+    [params.eventId, params.userId],
+  );
+  const event = existing.rows[0];
+  if (!event) return null;
+  if (['matched', 'ignored'].includes(String(event.match_status))) {
+    return {
+      id: event.id,
+      action: event.match_status === 'matched' ? 'link' : 'ignore',
+      matchStatus: event.match_status,
+      prospectId: event.prospect_id || null,
+      alreadyReviewed: true,
+    };
+  }
+
+  const reviewedAt = new Date().toISOString();
+  if (params.review.action === 'ignore') {
+    const { rows } = await params.pool.query(
+      `
+        UPDATE public.activity_events
+        SET match_status = 'ignored', match_reason = 'broker_ignored_evidence', updated_at = now(),
+            source_metadata = COALESCE(source_metadata, '{}'::jsonb) || $3::jsonb
+        WHERE id = $1 AND user_id = $2 AND match_status NOT IN ('matched', 'ignored')
+        RETURNING id, match_status, prospect_id
+      `,
+      [params.eventId, params.userId, JSON.stringify({ review: { action: 'ignore', reviewedAt } })],
+    );
+    return rows[0] ? {
+      id: rows[0].id,
+      action: 'ignore' as const,
+      matchStatus: rows[0].match_status,
+      prospectId: rows[0].prospect_id || null,
+      alreadyReviewed: false,
+    } : null;
+  }
+
+  const prospect = await params.pool.query(
+    `SELECT id FROM public.prospects WHERE id = $1 AND user_id = $2 LIMIT 1`,
+    [params.review.prospectId, params.userId],
+  );
+  if (!prospect.rows[0]) throw new Error('Selected prospect was not found');
+  const { rows } = await params.pool.query(
+    `
+      UPDATE public.activity_events
+      SET prospect_id = $3, match_status = 'matched', match_reason = 'broker_linked_evidence', updated_at = now(),
+          source_metadata = COALESCE(source_metadata, '{}'::jsonb) || $4::jsonb
+      WHERE id = $1 AND user_id = $2 AND match_status NOT IN ('matched', 'ignored')
+      RETURNING id, match_status, prospect_id
+    `,
+    [params.eventId, params.userId, params.review.prospectId, JSON.stringify({ review: { action: 'link', reviewedAt } })],
+  );
+  if (!rows[0]) return null;
+  await params.pool.query(
+    `
+      INSERT INTO public.activity_event_links (
+        id, user_id, event_id, entity_type, entity_id, role, confidence, metadata
+      )
+      VALUES ($1, $2, $3, 'prospect', $4, 'broker_reviewed_subject', 100, $5::jsonb)
+      ON CONFLICT (event_id, entity_type, entity_id, role)
+      DO UPDATE SET confidence = 100, metadata = EXCLUDED.metadata
+    `,
+    [randomUUID(), params.userId, params.eventId, params.review.prospectId, JSON.stringify({ reviewedAt })],
+  );
+  return {
+    id: rows[0].id,
+    action: 'link' as const,
+    matchStatus: rows[0].match_status,
+    prospectId: rows[0].prospect_id,
+    alreadyReviewed: false,
+  };
 }

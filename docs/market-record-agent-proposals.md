@@ -37,6 +37,14 @@ The scoped credential can submit proposals. Direct prospect create, edit, delete
   "placeId": "ChIJ-example",
   "googleMapsUrl": "https://maps.google.com/?cid=example",
   "evidenceUrl": "https://example.com/property-source",
+  "legalIdentity": {
+    "municipality": "Edmonton",
+    "titleNumber": "242 123 456",
+    "linc": "0012345678",
+    "plan": "3443TR",
+    "block": "4",
+    "lot": "5"
+  },
   "notes": "Observed operating at this location; awaiting broker approval."
 }
 ```

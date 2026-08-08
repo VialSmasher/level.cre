@@ -23,6 +23,7 @@
     "test:ux:report": "playwright show-report artifacts/ux-benchmark/playwright-local",
     "audit:product": "node scripts/product-audit/report-card.mjs",
     "normalize:property-spreadsheet": "tsx scripts/codex/normalize-property-spreadsheet.ts",
+    "property-title:dry-run": "tsx scripts/codex/build-property-title-evidence-dry-run.ts",
     "start": "npm --workspace @apps/api run start",
     "db:push": "npm --workspace @apps/api run db:push",
     "db:prepare": "npm --workspace @apps/api run db:prepare",

@@ -76,9 +76,11 @@ import { rankEmailCleanup, rankFollowUpReminder } from './lib/salesBriefRanking'
 import { findSupabaseAuthUserByEmail } from './lib/supabaseAuthUsers';
 import {
   ActivityEventBatchSchema,
+  ActivityEventReviewSchema,
   importActivityEventBatch,
   listActivityEvents,
   recordActivityEventFromSalesActivity,
+  reviewActivityEvent,
 } from './lib/activityEventService';
 import {
   OpportunityCreateSchema,
@@ -4066,6 +4068,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         email: z.string().trim().email().max(320).toLowerCase().nullable().optional(),
         websiteUrl: z.string().trim().url().max(2000).nullable().optional(),
         businessName: z.string().trim().max(240).nullable().optional(),
+        municipality: z.string().trim().max(240).nullable().optional(),
+        titleNumber: z.string().trim().max(120).nullable().optional(),
+        linc: z.string().trim().max(120).nullable().optional(),
+        plan: z.string().trim().max(120).nullable().optional(),
+        block: z.string().trim().max(120).nullable().optional(),
+        lot: z.string().trim().max(120).nullable().optional(),
       }).refine((value) => Object.values(value).some((candidate) => candidate != null && candidate !== ''), {
         message: 'At least one identifying field is required',
       }).safeParse(req.body || {});
@@ -4143,6 +4151,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           email: proposal.contactEmail,
           websiteUrl: proposal.websiteUrl,
           businessName: proposal.businessName,
+          ...(proposal.legalIdentity || {}),
         },
       });
       let existingProspectId = review.data.prospectId || null;
@@ -4153,10 +4162,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         if (!owned.rows[0]) return res.status(400).json({ message: 'Selected prospect was not found' });
       } else {
-        const prospectCandidates = resolution.candidates.filter((candidate) => candidate.entityType === 'prospect');
-        const resolvedProspect = prospectCandidates[0]?.confidence >= 80
-          && (!prospectCandidates[1] || prospectCandidates[0].confidence - prospectCandidates[1].confidence >= 10)
-          ? prospectCandidates[0]
+        const resolvedProspect = resolution.decision === 'link_existing'
+          && resolution.topCandidate?.entityType === 'prospect'
+          ? resolution.topCandidate
           : null;
         existingProspectId = resolvedProspect?.id || null;
       }
@@ -4193,6 +4201,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               externalId: proposal.externalId,
               evidenceUrl: proposal.evidenceUrl || null,
             },
+            ...(proposal.legalIdentity ? { legalIdentity: proposal.legalIdentity } : {}),
             ...(proposal.placeId || proposal.googleMapsUrl ? {
               googlePlace: {
                 ...(proposal.placeId ? { placeId: proposal.placeId } : {}),
@@ -4503,11 +4512,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         eventType: typeof req.query.eventType === 'string' ? req.query.eventType.trim() : undefined,
         matchStatus: typeof req.query.matchStatus === 'string' ? req.query.matchStatus.trim() : undefined,
         opportunityId: typeof req.query.opportunityId === 'string' ? req.query.opportunityId.trim() : undefined,
+        source: typeof req.query.source === 'string' ? req.query.source.trim() : undefined,
       });
       res.json({ rows });
     } catch (error) {
       console.error('Error getting activity events:', error);
       res.status(500).json({ message: 'Failed to get activity events' });
+    }
+  });
+
+  app.patch('/api/activity-events/:id/review', requireAuth, async (req, res) => {
+    try {
+      if (rejectAgentBrokerDecision(req, res, '/api/agent/activity-events/batch')) return;
+      const review = ActivityEventReviewSchema.safeParse(req.body || {});
+      if (!review.success) {
+        return res.status(400).json({ message: 'Invalid activity evidence review', error: review.error.errors });
+      }
+      if (isDemo(req)) return res.json({ id: req.params.id, ...review.data, skipped: true, reason: 'demo_mode' });
+      const result = await reviewActivityEvent({
+        pool,
+        userId: getUserId(req),
+        eventId: req.params.id,
+        review: review.data,
+      });
+      if (!result) return res.status(404).json({ message: 'Activity evidence was not found or was already reviewed' });
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to review activity evidence';
+      const status = message === 'Selected prospect was not found' ? 400 : 500;
+      console.error('Error reviewing activity evidence:', error);
+      res.status(status).json({ message });
     }
   });
 

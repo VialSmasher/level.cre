@@ -5,8 +5,10 @@ import { normalizeSalesActivityInput } from './salesActivityImport';
 import {
   ActivityEventBatchSchema,
   ActivityEventInputSchema,
+  ActivityEventReviewSchema,
   importActivityEventBatch,
   recordActivityEventFromSalesActivity,
+  reviewActivityEvent,
 } from './activityEventService';
 
 test('activity events require a known type, bounded confidence, and brief evidence', () => {
@@ -78,6 +80,30 @@ test('activity event import is idempotent and reports an upsert as a duplicate',
   assert.equal(result.duplicates, 1);
   assert.equal(queries.length, 1);
   assert.match(queries[0].sql, /ON CONFLICT \(user_id, source, external_event_id\)/);
+  assert.match(queries[0].sql, /match_status IN \('matched', 'ignored'\)/);
+});
+
+test('broker evidence review requires a prospect for link and preserves prior decisions', async () => {
+  assert.equal(ActivityEventReviewSchema.safeParse({ action: 'link' }).success, false);
+  assert.equal(ActivityEventReviewSchema.safeParse({ action: 'link', prospectId: 'prospect-1' }).success, true);
+  assert.equal(ActivityEventReviewSchema.safeParse({ action: 'ignore' }).success, true);
+
+  let queryCount = 0;
+  const pool = {
+    query: async () => {
+      queryCount += 1;
+      return { rows: [{ id: 'event-1', match_status: 'ignored', prospect_id: null }] };
+    },
+  } as any;
+  const result = await reviewActivityEvent({
+    pool,
+    userId: 'user-1',
+    eventId: 'event-1',
+    review: ActivityEventReviewSchema.parse({ action: 'link', prospectId: 'prospect-1' }),
+  });
+  assert.equal(queryCount, 1);
+  assert.equal(result?.matchStatus, 'ignored');
+  assert.equal(result?.alreadyReviewed, true);
 });
 
 test('confirmed sent sales activity dual-writes metadata without raw payload or body', async () => {

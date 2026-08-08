@@ -11,6 +11,12 @@ export type ResolvableMarketEntity = {
   email?: string | null;
   websiteUrl?: string | null;
   businessName?: string | null;
+  municipality?: string | null;
+  titleNumber?: string | null;
+  linc?: string | null;
+  plan?: string | null;
+  block?: string | null;
+  lot?: string | null;
 };
 
 export type MarketEntityResolutionInput = {
@@ -22,6 +28,12 @@ export type MarketEntityResolutionInput = {
   email?: string | null;
   websiteUrl?: string | null;
   businessName?: string | null;
+  municipality?: string | null;
+  titleNumber?: string | null;
+  linc?: string | null;
+  plan?: string | null;
+  block?: string | null;
+  lot?: string | null;
 };
 
 export type MarketEntityResolutionCandidate = ResolvableMarketEntity & {
@@ -74,6 +86,18 @@ function normalizeName(value?: string | null) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
 }
 
+function normalizeLegalToken(value?: string | null) {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]+/g, "");
+}
+
+function normalizeMunicipality(value?: string | null) {
+  return normalizeName(value)
+    .replace(/\b(county|municipality|municipal district|md|city|town|village)\b/g, " ")
+    .replace(/\bof\b/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
 function haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number) {
   const radius = 6_371_000;
   const toRadians = (value: number) => value * Math.PI / 180;
@@ -102,6 +126,18 @@ export function scoreMarketEntityCandidate(
   const inputDomain = emailDomain(input.email) || websiteDomain(input.websiteUrl);
   const entityDomain = emailDomain(entity.email) || websiteDomain(entity.websiteUrl);
   const marketKey = input.placeId ? `google-place:${input.placeId}` : "";
+  const inputMunicipality = normalizeMunicipality(input.municipality);
+  const entityMunicipality = normalizeMunicipality(entity.municipality);
+  const inputTitleNumber = normalizeLegalToken(input.titleNumber);
+  const entityTitleNumber = normalizeLegalToken(entity.titleNumber);
+  const inputLinc = normalizeLegalToken(input.linc);
+  const entityLinc = normalizeLegalToken(entity.linc);
+  const inputPlan = normalizeLegalToken(input.plan);
+  const entityPlan = normalizeLegalToken(entity.plan);
+  const inputBlock = normalizeLegalToken(input.block);
+  const entityBlock = normalizeLegalToken(entity.block);
+  const inputLot = normalizeLegalToken(input.lot);
+  const entityLot = normalizeLegalToken(entity.lot);
 
   if (input.placeId && (entity.placeId === input.placeId || entity.marketKey === marketKey)) {
     score += 100;
@@ -113,6 +149,34 @@ export function scoreMarketEntityCandidate(
       signals.push("Exact normalized address");
     } else {
       conflicts.push("Address differs");
+    }
+  }
+  if (inputMunicipality && entityMunicipality) {
+    if (inputMunicipality === entityMunicipality) {
+      score += 18;
+      signals.push("Exact municipality");
+    } else {
+      conflicts.push(`Municipality differs (${input.municipality} vs ${entity.municipality})`);
+    }
+  }
+  if (inputTitleNumber && entityTitleNumber && inputTitleNumber === entityTitleNumber) {
+    score += 100;
+    signals.push("Exact title number");
+  }
+  if (inputLinc && entityLinc && inputLinc === entityLinc) {
+    score += 100;
+    signals.push("Exact LINC");
+  }
+  if (inputPlan && entityPlan && inputPlan === entityPlan) {
+    score += 35;
+    signals.push("Exact plan");
+    if (inputBlock && entityBlock && inputBlock === entityBlock) {
+      score += 28;
+      signals.push("Exact block");
+    }
+    if (inputLot && entityLot && inputLot === entityLot) {
+      score += 37;
+      signals.push("Exact lot");
     }
   }
 
@@ -169,7 +233,12 @@ export function resolveMarketEntities(
     .slice(0, 10);
   const top = candidates[0] || null;
   const runnerUp = candidates[1] || null;
-  const decisive = Boolean(top && top.confidence >= 80 && (!runnerUp || top.confidence - runnerUp.confidence >= 10));
+  const decisive = Boolean(
+    top
+    && top.confidence >= 80
+    && top.conflicts.length === 0
+    && (!runnerUp || top.confidence - runnerUp.confidence >= 10),
+  );
   return {
     candidates,
     topCandidate: top,

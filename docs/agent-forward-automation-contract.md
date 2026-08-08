@@ -8,6 +8,8 @@ Level CRE uses a review-first operating model: agents may read, resolve, rank, w
 
 Accepted identity signals include Google Place ID, normalized address, coordinates, phone, email, website domain, and business name. The response returns ranked prospect/listing/dossier candidates plus the signals and conflicts behind each score. It is read-only.
 
+Property-title workflows may also submit municipality, title number, LINC, Plan, Block, and Lot. A normalized-address match is never decisive when municipalities conflict. Approved map records retain this compact legal identity in prospect metadata for future resolution.
+
 Market-record proposals run this resolver when submitted and again when approved. This prevents a stale proposal from creating a duplicate after another workflow has created the entity.
 
 ## Explainable requirement matching
@@ -59,6 +61,14 @@ This read-only report checks for:
 - dossier identity, coordinate, and stale proposed-fact gaps.
 
 The report explains the safe corrective action. It does not guess or mutate data.
+
+## Property-title evidence review
+
+`GET /api/activity-events?source=codex_property_title_audit&matchStatus=needs_review`
+
+The PL audit adapter generates idempotent `title_pulled`, `owner_identified`, and corporate `note` event drafts. Daily Desk Review can link an event to an existing prospect or archive it through `PATCH /api/activity-events/:id/review`. That action never creates a pin, opportunity, interaction, or XP award.
+
+The adapter itself is dry-run only. It blocks map proposals until the civic address, legal identity/municipality, and source-backed coordinates are verified. Corporate office, director, shareholder, records-office, and owner-mailing addresses are excluded from subject-property fields.
 
 ## Existing next-move feed
 

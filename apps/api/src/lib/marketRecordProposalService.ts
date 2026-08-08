@@ -3,6 +3,15 @@ import { z } from "zod";
 import { ActivityEventBatchSchema, importActivityEventBatch } from "./activityEventService";
 import { resolveMarketEntitiesForUser } from "./marketEntityResolver";
 
+const LegalPropertyIdentitySchema = z.object({
+  municipality: z.string().trim().max(240).nullable().optional(),
+  titleNumber: z.string().trim().max(120).nullable().optional(),
+  linc: z.string().trim().max(120).nullable().optional(),
+  plan: z.string().trim().max(120).nullable().optional(),
+  block: z.string().trim().max(120).nullable().optional(),
+  lot: z.string().trim().max(120).nullable().optional(),
+});
+
 export const MarketRecordProposalInputSchema = z.object({
   externalId: z.string().trim().min(1).max(240),
   source: z.string().trim().min(1).max(80).default("codex_market_research"),
@@ -21,6 +30,7 @@ export const MarketRecordProposalInputSchema = z.object({
   placeId: z.string().trim().max(240).nullable().optional(),
   googleMapsUrl: z.string().trim().url().max(2000).nullable().optional(),
   evidenceUrl: z.string().trim().url().max(2000).nullable().optional(),
+  legalIdentity: LegalPropertyIdentitySchema.nullable().optional(),
   sourceMetadata: z.record(z.unknown()).optional().default({}),
 });
 
@@ -49,6 +59,7 @@ export async function submitMarketRecordProposal(params: {
       email: params.proposal.contactEmail,
       websiteUrl: params.proposal.websiteUrl,
       businessName: params.proposal.businessName,
+      ...(params.proposal.legalIdentity || {}),
     },
   });
   const resolutionSummary = {

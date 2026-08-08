@@ -87,6 +87,52 @@ test("entity resolver favors stable place identity over a similar business name"
   assert.ok(result.topCandidate?.signals.includes("Exact Google Place ID"));
 });
 
+test("entity resolver uses exact land-title identity as a decisive property signal", () => {
+  const result = resolveMarketEntities({
+    municipality: "Edmonton",
+    linc: "0012 345 678",
+    titleNumber: "242 123 456",
+    plan: "3443TR",
+    block: "4",
+    lot: "5",
+  }, [
+    {
+      entityType: "prospect",
+      id: "legal-match",
+      label: "16440 130 Avenue NW",
+      municipality: "City of Edmonton",
+      linc: "0012345678",
+      titleNumber: "242123456",
+      plan: "3443 TR",
+      block: "4",
+      lot: "5",
+    },
+  ]);
+
+  assert.equal(result.decision, "link_existing");
+  assert.equal(result.topCandidate?.id, "legal-match");
+  assert.ok(result.topCandidate?.signals.includes("Exact LINC"));
+  assert.ok(result.topCandidate?.signals.includes("Exact title number"));
+});
+
+test("an address match is not decisive when municipalities conflict", () => {
+  const result = resolveMarketEntities({
+    address: "100 Industrial Road",
+    municipality: "Edmonton",
+  }, [
+    {
+      entityType: "prospect",
+      id: "wrong-municipality",
+      label: "100 Industrial Road",
+      address: "100 Industrial Road",
+      municipality: "Leduc County",
+    },
+  ]);
+
+  assert.equal(result.decision, "review");
+  assert.match(result.topCandidate?.conflicts[0] || "", /Municipality differs/);
+});
+
 test("opportunity proposals only use the dedicated review event type", () => {
   const proposal = OpportunityPromotionProposalInputSchema.parse({
     sourceEventId: "confirmed-event",
