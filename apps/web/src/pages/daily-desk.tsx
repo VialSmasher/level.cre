@@ -20,6 +20,7 @@ import {
   Target,
   TrendingDown,
   TrendingUp,
+  Upload,
   UserRoundSearch,
   Wifi,
   WifiOff,
@@ -27,6 +28,7 @@ import {
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { PropertyEvidenceImportDialog } from '@/components/PropertyEvidenceImportDialog'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Select,
@@ -523,6 +525,7 @@ export default function DailyDeskPage() {
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState<DeskTab>('today')
   const [prospectDrafts, setProspectDrafts] = useState<Record<string, string>>({})
+  const [isEvidenceImportOpen, setIsEvidenceImportOpen] = useState(false)
 
   const salesBriefQuery = useQuery<SalesBriefResponse>({
     queryKey: ['/api/automation/sales-brief?limit=25'],
@@ -697,6 +700,12 @@ export default function DailyDeskPage() {
     queryClient.invalidateQueries({ queryKey: ['/api/automation/activity-pulse'] })
   }
 
+  const handleEvidenceImported = () => {
+    setActiveTab('review')
+    queryClient.invalidateQueries({ queryKey: ['/api/activity-events?source=codex_property_title_audit&matchStatus=needs_review&limit=250'] })
+    queryClient.invalidateQueries({ queryKey: ['/api/automation/reconciliation?limit=25'] })
+  }
+
   const tabCounts: Record<DeskTab, number> = {
     today: queues.today.length,
     waiting: queues.waiting.length,
@@ -796,7 +805,7 @@ export default function DailyDeskPage() {
 
         <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
           <section className="overflow-hidden rounded-md border border-slate-200 bg-white" aria-live="polite">
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-5">
+            <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div>
                 <h2 className="text-sm font-semibold text-slate-950">
                   {activeTab === 'today' && 'Revenue-moving actions'}
@@ -808,9 +817,17 @@ export default function DailyDeskPage() {
                   {activeTab === 'review' ? 'Evidence stays reviewable; only your approval can link or create a map record.' : 'Ranked from current Level CRE and captured sales evidence.'}
                 </p>
               </div>
-              <Badge variant="outline" className="rounded bg-slate-50 text-slate-700">
-                {tabCounts[activeTab]} item{tabCounts[activeTab] === 1 ? '' : 's'}
-              </Badge>
+              <div className="flex items-center gap-2">
+                {activeTab === 'review' ? (
+                  <Button type="button" size="sm" variant="outline" onClick={() => setIsEvidenceImportOpen(true)}>
+                    <Upload className="h-4 w-4" />
+                    Import enrichment
+                  </Button>
+                ) : null}
+                <Badge variant="outline" className="rounded bg-slate-50 text-slate-700">
+                  {tabCounts[activeTab]} item{tabCounts[activeTab] === 1 ? '' : 's'}
+                </Badge>
+              </div>
             </div>
 
             {isLoading ? (
@@ -1225,6 +1242,12 @@ export default function DailyDeskPage() {
             </div>
           </div>
         </details>
+
+        <PropertyEvidenceImportDialog
+          open={isEvidenceImportOpen}
+          onOpenChange={setIsEvidenceImportOpen}
+          onImported={handleEvidenceImported}
+        />
       </div>
     </div>
   )
