@@ -6,6 +6,7 @@ import type { MarketMemoryAnchor } from '@level-cre/shared'
 import {
   buildApprovedBrokerageMemoryPayload,
   buildBrokerageMemoryFactDrafts,
+  buildNewBrokerageMemoryDossierInsert,
   previewBrokerageMemoryImport,
 } from './brokerageMemoryService'
 
@@ -168,6 +169,30 @@ test('approved map payload exposes only selected evidence and preserves prior ap
   assert.deepEqual(preserved.accountNumbers, ['1000'])
   assert.deepEqual(preserved.projects, ['First project'])
   assert.equal(preserved.legalIdentities[0].registeredOwner, 'OWNER ONE LTD.')
+})
+
+test('new dossier insert binds varchar title and text address separately', () => {
+  const property = {
+    ...anchor(),
+    address: '8210 - YELLOWHEAD TRAIL NW, T5B1G5',
+  }
+  const statement = buildNewBrokerageMemoryDossierInsert({
+    prospectId: null,
+    anchor: property,
+    canonicalPayload: property,
+    provenanceDocument: { latest: { source: 'test' }, history: [] },
+    importItemId: 'import-item-one',
+    userId: 'user-one',
+  })
+
+  assert.match(statement.text, /title, address, normalized_address/)
+  assert.match(statement.text, /'market_memory', \$3, \$4, \$5, \$6, 'active'/)
+  assert.equal(statement.text.match(/\$3(?!\d)/g)?.length, 1)
+  assert.equal(statement.text.match(/\$4(?!\d)/g)?.length, 1)
+  assert.equal(statement.values.length, 12)
+  assert.equal(statement.values[2], property.address)
+  assert.equal(statement.values[3], property.address)
+  assert.equal(statement.values[4], '8210 YELLOWHEAD TRL')
 })
 
 test('server preview performs reads only and returns a stable source hash', async () => {

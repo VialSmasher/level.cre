@@ -264,6 +264,43 @@ export function buildApprovedBrokerageMemoryPayload(
   }
 }
 
+export function buildNewBrokerageMemoryDossierInsert(params: {
+  prospectId: string | null
+  anchor: MarketMemoryAnchor
+  canonicalPayload: MarketMemoryAnchor
+  provenanceDocument: Record<string, unknown>
+  importItemId: string
+  userId: string
+}) {
+  return {
+    text: `
+      INSERT INTO public.intel_property_dossiers (
+        canonical_listing_id, prospect_id, external_memory_key, memory_class,
+        title, address, normalized_address, market, status, lat, lng,
+        memory_payload, source_provenance, approved_at, origin_import_item_id,
+        created_by_user_id, updated_at
+      ) VALUES (
+        NULL, $1, $2, 'market_memory', $3, $4, $5, $6, 'active', $7, $8,
+        $9::jsonb, $10::jsonb, now(), $11, $12, now()
+      ) RETURNING id
+    `,
+    values: [
+      params.prospectId,
+      params.anchor.id,
+      params.anchor.address,
+      params.anchor.address,
+      normalizeMarketAddress(params.anchor.address),
+      params.anchor.municipality,
+      params.anchor.latitude,
+      params.anchor.longitude,
+      JSON.stringify(params.canonicalPayload),
+      JSON.stringify(params.provenanceDocument),
+      params.importItemId,
+      params.userId,
+    ],
+  }
+}
+
 function reviewReasonsForAnchor(anchor: MarketMemoryAnchor) {
   return uniqueStrings([
     ...anchor.reviewReasons,
@@ -894,29 +931,15 @@ export async function decideBrokerageMemoryItem(params: {
     const provenanceDocument = { latest: provenance, history: [provenance] }
     let createdDossier = false
     if (!dossierId) {
-      const created = await client.query<{ id: string }>(`
-        INSERT INTO public.intel_property_dossiers (
-          canonical_listing_id, prospect_id, external_memory_key, memory_class,
-          title, address, normalized_address, market, status, lat, lng,
-          memory_payload, source_provenance, approved_at, origin_import_item_id,
-          created_by_user_id, updated_at
-        ) VALUES (
-          NULL, $1, $2, 'market_memory', $3, $3, $4, $5, 'active', $6, $7,
-          $8::jsonb, $9::jsonb, now(), $10, $11, now()
-        ) RETURNING id
-      `, [
-        requestedProspectId,
-        anchor.id,
-        anchor.address,
-        normalizeMarketAddress(anchor.address),
-        anchor.municipality,
-        anchor.latitude,
-        anchor.longitude,
-        JSON.stringify(canonicalPayload),
-        JSON.stringify(provenanceDocument),
-        item.id,
-        params.userId,
-      ])
+      const insert = buildNewBrokerageMemoryDossierInsert({
+        prospectId: requestedProspectId,
+        anchor,
+        canonicalPayload,
+        provenanceDocument,
+        importItemId: item.id,
+        userId: params.userId,
+      })
+      const created = await client.query<{ id: string }>(insert.text, insert.values)
       dossierId = created.rows[0].id
       createdDossier = true
     } else {
