@@ -49,6 +49,7 @@ type ActionType =
   | 'email_cleanup'
   | 'research_target'
   | 'outlook_signal'
+  | 'market_watch'
 
 type SalesBriefAction = {
   id: string
@@ -58,7 +59,7 @@ type SalesBriefAction = {
   title: string
   reason: string
   suggestedAction: string
-  source: 'level_cre' | 'email_review' | 'listing' | 'outlook'
+  source: 'level_cre' | 'email_review' | 'listing' | 'outlook' | 'industrial_intel'
   dueAt?: string | null
   prospect?: {
     id?: string
@@ -88,6 +89,7 @@ type SalesBriefAction = {
     propertyMentions?: string[]
     dealTerms?: string[]
     sourceUrls?: string[]
+    href?: string
   }
 }
 
@@ -171,6 +173,84 @@ type SalesActivityImportRow = {
   created_at: string
 }
 
+type MarketRecordProposalRow = {
+  id: string
+  source: string
+  occurred_at: string
+  company: string | null
+  summary: string | null
+  property_address: string | null
+  confidence: number
+  evidence_url: string | null
+  source_metadata?: {
+    proposal?: {
+      contactName?: string | null
+      contactEmail?: string | null
+      contactPhone?: string | null
+      websiteUrl?: string | null
+    }
+    entityResolution?: {
+      decision?: 'link_existing' | 'review' | 'create_new'
+      candidates?: Array<{
+        entityType: 'prospect' | 'listing' | 'dossier'
+        id: string
+        label: string
+        address?: string | null
+        confidence: number
+        signals: string[]
+      }>
+    }
+  } | null
+}
+
+type OpportunityProposalRow = {
+  id: string
+  occurred_at: string
+  company: string | null
+  subject: string | null
+  summary: string | null
+  property_address: string | null
+  confidence: number
+  source_metadata?: {
+    proposal?: {
+      type?: string
+      title?: string
+      sourceEventId?: string
+    }
+  } | null
+}
+
+type IntelWatchlistResponse = {
+  generatedAt: string
+  summary: { signals: number; activeRequirements: number; highPriority: number }
+  signals: Array<{
+    id: string
+    priority: ActionPriority
+    priorityScore: number
+    suggestedAction: string
+    signalKinds: string[]
+    listing: { id: string; title: string; address: string | null }
+    change: { changeType: string; changeSummary: string | null; observedAt: string | null }
+    requirement: { id: string; title: string; clientName: string | null } | null
+    match: { score: number; tier: 'strong' | 'possible' | 'stretch'; reasons: string[]; warnings: string[] } | null
+  }>
+}
+
+type ReconciliationResponse = {
+  generatedAt: string
+  summary: { issues: number; returned: number; high: number; medium: number; low: number }
+  rows: Array<{
+    id: string
+    kind: string
+    severity: 'high' | 'medium' | 'low'
+    entityType: 'prospect' | 'activity_event' | 'opportunity' | 'dossier'
+    entityId: string
+    label: string
+    reason: string
+    suggestedAction: string
+  }>
+}
+
 type Prospect = {
   id: string
   name: string
@@ -221,6 +301,7 @@ const actionIcons: Record<ActionType, typeof ListTodo> = {
   email_cleanup: Inbox,
   research_target: UserRoundSearch,
   outlook_signal: Mail,
+  market_watch: Activity,
 }
 
 const activityChartConfig = {
@@ -247,9 +328,17 @@ function prospectLabel(prospect: Prospect) {
 }
 
 function actionHref(action: SalesBriefAction) {
+  if (action.automationHints?.href) return action.automationHints.href
   if (action.prospect?.id) return `/app?prospectId=${encodeURIComponent(action.prospect.id)}`
   if (action.listing?.id) return `/app/workspaces/${encodeURIComponent(action.listing.id)}`
   if (action.type === 'email_cleanup' || action.type === 'outlook_signal') return '/app/inbox'
+  return null
+}
+
+function reconciliationHref(issue: ReconciliationResponse['rows'][number]) {
+  if (issue.entityType === 'prospect') return `/app?prospectId=${encodeURIComponent(issue.entityId)}`
+  if (issue.entityType === 'dossier') return `/tools/industrial-intel/dossiers?dossierId=${encodeURIComponent(issue.entityId)}`
+  if (issue.entityType === 'activity_event') return '/app/desk'
   return null
 }
 
@@ -257,6 +346,7 @@ function sourceLabel(action: SalesBriefAction) {
   if (action.source === 'outlook') return 'Outlook'
   if (action.source === 'email_review') return 'Inbox capture'
   if (action.source === 'listing') return 'Listing'
+  if (action.source === 'industrial_intel') return 'Industrial Intel'
   return 'Level CRE'
 }
 
@@ -414,6 +504,18 @@ export default function DailyDeskPage() {
   const importsQuery = useQuery<{ rows: SalesActivityImportRow[] }>({
     queryKey: ['/api/agent/sales-activity/imports?matchStatus=needs_review&limit=50'],
   })
+  const marketProposalsQuery = useQuery<{ rows: MarketRecordProposalRow[] }>({
+    queryKey: ['/api/activity-events?eventType=market_record_proposed&matchStatus=needs_review&limit=50'],
+  })
+  const opportunityProposalsQuery = useQuery<{ rows: OpportunityProposalRow[] }>({
+    queryKey: ['/api/activity-events?eventType=opportunity_promotion_proposed&matchStatus=needs_review&limit=50'],
+  })
+  const watchlistQuery = useQuery<IntelWatchlistResponse>({
+    queryKey: ['/api/intel/watchlist?days=30&limit=12'],
+  })
+  const reconciliationQuery = useQuery<ReconciliationResponse>({
+    queryKey: ['/api/automation/reconciliation?limit=25'],
+  })
   const prospectsQuery = useQuery<Prospect[]>({ queryKey: ['/api/prospects'] })
   const outlookQuery = useQuery<OutlookConfig>({ queryKey: ['/api/email/outlook/config'] })
   const inboundQuery = useQuery<InboundConfig>({ queryKey: ['/api/email/inbound/config'] })
@@ -428,8 +530,34 @@ export default function DailyDeskPage() {
     refetchOnMount: 'always',
   })
 
-  const actions = salesBriefQuery.data?.actions || []
+  const watchlistActions = useMemo<SalesBriefAction[]>(() => (
+    (watchlistQuery.data?.signals || []).map((signal) => ({
+      id: signal.id,
+      type: 'market_watch',
+      priority: signal.priority,
+      priorityScore: signal.priorityScore,
+      title: `${signal.change.changeType === 'new' ? 'New option' : 'Market change'}: ${signal.listing.title}`,
+      reason: [
+        signal.change.changeSummary || `${signal.change.changeType} listing signal`,
+        signal.requirement ? `${signal.match?.tier || 'possible'} match for ${signal.requirement.title}` : null,
+      ].filter(Boolean).join(' / '),
+      suggestedAction: signal.suggestedAction,
+      source: 'industrial_intel',
+      dueAt: signal.change.observedAt,
+      listing: signal.listing,
+      automationHints: {
+        href: `/tools/industrial-intel/listings?listingId=${encodeURIComponent(signal.listing.id)}`,
+        propertyMentions: signal.signalKinds,
+      },
+    }))
+  ), [watchlistQuery.data?.signals])
+  const actions = useMemo(
+    () => [...(salesBriefQuery.data?.actions || []), ...watchlistActions],
+    [salesBriefQuery.data?.actions, watchlistActions],
+  )
   const imports = importsQuery.data?.rows || []
+  const marketProposals = marketProposalsQuery.data?.rows || []
+  const opportunityProposals = opportunityProposalsQuery.data?.rows || []
   const prospects = useMemo(
     () => [...(prospectsQuery.data || [])].sort((left, right) => prospectLabel(left).localeCompare(prospectLabel(right))),
     [prospectsQuery.data],
@@ -461,9 +589,54 @@ export default function DailyDeskPage() {
     },
   })
 
+  const marketProposalMutation = useMutation({
+    mutationFn: async ({ proposalId, action }: { proposalId: string; action: 'approve' | 'ignore' }) => {
+      const response = await apiRequest('PATCH', `/api/market-record-proposals/${proposalId}`, { action })
+      return response.json()
+    },
+    onSuccess: (result, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/activity-events?eventType=market_record_proposed&matchStatus=needs_review&limit=50'] })
+      queryClient.invalidateQueries({ queryKey: ['/api/automation/sales-brief?limit=25'] })
+      queryClient.invalidateQueries({ queryKey: ['/api/prospects'] })
+      toast({
+        title: variables.action === 'approve' ? 'Map record approved' : 'Proposal archived',
+        description: variables.action === 'approve'
+          ? result.created ? 'The reviewed record is now on the map.' : 'The proposal was linked to the existing map record.'
+          : 'The proposal will no longer appear in Review.',
+      })
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Could not review proposal', description: error.message, variant: 'destructive' })
+    },
+  })
+
+  const opportunityProposalMutation = useMutation({
+    mutationFn: async ({ proposalId, action }: { proposalId: string; action: 'approve' | 'ignore' }) => {
+      const response = await apiRequest('PATCH', `/api/opportunity-proposals/${proposalId}`, { action })
+      return response.json()
+    },
+    onSuccess: (_result, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/activity-events?eventType=opportunity_promotion_proposed&matchStatus=needs_review&limit=50'] })
+      queryClient.invalidateQueries({ queryKey: ['/api/automation/sales-brief?limit=25'] })
+      toast({
+        title: variables.action === 'approve' ? 'Opportunity created' : 'Proposal archived',
+        description: variables.action === 'approve'
+          ? 'The confirmed activity now has a broker-approved opportunity and starter playbook.'
+          : 'The opportunity proposal will no longer appear in Review.',
+      })
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Could not review opportunity proposal', description: error.message, variant: 'destructive' })
+    },
+  })
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['/api/automation/sales-brief?limit=25'] })
     queryClient.invalidateQueries({ queryKey: ['/api/agent/sales-activity/imports?matchStatus=needs_review&limit=50'] })
+    queryClient.invalidateQueries({ queryKey: ['/api/activity-events?eventType=market_record_proposed&matchStatus=needs_review&limit=50'] })
+    queryClient.invalidateQueries({ queryKey: ['/api/activity-events?eventType=opportunity_promotion_proposed&matchStatus=needs_review&limit=50'] })
+    queryClient.invalidateQueries({ queryKey: ['/api/intel/watchlist?days=30&limit=12'] })
+    queryClient.invalidateQueries({ queryKey: ['/api/automation/reconciliation?limit=25'] })
     queryClient.invalidateQueries({ queryKey: ['/api/email/outlook/config'] })
     queryClient.invalidateQueries({ queryKey: ['/api/email/inbound/config'] })
     queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] })
@@ -473,11 +646,11 @@ export default function DailyDeskPage() {
   const tabCounts: Record<DeskTab, number> = {
     today: queues.today.length,
     waiting: queues.waiting.length,
-    review: queues.review.length + imports.length,
+    review: queues.review.length + imports.length + marketProposals.length + opportunityProposals.length,
     develop: queues.develop.length,
   }
-  const isLoading = salesBriefQuery.isLoading || importsQuery.isLoading
-  const hasError = salesBriefQuery.isError || importsQuery.isError
+  const isLoading = salesBriefQuery.isLoading || importsQuery.isLoading || marketProposalsQuery.isLoading || opportunityProposalsQuery.isLoading
+  const hasError = salesBriefQuery.isError || importsQuery.isError || marketProposalsQuery.isError || opportunityProposalsQuery.isError
   const generatedAt = formatWhen(salesBriefQuery.data?.generatedAt)
   const pulseMetrics = [
     { group: 'Effort', label: 'Touches / 28 days', value: activityPulseQuery.data?.total ?? 0, icon: Activity, tone: 'text-blue-700 bg-blue-50' },
@@ -574,7 +747,7 @@ export default function DailyDeskPage() {
                 <h2 className="text-sm font-semibold text-slate-950">
                   {activeTab === 'today' && 'Revenue-moving actions'}
                   {activeTab === 'waiting' && 'Sent work waiting on others'}
-                  {activeTab === 'review' && 'Activity needing context'}
+                  {activeTab === 'review' && 'Activity and map proposals needing context'}
                   {activeTab === 'develop' && 'Pipeline development'}
                 </h2>
                 <p className="mt-0.5 text-xs text-slate-500">
@@ -608,6 +781,107 @@ export default function DailyDeskPage() {
 
             {!isLoading && activeTab === 'review' ? (
               <div>
+                {marketProposals.map((item) => {
+                  const proposal = item.source_metadata?.proposal
+                  const resolvedCandidate = item.source_metadata?.entityResolution?.candidates?.[0]
+                  return (
+                    <article key={item.id} className="border-b border-slate-200 px-4 py-4 sm:px-5">
+                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_220px]">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className="rounded border-violet-200 bg-violet-50 text-violet-800">
+                              {item.source === 'surveysync_dossier' ? 'SurveySync map proposal' : 'Agent map proposal'}
+                            </Badge>
+                            <span className="text-xs text-slate-500">{formatWhen(item.occurred_at)}</span>
+                            <span className="text-xs font-medium text-slate-500">{item.confidence}% confidence</span>
+                          </div>
+                          <h3 className="mt-2 text-sm font-semibold text-slate-950">{item.company || 'Proposed market record'}</h3>
+                          <p className="mt-1 text-sm text-slate-700">{item.property_address || 'Address not supplied'}</p>
+                          <p className="mt-2 text-xs leading-5 text-slate-500">{item.summary || 'Awaiting broker review.'}</p>
+                          {[proposal?.contactName, proposal?.contactEmail, proposal?.contactPhone].filter(Boolean).length ? (
+                            <p className="mt-2 text-xs text-slate-500">
+                              {[proposal?.contactName, proposal?.contactEmail, proposal?.contactPhone].filter(Boolean).join(' / ')}
+                            </p>
+                          ) : null}
+                          {resolvedCandidate ? (
+                            <div className="mt-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                              <span className="font-semibold">Likely existing {resolvedCandidate.entityType}:</span>{' '}
+                              {resolvedCandidate.label} ({resolvedCandidate.confidence}%)
+                              {resolvedCandidate.signals.length ? ` / ${resolvedCandidate.signals.slice(0, 2).join(', ')}` : ''}
+                            </div>
+                          ) : null}
+                          {item.evidence_url ? (
+                            <a className="mt-2 inline-flex text-xs font-medium text-blue-700 hover:underline" href={item.evidence_url} target="_blank" rel="noreferrer">
+                              Open source evidence
+                            </a>
+                          ) : null}
+                        </div>
+                        <div className="flex items-start gap-2 xl:justify-end">
+                          <Button
+                            size="sm"
+                            disabled={marketProposalMutation.isPending}
+                            onClick={() => marketProposalMutation.mutate({ proposalId: item.id, action: 'approve' })}
+                          >
+                            <MapPin className="h-4 w-4" />
+                            {resolvedCandidate?.entityType === 'prospect' && resolvedCandidate.confidence >= 80 ? 'Approve & link' : 'Approve to map'}
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            title="Archive this proposal"
+                            aria-label="Archive this proposal"
+                            disabled={marketProposalMutation.isPending}
+                            onClick={() => marketProposalMutation.mutate({ proposalId: item.id, action: 'ignore' })}
+                          >
+                            <Archive className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </article>
+                  )
+                })}
+                {opportunityProposals.map((item) => {
+                  const proposal = item.source_metadata?.proposal
+                  return (
+                    <article key={item.id} className="border-b border-slate-200 px-4 py-4 sm:px-5">
+                      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_220px]">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className="rounded border-emerald-200 bg-emerald-50 text-emerald-800">Opportunity proposal</Badge>
+                            <span className="text-xs text-slate-500">{formatWhen(item.occurred_at)}</span>
+                            <span className="text-xs font-medium text-slate-500">{item.confidence}% confidence</span>
+                          </div>
+                          <h3 className="mt-2 text-sm font-semibold text-slate-950">{proposal?.title || item.company || item.subject || 'Proposed opportunity'}</h3>
+                          <p className="mt-1 text-sm text-slate-700">{item.property_address || item.company || 'Confirmed activity context'}</p>
+                          <p className="mt-2 text-xs leading-5 text-slate-500">{item.summary || 'Confirmed activity proposed for promotion.'}</p>
+                          <p className="mt-2 text-xs font-medium text-slate-500">
+                            {proposal?.type?.replace(/_/g, ' ') || 'listing pursuit'} / starts at Target; won or lost is never inferred
+                          </p>
+                        </div>
+                        <div className="flex items-start gap-2 xl:justify-end">
+                          <Button
+                            size="sm"
+                            disabled={opportunityProposalMutation.isPending}
+                            onClick={() => opportunityProposalMutation.mutate({ proposalId: item.id, action: 'approve' })}
+                          >
+                            <BriefcaseBusiness className="h-4 w-4" />
+                            Create pursuit
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            title="Archive this proposal"
+                            aria-label="Archive this proposal"
+                            disabled={opportunityProposalMutation.isPending}
+                            onClick={() => opportunityProposalMutation.mutate({ proposalId: item.id, action: 'ignore' })}
+                          >
+                            <Archive className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </article>
+                  )
+                })}
                 {imports.map((item) => {
                   const selectedProspect = prospectDrafts[item.id] || ''
                   return (
@@ -666,7 +940,7 @@ export default function DailyDeskPage() {
                   )
                 })}
                 {queues.review.map((action) => <ActionRow key={action.id} action={action} />)}
-                {imports.length === 0 && queues.review.length === 0 ? <EmptyQueue tab="review" /> : null}
+                {marketProposals.length === 0 && opportunityProposals.length === 0 && imports.length === 0 && queues.review.length === 0 ? <EmptyQueue tab="review" /> : null}
               </div>
             ) : null}
           </section>
@@ -727,6 +1001,47 @@ export default function DailyDeskPage() {
                 <div><dt className="text-[11px] leading-4 text-slate-500">Overdue</dt><dd className="mt-1 text-base font-semibold text-red-700">{salesBriefQuery.data?.pipelineHealth?.overdueNextActions ?? 0}</dd></div>
                 <div><dt className="text-[11px] leading-4 text-slate-500">Stalled 21d</dt><dd className="mt-1 text-base font-semibold text-amber-700">{salesBriefQuery.data?.pipelineHealth?.stalledProspects ?? 0}</dd></div>
               </dl>
+            </section>
+
+            <section className="rounded-md border border-slate-200 bg-white p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className={cn(
+                    'h-4 w-4',
+                    (reconciliationQuery.data?.summary.high || 0) > 0 ? 'text-red-600' : 'text-emerald-600',
+                  )} />
+                  <h2 className="text-sm font-semibold text-slate-950">Automation data health</h2>
+                </div>
+                <Badge variant="outline" className="rounded bg-slate-50 text-slate-700">
+                  {reconciliationQuery.data?.summary.issues ?? 0}
+                </Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-slate-500">
+                Orphan pins, missing provenance, stale follow-ups, and unresolved review evidence.
+              </p>
+              <div className="mt-3 divide-y divide-slate-100 border-y border-slate-100">
+                {(reconciliationQuery.data?.rows || []).slice(0, 3).map((issue) => {
+                  const href = reconciliationHref(issue)
+                  const content = (
+                    <div className="py-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-xs font-semibold text-slate-900">{issue.label}</p>
+                        <span className={cn(
+                          'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase',
+                          issue.severity === 'high' && 'bg-red-50 text-red-700',
+                          issue.severity === 'medium' && 'bg-amber-50 text-amber-700',
+                          issue.severity === 'low' && 'bg-slate-100 text-slate-600',
+                        )}>{issue.severity}</span>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-slate-500">{issue.reason}</p>
+                    </div>
+                  )
+                  return href ? <Link key={issue.id} href={href} className="block hover:bg-slate-50">{content}</Link> : <div key={issue.id}>{content}</div>
+                })}
+                {!reconciliationQuery.isLoading && (reconciliationQuery.data?.rows.length || 0) === 0 ? (
+                  <p className="py-4 text-xs text-emerald-700">No reconciliation issues found.</p>
+                ) : null}
+              </div>
             </section>
           </aside>
         </div>

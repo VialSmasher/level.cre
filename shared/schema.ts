@@ -10,6 +10,7 @@ import {
   uuid,
   text,
   integer,
+  doublePrecision,
   numeric,
   pgEnum,
   unique,
@@ -64,6 +65,7 @@ export type ContactInteractionType = z.infer<typeof ContactInteraction>;
 export const ProspectSchema = z.object({
   id: z.string(),
   name: z.string(),
+  address: z.string().optional(),
   status: ProspectStatus,
   notes: z.string(),
   geometry: ProspectGeometry,
@@ -85,7 +87,14 @@ export const ProspectSchema = z.object({
   aiMetadata: z.record(z.any()).optional(), // Reserved for AI enrichments/classifications
   // Business information
   businessName: z.string().optional(), // Business name from Google Places
-  websiteUrl: z.string().optional() // Business website URL
+  websiteUrl: z.string().optional(), // Business website URL
+  locationLat: z.number().optional(),
+  locationLng: z.number().optional(),
+  geohash: z.string().optional(),
+  marketKey: z.string().optional(),
+  marketConfidence: z.number().int().min(0).max(100).optional(),
+  marketContextSource: z.string().optional(),
+  marketContextStatus: z.string().optional(),
 });
 
 export const InsertProspectSchema = ProspectSchema.omit({ 
@@ -338,6 +347,14 @@ export const prospects = pgTable("prospects", {
   aiMetadata: jsonb("ai_metadata"), // Reserved for AI enrichment data
   businessName: varchar("business_name"), // Business name from Google Places
   websiteUrl: varchar("website_url"), // Business website URL
+  address: varchar("address"),
+  locationLat: doublePrecision("location_lat"),
+  locationLng: doublePrecision("location_lng"),
+  geohash: varchar("geohash"),
+  marketKey: varchar("market_key"),
+  marketConfidence: integer("market_confidence"),
+  marketContextSource: varchar("market_context_source"),
+  marketContextStatus: varchar("market_context_status").default("unknown"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

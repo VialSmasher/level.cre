@@ -1,6 +1,6 @@
 export const industrialIntelAgentManifest = {
   name: "Level CRE Industrial Intel",
-  version: "2026-06-15",
+  version: "2026-08-08",
   purpose:
     "Agent-facing contract for SurveySync and Industrial Intel inventory, dossiers, source assets, facts, requirements, and client survey maps.",
   auth: {
@@ -28,6 +28,8 @@ export const industrialIntelAgentManifest = {
     "Extracted facts should default to proposed status; approved status is a broker quality gate.",
     "Client-facing survey views must not expose brokerNotes or duplicate-cleanup/internal notes.",
     "Prefer existing dossiers by normalized address before creating new dossiers.",
+    "Resolve map identity before proposing a canonical record; ambiguous matches remain in Daily Desk Review.",
+    "Agents may propose map records and opportunities but may not approve them or infer won/lost stages.",
     "When extraction confidence is low or the property is an intersection/land parcel, keep address nullable and store location_description as a fact.",
   ],
   capabilities: {
@@ -46,6 +48,7 @@ export const industrialIntelAgentManifest = {
     inventory: {
       endpoints: [
         { method: "GET", path: "/api/intel/listings", description: "List current inventory/listings." },
+        { method: "GET", path: "/api/intel/watchlist", description: "Read recent availability, brochure, occupancy, pricing, and listing changes ranked against active requirements." },
         { method: "POST", path: "/api/intel/manual-listings/upload", description: "Bulk ingest structured listing records from CSV/XLSX-style rows." },
       ],
     },
@@ -55,6 +58,7 @@ export const industrialIntelAgentManifest = {
         { method: "POST", path: "/api/intel/dossiers", description: "Create a property dossier." },
         { method: "GET", path: "/api/intel/dossiers/:id", description: "Read dossier, facts, assets, and linked listing." },
         { method: "PATCH", path: "/api/intel/dossiers/:id", description: "Patch dossier metadata." },
+        { method: "POST", path: "/api/intel/dossiers/:id/map-proposal", description: "Send a geocoded dossier to the Daily Desk Review queue; it does not create a map record until broker approval." },
         { method: "POST", path: "/api/intel/dossiers/:id/facts", description: "Create or upsert one proposed/approved/rejected fact." },
         { method: "PATCH", path: "/api/intel/dossiers/:id/facts/:factId", description: "Patch a dossier fact after review." },
       ],
@@ -97,6 +101,7 @@ export const industrialIntelAgentManifest = {
         { method: "GET", path: "/api/intel/requirements", description: "List requirements." },
         { method: "POST", path: "/api/intel/requirements", description: "Create a structured requirement." },
         { method: "GET", path: "/api/intel/requirements/:id", description: "Read requirement detail." },
+        { method: "GET", path: "/api/intel/requirements/:id/matches", description: "Rank live inventory as strong, possible, or stretch matches with explainable reasons and gaps." },
         { method: "PATCH", path: "/api/intel/requirements/:id", description: "Patch requirement fields." },
         { method: "PUT", path: "/api/intel/requirements/:id/preferences", description: "Replace structured requirement preferences." },
       ],

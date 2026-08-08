@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import jwt from "jsonwebtoken";
 import { storage } from "./storage";
 import { ensureUser } from './ensureUser';
-import { getUserId, requireAuth, requireSalesActivityAuth, getUserFromBearerAuthHeader } from "./auth";
+import { getUserId, requireAuth, requireMarketRecordProposalAuth, requireSalesActivityAuth, getUserFromBearerAuthHeader } from "./auth";
 import { z } from 'zod';
 import { ProspectGeometry, ProspectStatus, FollowUpTimeframe } from '@level-cre/shared/schema';
 import { createCipheriv, createDecipheriv, createHmac, createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
@@ -11,6 +11,26 @@ import * as demo from './demoStore';
 
 function isDemo(req: Request): boolean {
   return req.headers['x-demo-mode'] === 'true' || process.env.VITE_DEMO_MODE === '1' || process.env.DEMO_MODE === '1';
+}
+
+function rejectDirectAgentMapWrite(req: Request, res: Response): boolean {
+  const role = String((req as any)?.user?.role || '');
+  if (!['agent', 'market_record_agent', 'sales_activity_agent'].includes(role)) return false;
+  res.status(403).json({
+    message: 'Agent credentials may propose market records but cannot write directly to the map.',
+    proposalEndpoint: '/api/agent/market-record-proposals',
+  });
+  return true;
+}
+
+function rejectAgentBrokerDecision(req: Request, res: Response, proposalEndpoint: string): boolean {
+  const role = String((req as any)?.user?.role || '');
+  if (!['agent', 'market_record_agent', 'sales_activity_agent'].includes(role)) return false;
+  res.status(403).json({
+    message: 'Agent credentials may propose this change but broker approval requires a signed-in user.',
+    proposalEndpoint,
+  });
+  return true;
 }
 import { createClient } from '@supabase/supabase-js';
 import { pool, db } from './db';
@@ -51,6 +71,7 @@ import {
 } from './lib/emailProspectMatching';
 import { buildPipelineHealth } from './lib/pipelineHealth';
 import { buildActivityPulse } from './lib/activityPulse';
+import { buildAutomationReconciliation } from './lib/automationReconciliation';
 import { rankEmailCleanup, rankFollowUpReminder } from './lib/salesBriefRanking';
 import { findSupabaseAuthUserByEmail } from './lib/supabaseAuthUsers';
 import {
@@ -69,6 +90,17 @@ import {
   listOpportunities,
   recordOpportunityPlaybookStep,
 } from './lib/opportunityService';
+import { resolveMarketEntitiesForUser } from './lib/marketEntityResolver';
+import {
+  MarketRecordProposalInputSchema,
+  MarketRecordProposalReviewSchema,
+  submitMarketRecordProposal,
+} from './lib/marketRecordProposalService';
+import {
+  OpportunityPromotionProposalInputSchema,
+  OpportunityPromotionProposalReviewSchema,
+  submitOpportunityPromotionProposal,
+} from './lib/opportunityProposalService';
 
 const PursuitBulkImportRecordSchema = z.object({
   sourceRow: z.number().int().positive(),
@@ -134,7 +166,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     : null;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
   const supabaseAdmin = (supabaseUrl && supabaseServiceKey) ? createClient(supabaseUrl, supabaseServiceKey) : null;
-  const prospectSelect = 'id,user_id,name,status,notes,geometry,submarket_id,last_contact_date,follow_up_timeframe,follow_up_due_date,contact_name,contact_email,contact_phone,contact_company,size,acres,business_name,website_url,created_at,address,location_lat,location_lng';
+  const prospectSelect = 'id,user_id,name,status,notes,geometry,submarket_id,last_contact_date,follow_up_timeframe,follow_up_due_date,contact_name,contact_email,contact_phone,contact_company,business_name,website_url,created_at,address,location_lat,location_lng,geohash,building_sf,lot_size_acres,ai_metadata,market_key,market_confidence,market_context_source,market_context_status';
   const listingSelect = 'id,user_id,title,address,lat,lng,submarket,deal_type,size,price,created_at,archived_at';
 
   function shouldUseSupabaseReadFallback(error: unknown): boolean {
@@ -235,8 +267,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const business = data.businessName?.trim();
     const company = data.contactCompany?.trim();
     const name = data.name?.trim();
-    if (business) return business;
     if (name && !isPlaceholderProspectName(name)) return name;
+    if (business) return business;
     if (company) return company;
     return geometryFallbackName(data.geometry);
   }
@@ -1222,8 +1254,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   function mapProspectRow(row: any) {
-    const parsedSize = row.size !== null && row.size !== undefined && row.size !== ''
-      ? Number(row.size)
+    const parsedSize = row.building_sf !== null && row.building_sf !== undefined && row.building_sf !== ''
+      ? Number(row.building_sf)
       : undefined;
     return {
       id: row.id,
@@ -1240,10 +1272,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       contactPhone: row.contact_phone || undefined,
       contactCompany: row.contact_company || undefined,
       buildingSf: Number.isFinite(parsedSize as number) ? parsedSize : undefined,
-      lotSizeAcres: row.acres !== null && row.acres !== undefined ? Number(row.acres) : undefined,
-      aiMetadata: undefined,
+      lotSizeAcres: row.lot_size_acres !== null && row.lot_size_acres !== undefined ? Number(row.lot_size_acres) : undefined,
+      aiMetadata: row.ai_metadata || undefined,
       businessName: row.business_name || undefined,
       websiteUrl: row.website_url || undefined,
+      address: row.address || undefined,
+      locationLat: row.location_lat ?? undefined,
+      locationLng: row.location_lng ?? undefined,
+      geohash: row.geohash || undefined,
+      marketKey: row.market_key || undefined,
+      marketConfidence: row.market_confidence ?? undefined,
+      marketContextSource: row.market_context_source || undefined,
+      marketContextStatus: row.market_context_status || undefined,
       createdDate: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
     };
   }
@@ -2659,6 +2699,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/listings/:id/prospects/bulk', requireAuth, async (req, res) => {
     try {
+      if (rejectDirectAgentMapWrite(req, res)) return;
       await requireEditAccess(req, req.params.id);
       const parsed = PursuitBulkImportSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -3717,6 +3758,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/prospects', requireAuth, async (req, res) => {
     const t0 = Date.now();
     try {
+      if (rejectDirectAgentMapWrite(req, res)) return;
       const userId = getUserId(req);
       const email = (req as any)?.user?.email || null;
       if (!isDemo(req)) {
@@ -3743,6 +3785,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         aiMetadata: z.record(z.any()).nullable().optional(),
         businessName: z.string().nullable().optional(),
         websiteUrl: z.string().nullable().optional(),
+        address: z.string().nullable().optional(),
+        locationLat: z.number().min(-90).max(90).nullable().optional(),
+        locationLng: z.number().min(-180).max(180).nullable().optional(),
+        geohash: z.string().nullable().optional(),
+        marketKey: z.string().nullable().optional(),
+        marketConfidence: z.number().int().min(0).max(100).nullable().optional(),
+        marketContextSource: z.string().nullable().optional(),
+        marketContextStatus: z.string().nullable().optional(),
       });
 
       const parseResult = ProspectInputSchema.safeParse(req.body);
@@ -3760,6 +3810,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
         await demo.addProspect(userId, created);
         return res.status(201).json(created);
+      }
+
+      if (parseResult.data.marketKey) {
+        const duplicateResult = await pool.query(
+          'SELECT id FROM public.prospects WHERE user_id = $1 AND market_key = $2 ORDER BY created_at ASC LIMIT 1',
+          [userId, parseResult.data.marketKey],
+        );
+        if (duplicateResult.rows[0]?.id) {
+          const existingProspect = await storage.getProspect(duplicateResult.rows[0].id, userId);
+          if (existingProspect) {
+            return res.status(200).json({ ...existingProspect, deduplicated: true });
+          }
+        }
       }
 
       const prospect = await storage.createProspect({ ...parseResult.data, name: cleanProspectName(parseResult.data), userId });
@@ -3782,6 +3845,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/prospects/:id', requireAuth, async (req, res) => {
     try {
+      if (rejectDirectAgentMapWrite(req, res)) return;
       const userId = getUserId(req);
       const email = (req as any)?.user?.email || null;
       if (!isDemo(req)) {
@@ -3805,6 +3869,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         aiMetadata: z.record(z.any()).nullable().optional(),
         businessName: z.string().nullable().optional(),
         websiteUrl: z.string().nullable().optional(),
+        address: z.string().nullable().optional(),
+        locationLat: z.number().min(-90).max(90).nullable().optional(),
+        locationLng: z.number().min(-180).max(180).nullable().optional(),
+        geohash: z.string().nullable().optional(),
+        marketKey: z.string().nullable().optional(),
+        marketConfidence: z.number().int().min(0).max(100).nullable().optional(),
+        marketContextSource: z.string().nullable().optional(),
+        marketContextStatus: z.string().nullable().optional(),
       }).strict();
 
       const parseResult = ProspectPatchSchema.safeParse(req.body);
@@ -3838,6 +3910,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete('/api/prospects/:id', requireAuth, async (req, res) => {
     try {
+      if (rejectDirectAgentMapWrite(req, res)) return;
       const userId = getUserId(req);
       if (isDemo(req)) {
         await demo.deleteProspect(userId, req.params.id);
@@ -3953,6 +4026,311 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting submarket:", error);
       res.status(500).json({ message: "Failed to delete submarket" });
+    }
+  });
+
+  app.post('/api/agent/market-record-proposals', requireMarketRecordProposalAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) await ensureUser(userId, email);
+      const parsed = MarketRecordProposalInputSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid market record proposal', error: parsed.error.errors });
+      }
+      if (isDemo(req)) {
+        return res.status(202).json({ skipped: true, reason: 'demo_mode', proposal: parsed.data });
+      }
+
+      const summary = await submitMarketRecordProposal({
+        pool,
+        userId,
+        proposal: parsed.data,
+        agentName: (req as any)?.user?.agentName || null,
+      });
+      res.status(202).json(summary);
+    } catch (error) {
+      console.error('Error submitting market record proposal:', error);
+      res.status(500).json({ message: 'Failed to submit market record proposal' });
+    }
+  });
+
+  app.post('/api/agent/entity-resolution', requireMarketRecordProposalAuth, async (req, res) => {
+    try {
+      const parsed = z.object({
+        address: z.string().trim().max(1000).nullable().optional(),
+        latitude: z.number().min(-90).max(90).nullable().optional(),
+        longitude: z.number().min(-180).max(180).nullable().optional(),
+        placeId: z.string().trim().max(240).nullable().optional(),
+        phone: z.string().trim().max(80).nullable().optional(),
+        email: z.string().trim().email().max(320).toLowerCase().nullable().optional(),
+        websiteUrl: z.string().trim().url().max(2000).nullable().optional(),
+        businessName: z.string().trim().max(240).nullable().optional(),
+      }).refine((value) => Object.values(value).some((candidate) => candidate != null && candidate !== ''), {
+        message: 'At least one identifying field is required',
+      }).safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid entity resolution request', error: parsed.error.errors });
+      }
+      if (isDemo(req)) return res.json({ decision: 'create_new', candidates: [], topCandidate: null });
+      const result = await resolveMarketEntitiesForUser({ pool, userId: getUserId(req), input: parsed.data });
+      res.json(result);
+    } catch (error) {
+      console.error('Error resolving market entity:', error);
+      res.status(500).json({ message: 'Failed to resolve market entity' });
+    }
+  });
+
+  app.patch('/api/market-record-proposals/:id', requireAuth, async (req, res) => {
+    try {
+      if (rejectAgentBrokerDecision(req, res, '/api/agent/market-record-proposals')) return;
+      const userId = getUserId(req);
+      const review = MarketRecordProposalReviewSchema.safeParse(req.body || {});
+      if (!review.success) {
+        return res.status(400).json({ message: 'Invalid market record proposal review', error: review.error.errors });
+      }
+      if (isDemo(req)) {
+        return res.json({ id: req.params.id, action: review.data.action, skipped: true, reason: 'demo_mode' });
+      }
+
+      const { rows } = await pool.query(
+        `
+          SELECT id, source, external_event_id, evidence_status, match_status, prospect_id,
+                 property_address, confidence, source_metadata
+          FROM public.activity_events
+          WHERE id = $1 AND user_id = $2 AND event_type = 'market_record_proposed'
+          LIMIT 1
+        `,
+        [req.params.id, userId],
+      );
+      const event = rows[0];
+      if (!event) return res.status(404).json({ message: 'Market record proposal not found' });
+
+      if (review.data.action === 'ignore') {
+        await pool.query(
+          `
+            UPDATE public.activity_events
+            SET match_status = 'ignored', match_reason = 'broker_rejected_market_record', updated_at = now(),
+                source_metadata = COALESCE(source_metadata, '{}'::jsonb) || $3::jsonb
+            WHERE id = $1 AND user_id = $2
+          `,
+          [req.params.id, userId, JSON.stringify({ review: { action: 'ignore', reviewedAt: new Date().toISOString() } })],
+        );
+        return res.json({ id: req.params.id, action: 'ignore', matchStatus: 'ignored' });
+      }
+
+      if (event.match_status === 'matched' && event.prospect_id) {
+        return res.json({ id: req.params.id, action: 'approve', prospectId: event.prospect_id, created: false, alreadyReviewed: true });
+      }
+
+      const proposalResult = MarketRecordProposalInputSchema.safeParse(event.source_metadata?.proposal);
+      if (!proposalResult.success) {
+        return res.status(409).json({ message: 'Proposal payload is missing or no longer valid' });
+      }
+      const proposal = proposalResult.data;
+      const marketKey = proposal.placeId
+        ? `google-place:${proposal.placeId}`
+        : `proposal:${proposal.source}:${proposal.externalId}`;
+      const resolution = await resolveMarketEntitiesForUser({
+        pool,
+        userId,
+        input: {
+          address: proposal.address,
+          latitude: proposal.latitude,
+          longitude: proposal.longitude,
+          placeId: proposal.placeId,
+          phone: proposal.contactPhone,
+          email: proposal.contactEmail,
+          websiteUrl: proposal.websiteUrl,
+          businessName: proposal.businessName,
+        },
+      });
+      let existingProspectId = review.data.prospectId || null;
+      if (existingProspectId) {
+        const owned = await pool.query(
+          'SELECT id FROM public.prospects WHERE id = $1 AND user_id = $2 LIMIT 1',
+          [existingProspectId, userId],
+        );
+        if (!owned.rows[0]) return res.status(400).json({ message: 'Selected prospect was not found' });
+      } else {
+        const prospectCandidates = resolution.candidates.filter((candidate) => candidate.entityType === 'prospect');
+        const resolvedProspect = prospectCandidates[0]?.confidence >= 80
+          && (!prospectCandidates[1] || prospectCandidates[0].confidence - prospectCandidates[1].confidence >= 10)
+          ? prospectCandidates[0]
+          : null;
+        existingProspectId = resolvedProspect?.id || null;
+      }
+
+      let prospect = existingProspectId
+        ? await storage.getProspect(existingProspectId, userId)
+        : undefined;
+      const created = !prospect;
+      if (!prospect) {
+        prospect = await storage.createProspect({
+          userId,
+          name: proposal.address,
+          address: proposal.address,
+          status: 'prospect',
+          notes: proposal.notes || '',
+          geometry: { type: 'Point', coordinates: [proposal.longitude, proposal.latitude] },
+          locationLat: proposal.latitude,
+          locationLng: proposal.longitude,
+          followUpDueDate: null,
+          contactName: proposal.contactName || undefined,
+          contactEmail: proposal.contactEmail || undefined,
+          contactPhone: proposal.contactPhone || undefined,
+          contactCompany: proposal.businessName || undefined,
+          businessName: proposal.businessName || null,
+          websiteUrl: proposal.websiteUrl || null,
+          marketKey,
+          marketConfidence: proposal.confidence,
+          marketContextSource: proposal.source,
+          marketContextStatus: proposal.evidenceStatus,
+          aiMetadata: {
+            marketProposal: {
+              eventId: event.id,
+              source: proposal.source,
+              externalId: proposal.externalId,
+              evidenceUrl: proposal.evidenceUrl || null,
+            },
+            ...(proposal.placeId || proposal.googleMapsUrl ? {
+              googlePlace: {
+                ...(proposal.placeId ? { placeId: proposal.placeId } : {}),
+                ...(proposal.googleMapsUrl ? { googleMapsUrl: proposal.googleMapsUrl } : {}),
+              },
+            } : {}),
+          },
+        });
+      }
+
+      await pool.query(
+        `
+          UPDATE public.activity_events
+          SET prospect_id = $3, match_status = 'matched', match_reason = $4,
+              evidence_status = 'confirmed', confidence = 100, updated_at = now(),
+              source_metadata = COALESCE(source_metadata, '{}'::jsonb) || $5::jsonb
+          WHERE id = $1 AND user_id = $2
+        `,
+        [
+          req.params.id,
+          userId,
+          prospect.id,
+          created ? 'broker_approved_market_record' : 'broker_linked_existing_market_record',
+          JSON.stringify({ review: { action: 'approve', reviewedAt: new Date().toISOString(), created } }),
+        ],
+      );
+      res.json({
+        id: req.params.id,
+        action: 'approve',
+        prospectId: prospect.id,
+        created,
+        prospect,
+        entityResolution: {
+          decision: resolution.decision,
+          linkedCandidateId: created ? null : prospect.id,
+        },
+      });
+    } catch (error) {
+      console.error('Error reviewing market record proposal:', error);
+      res.status(500).json({ message: 'Failed to review market record proposal' });
+    }
+  });
+
+  app.post('/api/agent/opportunity-proposals', requireSalesActivityAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = OpportunityPromotionProposalInputSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid opportunity proposal', error: parsed.error.errors });
+      }
+      if (isDemo(req)) return res.status(202).json({ skipped: true, reason: 'demo_mode', proposal: parsed.data });
+      const result = await submitOpportunityPromotionProposal({
+        pool,
+        userId,
+        input: parsed.data,
+        agentName: (req as any)?.user?.agentName || null,
+      });
+      res.status(202).json(result);
+    } catch (error) {
+      console.error('Error submitting opportunity proposal:', error);
+      res.status(400).json({ message: error instanceof Error ? error.message : 'Failed to submit opportunity proposal' });
+    }
+  });
+
+  app.patch('/api/opportunity-proposals/:id', requireAuth, async (req, res) => {
+    try {
+      if (rejectAgentBrokerDecision(req, res, '/api/agent/opportunity-proposals')) return;
+      const userId = getUserId(req);
+      const review = OpportunityPromotionProposalReviewSchema.safeParse(req.body || {});
+      if (!review.success) {
+        return res.status(400).json({ message: 'Invalid opportunity proposal review', error: review.error.errors });
+      }
+      if (isDemo(req)) return res.json({ id: req.params.id, action: review.data.action, skipped: true });
+      const { rows } = await pool.query(`
+        SELECT id, match_status, opportunity_id, source_metadata
+        FROM public.activity_events
+        WHERE id = $1 AND user_id = $2 AND event_type = 'opportunity_promotion_proposed'
+        LIMIT 1
+      `, [req.params.id, userId]);
+      const event = rows[0];
+      if (!event) return res.status(404).json({ message: 'Opportunity proposal not found' });
+      if (review.data.action === 'ignore') {
+        await pool.query(`
+          UPDATE public.activity_events
+          SET match_status = 'ignored', match_reason = 'broker_rejected_opportunity_proposal', updated_at = now(),
+              source_metadata = COALESCE(source_metadata, '{}'::jsonb) || $3::jsonb
+          WHERE id = $1 AND user_id = $2
+        `, [req.params.id, userId, JSON.stringify({ review: { action: 'ignore', reviewedAt: new Date().toISOString() } })]);
+        return res.json({ id: req.params.id, action: 'ignore', matchStatus: 'ignored' });
+      }
+      if (event.match_status === 'matched' && event.opportunity_id) {
+        return res.json({ id: req.params.id, action: 'approve', opportunityId: event.opportunity_id, alreadyReviewed: true });
+      }
+      const proposalResult = OpportunityPromotionProposalInputSchema.safeParse(event.source_metadata?.proposal);
+      if (!proposalResult.success) {
+        return res.status(409).json({ message: 'Opportunity proposal payload is missing or no longer valid' });
+      }
+      const proposal = proposalResult.data;
+      const opportunity = await createOpportunity({
+        pool,
+        userId,
+        input: OpportunityCreateSchema.parse({
+          type: proposal.type,
+          title: proposal.title,
+          company: proposal.company,
+          contactName: proposal.contactName,
+          contactEmail: proposal.contactEmail,
+          propertyAddress: proposal.propertyAddress,
+          prospectId: proposal.prospectId,
+          listingId: proposal.listingId,
+          confidence: Math.max(80, proposal.confidence),
+          source: 'broker_approved_agent_proposal',
+          sourceEventId: proposal.sourceEventId,
+          notes: proposal.reason,
+          metadata: {
+            proposalEventId: event.id,
+            sourceActivityEventId: proposal.sourceEventId,
+            ...proposal.metadata,
+          },
+        }),
+      }) as any;
+      await pool.query(`
+        UPDATE public.activity_events
+        SET opportunity_id = $3, match_status = 'matched', match_reason = 'broker_approved_opportunity_proposal',
+            evidence_status = 'confirmed', confidence = 100, updated_at = now(),
+            source_metadata = COALESCE(source_metadata, '{}'::jsonb) || $4::jsonb
+        WHERE id = $1 AND user_id = $2
+      `, [req.params.id, userId, opportunity.id, JSON.stringify({ review: { action: 'approve', reviewedAt: new Date().toISOString() } })]);
+      await pool.query(`
+        UPDATE public.activity_events
+        SET opportunity_id = COALESCE(opportunity_id, $3), updated_at = now()
+        WHERE id = $1 AND user_id = $2
+      `, [proposal.sourceEventId, userId, opportunity.id]);
+      res.json({ id: req.params.id, action: 'approve', opportunityId: opportunity.id, opportunity });
+    } catch (error) {
+      if (error instanceof OpportunityServiceError) return res.status(error.status).json({ message: error.message });
+      console.error('Error reviewing opportunity proposal:', error);
+      res.status(500).json({ message: 'Failed to review opportunity proposal' });
     }
   });
 
@@ -4154,6 +4532,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/opportunities', requireAuth, async (req, res) => {
     try {
+      if (rejectAgentBrokerDecision(req, res, '/api/agent/opportunity-proposals')) return;
       const userId = getUserId(req);
       const parsed = OpportunityCreateSchema.safeParse(req.body || {});
       if (!parsed.success) return res.status(400).json({ message: 'Invalid opportunity', error: parsed.error.errors });
@@ -4169,6 +4548,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/opportunities/:id/stage', requireAuth, async (req, res) => {
     try {
+      if (rejectAgentBrokerDecision(req, res, '/api/agent/opportunity-proposals')) return;
       const userId = getUserId(req);
       const parsed = OpportunityStageChangeSchema.safeParse(req.body || {});
       if (!parsed.success) return res.status(400).json({ message: 'Invalid opportunity stage change', error: parsed.error.errors });
@@ -4184,6 +4564,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch('/api/opportunities/:id/playbook', requireAuth, async (req, res) => {
     try {
+      if (rejectAgentBrokerDecision(req, res, '/api/agent/opportunity-proposals')) return;
       const userId = getUserId(req);
       const parsed = OpportunityPlaybookStepSchema.safeParse(req.body || {});
       if (!parsed.success) return res.status(400).json({ message: 'Invalid opportunity playbook step', error: parsed.error.errors });
@@ -5939,6 +6320,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error building automation sales brief:', error);
       res.status(500).json({ message: 'Failed to build sales brief' });
+    }
+  });
+
+  app.get('/api/automation/reconciliation', requireAuth, async (req, res) => {
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 250);
+      if (isDemo(req)) {
+        return res.json({
+          generatedAt: new Date().toISOString(),
+          summary: { issues: 0, returned: 0, high: 0, medium: 0, low: 0 },
+          rows: [],
+        });
+      }
+      const report = await buildAutomationReconciliation({ pool, userId: getUserId(req), limit });
+      res.json(report);
+    } catch (error) {
+      console.error('Error reconciling automation data:', error);
+      res.status(500).json({ message: 'Failed to reconcile automation data' });
     }
   });
 

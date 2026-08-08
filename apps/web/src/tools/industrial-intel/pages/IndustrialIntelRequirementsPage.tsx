@@ -64,9 +64,21 @@ type IntelListing = {
 type RequirementMatch = {
   listing: IntelListing;
   score: number;
-  tier: "strong" | "adjacent" | "review";
+  tier: "strong" | "possible" | "stretch";
   reasons: string[];
   warnings: string[];
+};
+
+type RequirementMatchesResponse = {
+  generatedAt: string;
+  scoringVersion: string;
+  matches: RequirementMatch[];
+  summary: {
+    activeListings: number;
+    strong: number;
+    possible: number;
+    stretch: number;
+  };
 };
 
 type DecisionValue = "shortlist" | "maybe" | "rejected";
@@ -300,189 +312,6 @@ function getRequirementConstraintChips(requirement: IntelRequirement) {
     requirement.powerNotes ? "power noted" : "",
     requirement.officeNotes ? "office noted" : "",
   ].filter(Boolean);
-}
-
-function normalizeMatchText(value: string | null | undefined) {
-  return (value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-function uniqueValues(values: string[]) {
-  return Array.from(new Set(values.filter(Boolean)));
-}
-
-function getRequirementAreaTokens(requirement: IntelRequirement) {
-  const areaText = normalizeMatchText([
-    requirement.submarket,
-    requirement.market,
-    requirement.specialNotes,
-    requirement.timingNotes,
-  ].filter(Boolean).join(" "));
-
-  const knownAreas = [
-    "south edmonton",
-    "southeast",
-    "south east",
-    "sherwood park",
-    "leduc",
-    "nisku",
-    "acheson",
-    "northwest",
-    "north west",
-    "west edmonton",
-    "fort saskatchewan",
-    "st albert",
-    "edmonton",
-    "calgary",
-  ];
-
-  const detected = knownAreas.filter((area) => areaText.includes(area));
-  if (requirement.submarket) detected.push(normalizeMatchText(requirement.submarket));
-  if (requirement.market) detected.push(normalizeMatchText(requirement.market));
-  return uniqueValues(detected);
-}
-
-function listingMatchesArea(listing: IntelListing, areaTokens: string[]) {
-  if (areaTokens.length === 0) return false;
-  const listingArea = normalizeMatchText([listing.submarket, listing.market, listing.address, listing.title].filter(Boolean).join(" "));
-  if (!listingArea) return false;
-  return areaTokens.some((area) => listingArea.includes(area) || area.includes(listingArea));
-}
-
-function scoreListingForRequirement(requirement: IntelRequirement, listing: IntelListing): RequirementMatch {
-  let score = 0;
-  const reasons: string[] = [];
-  const warnings: string[] = [];
-  const dealType = normalizeMatchText(requirement.dealType);
-  const listingType = normalizeMatchText(listing.listingType);
-  const areaTokens = getRequirementAreaTokens(requirement);
-  const listingText = normalizeMatchText([listing.title, listing.address, listing.submarket, listing.market, listing.sourceName].filter(Boolean).join(" "));
-
-  if (dealType === "either" || dealType === listingType || (dealType === "lease" && listingType === "sublease")) {
-    score += 22;
-    reasons.push(`${listing.listingType} aligns with the requirement`);
-  } else {
-    warnings.push(`Deal type mismatch: requirement is ${requirement.dealType}, listing is ${listing.listingType}`);
-  }
-
-  if (listingMatchesArea(listing, areaTokens)) {
-    score += 24;
-    reasons.push(`Area matches ${listing.submarket || listing.market || "the target geography"}`);
-  } else if (requirement.submarket || requirement.specialNotes) {
-    score += 6;
-    warnings.push("Target geography needs broker review");
-  } else {
-    score += 8;
-    warnings.push("Requirement area is not structured yet");
-  }
-
-  if (listing.availableSf && (requirement.minSf || requirement.maxSf)) {
-    const minSf = requirement.minSf || 0;
-    const maxSf = requirement.maxSf || Number.POSITIVE_INFINITY;
-    if (listing.availableSf >= minSf && listing.availableSf <= maxSf) {
-      score += 30;
-      reasons.push(`Size fits at ${listing.availableSf.toLocaleString()} SF`);
-    } else {
-      const lowBound = minSf ? minSf * 0.75 : 0;
-      const highBound = Number.isFinite(maxSf) ? maxSf * 1.25 : Number.POSITIVE_INFINITY;
-      if (listing.availableSf >= lowBound && listing.availableSf <= highBound) {
-        score += 15;
-        reasons.push(`Size is adjacent at ${listing.availableSf.toLocaleString()} SF`);
-      } else {
-        warnings.push(`Size is outside target at ${listing.availableSf.toLocaleString()} SF`);
-      }
-    }
-  } else if (listing.assetType === "land" && requirement.minYardAcres && listing.landAcres) {
-    if (listing.landAcres >= requirement.minYardAcres) {
-      score += 20;
-      reasons.push(`Land size supports yard need at ${listing.landAcres.toLocaleString()} ac`);
-    }
-  } else {
-    score += 4;
-    warnings.push("Size data is missing or incomplete");
-  }
-
-  if (requirement.maxBudgetPsf) {
-    if (listing.leaseRatePsf && listing.leaseRatePsf <= requirement.maxBudgetPsf) {
-      score += 8;
-      reasons.push(`Lease rate is within budget at ${formatPsf(listing.leaseRatePsf)}`);
-    } else if (listing.leaseRatePsf) {
-      warnings.push(`Lease rate exceeds budget at ${formatPsf(listing.leaseRatePsf)}`);
-    } else if (dealType !== "sale") {
-      warnings.push("Lease rate is missing");
-    }
-  }
-
-  if (requirement.minClearHeightFt) {
-    if (listing.clearHeightFt && listing.clearHeightFt >= requirement.minClearHeightFt) {
-      score += 8;
-      reasons.push(`Clear height meets target at ${listing.clearHeightFt}'`);
-    } else if (listing.clearHeightFt) {
-      warnings.push(`Clear height is below target at ${listing.clearHeightFt}'`);
-    } else {
-      warnings.push("Clear height needs verification");
-    }
-  }
-
-  if (requirement.minYardAcres && listing.assetType !== "land") {
-    if (listing.landAcres && listing.landAcres >= requirement.minYardAcres) {
-      score += 7;
-      reasons.push(`Yard/land area supports ${requirement.minYardAcres} ac need`);
-    } else {
-      warnings.push("Yard requirement needs verification");
-    }
-  }
-
-  if (requirement.requiredDockDoors || requirement.requiredGradeDoors) {
-    const loadingLanguage = ["dock", "loading", "grade", "drive in", "drive-in"].some((term) => listingText.includes(term));
-    if (loadingLanguage) {
-      score += 5;
-      reasons.push("Listing language references loading access");
-    } else {
-      warnings.push("Door count/loading needs verification");
-    }
-  }
-
-  if (requirement.powerNotes) {
-    if (listingText.includes("power") || listingText.includes("manufacturing") || listingText.includes("shop")) {
-      score += 8;
-      reasons.push("Listing language may support power/manufacturing use");
-    } else {
-      warnings.push("Power requirement cannot be verified from listing data");
-    }
-  }
-
-  if (listing.latitude && listing.longitude) {
-    score += 5;
-    reasons.push("Mappable for client survey");
-  } else {
-    warnings.push("Needs coordinates before map-ready survey");
-  }
-
-  if (listing.brochureUrl || listing.sourceUrl) {
-    score += 4;
-    reasons.push("Source link available");
-  } else {
-    warnings.push("No brochure/source link attached");
-  }
-
-  if (listing.dataQualityStatus === "review") {
-    score -= 8;
-    warnings.push("Listing is flagged for data review");
-  }
-
-  if (requirement.isOffMarketSearchEnabled && score < 45) {
-    score += 4;
-    warnings.push("May be useful as off-market comp context");
-  }
-
-  const boundedScore = Math.max(0, Math.min(100, score));
-  return {
-    listing,
-    score: boundedScore,
-    tier: boundedScore >= 70 ? "strong" : boundedScore >= 45 ? "adjacent" : "review",
-    reasons,
-    warnings,
-  };
 }
 
 function extractNumber(value: string | undefined) {
@@ -802,7 +631,7 @@ function MatchCard({
     <div className={`rounded-2xl border p-4 ${
       match.tier === "strong"
         ? "border-emerald-200 bg-emerald-50/60"
-        : match.tier === "adjacent"
+        : match.tier === "possible"
           ? "border-blue-200 bg-blue-50/50"
           : "border-slate-200 bg-white"
     }`}>
@@ -813,11 +642,11 @@ function MatchCard({
             <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
               match.tier === "strong"
                 ? "bg-emerald-100 text-emerald-800"
-                : match.tier === "adjacent"
+                : match.tier === "possible"
                   ? "bg-blue-100 text-blue-800"
                   : "bg-slate-100 text-slate-700"
             }`}>
-              {match.tier === "strong" ? "Strong match" : match.tier === "adjacent" ? "Compatible adjacent" : "Review later"}
+              {match.tier === "strong" ? "Strong match" : match.tier === "possible" ? "Possible match" : "Stretch"}
             </span>
             {decision && (
               <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
@@ -925,11 +754,13 @@ export default function IndustrialIntelRequirementsPage() {
     queryKey: ["/api/intel/requirements"],
   });
 
-  const { data: listings = [], isLoading: isLoadingListings } = useQuery<IntelListing[]>({
-    queryKey: ["/api/intel/listings"],
-  });
-
   const selectedRequirement = requirements.find((requirement) => requirement.id === selectedRequirementId) || requirements[0] || null;
+  const requirementMatchesQuery = useQuery<RequirementMatchesResponse>({
+    queryKey: selectedRequirement
+      ? [`/api/intel/requirements/${selectedRequirement.id}/matches?limit=250`]
+      : ["/api/intel/requirements/_/matches"],
+    enabled: Boolean(selectedRequirement?.id),
+  });
   const decisionQueryKey = selectedRequirement
     ? [`/api/intel/requirements/${selectedRequirement.id}/shortlist`]
     : ["/api/intel/requirements/_/shortlist"];
@@ -943,13 +774,7 @@ export default function IndustrialIntelRequirementsPage() {
     requirementDecisions.map((decision) => [decision.listingId, decision]),
   ) as Record<string, IntelRequirementListingDecision>, [requirementDecisions]);
 
-  const scoredMatches = useMemo(() => {
-    if (!selectedRequirement) return [];
-    return listings
-      .filter((listing) => !listing.removedAt && listing.status !== "removed")
-      .map((listing) => scoreListingForRequirement(selectedRequirement, listing))
-      .sort((left, right) => right.score - left.score);
-  }, [listings, selectedRequirement]);
+  const scoredMatches = requirementMatchesQuery.data?.matches || [];
 
   const filteredMatches = useMemo(() => (
     matchTierFilter === "all" ? scoredMatches : scoredMatches.filter((match) => match.tier === matchTierFilter)
@@ -959,8 +784,8 @@ export default function IndustrialIntelRequirementsPage() {
 
   const matchGroups = useMemo(() => ({
     strong: matches.filter((match) => match.tier === "strong"),
-    adjacent: matches.filter((match) => match.tier === "adjacent"),
-    review: matches.filter((match) => match.tier === "review"),
+    possible: matches.filter((match) => match.tier === "possible"),
+    stretch: matches.filter((match) => match.tier === "stretch"),
   }), [matches]);
 
   const dictationInsights = useMemo(() => getDictationInsights(dictationText), [dictationText]);
@@ -1160,7 +985,7 @@ export default function IndustrialIntelRequirementsPage() {
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tool B inventory</p>
-          <p className="mt-1 text-2xl font-semibold text-slate-950">{listings.filter((listing) => !listing.removedAt && listing.status !== "removed").length}</p>
+          <p className="mt-1 text-2xl font-semibold text-slate-950">{requirementMatchesQuery.data?.summary.activeListings ?? 0}</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Selected readiness</p>
@@ -1500,12 +1325,12 @@ export default function IndustrialIntelRequirementsPage() {
                         {filteredMatches.length} shown
                       </span>
                       <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-emerald-800">{matchGroups.strong.length} strong</span>
-                      <span className="rounded-full bg-blue-100 px-3 py-1.5 text-blue-800">{matchGroups.adjacent.length} adjacent</span>
-                      <span className="rounded-full bg-slate-100 px-3 py-1.5 text-slate-700">{matchGroups.review.length} review</span>
+                      <span className="rounded-full bg-blue-100 px-3 py-1.5 text-blue-800">{matchGroups.possible.length} possible</span>
+                      <span className="rounded-full bg-slate-100 px-3 py-1.5 text-slate-700">{matchGroups.stretch.length} stretch</span>
                     </div>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {(["all", "strong", "adjacent", "review"] as const).map((tier) => (
+                    {(["all", "strong", "possible", "stretch"] as const).map((tier) => (
                       <Button
                         key={tier}
                         type="button"
@@ -1519,7 +1344,7 @@ export default function IndustrialIntelRequirementsPage() {
                     ))}
                   </div>
 
-                  {isLoadingListings ? (
+                  {requirementMatchesQuery.isLoading ? (
                     <p className="mt-5 text-sm text-slate-500">Scoring listings...</p>
                   ) : !selectedRequirement ? (
                     <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-8 text-center text-sm text-slate-600">

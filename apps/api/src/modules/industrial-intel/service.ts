@@ -51,6 +51,7 @@ import {
   signIntelListingAssets,
 } from "./assetStorage";
 import { extractSurveyFactsFromBuffer, type SurveySyncExtractionResult } from "./surveySyncExtraction";
+import { rankRequirementListings, scoreRequirementListing } from "@level-cre/shared";
 
 export type CreateSurveyItemAssetUploadInput = {
   fileName: string;
@@ -162,8 +163,8 @@ export class IndustrialIntelService {
     return industrialIntelRepository.getRuns();
   }
 
-  async getListings(): Promise<IntelListingListItem[]> {
-    return industrialIntelRepository.getListings();
+  async getListings(limit = 500): Promise<IntelListingListItem[]> {
+    return industrialIntelRepository.getListings(limit);
   }
 
   async logAgentEvent(input: CreateIntelAgentEventInput): Promise<IntelAgentEvent | null> {
@@ -601,8 +602,8 @@ export class IndustrialIntelService {
     return industrialIntelRepository.updatePublicLinkCandidateStatus(listingId, candidateId, "rejected");
   }
 
-  async getRecentChanges(): Promise<IntelChangeListItem[]> {
-    return industrialIntelRepository.getRecentChanges();
+  async getRecentChanges(limit = 10): Promise<IntelChangeListItem[]> {
+    return industrialIntelRepository.getRecentChanges(limit);
   }
 
   async getRequirements(userId: string): Promise<IntelRequirementListItem[]> {
@@ -611,6 +612,110 @@ export class IndustrialIntelService {
 
   async getRequirementById(userId: string, id: string): Promise<IntelRequirementDetail | null> {
     return industrialIntelRepository.getRequirementById(userId, id);
+  }
+
+  async getRequirementMatches(userId: string, id: string, limit = 100) {
+    const requirement = await industrialIntelRepository.getRequirementById(userId, id);
+    if (!requirement) return null;
+    const listings = await industrialIntelRepository.getListings(500);
+    const rankedMatches = rankRequirementListings(requirement, listings);
+    const matches = rankedMatches.slice(0, limit);
+    return {
+      requirement,
+      generatedAt: new Date().toISOString(),
+      scoringVersion: "2026-08-08",
+      matches,
+      summary: {
+        activeListings: rankedMatches.length,
+        strong: matches.filter((match) => match.tier === "strong").length,
+        possible: matches.filter((match) => match.tier === "possible").length,
+        stretch: matches.filter((match) => match.tier === "stretch").length,
+      },
+    };
+  }
+
+  async getWatchlistSignals(
+    userId: string,
+    options: { days?: number; limit?: number; terms?: string[] } = {},
+  ) {
+    const days = Math.min(Math.max(options.days || 30, 1), 180);
+    const limit = Math.min(Math.max(options.limit || 12, 1), 50);
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const terms = Array.from(new Set((options.terms || [])
+      .map((term) => term.trim().toLowerCase())
+      .filter(Boolean)))
+      .slice(0, 25);
+    const requirementRows = (await industrialIntelRepository.getRequirements(userId))
+      .filter((requirement) => requirement.status === "active" && !requirement.archivedAt);
+    const [requirements, listings, changes] = await Promise.all([
+      Promise.all(requirementRows.map((requirement) => industrialIntelRepository.getRequirementById(userId, requirement.id))),
+      industrialIntelRepository.getListings(750),
+      industrialIntelRepository.getRecentChanges(250),
+    ]);
+    const activeRequirements = requirements.filter((requirement): requirement is IntelRequirementDetail => Boolean(requirement));
+    const listingsById = new Map(listings.map((listing) => [listing.id, listing]));
+    const signals = changes.flatMap((change) => {
+      const observedAt = change.observedAt ? new Date(change.observedAt).getTime() : 0;
+      if (!observedAt || observedAt < cutoff) return [];
+      const listing = listingsById.get(change.listingId);
+      if (!listing) return [];
+      const searchable = [listing.title, listing.address, listing.market, listing.submarket, change.changeSummary]
+        .filter(Boolean).join(" ").toLowerCase();
+      const matchedTerms = terms.filter((term) => searchable.includes(term));
+      const requirementMatches = activeRequirements
+        .map((requirement) => ({ requirement, match: scoreRequirementListing(requirement, listing) }))
+        .sort((left, right) => right.match.score - left.match.score);
+      const best = requirementMatches[0] || null;
+      if (matchedTerms.length === 0 && (!best || best.match.score < 45)) return [];
+      const summary = (change.changeSummary || "").toLowerCase();
+      const signalKinds = [
+        summary.includes("brochure") ? "brochure" : null,
+        summary.includes("availab") || change.changeType === "removed" || change.changeType === "reactivated" ? "availability" : null,
+        summary.includes("occup") || summary.includes("tenant") ? "occupancy" : null,
+        summary.includes("rate") || summary.includes("price") ? "pricing" : null,
+      ].filter((kind): kind is string => Boolean(kind));
+      if (signalKinds.length === 0) signalKinds.push("listing");
+      const priorityScore = Math.min(100, (best?.match.score || 45)
+        + (change.changeType === "new" || change.changeType === "reactivated" ? 10 : 0)
+        + (matchedTerms.length ? 8 : 0));
+      const suggestedAction = change.changeType === "removed"
+        ? "Confirm the removal, update any affected survey, and replace the option if the requirement is still active."
+        : change.changeType === "updated"
+          ? "Recheck availability, economics, and the latest brochure before carrying this option forward."
+          : "Review the source, confirm the key facts, and shortlist it if the match holds up.";
+      return [{
+        id: `intel-watch:${change.id}`,
+        listing,
+        change,
+        signalKinds,
+        matchedTerms,
+        requirement: best ? {
+          id: best.requirement.id,
+          title: best.requirement.title,
+          clientName: best.requirement.clientName,
+        } : null,
+        match: best?.match || null,
+        priorityScore,
+        priority: priorityScore >= 80 ? "high" : priorityScore >= 60 ? "medium" : "low",
+        suggestedAction,
+      }];
+    }).sort((left, right) => right.priorityScore - left.priorityScore).slice(0, limit);
+    return {
+      generatedAt: new Date().toISOString(),
+      days,
+      terms,
+      implicitWatchlist: activeRequirements.map((requirement) => ({
+        id: requirement.id,
+        title: requirement.title,
+        clientName: requirement.clientName,
+      })),
+      summary: {
+        signals: signals.length,
+        activeRequirements: activeRequirements.length,
+        highPriority: signals.filter((signal) => signal.priority === "high").length,
+      },
+      signals,
+    };
   }
 
   async createRequirement(userId: string, input: CreateIntelRequirementInput): Promise<IntelRequirementDetail> {

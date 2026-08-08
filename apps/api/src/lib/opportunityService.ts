@@ -65,6 +65,7 @@ export const OpportunityCreateSchema = z.object({
   expectedCloseDate: OptionalDateSchema,
   confidence: z.number().int().min(0).max(100).optional().default(100),
   source: z.string().trim().min(1).max(80).optional().default('manual'),
+  sourceEventId: z.string().trim().min(1).nullable().optional(),
   notes: z.string().trim().max(5000).nullable().optional(),
   metadata: z.record(z.unknown()).optional().default({}),
 });
@@ -148,6 +149,13 @@ export async function createOpportunity(params: {
       assertOwnedReference(client, params.userId, 'prospects', params.input.prospectId),
       assertOwnedReference(client, params.userId, 'listings', params.input.listingId),
     ]);
+    if (params.input.sourceEventId) {
+      const sourceEvent = await client.query(
+        `SELECT id FROM public.activity_events WHERE id = $1 AND user_id = $2 LIMIT 1`,
+        [params.input.sourceEventId, params.userId],
+      );
+      if (!sourceEvent.rows[0]) throw new OpportunityServiceError(400, 'Source activity event was not found');
+    }
     const id = randomUUID();
     const { rows } = await client.query(
       `
@@ -188,11 +196,11 @@ export async function createOpportunity(params: {
       `
         INSERT INTO public.opportunity_stage_events (
           id, user_id, opportunity_id, from_stage, to_stage, evidence_status,
-          confidence, source, reason, metadata
+          confidence, source, source_event_id, reason, metadata
         )
-        VALUES ($1, $2, $3, NULL, 'target', 'confirmed', $4, $5, 'Opportunity created', '{}'::jsonb)
+        VALUES ($1, $2, $3, NULL, 'target', 'confirmed', $4, $5, $6, 'Opportunity created', '{}'::jsonb)
       `,
-      [randomUUID(), params.userId, id, params.input.confidence, params.input.source],
+      [randomUUID(), params.userId, id, params.input.confidence, params.input.source, params.input.sourceEventId || null],
     );
 
     if (params.input.type === 'listing_pursuit') {

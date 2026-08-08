@@ -5,6 +5,11 @@ import { getUserId, requireAuth } from "../../auth";
 import { ensureUser } from "../../ensureUser";
 import { industrialIntelAgentManifest } from "./agentManifest";
 import { industrialIntelService } from "./service";
+import { pool } from "../../db";
+import {
+  MarketRecordProposalInputSchema,
+  submitMarketRecordProposal,
+} from "../../lib/marketRecordProposalService";
 
 const intelRequirementSchema = z.object({
   title: z.string().trim().min(1),
@@ -152,6 +157,12 @@ const intelDossierFactSchema = z.object({
 });
 
 const intelDossierFactUpdateSchema = intelDossierFactSchema.partial();
+
+const intelDossierMapProposalSchema = z.object({
+  notes: z.string().trim().max(2000).nullable().optional(),
+  evidenceUrl: z.string().trim().url().max(2000).nullable().optional(),
+  confidence: z.number().int().min(0).max(100).nullable().optional(),
+});
 
 const intelAgentSurveySyncJobSchema = z.object({
   dryRun: z.boolean().optional(),
@@ -962,6 +973,21 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/intel/watchlist", requireAuth, async (req, res) => {
+    try {
+      const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+      const limit = Math.min(Math.max(Number(req.query.limit) || 12, 1), 50);
+      const terms = typeof req.query.terms === "string"
+        ? req.query.terms.split(",").map((term) => term.trim()).filter(Boolean)
+        : [];
+      const result = await industrialIntelService.getWatchlistSignals(getUserId(req), { days, limit, terms });
+      res.json(result);
+    } catch (error) {
+      console.error("Error building industrial intel watchlist:", error);
+      res.status(500).json({ message: "Failed to build industrial intel watchlist" });
+    }
+  });
+
   app.get("/api/intel/requirements/:id", requireAuth, async (req, res) => {
     try {
       const requirement = await industrialIntelService.getRequirementById(getUserId(req), req.params.id);
@@ -972,6 +998,77 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     } catch (error) {
       console.error("Error fetching industrial intel requirement:", error);
       res.status(500).json({ message: "Failed to fetch industrial intel requirement" });
+    }
+  });
+
+  app.post("/api/intel/dossiers/:id/map-proposal", requireAuth, async (req, res) => {
+    try {
+      await ensureIntelActor(req);
+      const input = intelDossierMapProposalSchema.safeParse(req.body || {});
+      if (!input.success) {
+        return res.status(400).json({ message: "Invalid dossier map proposal", issues: input.error.flatten() });
+      }
+      const userId = getUserId(req);
+      const dossier = await industrialIntelService.getDossierById(userId, req.params.id);
+      if (!dossier) return res.status(404).json({ message: "Industrial intel dossier not found" });
+      const address = dossier.address || dossier.listing?.address;
+      const latitude = dossier.latitude ?? dossier.listing?.latitude;
+      const longitude = dossier.longitude ?? dossier.listing?.longitude;
+      if (!address || latitude == null || longitude == null) {
+        return res.status(409).json({
+          message: "Dossier needs an address and coordinates before it can be proposed to the map",
+        });
+      }
+      const approvedFacts = dossier.facts.filter((fact) => fact.status === "approved");
+      const factValue = (...keys: string[]) => approvedFacts.find((fact) => keys.includes(fact.factKey))?.valueText || null;
+      const contactEmailValue = factValue("contact_email", "broker_email");
+      const contactEmail = z.string().trim().email().safeParse(contactEmailValue).success ? contactEmailValue : null;
+      const proposal = MarketRecordProposalInputSchema.parse({
+        externalId: `dossier-map:${dossier.id}`,
+        source: "surveysync_dossier",
+        observedAt: dossier.updatedAt || new Date().toISOString(),
+        evidenceStatus: "observed",
+        confidence: input.data.confidence ?? Math.min(95, Math.max(40, dossier.dataCompletenessScore)),
+        businessName: factValue("tenant_name", "occupant", "business_name") || dossier.title,
+        address,
+        latitude,
+        longitude,
+        contactName: factValue("contact_name", "broker_contact"),
+        contactEmail,
+        contactPhone: factValue("contact_phone", "broker_phone"),
+        notes: input.data.notes || "SurveySync dossier proposed for map review. Source assets and approved facts remain attached to the dossier.",
+        evidenceUrl: input.data.evidenceUrl || dossier.listing?.brochureUrl || dossier.listing?.sourceUrl || null,
+        sourceMetadata: {
+          dossierId: dossier.id,
+          canonicalListingId: dossier.canonicalListingId,
+          sourceAssetIds: dossier.assets.map((asset) => asset.id),
+          approvedFactIds: approvedFacts.map((fact) => fact.id),
+        },
+      });
+      const result = await submitMarketRecordProposal({
+        pool,
+        userId,
+        proposal,
+        agentName: (req as any)?.user?.agentName || "surveysync",
+      });
+      res.status(202).json(result);
+    } catch (error) {
+      console.error("Error proposing dossier to map:", error);
+      res.status(500).json({ message: "Failed to propose dossier to map" });
+    }
+  });
+
+  app.get("/api/intel/requirements/:id/matches", requireAuth, async (req, res) => {
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 250);
+      const result = await industrialIntelService.getRequirementMatches(getUserId(req), req.params.id, limit);
+      if (!result) {
+        return res.status(404).json({ message: "Industrial intel requirement not found" });
+      }
+      res.json(result);
+    } catch (error) {
+      console.error("Error matching industrial intel requirement:", error);
+      res.status(500).json({ message: "Failed to match industrial intel requirement" });
     }
   });
 

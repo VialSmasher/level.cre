@@ -21,7 +21,9 @@ import { XP_VALUES, actionForInteractionType, inferInteractionTypeFromNote, xpFo
 
 type ProspectCreateInput = Omit<
   InsertProspect,
-  'followUpDueDate' | 'buildingSf' | 'lotSizeAcres' | 'aiMetadata' | 'businessName' | 'websiteUrl'
+  'followUpDueDate' | 'buildingSf' | 'lotSizeAcres' | 'aiMetadata' | 'businessName' | 'websiteUrl' |
+  'address' | 'locationLat' | 'locationLng' | 'geohash' | 'marketKey' | 'marketConfidence' |
+  'marketContextSource' | 'marketContextStatus'
 > & {
   followUpDueDate?: string | null;
   buildingSf?: number | null;
@@ -29,11 +31,21 @@ type ProspectCreateInput = Omit<
   aiMetadata?: Record<string, any> | null;
   businessName?: string | null;
   websiteUrl?: string | null;
+  address?: string | null;
+  locationLat?: number | null;
+  locationLng?: number | null;
+  geohash?: string | null;
+  marketKey?: string | null;
+  marketConfidence?: number | null;
+  marketContextSource?: string | null;
+  marketContextStatus?: string | null;
 };
 
 type ProspectUpdateInput = Omit<
   Partial<Prospect>,
-  'followUpDueDate' | 'buildingSf' | 'lotSizeAcres' | 'aiMetadata' | 'businessName' | 'websiteUrl'
+  'followUpDueDate' | 'buildingSf' | 'lotSizeAcres' | 'aiMetadata' | 'businessName' | 'websiteUrl' |
+  'address' | 'locationLat' | 'locationLng' | 'geohash' | 'marketKey' | 'marketConfidence' |
+  'marketContextSource' | 'marketContextStatus'
 > & {
   followUpDueDate?: string | null;
   buildingSf?: number | null;
@@ -41,6 +53,14 @@ type ProspectUpdateInput = Omit<
   aiMetadata?: Record<string, any> | null;
   businessName?: string | null;
   websiteUrl?: string | null;
+  address?: string | null;
+  locationLat?: number | null;
+  locationLng?: number | null;
+  geohash?: string | null;
+  marketKey?: string | null;
+  marketConfidence?: number | null;
+  marketContextSource?: string | null;
+  marketContextStatus?: string | null;
 };
 
 // Updated interface with user-specific CRUD methods
@@ -211,6 +231,14 @@ export class DatabaseStorage implements IStorage {
         aiMetadata: prospects.aiMetadata,
         businessName: prospects.businessName,
         websiteUrl: prospects.websiteUrl,
+        address: prospects.address,
+        locationLat: prospects.locationLat,
+        locationLng: prospects.locationLng,
+        geohash: prospects.geohash,
+        marketKey: prospects.marketKey,
+        marketConfidence: prospects.marketConfidence,
+        marketContextSource: prospects.marketContextSource,
+        marketContextStatus: prospects.marketContextStatus,
         createdAt: prospects.createdAt,
       })
       .from(listingProspects)
@@ -236,6 +264,14 @@ export class DatabaseStorage implements IStorage {
       aiMetadata: (p.aiMetadata as any) || undefined,
       businessName: p.businessName || undefined,
       websiteUrl: p.websiteUrl || undefined,
+      address: p.address || undefined,
+      locationLat: p.locationLat ?? undefined,
+      locationLng: p.locationLng ?? undefined,
+      geohash: p.geohash || undefined,
+      marketKey: p.marketKey || undefined,
+      marketConfidence: p.marketConfidence ?? undefined,
+      marketContextSource: p.marketContextSource || undefined,
+      marketContextStatus: p.marketContextStatus || undefined,
       createdDate: p.createdAt?.toISOString() || new Date().toISOString(),
     }));
   }
@@ -262,6 +298,14 @@ export class DatabaseStorage implements IStorage {
         aiMetadata: prospects.aiMetadata,
         businessName: prospects.businessName,
         websiteUrl: prospects.websiteUrl,
+        address: prospects.address,
+        locationLat: prospects.locationLat,
+        locationLng: prospects.locationLng,
+        geohash: prospects.geohash,
+        marketKey: prospects.marketKey,
+        marketConfidence: prospects.marketConfidence,
+        marketContextSource: prospects.marketContextSource,
+        marketContextStatus: prospects.marketContextStatus,
         createdAt: prospects.createdAt,
       })
       .from(listingProspects)
@@ -286,6 +330,14 @@ export class DatabaseStorage implements IStorage {
       aiMetadata: (p.aiMetadata as any) || undefined,
       businessName: p.businessName || undefined,
       websiteUrl: p.websiteUrl || undefined,
+      address: p.address || undefined,
+      locationLat: p.locationLat ?? undefined,
+      locationLng: p.locationLng ?? undefined,
+      geohash: p.geohash || undefined,
+      marketKey: p.marketKey || undefined,
+      marketConfidence: p.marketConfidence ?? undefined,
+      marketContextSource: p.marketContextSource || undefined,
+      marketContextStatus: p.marketContextStatus || undefined,
       createdDate: p.createdAt?.toISOString() || new Date().toISOString(),
     }));
   }
@@ -683,6 +735,14 @@ export class DatabaseStorage implements IStorage {
         aiMetadata: prospects.aiMetadata,
         businessName: prospects.businessName,
         websiteUrl: prospects.websiteUrl,
+        address: prospects.address,
+        locationLat: prospects.locationLat,
+        locationLng: prospects.locationLng,
+        geohash: prospects.geohash,
+        marketKey: prospects.marketKey,
+        marketConfidence: prospects.marketConfidence,
+        marketContextSource: prospects.marketContextSource,
+        marketContextStatus: prospects.marketContextStatus,
         createdAt: prospects.createdAt,
       })
       .from(prospects)
@@ -707,6 +767,14 @@ export class DatabaseStorage implements IStorage {
       aiMetadata: (row.aiMetadata as any) || undefined,
       businessName: row.businessName || undefined,
       websiteUrl: row.websiteUrl || undefined,
+      address: row.address || undefined,
+      locationLat: row.locationLat ?? undefined,
+      locationLng: row.locationLng ?? undefined,
+      geohash: row.geohash || undefined,
+      marketKey: row.marketKey || undefined,
+      marketConfidence: row.marketConfidence ?? undefined,
+      marketContextSource: row.marketContextSource || undefined,
+      marketContextStatus: row.marketContextStatus || undefined,
       createdDate: row.createdAt?.toISOString() || new Date().toISOString()
     };
   }
@@ -737,6 +805,14 @@ export class DatabaseStorage implements IStorage {
         aiMetadata: prospects.aiMetadata,
         businessName: prospects.businessName,
         websiteUrl: prospects.websiteUrl,
+        address: prospects.address,
+        locationLat: prospects.locationLat,
+        locationLng: prospects.locationLng,
+        geohash: prospects.geohash,
+        marketKey: prospects.marketKey,
+        marketConfidence: prospects.marketConfidence,
+        marketContextSource: prospects.marketContextSource,
+        marketContextStatus: prospects.marketContextStatus,
         createdAt: prospects.createdAt,
       })
       .from(prospects)
@@ -801,6 +877,14 @@ export class DatabaseStorage implements IStorage {
       aiMetadata: (r.aiMetadata as any) || undefined,
       businessName: r.businessName || undefined,
       websiteUrl: r.websiteUrl || undefined,
+      address: r.address || undefined,
+      locationLat: r.locationLat ?? undefined,
+      locationLng: r.locationLng ?? undefined,
+      geohash: r.geohash || undefined,
+      marketKey: r.marketKey || undefined,
+      marketConfidence: r.marketConfidence ?? undefined,
+      marketContextSource: r.marketContextSource || undefined,
+      marketContextStatus: r.marketContextStatus || undefined,
       createdDate: r.createdAt?.toISOString() || new Date().toISOString()
     }));
   }
@@ -830,6 +914,14 @@ export class DatabaseStorage implements IStorage {
       ...(insertProspect.aiMetadata !== undefined && { aiMetadata: insertProspect.aiMetadata }),
       ...(insertProspect.businessName !== undefined && { businessName: insertProspect.businessName }),
       ...(insertProspect.websiteUrl !== undefined && { websiteUrl: insertProspect.websiteUrl }),
+      ...(insertProspect.address !== undefined && { address: insertProspect.address }),
+      ...(insertProspect.locationLat !== undefined && { locationLat: insertProspect.locationLat }),
+      ...(insertProspect.locationLng !== undefined && { locationLng: insertProspect.locationLng }),
+      ...(insertProspect.geohash !== undefined && { geohash: insertProspect.geohash }),
+      ...(insertProspect.marketKey !== undefined && { marketKey: insertProspect.marketKey }),
+      ...(insertProspect.marketConfidence !== undefined && { marketConfidence: insertProspect.marketConfidence }),
+      ...(insertProspect.marketContextSource !== undefined && { marketContextSource: insertProspect.marketContextSource }),
+      ...(insertProspect.marketContextStatus !== undefined && { marketContextStatus: insertProspect.marketContextStatus }),
     }).returning({
       id: prospects.id,
       name: prospects.name,
@@ -849,6 +941,14 @@ export class DatabaseStorage implements IStorage {
       aiMetadata: prospects.aiMetadata,
       businessName: prospects.businessName,
       websiteUrl: prospects.websiteUrl,
+      address: prospects.address,
+      locationLat: prospects.locationLat,
+      locationLng: prospects.locationLng,
+      geohash: prospects.geohash,
+      marketKey: prospects.marketKey,
+      marketConfidence: prospects.marketConfidence,
+      marketContextSource: prospects.marketContextSource,
+      marketContextStatus: prospects.marketContextStatus,
       createdAt: prospects.createdAt,
     });
     
@@ -881,6 +981,14 @@ export class DatabaseStorage implements IStorage {
       aiMetadata: (result.aiMetadata as any) || undefined,
       businessName: result.businessName || undefined,
       websiteUrl: result.websiteUrl || undefined,
+      address: result.address || undefined,
+      locationLat: result.locationLat ?? undefined,
+      locationLng: result.locationLng ?? undefined,
+      geohash: result.geohash || undefined,
+      marketKey: result.marketKey || undefined,
+      marketConfidence: result.marketConfidence ?? undefined,
+      marketContextSource: result.marketContextSource || undefined,
+      marketContextStatus: result.marketContextStatus || undefined,
       createdDate: result.createdAt?.toISOString() || new Date().toISOString()
     };
   }
@@ -912,6 +1020,14 @@ export class DatabaseStorage implements IStorage {
       ...(updates.aiMetadata !== undefined && { aiMetadata: updates.aiMetadata }),
       ...(updates.businessName !== undefined && { businessName: updates.businessName }),
       ...(updates.websiteUrl !== undefined && { websiteUrl: updates.websiteUrl }),
+      ...(updates.address !== undefined && { address: updates.address }),
+      ...(updates.locationLat !== undefined && { locationLat: updates.locationLat }),
+      ...(updates.locationLng !== undefined && { locationLng: updates.locationLng }),
+      ...(updates.geohash !== undefined && { geohash: updates.geohash }),
+      ...(updates.marketKey !== undefined && { marketKey: updates.marketKey }),
+      ...(updates.marketConfidence !== undefined && { marketConfidence: updates.marketConfidence }),
+      ...(updates.marketContextSource !== undefined && { marketContextSource: updates.marketContextSource }),
+      ...(updates.marketContextStatus !== undefined && { marketContextStatus: updates.marketContextStatus }),
       updatedAt: new Date()
     };
 
@@ -938,6 +1054,14 @@ export class DatabaseStorage implements IStorage {
         aiMetadata: prospects.aiMetadata,
         businessName: prospects.businessName,
         websiteUrl: prospects.websiteUrl,
+        address: prospects.address,
+        locationLat: prospects.locationLat,
+        locationLng: prospects.locationLng,
+        geohash: prospects.geohash,
+        marketKey: prospects.marketKey,
+        marketConfidence: prospects.marketConfidence,
+        marketContextSource: prospects.marketContextSource,
+        marketContextStatus: prospects.marketContextStatus,
         createdAt: prospects.createdAt,
       });
 
@@ -989,6 +1113,14 @@ export class DatabaseStorage implements IStorage {
           aiMetadata: prospects.aiMetadata,
           businessName: prospects.businessName,
           websiteUrl: prospects.websiteUrl,
+          address: prospects.address,
+          locationLat: prospects.locationLat,
+          locationLng: prospects.locationLng,
+          geohash: prospects.geohash,
+          marketKey: prospects.marketKey,
+          marketConfidence: prospects.marketConfidence,
+          marketContextSource: prospects.marketContextSource,
+          marketContextStatus: prospects.marketContextStatus,
           createdAt: prospects.createdAt,
         });
       result = rows?.[0];
@@ -1014,6 +1146,14 @@ export class DatabaseStorage implements IStorage {
       aiMetadata: (result.aiMetadata as any) || undefined,
       businessName: result.businessName || undefined,
       websiteUrl: result.websiteUrl || undefined,
+      address: result.address || undefined,
+      locationLat: result.locationLat ?? undefined,
+      locationLng: result.locationLng ?? undefined,
+      geohash: result.geohash || undefined,
+      marketKey: result.marketKey || undefined,
+      marketConfidence: result.marketConfidence ?? undefined,
+      marketContextSource: result.marketContextSource || undefined,
+      marketContextStatus: result.marketContextStatus || undefined,
       createdDate: result.createdAt?.toISOString() || new Date().toISOString()
     };
 

@@ -16,6 +16,8 @@ export const ACTIVITY_EVENT_TYPES = [
   'title_pulled',
   'owner_identified',
   'requirement_discovered',
+  'market_record_proposed',
+  'opportunity_promotion_proposed',
   'proposal_sent',
   'offer_sent',
   'offer_received',

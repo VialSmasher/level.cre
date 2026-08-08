@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
-import { CalendarDays, Clock3, Edit3, Mail, MapPin, MessageSquareText, Phone, Save, Trash2, X } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CheckCircle2, Clock3, Edit3, Loader2, Mail, MapPin, MessageSquareText, Phone, Save, Trash2, X } from 'lucide-react';
 import { apiRequest } from '@/lib/queryClient';
 import {
   STATUS_META,
@@ -123,6 +123,7 @@ const readableInteractionValue = (value: string) => value.replace(/_/g, ' ').rep
 
 type ProspectEditPanelProps = {
   prospect: Prospect;
+  saveStatus?: 'saved' | 'saving' | 'error';
   values: ProspectEditPanelValues;
   submarketOptions: string[];
   isEditingShape: boolean;
@@ -163,6 +164,7 @@ type ProspectEditPanelProps = {
 
 export function ProspectEditPanel({
   prospect,
+  saveStatus = 'saved',
   values,
   submarketOptions,
   isEditingShape,
@@ -247,7 +249,24 @@ export function ProspectEditPanel({
       </div>
 
       <div className="px-4 py-3 space-y-4">
-        <p className="text-[11px] text-gray-500">Changes save automatically</p>
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-500" role="status" aria-live="polite">
+          {saveStatus === 'saving' ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span>Saving changes…</span>
+            </>
+          ) : saveStatus === 'error' ? (
+            <>
+              <AlertTriangle className="h-3 w-3 text-red-500" />
+              <span className="text-red-600">Save failed — changes kept for retry</span>
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+              <span>All changes saved</span>
+            </>
+          )}
+        </div>
         <Tabs defaultValue="property" className="space-y-4">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="property" className="text-xs">Property</TabsTrigger>
@@ -323,7 +342,7 @@ export function ProspectEditPanel({
                   onValueChange={(value: FollowUpTimeframeType | 'none') => {
                     const timeframe = value === 'none' ? undefined : value;
                     const anchor = prospect.lastContactDate || prospect.createdDate;
-                    const dueDate = timeframe ? computeFollowUpDue(anchor, timeframe) : null;
+                    const dueDate = timeframe ? (computeFollowUpDue(anchor, timeframe) ?? null) : null;
                     onFollowUpChange(timeframe, dueDate);
                   }}
                 >

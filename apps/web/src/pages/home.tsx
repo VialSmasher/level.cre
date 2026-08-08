@@ -293,6 +293,7 @@ export default function HomePage() {
   const [xpToast, setXpToast] = useState<{ id: number; xp: number; label?: string } | null>(null);
   const [savePulse, setSavePulse] = useState(false);
   const [quickLogPendingType, setQuickLogPendingType] = useState<'call' | 'email' | 'meeting' | null>(null);
+  const [prospectSaveStatus, setProspectSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
   const [isXpSoundEnabled, setIsXpSoundEnabled] = useState<boolean>(() => {
     const settings = readJSON<any>(nsKey(currentUser?.id, 'userSettings'), null);
     if (settings && typeof settings.soundEffects === 'boolean') return settings.soundEffects;
@@ -305,6 +306,7 @@ export default function HomePage() {
   
   // Search pin state
   const [searchPin, setSearchPin] = useState<SearchPin | null>(null);
+  const searchPinSaveInFlightRef = useRef(false);
   // Signal to clear the SearchBar input when a prospect is added
   const [clearSearchSignal, setClearSearchSignal] = useState(0);
   
@@ -362,7 +364,7 @@ export default function HomePage() {
 
   const bumpLocalSkillXp = useCallback((delta: number, skillKey: 'followUp' | 'prospecting' = 'followUp') => {
     if (!delta || Number.isNaN(delta)) return;
-    queryClient.setQueryData<any>(['/api/skills'], (prev) => {
+    queryClient.setQueryData<any>(['/api/skills'], (prev: any) => {
       if (!prev || typeof prev !== 'object') return prev;
       return {
         ...prev,
@@ -547,10 +549,10 @@ export default function HomePage() {
       const lat = event.latLng.lat();
       const lng = event.latLng.lng();
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-      const pixel = event.pixel;
       const rect = mapContainerRef.current.getBoundingClientRect();
-      const viewportX = rect.left + (pixel?.x ?? 0);
-      const viewportY = rect.top + (pixel?.y ?? 0);
+      const pointerEvent = event.domEvent as MouseEvent | PointerEvent | undefined;
+      const viewportX = pointerEvent?.clientX ?? (rect.left + rect.width / 2);
+      const viewportY = pointerEvent?.clientY ?? (rect.top + rect.height / 2);
       setContextMenu({ lat, lng, viewportX, viewportY });
     });
     return () => {
@@ -765,6 +767,7 @@ export default function HomePage() {
   const handleProspectClick = useCallback((prospect: Prospect) => {
     console.log('Prospect clicked:', prospect);
     setSelectedProspect(prospect);
+    setProspectSaveStatus('saved');
     setIsEditPanelOpen(true);
   }, []);
 
@@ -870,6 +873,21 @@ export default function HomePage() {
   );
 
   useEffect(() => {
+    setProspectSaveStatus('saved');
+  }, [selectedProspect?.id]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (selectedProspect?.id) {
+      url.searchParams.set('prospectId', selectedProspect.id);
+    } else {
+      url.searchParams.delete('prospectId');
+    }
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [selectedProspect?.id]);
+
+  useEffect(() => {
     if (!map || prospects.length === 0 || typeof window === 'undefined') return;
     let storedTargetId: string | null = null;
     try {
@@ -919,6 +937,15 @@ export default function HomePage() {
     lotSizeAcres: data.lotSizeAcres,
     businessName: (data as any).businessName,
     websiteUrl: (data as any).websiteUrl,
+    aiMetadata: data.aiMetadata,
+    address: data.address,
+    locationLat: data.locationLat,
+    locationLng: data.locationLng,
+    geohash: data.geohash,
+    marketKey: data.marketKey,
+    marketConfidence: data.marketConfidence,
+    marketContextSource: data.marketContextSource,
+    marketContextStatus: data.marketContextStatus,
     name: data.name,
     status: data.status,
     notes: data.notes,
@@ -940,65 +967,81 @@ export default function HomePage() {
 
   // Handle "Save as Prospect" from search pin - save immediately (demo local or API)
   const handleSaveSearchPin = useCallback(async () => {
-    if (!searchPin) return;
-    
+    if (!searchPin || searchPinSaveInFlightRef.current) return;
+    searchPinSaveInFlightRef.current = true;
+
     try {
+      const placeId = searchPin.placeId?.trim();
+      const existingProspect = placeId
+        ? prospects.find((prospect) => {
+            const googlePlaceId = (prospect.aiMetadata as any)?.googlePlace?.placeId;
+            return googlePlaceId === placeId || prospect.marketKey === `google-place:${placeId}`;
+          })
+        : undefined;
+
+      if (existingProspect) {
+        setSelectedProspect(existingProspect);
+        setProspectSaveStatus('saved');
+        setIsEditPanelOpen(true);
+        setSearchPin(null);
+        setClearSearchSignal((signal) => signal + 1);
+        toast({
+          title: 'Already on the map',
+          description: `Opened the existing ${getProspectDisplayName(existingProspect)} record.`,
+        });
+        return;
+      }
+
       const prospectDetails = searchLocationToProspectDetails(searchPin);
       const newProspectData = {
-        // Map address to Property tab (Address field is `name`)
+        // Keep the legacy map label while also writing canonical location fields.
         name: searchPin.address,
+        address: searchPin.address,
+        locationLat: searchPin.lat,
+        locationLng: searchPin.lng,
         geometry: {
           type: 'Point' as const,
           coordinates: [searchPin.lng, searchPin.lat] as [number, number]
         },
         status: 'prospect' as ProspectStatusType,
         notes: '',
+        followUpDueDate: null,
         submarketId: inferSubmarketFromPoint(searchPin) || '',
+        ...(placeId ? {
+          marketKey: `google-place:${placeId}`,
+          marketConfidence: 100,
+        } : {
+          marketConfidence: 80,
+        }),
+        marketContextSource: 'google_places',
+        marketContextStatus: 'observed',
         ...prospectDetails,
       };
-      const { businessName, websiteUrl, contactCompany, contactPhone, aiMetadata, ...initialProspectData } = newProspectData;
-      const enrichmentPatch = { businessName, websiteUrl, contactCompany, contactPhone, aiMetadata };
-      const hasEnrichmentPatch = Object.values(enrichmentPatch).some((value) => value !== undefined);
 
       console.log('Saving search pin as prospect:', newProspectData);
 
       if (isDemoMode) {
-        const localProspect = buildLocalProspect({
-          name: newProspectData.name,
-          status: newProspectData.status,
-          notes: newProspectData.notes,
-          geometry: newProspectData.geometry,
-          submarketId: newProspectData.submarketId,
-          businessName: newProspectData.businessName,
-          contactCompany: newProspectData.contactCompany,
-          contactPhone: newProspectData.contactPhone,
-          websiteUrl: newProspectData.websiteUrl,
-          aiMetadata: newProspectData.aiMetadata,
-        } as any);
+        const localProspect = buildLocalProspect(newProspectData as any);
         const next = [...prospects, localProspect];
         persistProspects(next);
         setSelectedProspect(localProspect);
+        setProspectSaveStatus('saved');
         setIsEditPanelOpen(true);
         setSearchPin(null);
         // Also clear the search input field
         setClearSearchSignal((s) => s + 1);
         toast({ title: 'Prospect saved (demo)', description: `"${getProspectDisplayName(localProspect)}" added locally.` });
       } else {
-        // Save directly to database
-        const response = await apiRequest('POST', '/api/prospects', initialProspectData);
-        let savedProspect = await response.json();
-        if (hasEnrichmentPatch) {
-          try {
-            const patchResponse = await apiRequest('PATCH', `/api/prospects/${savedProspect.id}`, enrichmentPatch);
-            savedProspect = await patchResponse.json();
-          } catch (enrichmentError) {
-            console.warn('Prospect saved, but Google Places enrichment could not be applied', enrichmentError);
-          }
-        }
+        // One complete write prevents a saved pin from losing its enrichment fields.
+        const response = await apiRequest('POST', '/api/prospects', newProspectData);
+        const savedProspect = await response.json();
         
         // Add to prospects list
-        setProspects(prev => [...prev, savedProspect]);
+        setProspects(prev => prev.some((prospect) => prospect.id === savedProspect.id)
+          ? prev.map((prospect) => prospect.id === savedProspect.id ? savedProspect : prospect)
+          : [...prev, savedProspect]);
         setSelectedProspect(savedProspect);
+        setProspectSaveStatus('saved');
         setIsEditPanelOpen(true);
         
         queryClient.setQueryData<Prospect[] | undefined>(['/api/prospects'], (prev) => {
@@ -1027,6 +1070,8 @@ export default function HomePage() {
         description: "Failed to save prospect to database.",
         variant: "destructive"
       });
+    } finally {
+      searchPinSaveInFlightRef.current = false;
     }
   }, [searchPin, inferSubmarketFromPoint, toast, queryClient, isDemoMode, prospects]);
 
@@ -1289,7 +1334,7 @@ export default function HomePage() {
   const enablePolygonEditing = useCallback((prospectId: string) => {
     // Find the prospect to get original coordinates
     const prospect = prospects.find(p => p.id === prospectId);
-    if (!prospect || (prospect.geometry.type !== 'Polygon' && prospect.geometry.type !== 'Rectangle')) {
+    if (!prospect || prospect.geometry.type !== 'Polygon') {
       return;
     }
     
@@ -1455,6 +1500,7 @@ export default function HomePage() {
 
   // Update prospect handler - debounced + optimistic to reduce flicker while typing
   const homeSaveTimerRef = useRef<number | null>(null);
+  const homeSaveInFlightRef = useRef(false);
   const homePendingPatchRef = useRef<Partial<Prospect>>({});
   const homeLastEditedIdRef = useRef<string | null>(null);
   const manualLotOverrideRef = useRef<Set<string>>(new Set());
@@ -1467,12 +1513,16 @@ export default function HomePage() {
     'submarketId',
   ]));
 
-  const flushHomeQueuedSave = useCallback(async () => {
-    if (!selectedProspect) return;
+  const flushHomeQueuedSave = useCallback(async (): Promise<boolean> => {
+    if (!selectedProspect) return true;
+    if (homeSaveInFlightRef.current) return false;
     const id = selectedProspect.id;
     const patch = homePendingPatchRef.current;
     homePendingPatchRef.current = {};
-    if (!patch || Object.keys(patch).length === 0) return;
+    if (!patch || Object.keys(patch).length === 0) return true;
+    homeSaveInFlightRef.current = true;
+    setProspectSaveStatus('saving');
+    let saveSucceeded = false;
     try {
       // In demo mode, persist locally without hitting the API
       if (isDemoMode) {
@@ -1482,26 +1532,42 @@ export default function HomePage() {
           return next;
         });
         setSelectedProspect(prev => (prev && prev.id === id ? ({ ...prev, ...patch } as Prospect) : prev));
-        return;
+        setProspectSaveStatus('saved');
+        saveSucceeded = true;
+        return true;
       }
       const response = await apiRequest('PATCH', `/api/prospects/${id}`, patch);
       const payload = await response.json();
       const { prospect: savedProspect, newXpGained } = parseProspectPatchResponse(payload);
-      const patchKeys = Object.keys(patch) as (keyof Prospect)[];
-      const hasMapVisualChanges = patchKeys.some((key) => mapVisualFieldsRef.current.has(key));
-      if (hasMapVisualChanges) {
-        setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
-      }
-      setSelectedProspect(prev => (prev && prev.id === savedProspect.id ? savedProspect : prev));
-      upsertProspectInCache(savedProspect);
+      const pendingAfterRequest = homePendingPatchRef.current;
+      const currentProspect = { ...savedProspect, ...pendingAfterRequest } as Prospect;
+      setProspects(prev => prev.map(p => p.id === savedProspect.id ? currentProspect : p));
+      setSelectedProspect(prev => (prev && prev.id === savedProspect.id ? currentProspect : prev));
+      upsertProspectInCache(currentProspect);
       if (newXpGained > 0) {
         bumpLocalSkillXp(newXpGained, 'followUp');
         triggerXpFeedback(newXpGained);
       }
+      setProspectSaveStatus(Object.keys(pendingAfterRequest).length > 0 ? 'saving' : 'saved');
+      saveSucceeded = true;
+      return true;
     } catch (error) {
       console.error('Error updating prospect:', error);
+      // Keep the failed patch in memory; newer edits take precedence on retry.
+      homePendingPatchRef.current = { ...patch, ...homePendingPatchRef.current };
+      setProspectSaveStatus('error');
+      return false;
+    } finally {
+      homeSaveInFlightRef.current = false;
+      if (saveSucceeded && Object.keys(homePendingPatchRef.current).length > 0) {
+        if (homeSaveTimerRef.current) window.clearTimeout(homeSaveTimerRef.current);
+        homeSaveTimerRef.current = window.setTimeout(() => {
+          homeSaveTimerRef.current = null;
+          void flushHomeQueuedSave();
+        }, 250);
+      }
     }
-  }, [selectedProspect, isDemoMode, upsertProspectInCache]);
+  }, [selectedProspect, isDemoMode, upsertProspectInCache, bumpLocalSkillXp, triggerXpFeedback]);
 
   const queueSelectedProspectPatch = useCallback((field: keyof Prospect, value: any) => {
     if (!selectedProspect) return;
@@ -1513,6 +1579,7 @@ export default function HomePage() {
     }
     homeLastEditedIdRef.current = id;
     homePendingPatchRef.current = { ...homePendingPatchRef.current, [field]: value };
+    setProspectSaveStatus('saving');
     if (homeSaveTimerRef.current) window.clearTimeout(homeSaveTimerRef.current);
     homeSaveTimerRef.current = window.setTimeout(() => { homeSaveTimerRef.current = null; void flushHomeQueuedSave(); }, 500);
   }, [selectedProspect, flushHomeQueuedSave]);
@@ -1534,6 +1601,15 @@ export default function HomePage() {
     queueSelectedProspectPatch(field, value);
   }, [selectedProspect, queueSelectedProspectPatch]);
 
+  const updateSelectedProspectAddress = useCallback((value: string) => {
+    if (!selectedProspect) return;
+    const id = selectedProspect.id;
+    setSelectedProspect((prev) => prev && prev.id === id ? ({ ...prev, name: value, address: value } as Prospect) : prev);
+    setProspects((prev) => prev.map((prospect) => prospect.id === id ? ({ ...prospect, name: value, address: value } as Prospect) : prospect));
+    queueSelectedProspectPatch('name', value);
+    queueSelectedProspectPatch('address', value);
+  }, [selectedProspect, queueSelectedProspectPatch]);
+
   useEffect(() => {
     if (!selectedProspect) {
       setBuildingSfInput('');
@@ -1553,7 +1629,6 @@ export default function HomePage() {
 
     const spec = quickLogSpecFor(type);
     const due = addDaysIsoFromNow(spec.followUpDays);
-    const expectedXp = spec.xp;
     const optimistic = {
       ...selectedProspect,
       followUpDueDate: due,
@@ -1566,14 +1641,13 @@ export default function HomePage() {
     if (homeSaveTimerRef.current) {
       window.clearTimeout(homeSaveTimerRef.current);
       homeSaveTimerRef.current = null;
-      homePendingPatchRef.current = {};
     }
 
-    setSelectedProspect(optimistic);
-    bumpLocalSkillXp(expectedXp, 'followUp');
-    triggerXpFeedback(expectedXp, spec.toastLabel);
-
     try {
+      const priorSaveSucceeded = await flushHomeQueuedSave();
+      if (!priorSaveSucceeded) {
+        throw new Error('Unsaved prospect changes must be retried before logging activity.');
+      }
       const result = await logBrokerActivity({
         prospect: selectedProspect,
         type,
@@ -1590,25 +1664,20 @@ export default function HomePage() {
       queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] });
       queryClient.invalidateQueries({ queryKey: ['/api/automation/activity-pulse'] });
 
-      const delta = newXpGained - expectedXp;
-      if (delta !== 0) {
-        bumpLocalSkillXp(delta, 'followUp');
-      }
-      if (newXpGained > 0 && newXpGained !== expectedXp) {
+      if (newXpGained > 0) {
+        bumpLocalSkillXp(newXpGained, 'followUp');
         triggerXpFeedback(newXpGained, spec.toastLabel);
       }
     } catch (error) {
-      setSelectedProspect(selectedProspect);
-      bumpLocalSkillXp(-expectedXp, 'followUp');
       toast({
         title: 'Quick log failed',
-        description: 'Could not save follow-up action.',
+        description: error instanceof Error ? error.message : 'Could not save follow-up action.',
         variant: 'destructive',
       });
     } finally {
       setQuickLogPendingType(null);
     }
-  }, [selectedProspect, quickLogPendingType, bumpLocalSkillXp, triggerXpFeedback, parseProspectPatchResponse, upsertProspectInCache, toast]);
+  }, [selectedProspect, quickLogPendingType, flushHomeQueuedSave, bumpLocalSkillXp, triggerXpFeedback, upsertProspectInCache, queryClient, toast]);
 
   // Delete prospect handler - remove from database
   const deleteSelectedProspect = useCallback(async () => {
@@ -1672,7 +1741,15 @@ export default function HomePage() {
       window.clearTimeout(homeSaveTimerRef.current);
       homeSaveTimerRef.current = null;
     }
-    await flushHomeQueuedSave();
+    const saveSucceeded = await flushHomeQueuedSave();
+    if (!saveSucceeded) {
+      toast({
+        title: 'Changes not saved yet',
+        description: 'The editor is staying open so you can retry without losing your changes.',
+        variant: 'destructive',
+      });
+      return;
+    }
     // Reset UI + selection
     if (editingProspectId) {
       clearPolygonPathListeners(editingProspectId);
@@ -1683,7 +1760,7 @@ export default function HomePage() {
     // Reset drawing tools
     try { setTerraModeSafe('select'); } catch {}
     try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false, clickableIcons: false } as google.maps.MapOptions); } catch {}
-  }, [editingProspectId, savePolygonChanges, flushHomeQueuedSave, setTerraModeSafe, map, clearPolygonPathListeners]);
+  }, [editingProspectId, savePolygonChanges, flushHomeQueuedSave, setTerraModeSafe, map, clearPolygonPathListeners, toast]);
 
   useEffect(() => {
     return () => {
@@ -1833,7 +1910,6 @@ export default function HomePage() {
                 position={{ lat: searchPin.lat, lng: searchPin.lng }}
                 onCloseClick={() => setSearchPin(null)}
                 options={{ maxWidth: 244 }}
-                shouldFocus={false}
               >
                 <SearchResultCard
                   location={searchPin}
@@ -1968,8 +2044,9 @@ export default function HomePage() {
       {isEditPanelOpen && selectedProspect && (
         <ProspectEditPanel
           prospect={selectedProspect}
+          saveStatus={prospectSaveStatus}
           values={{
-            address: getDisplayAddressValue(selectedProspect.name),
+            address: selectedProspect.address || getDisplayAddressValue(selectedProspect.name),
             businessName: selectedProspect.businessName || '',
             websiteUrl: selectedProspect.websiteUrl || '',
             buildingSf: buildingSfInput,
@@ -2039,7 +2116,7 @@ export default function HomePage() {
           onDrawArea={() => handleDrawPolygon()}
           onCopyCoordinates={selectedProspectLatLng ? () => void handleCopyCoordinates(selectedProspectLatLng.lat, selectedProspectLatLng.lng) : undefined}
           onOpenCoordinatesInMaps={selectedProspectLatLng ? () => handleOpenInMaps(selectedProspectLatLng.lat, selectedProspectLatLng.lng) : undefined}
-          onAddressChange={(value) => updateSelectedProspect('name', value)}
+          onAddressChange={updateSelectedProspectAddress}
           onBusinessNameChange={(value) => updateSelectedProspect('businessName', value || null)}
           onWebsiteUrlChange={(value) => updateSelectedProspect('websiteUrl', value || null)}
           onStatusChange={(value) => updateSelectedProspect('status', value)}

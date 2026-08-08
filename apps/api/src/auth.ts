@@ -48,6 +48,26 @@ function getConfiguredSalesActivityAgent(req: Request): { id: string; email?: st
   }
 }
 
+function getConfiguredMarketRecordAgent(req: Request): { id: string; email?: string; agentName?: string } | null {
+  const expectedToken = process.env.MARKET_RECORD_AGENT_API_KEY
+  const userId = process.env.MARKET_RECORD_AGENT_USER_ID || process.env.INTEL_AGENT_USER_ID
+  if (!expectedToken || !userId) return null
+
+  const authHeader = req.headers.authorization
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
+  const headerToken = typeof req.headers['x-levelcre-market-key'] === 'string'
+    ? req.headers['x-levelcre-market-key']
+    : null
+  const suppliedTokens = [bearerToken, headerToken].filter((token): token is string => Boolean(token))
+  if (!suppliedTokens.some((token) => safeTokenEquals(token, expectedToken))) return null
+
+  return {
+    id: userId,
+    email: process.env.MARKET_RECORD_AGENT_EMAIL || process.env.INTEL_AGENT_EMAIL || undefined,
+    agentName: process.env.MARKET_RECORD_AGENT_NAME || 'codex-market-records',
+  }
+}
+
 // Verify JWT using Supabase shared secret (HS256)
 async function verifyBearerJWT(token: string): Promise<JWTPayload | null> {
   try {
@@ -179,6 +199,21 @@ export async function requireSalesActivityAuth(req: Request, res: Response, next
       email: salesAgentUser.email,
       role: 'sales_activity_agent',
       agentName: salesAgentUser.agentName,
+    }
+    return next()
+  }
+
+  return requireAuth(req, res, next)
+}
+
+export async function requireMarketRecordProposalAuth(req: Request, res: Response, next: NextFunction) {
+  const marketAgentUser = getConfiguredMarketRecordAgent(req)
+  if (marketAgentUser) {
+    ;(req as any).user = {
+      id: marketAgentUser.id,
+      email: marketAgentUser.email,
+      role: 'market_record_agent',
+      agentName: marketAgentUser.agentName,
     }
     return next()
   }

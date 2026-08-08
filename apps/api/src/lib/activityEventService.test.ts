@@ -38,6 +38,15 @@ test('activity events require a known type, bounded confidence, and brief eviden
     occurredAt: new Date(),
     sourceMetadata: { provider: { bodyHtml: '<p>Full message</p>' } },
   }).success, false);
+  assert.equal(ActivityEventInputSchema.safeParse({
+    externalEventId: 'market-proposal-1',
+    eventType: 'market_record_proposed',
+    occurredAt: new Date(),
+    evidenceStatus: 'observed',
+    matchStatus: 'needs_review',
+    propertyAddress: '12345 67 Street NW, Edmonton, AB',
+    sourceMetadata: { proposal: { latitude: 53.55, longitude: -113.45 } },
+  }).success, true);
 });
 
 test('activity event import is idempotent and reports an upsert as a duplicate', async () => {
