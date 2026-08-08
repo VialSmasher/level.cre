@@ -139,3 +139,116 @@ test('rejects an import payload that claims Level CRE writes are authorized', ()
   const payload = { ...filePayload(), levelCreWriteAuthorized: true }
   assert.throws(() => parseCurrentProjectsMarketMemory(JSON.stringify(payload)), /not the Current Projects Edmonton enrichment file/)
 })
+
+test('uses municipal account identity so coordinate corrections do not change the anchor key', () => {
+  const original = filePayload()
+  original.counts = { identities: 1, lookups: 1 }
+  original.records = [record({})]
+  const corrected = structuredClone(original)
+  corrected.records[0].coordinate.latitude += 0.0002
+  corrected.records[0].coordinate.longitude -= 0.0002
+
+  const originalAnchor = parseCurrentProjectsMarketMemory(JSON.stringify(original)).anchors[0]
+  const correctedAnchor = parseCurrentProjectsMarketMemory(JSON.stringify(corrected)).anchors[0]
+  assert.equal(originalAnchor.id, 'edmonton-account-set:1000')
+  assert.equal(correctedAnchor.id, originalAnchor.id)
+})
+
+test('consolidates the same municipal parcel across conflicting coordinates', () => {
+  const first = record({})
+  const corrected = record({
+    titleIdentity: 'linc:coordinate-correction',
+    sourceTitle: {
+      ...record({}).sourceTitle,
+      source_sha256: 'hash-coordinate-correction',
+    },
+    coordinate: {
+      ...record({}).coordinate,
+      latitude: 53.5002,
+      longitude: -113.5002,
+    },
+  })
+  const input = {
+    schemaVersion: 1,
+    generatedAt: '2026-08-08T12:00:00.000Z',
+    levelCreWriteAuthorized: false,
+    counts: { identities: 2, lookups: 1 },
+    records: [first, corrected],
+  }
+
+  const preview = parseCurrentProjectsMarketMemory(JSON.stringify(input))
+  assert.equal(preview.anchors.length, 1)
+  assert.equal(preview.anchors[0]?.id, 'edmonton-account-set:1000')
+  assert.equal(preview.anchors[0]?.legalIdentities.length, 2)
+  assert.equal(preview.anchors[0]?.baseLayer, 'review')
+  assert.match(preview.anchors[0]?.reviewReasons.join(' ') || '', /resolve to 2 coordinates/i)
+})
+
+test('keeps distinct parcels separate when they share the same civic address', () => {
+  const first = record({})
+  const second = record({
+    titleIdentity: 'linc:other-parcel',
+    sourceTitle: { ...record({}).sourceTitle, linc: '009', title_number: '100 009', source_sha256: 'hash-nine' },
+    coordinate: { ...record({}).coordinate, latitude: 53.5005, accountNumber: '1001' },
+  })
+  const input = {
+    schemaVersion: 1,
+    generatedAt: '2026-08-08T12:00:00.000Z',
+    levelCreWriteAuthorized: false,
+    counts: { identities: 2, lookups: 2 },
+    records: [first, second],
+  }
+  const preview = parseCurrentProjectsMarketMemory(JSON.stringify(input))
+  assert.equal(preview.anchors.length, 2)
+  assert.equal(new Set(preview.anchors.map((anchor) => anchor.id)).size, 2)
+  assert.deepEqual(preview.anchors.map((anchor) => anchor.address), ['100 First Street NW', '100 First Street NW'])
+})
+
+test('folder-name-only similarity does not become a property match', () => {
+  const preview = parseCurrentProjectsMarketMemory(JSON.stringify(filePayload()))
+  const prospects = [{
+    id: 'same-project-name',
+    name: 'Second project',
+    businessName: 'Second project',
+    status: 'prospect',
+    notes: '',
+  }] as Prospect[]
+  const resolved = resolveMarketMemoryAgainstProspects(preview.anchors, prospects)
+  const second = resolved.find((anchor) => anchor.address.includes('200 Second'))
+  assert.equal(second?.resolution?.decision, 'create_new')
+  assert.equal(second?.resolution?.candidates.length, 0)
+})
+
+test('address alone remains reviewable and never auto-links', () => {
+  const preview = parseCurrentProjectsMarketMemory(JSON.stringify(filePayload()))
+  const prospects = [{
+    id: 'address-only',
+    name: '200 Second Avenue NW',
+    address: '200 Second Avenue NW',
+    status: 'prospect',
+    notes: '',
+  }] as Prospect[]
+  const resolved = resolveMarketMemoryAgainstProspects(preview.anchors, prospects)
+  const second = resolved.find((anchor) => anchor.address.includes('200 Second'))
+  assert.equal(second?.resolution?.decision, 'review')
+  assert.equal(second?.previewLayer, 'review')
+})
+
+test('keeps equally strong existing candidates in review instead of choosing by array order', () => {
+  const preview = parseCurrentProjectsMarketMemory(JSON.stringify(filePayload()))
+  const duplicateCandidates = ['candidate-one', 'candidate-two'].map((id) => ({
+    id,
+    name: id,
+    address: '200 Second Avenue NW',
+    status: 'prospect',
+    notes: '',
+    geometry: { type: 'Point', coordinates: [-113.6, 53.6] },
+  })) as Prospect[]
+
+  const resolved = resolveMarketMemoryAgainstProspects(preview.anchors, duplicateCandidates)
+  const second = resolved.find((anchor) => anchor.address.includes('200 Second'))
+  assert.equal(second?.resolution?.decision, 'review')
+  assert.equal(second?.resolution?.candidates.length, 2)
+  assert.equal(second?.resolution?.candidates[0]?.confidence, second?.resolution?.candidates[1]?.confidence)
+  assert.equal(second?.previewLayer, 'review')
+})

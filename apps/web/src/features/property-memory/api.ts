@@ -1,0 +1,233 @@
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query'
+
+import { apiRequest } from '@/lib/queryClient'
+import type {
+  CurrentProjectsMarketMemoryPreview,
+  MarketMemoryAnchor,
+  MarketMemoryResolution,
+} from '@level-cre/shared'
+
+export type PropertyMemoryFieldGroup = 'location' | 'municipal' | 'legal' | 'ownership' | 'context'
+
+export type PropertyMemoryFieldDecisions = Record<PropertyMemoryFieldGroup, boolean>
+
+export const DEFAULT_PROPERTY_MEMORY_FIELD_DECISIONS: PropertyMemoryFieldDecisions = {
+  location: true,
+  municipal: true,
+  legal: true,
+  ownership: true,
+  context: true,
+}
+
+export type PropertyMemoryImportRequest = {
+  sourceFileName: string
+  payload: unknown
+}
+
+export type PropertyMemoryStageRequest = PropertyMemoryImportRequest & {
+  previewHash: string
+}
+
+export type PropertyMemoryImportSummary = {
+  identities: number
+  anchors: number
+  existing: number
+  marketMemory: number
+  review: number
+  pending: number
+}
+
+export type PropertyMemoryPreviewResponse = {
+  duplicate?: boolean
+  importId?: string | null
+  sourceHash: string
+  summary: PropertyMemoryImportSummary
+  preview: CurrentProjectsMarketMemoryPreview
+}
+
+export type PropertyMemoryReviewItem = {
+  id: string
+  importId: string
+  status: 'pending' | 'approved' | 'rejected' | 'superseded'
+  suggestedLayer: 'existing' | 'market_memory' | 'review'
+  matchedDossierId: string | null
+  matchedProspectId: string | null
+  matchedListingId: string | null
+  matchConfidence: number
+  resolution: MarketMemoryResolution | Record<string, unknown>
+  reviewReasons: string[]
+  sourceFileName: string | null
+  createdAt: string | null
+  updatedAt: string | null
+  anchor: MarketMemoryAnchor
+  currentValues?: Partial<Record<PropertyMemoryFieldGroup, string[]>>
+}
+
+export type PropertyMemoryReviewResponse = {
+  rows: PropertyMemoryReviewItem[]
+}
+
+export type PropertyMemoryDecision = {
+  action: 'approve' | 'reject'
+  targetDossierId?: string | null
+  targetProspectId?: string | null
+  targetListingId?: string | null
+  confirmConflicts: boolean
+  coordinateDecision?: 'keep_existing' | 'use_verified'
+  fieldDecisions: PropertyMemoryFieldDecisions
+}
+
+export type PropertyMemoryDecisionRequest = {
+  itemId: string
+  decision: PropertyMemoryDecision
+}
+
+export type PropertyMemoryDecisionResponse = {
+  alreadyReviewed: boolean
+  action: 'approved' | 'rejected'
+  dossierId?: string | null
+  factCount?: number
+  item: PropertyMemoryReviewItem
+}
+
+export type PropertyMemoryMapResponse = CurrentProjectsMarketMemoryPreview & {
+  linkedProspectIds: string[]
+  anchors: MarketMemoryAnchor[]
+}
+
+// Keep endpoints in one place while the backend route surface settles.
+export const propertyMemoryRoutes = {
+  preview: '/api/intel/brokerage-memory/preview',
+  imports: '/api/intel/brokerage-memory/imports',
+  review: '/api/intel/brokerage-memory/review',
+  map: '/api/intel/brokerage-memory/map',
+  decision: (itemId: string) => `/api/intel/brokerage-memory/items/${encodeURIComponent(itemId)}/decision`,
+} as const
+
+export const propertyMemoryKeys = {
+  all: ['property-memory'] as const,
+  map: () => ['property-memory', 'map'] as const,
+  reviewRoot: () => ['property-memory', 'review'] as const,
+  review: (limit: number) => ['property-memory', 'review', limit] as const,
+} as const
+
+async function responseJson<T>(response: Response): Promise<T> {
+  return response.json() as Promise<T>
+}
+
+export async function previewPropertyMemoryImport(
+  input: PropertyMemoryImportRequest,
+): Promise<PropertyMemoryPreviewResponse> {
+  return responseJson(await apiRequest('POST', propertyMemoryRoutes.preview, input))
+}
+
+export async function stagePropertyMemoryImport(
+  input: PropertyMemoryStageRequest,
+): Promise<PropertyMemoryPreviewResponse> {
+  return responseJson(await apiRequest('POST', propertyMemoryRoutes.imports, input))
+}
+
+export async function fetchPropertyMemoryReview(limit = 100): Promise<PropertyMemoryReviewResponse> {
+  const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 250)
+  return responseJson(await apiRequest('GET', `${propertyMemoryRoutes.review}?limit=${boundedLimit}`))
+}
+
+export async function fetchPropertyMemoryMap(): Promise<PropertyMemoryMapResponse> {
+  return responseJson(await apiRequest('GET', propertyMemoryRoutes.map))
+}
+
+export async function decidePropertyMemoryItem(
+  request: PropertyMemoryDecisionRequest,
+): Promise<PropertyMemoryDecisionResponse> {
+  return responseJson(await apiRequest('POST', propertyMemoryRoutes.decision(request.itemId), request.decision))
+}
+
+export async function invalidatePropertyMemoryMap(queryClient: QueryClient) {
+  await queryClient.invalidateQueries({ queryKey: propertyMemoryKeys.map() })
+}
+
+export async function invalidatePropertyMemoryReview(queryClient: QueryClient) {
+  await queryClient.invalidateQueries({ queryKey: propertyMemoryKeys.reviewRoot() })
+}
+
+export async function invalidatePropertyMemoryAfterImport(queryClient: QueryClient) {
+  await Promise.all([
+    invalidatePropertyMemoryMap(queryClient),
+    invalidatePropertyMemoryReview(queryClient),
+  ])
+}
+
+export async function invalidatePropertyMemoryAfterDecision(queryClient: QueryClient) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: propertyMemoryKeys.all }),
+    queryClient.invalidateQueries({ queryKey: ['/api/intel/dossiers'] }),
+    queryClient.invalidateQueries({ queryKey: ['/api/prospects'] }),
+  ])
+}
+
+type MutationCallbacks<TData, TVariables> = {
+  onSuccess?: (data: TData, variables: TVariables) => void | Promise<void>
+  onError?: (error: Error, variables: TVariables) => void
+}
+
+export function usePropertyMemoryMap(options: { enabled?: boolean } = {}) {
+  return useQuery<PropertyMemoryMapResponse>({
+    queryKey: propertyMemoryKeys.map(),
+    queryFn: fetchPropertyMemoryMap,
+    enabled: options.enabled ?? true,
+    staleTime: 30_000,
+  })
+}
+
+export function usePropertyMemoryReview(options: { enabled?: boolean; limit?: number } = {}) {
+  const limit = Math.min(Math.max(Math.trunc(options.limit ?? 100), 1), 250)
+  return useQuery<PropertyMemoryReviewResponse>({
+    queryKey: propertyMemoryKeys.review(limit),
+    queryFn: () => fetchPropertyMemoryReview(limit),
+    enabled: options.enabled ?? true,
+    staleTime: 15_000,
+  })
+}
+
+export function usePreviewPropertyMemoryImport(
+  callbacks: MutationCallbacks<PropertyMemoryPreviewResponse, PropertyMemoryImportRequest> = {},
+) {
+  return useMutation<PropertyMemoryPreviewResponse, Error, PropertyMemoryImportRequest>({
+    mutationFn: previewPropertyMemoryImport,
+    onSuccess: callbacks.onSuccess,
+    onError: callbacks.onError,
+  })
+}
+
+export function useStagePropertyMemoryImport(
+  callbacks: MutationCallbacks<PropertyMemoryPreviewResponse, PropertyMemoryStageRequest> = {},
+) {
+  const queryClient = useQueryClient()
+  return useMutation<PropertyMemoryPreviewResponse, Error, PropertyMemoryStageRequest>({
+    mutationFn: stagePropertyMemoryImport,
+    onSuccess: async (data, variables) => {
+      await invalidatePropertyMemoryAfterImport(queryClient)
+      await callbacks.onSuccess?.(data, variables)
+    },
+    onError: callbacks.onError,
+  })
+}
+
+export function useDecidePropertyMemoryItem(
+  callbacks: MutationCallbacks<PropertyMemoryDecisionResponse, PropertyMemoryDecisionRequest> = {},
+) {
+  const queryClient = useQueryClient()
+  return useMutation<PropertyMemoryDecisionResponse, Error, PropertyMemoryDecisionRequest>({
+    mutationFn: decidePropertyMemoryItem,
+    onSuccess: async (data, variables) => {
+      await invalidatePropertyMemoryAfterDecision(queryClient)
+      await callbacks.onSuccess?.(data, variables)
+    },
+    onError: callbacks.onError,
+  })
+}

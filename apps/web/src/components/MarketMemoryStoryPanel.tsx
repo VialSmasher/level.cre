@@ -9,6 +9,8 @@ import type { MarketMemoryAnchor, MarketMemoryLegalIdentity } from '@/lib/curren
 type Props = {
   anchor: MarketMemoryAnchor
   onClose: () => void
+  onReview?: () => void
+  onWorkProspect?: () => void
 }
 
 function cleanDate(value: string | null) {
@@ -41,9 +43,27 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-export function MarketMemoryStoryPanel({ anchor, onClose }: Props) {
+export function MarketMemoryStoryPanel({ anchor, onClose, onReview, onWorkProspect }: Props) {
   const meta = storyMeta(anchor)
   const candidate = anchor.resolution?.topCandidate
+  const persistenceState = anchor.persistence?.state || 'local_preview'
+  const persistenceMeta = persistenceState === 'approved'
+    ? {
+        badge: 'Saved brokerage memory',
+        title: 'Approved property memory',
+        description: 'These source-backed facts are durable in Level CRE. Linked prospect notes, status, follow-ups and manual geometry remain separate.',
+      }
+    : persistenceState === 'pending'
+      ? {
+          badge: 'Awaiting broker approval',
+          title: 'Saved to Today → Review',
+          description: 'This proposal is durable, but the canonical property record has not changed. Approve or reject it from Review.',
+        }
+      : {
+          badge: 'Local preview',
+          title: 'No data has been saved',
+          description: 'This read-only preview has not changed Level CRE.',
+        }
 
   return (
     <aside className="absolute bottom-2 left-2 right-2 z-[80] flex max-h-[78dvh] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl md:bottom-auto md:left-auto md:right-0 md:top-0 md:h-full md:max-h-none md:w-[380px] md:rounded-none md:border-y-0 md:border-r-0 md:border-l">
@@ -55,7 +75,7 @@ export function MarketMemoryStoryPanel({ anchor, onClose }: Props) {
                 <meta.Icon className="mr-1 h-3 w-3" />
                 {meta.label}
               </Badge>
-              <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">Preview only</Badge>
+              <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">{persistenceMeta.badge}</Badge>
             </div>
             <h2 className="mt-2 text-base font-semibold leading-5 text-slate-950">{anchor.address}</h2>
             <p className="mt-1 text-xs text-slate-500">{anchor.latitude.toFixed(6)}, {anchor.longitude.toFixed(6)}</p>
@@ -68,8 +88,8 @@ export function MarketMemoryStoryPanel({ anchor, onClose }: Props) {
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="bg-slate-950 px-4 py-3 text-xs leading-5 text-slate-100">
-          <div className="flex items-center gap-2 font-semibold text-white"><Database className="h-4 w-4" />No data has been saved</div>
-          <p className="mt-1 text-slate-300">This is a local merge preview. Broker notes, follow-ups, status, and coordinates in Level CRE remain untouched.</p>
+          <div className="flex items-center gap-2 font-semibold text-white"><Database className="h-4 w-4" />{persistenceMeta.title}</div>
+          <p className="mt-1 text-slate-300">{persistenceMeta.description}</p>
         </div>
 
         {candidate ? (
@@ -143,6 +163,13 @@ export function MarketMemoryStoryPanel({ anchor, onClose }: Props) {
           </div>
         </Section>
       </ScrollArea>
+
+      {onReview || onWorkProspect ? (
+        <div className="flex gap-2 border-t border-slate-200 bg-white px-4 py-3">
+          {onReview ? <Button type="button" variant="outline" className="flex-1" onClick={onReview}>Review changes</Button> : null}
+          {onWorkProspect ? <Button type="button" className="flex-1" onClick={onWorkProspect}>Work this prospect</Button> : null}
+        </div>
+      ) : null}
     </aside>
   )
 }

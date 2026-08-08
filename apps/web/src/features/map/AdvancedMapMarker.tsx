@@ -34,6 +34,7 @@ export function AdvancedMapMarker({
     let marker: google.maps.marker.AdvancedMarkerElement | null = null;
     let content: HTMLElement | null = null;
     let listener: google.maps.MapsEventListener | null = null;
+    let keyListener: ((event: KeyboardEvent) => void) | null = null;
 
     void (async () => {
       try {
@@ -42,6 +43,17 @@ export function AdvancedMapMarker({
 
         content = createCircleMarkerContent({ color, borderColor, label, labelColor, scale });
         content.style.cursor = onClick ? 'pointer' : 'default';
+        if (onClick) {
+          content.tabIndex = 0;
+          content.setAttribute('role', 'button');
+          content.setAttribute('aria-label', title || 'Open map property');
+          keyListener = (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            onClick();
+          };
+          content.addEventListener('keydown', keyListener);
+        }
         marker = new AdvancedMarkerElement({
           map,
           position,
@@ -60,6 +72,7 @@ export function AdvancedMapMarker({
     return () => {
       disposed = true;
       listener?.remove();
+      if (content && keyListener) content.removeEventListener('keydown', keyListener);
       if (marker) {
         marker.map = null;
       }

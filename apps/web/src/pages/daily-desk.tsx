@@ -29,6 +29,12 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { PropertyEvidenceImportDialog } from '@/components/PropertyEvidenceImportDialog'
+import { MarketMemoryPreviewDialog } from '@/components/MarketMemoryPreviewDialog'
+import { PropertyMemoryReviewCard } from '@/features/property-memory/PropertyMemoryReviewCard'
+import {
+  useDecidePropertyMemoryItem,
+  usePropertyMemoryReview,
+} from '@/features/property-memory/api'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Select,
@@ -523,9 +529,14 @@ function ActivityMomentum({ data, maxDailyActivity }: { data: ActivityPulseRespo
 export default function DailyDeskPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
-  const [activeTab, setActiveTab] = useState<DeskTab>('today')
+  const [activeTab, setActiveTab] = useState<DeskTab>(() => {
+    if (typeof window === 'undefined') return 'today'
+    const requested = new URLSearchParams(window.location.search).get('tab')
+    return requested === 'review' || requested === 'waiting' || requested === 'develop' ? requested : 'today'
+  })
   const [prospectDrafts, setProspectDrafts] = useState<Record<string, string>>({})
   const [isEvidenceImportOpen, setIsEvidenceImportOpen] = useState(false)
+  const [isMemoryImportOpen, setIsMemoryImportOpen] = useState(false)
 
   const salesBriefQuery = useQuery<SalesBriefResponse>({
     queryKey: ['/api/automation/sales-brief?limit=25'],
@@ -542,6 +553,7 @@ export default function DailyDeskPage() {
   const propertyEvidenceQuery = useQuery<{ rows: PropertyEvidenceRow[] }>({
     queryKey: ['/api/activity-events?source=codex_property_title_audit&matchStatus=needs_review&limit=250'],
   })
+  const propertyMemoryReviewQuery = usePropertyMemoryReview({ limit: 250 })
   const watchlistQuery = useQuery<IntelWatchlistResponse>({
     queryKey: ['/api/intel/watchlist?days=30&limit=12'],
   })
@@ -560,6 +572,20 @@ export default function DailyDeskPage() {
     },
     staleTime: 60_000,
     refetchOnMount: 'always',
+  })
+
+  const propertyMemoryDecision = useDecidePropertyMemoryItem({
+    onSuccess: (result) => {
+      toast({
+        title: result.action === 'approved' ? 'Property memory approved' : 'Property proposal rejected',
+        description: result.action === 'approved'
+          ? 'The selected source-backed facts are now durable and map-visible.'
+          : 'The review decision was saved and will not reopen on a repeat import.',
+      })
+    },
+    onError: (error) => {
+      toast({ title: 'Could not save the property decision', description: error.message, variant: 'destructive' })
+    },
   })
 
   const watchlistActions = useMemo<SalesBriefAction[]>(() => (
@@ -591,6 +617,7 @@ export default function DailyDeskPage() {
   const marketProposals = marketProposalsQuery.data?.rows || []
   const opportunityProposals = opportunityProposalsQuery.data?.rows || []
   const propertyEvidence = propertyEvidenceQuery.data?.rows || []
+  const propertyMemoryItems = propertyMemoryReviewQuery.data?.rows || []
   const prospects = useMemo(
     () => [...(prospectsQuery.data || [])].sort((left, right) => prospectLabel(left).localeCompare(prospectLabel(right))),
     [prospectsQuery.data],
@@ -698,6 +725,7 @@ export default function DailyDeskPage() {
     queryClient.invalidateQueries({ queryKey: ['/api/email/inbound/config'] })
     queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] })
     queryClient.invalidateQueries({ queryKey: ['/api/automation/activity-pulse'] })
+    queryClient.invalidateQueries({ queryKey: ['property-memory'] })
   }
 
   const handleEvidenceImported = () => {
@@ -709,11 +737,11 @@ export default function DailyDeskPage() {
   const tabCounts: Record<DeskTab, number> = {
     today: queues.today.length,
     waiting: queues.waiting.length,
-    review: queues.review.length + imports.length + marketProposals.length + opportunityProposals.length + propertyEvidence.length,
+    review: queues.review.length + propertyMemoryItems.length + imports.length + marketProposals.length + opportunityProposals.length + propertyEvidence.length,
     develop: queues.develop.length,
   }
   const isLoading = salesBriefQuery.isLoading || importsQuery.isLoading || marketProposalsQuery.isLoading || opportunityProposalsQuery.isLoading || propertyEvidenceQuery.isLoading
-  const hasError = salesBriefQuery.isError || importsQuery.isError || marketProposalsQuery.isError || opportunityProposalsQuery.isError || propertyEvidenceQuery.isError
+  const hasError = salesBriefQuery.isError || importsQuery.isError || marketProposalsQuery.isError || opportunityProposalsQuery.isError || propertyEvidenceQuery.isError || propertyMemoryReviewQuery.isError
   const generatedAt = formatWhen(salesBriefQuery.data?.generatedAt)
   const pulseMetrics = [
     { group: 'Effort', label: 'Touches / 28 days', value: activityPulseQuery.data?.total ?? 0, icon: Activity, tone: 'text-blue-700 bg-blue-50' },
@@ -819,10 +847,15 @@ export default function DailyDeskPage() {
               </div>
               <div className="flex items-center gap-2">
                 {activeTab === 'review' ? (
-                  <Button type="button" size="sm" variant="outline" onClick={() => setIsEvidenceImportOpen(true)}>
-                    <Upload className="h-4 w-4" />
-                    Import enrichment
-                  </Button>
+                  <>
+                    <Button type="button" size="sm" onClick={() => setIsMemoryImportOpen(true)}>
+                      <Upload className="h-4 w-4" />
+                      Import map memory
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => setIsEvidenceImportOpen(true)}>
+                      Import legacy evidence
+                    </Button>
+                  </>
                 ) : null}
                 <Badge variant="outline" className="rounded bg-slate-50 text-slate-700">
                   {tabCounts[activeTab]} item{tabCounts[activeTab] === 1 ? '' : 's'}
@@ -850,8 +883,36 @@ export default function DailyDeskPage() {
                 ))
               : null}
 
+            {activeTab === 'review' && propertyMemoryReviewQuery.isLoading ? (
+              <div className="border-b border-slate-200 px-5 py-5">
+                <div className="h-4 w-44 animate-pulse rounded bg-slate-200" />
+                <div className="mt-3 h-3 w-full animate-pulse rounded bg-slate-100" />
+              </div>
+            ) : null}
+
+            {activeTab === 'review' && propertyMemoryItems.length ? (
+              <section aria-labelledby="property-memory-review-heading">
+                <div className="border-b border-blue-200 bg-blue-50 px-4 py-3 sm:px-5">
+                  <h3 id="property-memory-review-heading" className="text-sm font-semibold text-blue-950">Property memory</h3>
+                  <p className="mt-0.5 text-xs text-blue-800">One decision per canonical property. Approval adds selected dossier facts without creating a prospect.</p>
+                </div>
+                {propertyMemoryItems.map((item) => (
+                  <PropertyMemoryReviewCard
+                    key={item.id}
+                    item={item}
+                    isPending={propertyMemoryDecision.isPending && propertyMemoryDecision.variables?.itemId === item.id}
+                    onApprove={(decision) => propertyMemoryDecision.mutate({ itemId: item.id, decision })}
+                    onReject={(decision) => propertyMemoryDecision.mutate({ itemId: item.id, decision })}
+                  />
+                ))}
+              </section>
+            ) : null}
+
             {!isLoading && activeTab === 'review' ? (
               <div>
+                {marketProposals.length || opportunityProposals.length || propertyEvidence.length || imports.length || queues.review.length ? (
+                  <div className="border-b border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-600 sm:px-5">Other review items</div>
+                ) : null}
                 {marketProposals.map((item) => {
                   const proposal = item.source_metadata?.proposal
                   const resolvedCandidate = item.source_metadata?.entityResolution?.candidates?.[0]
@@ -1079,7 +1140,7 @@ export default function DailyDeskPage() {
                   )
                 })}
                 {queues.review.map((action) => <ActionRow key={action.id} action={action} />)}
-                {marketProposals.length === 0 && opportunityProposals.length === 0 && propertyEvidence.length === 0 && imports.length === 0 && queues.review.length === 0 ? <EmptyQueue tab="review" /> : null}
+                {propertyMemoryItems.length === 0 && marketProposals.length === 0 && opportunityProposals.length === 0 && propertyEvidence.length === 0 && imports.length === 0 && queues.review.length === 0 ? <EmptyQueue tab="review" /> : null}
               </div>
             ) : null}
           </section>
@@ -1242,6 +1303,18 @@ export default function DailyDeskPage() {
             </div>
           </div>
         </details>
+
+        <MarketMemoryPreviewDialog
+          open={isMemoryImportOpen}
+          onOpenChange={setIsMemoryImportOpen}
+          onPreviewReady={(preview) => {
+            setActiveTab('review')
+            toast({
+              title: 'Property memory saved to Review',
+              description: `${preview.anchors.length} canonical properties are staged for broker decisions and visible on the map review layer.`,
+            })
+          }}
+        />
 
         <PropertyEvidenceImportDialog
           open={isEvidenceImportOpen}

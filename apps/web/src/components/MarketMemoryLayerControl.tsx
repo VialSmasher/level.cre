@@ -30,6 +30,8 @@ export function MarketMemoryLayerControl({ anchors, visibleLayers, onOpenPreview
     )
   }
 
+  const pendingCount = anchors.filter((anchor) => anchor.persistence?.state === 'pending').length
+
   return (
     <div className="w-64 rounded-lg border border-slate-200 bg-white/95 shadow-xl backdrop-blur-sm">
       <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2.5">
@@ -38,7 +40,9 @@ export function MarketMemoryLayerControl({ anchors, visibleLayers, onOpenPreview
             <Layers3 className="h-4 w-4 text-blue-700" />
             Brokerage memory
           </div>
-          <p className="mt-0.5 text-[11px] text-slate-500">{anchors.length} preview anchors · no writes</p>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            {anchors.length} server-backed properties{pendingCount ? ` · ${pendingCount} awaiting review` : ''}
+          </p>
         </div>
         <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onOpenPreview} aria-label="Load a different brokerage memory file" title="Load a different file">
           <RotateCcw className="h-3.5 w-3.5" />
@@ -62,7 +66,7 @@ export function MarketMemoryLayerControl({ anchors, visibleLayers, onOpenPreview
         })}
       </div>
       <div className="border-t border-slate-200 px-3 py-2">
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-full text-xs text-slate-600" onClick={onClear}>Clear preview</Button>
+        <Button type="button" variant="ghost" size="sm" className="h-7 w-full text-xs text-slate-600" onClick={onClear}>Hide all memory layers</Button>
       </div>
     </div>
   )
