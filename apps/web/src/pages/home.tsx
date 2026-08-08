@@ -193,11 +193,14 @@ const MarketMemoryOverlayLayer = memo(function MarketMemoryOverlayLayer({
         const layer = anchor.previewLayer || anchor.baseLayer;
         if (!visibleLayers.has(layer)) return null;
         const marker = MARKET_MEMORY_MARKER_META[layer];
+        const markerTitle = anchor.persistence?.state === 'pending'
+          ? layer === 'review' ? 'Conflict review pending' : 'Awaiting broker approval'
+          : marker.title;
         return (
           <AdvancedMapMarker
             key={anchor.id}
             position={{ lat: anchor.latitude, lng: anchor.longitude }}
-            title={`${marker.title}: ${anchor.address}`}
+            title={`${markerTitle}: ${anchor.address}`}
             color={marker.color}
             borderColor="#ffffff"
             label={marker.label}
@@ -702,6 +705,7 @@ export default function HomePage() {
       const memory = linkedMemoryByProspectId.get(prospect.id);
       const memoryLayer: MarketMemoryLayer | null = memory ? (memory.previewLayer || memory.baseLayer) : null;
       const showMemoryState = Boolean(memory && memoryLayer && visibleMarketMemoryLayers.has(memoryLayer));
+      const memoryIsPending = memory?.persistence?.state === 'pending';
       if (prospect.geometry.type === 'Point') {
         const [lng, lat] = prospect.geometry.coordinates as [number, number];
         return {
@@ -715,7 +719,7 @@ export default function HomePage() {
             ? memoryLayer === 'review' ? '#D97706' : '#0F766E'
             : undefined,
           markerTitle: showMemoryState
-            ? `${getProspectDisplayName(prospect)} · ${memoryLayer === 'review' ? 'memory review pending' : 'brokerage memory saved'}`
+            ? `${getProspectDisplayName(prospect)} · ${memoryIsPending ? 'memory approval pending' : 'brokerage memory saved'}`
             : undefined,
         };
       }

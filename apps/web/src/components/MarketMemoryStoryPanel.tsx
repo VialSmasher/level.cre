@@ -25,6 +25,12 @@ function identityLabel(identity: MarketMemoryLegalIdentity) {
 }
 
 function storyMeta(anchor: MarketMemoryAnchor) {
+  if (anchor.persistence?.state === 'pending') {
+    if (anchor.previewLayer === 'review') {
+      return { label: 'Conflict review pending', className: 'border-amber-200 bg-amber-50 text-amber-800', Icon: AlertTriangle }
+    }
+    return { label: 'Awaiting broker approval', className: 'border-blue-200 bg-blue-50 text-blue-800', Icon: FileCheck2 }
+  }
   if (anchor.previewLayer === 'existing') {
     return { label: 'Matches existing record', className: 'border-teal-200 bg-teal-50 text-teal-800', Icon: Link2 }
   }
