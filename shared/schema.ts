@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
+  bigint,
   boolean,
+  check,
   index,
   jsonb,
   pgTable,
@@ -14,6 +17,7 @@ import {
   numeric,
   pgEnum,
   unique,
+  uniqueIndex,
   primaryKey,
   customType,
 } from "drizzle-orm/pg-core";
@@ -1201,6 +1205,266 @@ export const intelSurveyItems = pgTable(
   ],
 );
 
+// Canonical property memory assembled from listings, broker research, and
+// approved brokerage-memory imports. The import-item reference is deliberately
+// deferred because approved review items and dossiers reference one another.
+export const intelPropertyDossiers = pgTable(
+  "intel_property_dossiers",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    canonicalListingId: varchar("canonical_listing_id").references(() => intelListings.id, { onDelete: "set null" }),
+    title: varchar("title").notNull(),
+    address: text("address"),
+    normalizedAddress: text("normalized_address"),
+    market: varchar("market"),
+    submarket: varchar("submarket"),
+    assetType: varchar("asset_type"),
+    listingType: varchar("listing_type"),
+    status: varchar("status").notNull().default("active"),
+    lat: numeric("lat"),
+    lng: numeric("lng"),
+    dataCompletenessScore: integer("data_completeness_score").notNull().default(0),
+    createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+    prospectId: varchar("prospect_id").references(() => prospects.id, { onDelete: "set null" }),
+    externalMemoryKey: varchar("external_memory_key"),
+    memoryClass: varchar("memory_class").notNull().default("inventory"),
+    memoryPayload: jsonb("memory_payload").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    sourceProvenance: jsonb("source_provenance").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    originImportItemId: varchar("origin_import_item_id").references(
+      (): AnyPgColumn => brokerageMemoryItems.id,
+      { onDelete: "set null" },
+    ),
+  },
+  (table) => [
+    check(
+      "chk_intel_property_dossiers_status",
+      sql`${table.status} IN ('active', 'draft', 'archived')`,
+    ),
+    uniqueIndex("uq_intel_property_dossiers_user_listing")
+      .on(table.createdByUserId, table.canonicalListingId)
+      .where(sql`${table.canonicalListingId} IS NOT NULL`),
+    index("idx_intel_property_dossiers_user_address")
+      .on(table.createdByUserId, table.normalizedAddress)
+      .where(sql`${table.normalizedAddress} IS NOT NULL`),
+    index("idx_intel_property_dossiers_user").on(table.createdByUserId),
+    index("idx_intel_property_dossiers_status").on(table.status),
+    uniqueIndex("uq_intel_property_dossiers_user_prospect")
+      .on(table.createdByUserId, table.prospectId)
+      .where(sql`${table.prospectId} IS NOT NULL`),
+    index("idx_intel_property_dossiers_prospect")
+      .on(table.prospectId)
+      .where(sql`${table.prospectId} IS NOT NULL`),
+    uniqueIndex("uq_intel_property_dossiers_user_memory_key")
+      .on(table.createdByUserId, table.externalMemoryKey)
+      .where(sql`${table.externalMemoryKey} IS NOT NULL`),
+    index("idx_intel_property_dossiers_memory_class").on(table.createdByUserId, table.memoryClass, table.status),
+    index("idx_intel_property_dossiers_origin_import_item")
+      .on(table.originImportItemId)
+      .where(sql`${table.originImportItemId} IS NOT NULL`),
+  ],
+).enableRLS();
+
+export const intelListingAssets = pgTable(
+  "intel_listing_assets",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    listingId: varchar("listing_id").references(() => intelListings.id, { onDelete: "cascade" }),
+    surveyId: varchar("survey_id").references(() => intelSurveys.id, { onDelete: "cascade" }),
+    surveyItemId: varchar("survey_item_id").references(() => intelSurveyItems.id, { onDelete: "cascade" }),
+    assetType: varchar("asset_type").notNull().default("brochure"),
+    fileName: text("file_name").notNull(),
+    contentType: varchar("content_type").notNull(),
+    fileSize: bigint("file_size", { mode: "number" }).notNull().default(0),
+    storageBucket: varchar("storage_bucket").notNull(),
+    storagePath: text("storage_path").notNull().unique(),
+    source: varchar("source").notNull().default("upload"),
+    status: varchar("status").notNull().default("pending"),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    createdByUserId: varchar("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+    dossierId: varchar("dossier_id").references(() => intelPropertyDossiers.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    check(
+      "chk_intel_listing_assets_type",
+      sql`${table.assetType} IN ('brochure', 'flyer', 'aerial', 'site_plan', 'photo', 'survey_page', 'other')`,
+    ),
+    check(
+      "chk_intel_listing_assets_source",
+      sql`${table.source} IN ('upload', 'email', 'resolver', 'manual')`,
+    ),
+    check(
+      "chk_intel_listing_assets_status",
+      sql`${table.status} IN ('pending', 'active', 'failed', 'archived')`,
+    ),
+    index("idx_intel_listing_assets_listing").on(table.listingId),
+    index("idx_intel_listing_assets_survey").on(table.surveyId),
+    index("idx_intel_listing_assets_survey_item").on(table.surveyItemId),
+    index("idx_intel_listing_assets_status").on(table.status),
+    index("idx_intel_listing_assets_dossier").on(table.dossierId),
+  ],
+).enableRLS();
+
+export const brokerageMemoryImports = pgTable(
+  "brokerage_memory_imports",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()::text`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    source: varchar("source").notNull().default("current_projects_title_enrichment"),
+    sourceFileName: text("source_file_name"),
+    sourceHash: varchar("source_hash").notNull(),
+    generatedAt: timestamp("generated_at", { withTimezone: true }),
+    status: varchar("status").notNull().default("preview"),
+    identityCount: integer("identity_count").notNull().default(0),
+    anchorCount: integer("anchor_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "chk_brokerage_memory_import_status",
+      sql`${table.status} IN ('preview', 'partially_approved', 'completed', 'superseded', 'failed')`,
+    ),
+    uniqueIndex("uq_brokerage_memory_import_source_hash").on(table.userId, table.source, table.sourceHash),
+    index("idx_brokerage_memory_import_user_status").on(table.userId, table.status, table.createdAt.desc()),
+  ],
+).enableRLS();
+
+export const brokerageMemoryItems = pgTable(
+  "brokerage_memory_items",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()::text`),
+    importId: varchar("import_id").notNull().references(() => brokerageMemoryImports.id, { onDelete: "cascade" }),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    externalAnchorId: varchar("external_anchor_id").notNull(),
+    status: varchar("status").notNull().default("pending"),
+    baseLayer: varchar("base_layer").notNull(),
+    suggestedLayer: varchar("suggested_layer").notNull(),
+    address: text("address").notNull(),
+    normalizedAddress: text("normalized_address"),
+    lat: doublePrecision("lat").notNull(),
+    lng: doublePrecision("lng").notNull(),
+    matchedDossierId: varchar("matched_dossier_id").references(() => intelPropertyDossiers.id, { onDelete: "set null" }),
+    matchedProspectId: varchar("matched_prospect_id").references(() => prospects.id, { onDelete: "set null" }),
+    matchedListingId: varchar("matched_listing_id").references(() => listings.id, { onDelete: "set null" }),
+    matchConfidence: integer("match_confidence").notNull().default(0),
+    resolutionJson: jsonb("resolution_json").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    reviewReasons: jsonb("review_reasons").$type<unknown[]>().notNull().default(sql`'[]'::jsonb`),
+    anchorPayload: jsonb("anchor_payload").$type<Record<string, unknown>>().notNull(),
+    decisionMetadata: jsonb("decision_metadata").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    decisionAction: varchar("decision_action"),
+    decidedByUserId: varchar("decided_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    rejectedAt: timestamp("rejected_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "chk_brokerage_memory_item_status",
+      sql`${table.status} IN ('pending', 'approved', 'rejected', 'superseded')`,
+    ),
+    check(
+      "chk_brokerage_memory_item_base_layer",
+      sql`${table.baseLayer} IN ('market_memory', 'review')`,
+    ),
+    check(
+      "chk_brokerage_memory_item_suggested_layer",
+      sql`${table.suggestedLayer} IN ('existing', 'market_memory', 'review')`,
+    ),
+    check(
+      "chk_brokerage_memory_item_confidence",
+      sql`${table.matchConfidence} BETWEEN 0 AND 100`,
+    ),
+    check(
+      "chk_brokerage_memory_item_decision_action",
+      sql`${table.decisionAction} IS NULL OR ${table.decisionAction} IN ('create_dossier', 'link_dossier', 'reject')`,
+    ),
+    uniqueIndex("uq_brokerage_memory_item_anchor").on(table.importId, table.externalAnchorId),
+    index("idx_brokerage_memory_item_user_status").on(table.userId, table.status, table.updatedAt.desc()),
+    index("idx_brokerage_memory_item_location").on(table.lat, table.lng),
+    index("idx_brokerage_memory_item_dossier")
+      .on(table.matchedDossierId)
+      .where(sql`${table.matchedDossierId} IS NOT NULL`),
+    index("idx_brokerage_memory_item_prospect")
+      .on(table.matchedProspectId)
+      .where(sql`${table.matchedProspectId} IS NOT NULL`),
+    index("idx_brokerage_memory_item_listing")
+      .on(table.matchedListingId)
+      .where(sql`${table.matchedListingId} IS NOT NULL`),
+  ],
+).enableRLS();
+
+export const intelDossierFacts = pgTable(
+  "intel_dossier_facts",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    dossierId: varchar("dossier_id").notNull().references(() => intelPropertyDossiers.id, { onDelete: "cascade" }),
+    sourceAssetId: varchar("source_asset_id").references(() => intelListingAssets.id, { onDelete: "set null" }),
+    factKey: varchar("fact_key").notNull(),
+    label: varchar("label").notNull(),
+    valueText: text("value_text"),
+    valueNumber: numeric("value_number"),
+    valueBoolean: boolean("value_boolean"),
+    valueJson: jsonb("value_json").$type<unknown>(),
+    confidence: integer("confidence").notNull().default(50),
+    status: varchar("status").notNull().default("proposed"),
+    source: varchar("source").notNull().default("manual"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+    externalFactId: varchar("external_fact_id"),
+    importItemId: varchar("import_item_id").references(() => brokerageMemoryItems.id, { onDelete: "set null" }),
+    observedAt: timestamp("observed_at", { withTimezone: true }),
+    sourceMetadata: jsonb("source_metadata").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+  },
+  (table) => [
+    check(
+      "chk_intel_dossier_facts_status",
+      sql`${table.status} IN ('proposed', 'approved', 'rejected')`,
+    ),
+    check(
+      "chk_intel_dossier_facts_confidence",
+      sql`${table.confidence} >= 0 AND ${table.confidence} <= 100`,
+    ),
+    index("idx_intel_dossier_facts_dossier").on(table.dossierId),
+    index("idx_intel_dossier_facts_status").on(table.status),
+    uniqueIndex("uq_intel_dossier_facts_external")
+      .on(table.dossierId, table.externalFactId)
+      .where(sql`${table.externalFactId} IS NOT NULL`),
+    index("idx_intel_dossier_facts_import_item")
+      .on(table.importItemId)
+      .where(sql`${table.importItemId} IS NOT NULL`),
+  ],
+).enableRLS();
+
+export const intelDossierEntityLinks = pgTable(
+  "intel_dossier_entity_links",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()::text`),
+    dossierId: varchar("dossier_id").notNull().references(() => intelPropertyDossiers.id, { onDelete: "cascade" }),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    entityType: varchar("entity_type").notNull(),
+    entityId: varchar("entity_id").notNull(),
+    relationship: varchar("relationship").notNull().default("related"),
+    source: varchar("source").notNull().default("manual"),
+    importItemId: varchar("import_item_id").references(() => brokerageMemoryItems.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "chk_intel_dossier_entity_link_type",
+      sql`${table.entityType} IN ('prospect', 'listing', 'company', 'contact', 'opportunity')`,
+    ),
+    uniqueIndex("uq_intel_dossier_entity_link").on(table.dossierId, table.entityType, table.entityId),
+    index("idx_intel_dossier_entity_link_entity").on(table.userId, table.entityType, table.entityId),
+  ],
+).enableRLS();
+
 export const intelSurveyEvents = pgTable(
   "intel_survey_events",
   {
@@ -1265,6 +1529,18 @@ export type IntelSurvey = typeof intelSurveys.$inferSelect;
 export type InsertIntelSurvey = typeof intelSurveys.$inferInsert;
 export type IntelSurveyItem = typeof intelSurveyItems.$inferSelect;
 export type InsertIntelSurveyItem = typeof intelSurveyItems.$inferInsert;
+export type IntelPropertyDossier = typeof intelPropertyDossiers.$inferSelect;
+export type InsertIntelPropertyDossier = typeof intelPropertyDossiers.$inferInsert;
+export type IntelListingAsset = typeof intelListingAssets.$inferSelect;
+export type InsertIntelListingAsset = typeof intelListingAssets.$inferInsert;
+export type BrokerageMemoryImport = typeof brokerageMemoryImports.$inferSelect;
+export type InsertBrokerageMemoryImport = typeof brokerageMemoryImports.$inferInsert;
+export type BrokerageMemoryItem = typeof brokerageMemoryItems.$inferSelect;
+export type InsertBrokerageMemoryItem = typeof brokerageMemoryItems.$inferInsert;
+export type IntelDossierFact = typeof intelDossierFacts.$inferSelect;
+export type InsertIntelDossierFact = typeof intelDossierFacts.$inferInsert;
+export type IntelDossierEntityLink = typeof intelDossierEntityLinks.$inferSelect;
+export type InsertIntelDossierEntityLink = typeof intelDossierEntityLinks.$inferInsert;
 export type IntelSurveyEvent = typeof intelSurveyEvents.$inferSelect;
 export type InsertIntelSurveyEvent = typeof intelSurveyEvents.$inferInsert;
 export type IntelAgentEvent = typeof intelAgentEvents.$inferSelect;

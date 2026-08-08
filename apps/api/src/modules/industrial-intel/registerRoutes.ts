@@ -1,7 +1,7 @@
 import type { Express, Request } from "express";
 import { randomBytes, randomUUID } from "crypto";
 import { z } from "zod";
-import { getUserId, requireAuth } from "../../auth";
+import { getUserId, requireAuth, requireBrokerAuth, requireMarketRecordProposalAuth } from "../../auth";
 import { ensureUser } from "../../ensureUser";
 import { industrialIntelAgentManifest } from "./agentManifest";
 import { industrialIntelService } from "./service";
@@ -10,6 +10,17 @@ import {
   MarketRecordProposalInputSchema,
   submitMarketRecordProposal,
 } from "../../lib/marketRecordProposalService";
+import {
+  BrokerageMemoryDecisionSchema,
+  BrokerageMemoryImportInputSchema,
+  BrokerageMemoryPreviewInputSchema,
+  BrokerageMemoryServiceError,
+  decideBrokerageMemoryItem,
+  getBrokerageMemoryMap,
+  listBrokerageMemoryReview,
+  previewBrokerageMemoryImport,
+  stageBrokerageMemoryImport,
+} from "../../lib/brokerageMemoryService";
 
 const intelRequirementSchema = z.object({
   title: z.string().trim().min(1),
@@ -970,6 +981,105 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     } catch (error) {
       console.error("Error creating industrial intel requirement:", error);
       res.status(500).json({ message: "Failed to create industrial intel requirement" });
+    }
+  });
+
+  app.post("/api/intel/brokerage-memory/preview", requireMarketRecordProposalAuth, async (req, res) => {
+    try {
+      const parsed = BrokerageMemoryPreviewInputSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid brokerage-memory preview", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const result = await previewBrokerageMemoryImport({
+        pool,
+        userId: getUserId(req),
+        ...parsed.data,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof BrokerageMemoryServiceError) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      console.error("Error previewing brokerage memory:", error);
+      res.status(500).json({ message: "Failed to preview brokerage memory" });
+    }
+  });
+
+  app.post("/api/intel/brokerage-memory/imports", requireMarketRecordProposalAuth, async (req, res) => {
+    try {
+      const parsed = BrokerageMemoryImportInputSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid brokerage-memory import", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const result = await stageBrokerageMemoryImport({
+        pool,
+        userId: getUserId(req),
+        ...parsed.data,
+      });
+      res.status(result.duplicate ? 200 : 201).json(result);
+    } catch (error) {
+      if (error instanceof BrokerageMemoryServiceError) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      console.error("Error staging brokerage memory:", error);
+      res.status(500).json({ message: "Failed to save brokerage memory to Review" });
+    }
+  });
+
+  app.get("/api/intel/brokerage-memory/review", requireMarketRecordProposalAuth, async (req, res) => {
+    try {
+      await ensureIntelActor(req);
+      const result = await listBrokerageMemoryReview({
+        pool,
+        userId: getUserId(req),
+        limit: Number(req.query.limit || 100),
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof BrokerageMemoryServiceError) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      console.error("Error loading brokerage-memory review:", error);
+      res.status(500).json({ message: "Failed to load brokerage-memory review" });
+    }
+  });
+
+  app.post("/api/intel/brokerage-memory/items/:id/decision", requireBrokerAuth, async (req, res) => {
+    try {
+      const parsed = BrokerageMemoryDecisionSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid brokerage-memory decision", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const result = await decideBrokerageMemoryItem({
+        pool,
+        userId: getUserId(req),
+        itemId: req.params.id,
+        decision: parsed.data,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof BrokerageMemoryServiceError) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      console.error("Error deciding brokerage-memory item:", error);
+      res.status(500).json({ message: "Failed to decide brokerage-memory item" });
+    }
+  });
+
+  app.get("/api/intel/brokerage-memory/map", requireMarketRecordProposalAuth, async (req, res) => {
+    try {
+      await ensureIntelActor(req);
+      const result = await getBrokerageMemoryMap({ pool, userId: getUserId(req) });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof BrokerageMemoryServiceError) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      console.error("Error loading brokerage-memory map:", error);
+      res.status(500).json({ message: "Failed to load brokerage-memory map" });
     }
   });
 

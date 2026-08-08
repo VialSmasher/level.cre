@@ -27,12 +27,21 @@ export const industrialIntelAgentManifest = {
     "Original source material should be uploaded and preserved before facts are proposed.",
     "Extracted facts should default to proposed status; approved status is a broker quality gate.",
     "Client-facing survey views must not expose brokerNotes or duplicate-cleanup/internal notes.",
-    "Prefer existing dossiers by normalized address before creating new dossiers.",
+    "Prefer exact parcel identity (memory key, municipal account, LINC/title, or legal identity) before creating a dossier; address-only matches require broker review.",
     "Resolve map identity before proposing a canonical record; ambiguous matches remain in Daily Desk Review.",
     "Agents may propose map records and opportunities but may not approve them or infer won/lost stages.",
     "When extraction confidence is low or the property is an intersection/land parcel, keep address nullable and store location_description as a fact.",
   ],
   capabilities: {
+    brokerageMemory: {
+      endpoints: [
+        { method: "POST", path: "/api/intel/brokerage-memory/preview", description: "Parse and resolve an enrichment document with no database writes." },
+        { method: "POST", path: "/api/intel/brokerage-memory/imports", description: "Stage one proposal per canonical property in broker Review; never creates a prospect or awards XP." },
+        { method: "GET", path: "/api/intel/brokerage-memory/review", description: "Read pending property-level proposals and field groups." },
+        { method: "GET", path: "/api/intel/brokerage-memory/map", description: "Read approved property memory plus the clearly labelled pending review layer." },
+        { method: "POST", path: "/api/intel/brokerage-memory/items/:id/decision", description: "Broker JWT only. Approve selected facts or reject one property proposal." },
+      ],
+    },
     agentOps: {
       endpoints: [
         { method: "GET", path: "/api/intel/agent-manifest", description: "Read the active agent contract." },

@@ -13,10 +13,14 @@ export type ResolvableMarketEntity = {
   businessName?: string | null;
   municipality?: string | null;
   titleNumber?: string | null;
+  titleNumbers?: string[] | null;
   linc?: string | null;
+  lincs?: string[] | null;
   plan?: string | null;
   block?: string | null;
   lot?: string | null;
+  externalMemoryKey?: string | null;
+  municipalAccountNumbers?: string[] | null;
 };
 
 export type MarketEntityResolutionInput = {
@@ -30,10 +34,14 @@ export type MarketEntityResolutionInput = {
   businessName?: string | null;
   municipality?: string | null;
   titleNumber?: string | null;
+  titleNumbers?: string[] | null;
   linc?: string | null;
+  lincs?: string[] | null;
   plan?: string | null;
   block?: string | null;
   lot?: string | null;
+  externalMemoryKey?: string | null;
+  municipalAccountNumbers?: string[] | null;
 };
 
 export type MarketEntityResolutionCandidate = ResolvableMarketEntity & {
@@ -130,14 +138,32 @@ export function scoreMarketEntityCandidate(
   const entityMunicipality = normalizeMunicipality(entity.municipality);
   const inputTitleNumber = normalizeLegalToken(input.titleNumber);
   const entityTitleNumber = normalizeLegalToken(entity.titleNumber);
+  const entityTitleNumbers = new Set([entityTitleNumber, ...(entity.titleNumbers || []).map(normalizeLegalToken)].filter(Boolean));
   const inputLinc = normalizeLegalToken(input.linc);
   const entityLinc = normalizeLegalToken(entity.linc);
+  const entityLincs = new Set([entityLinc, ...(entity.lincs || []).map(normalizeLegalToken)].filter(Boolean));
   const inputPlan = normalizeLegalToken(input.plan);
   const entityPlan = normalizeLegalToken(entity.plan);
   const inputBlock = normalizeLegalToken(input.block);
   const entityBlock = normalizeLegalToken(entity.block);
   const inputLot = normalizeLegalToken(input.lot);
   const entityLot = normalizeLegalToken(entity.lot);
+  const inputExternalMemoryKey = String(input.externalMemoryKey || "").trim();
+  const entityExternalMemoryKey = String(entity.externalMemoryKey || "").trim();
+  const inputAccounts = new Set((input.municipalAccountNumbers || []).map(normalizeLegalToken).filter(Boolean));
+  const entityAccounts = new Set((entity.municipalAccountNumbers || []).map(normalizeLegalToken).filter(Boolean));
+
+  if (inputExternalMemoryKey && entityExternalMemoryKey && inputExternalMemoryKey === entityExternalMemoryKey) {
+    score += 150;
+    signals.push("Exact brokerage memory key");
+  }
+  if (inputAccounts.size && entityAccounts.size) {
+    const matchingAccounts = Array.from(inputAccounts).filter((account) => entityAccounts.has(account));
+    if (matchingAccounts.length) {
+      score += 110;
+      signals.push(`Exact municipal account${matchingAccounts.length > 1 ? "s" : ""}: ${matchingAccounts.join(", ")}`);
+    }
+  }
 
   if (input.placeId && (entity.placeId === input.placeId || entity.marketKey === marketKey)) {
     score += 100;
@@ -159,11 +185,11 @@ export function scoreMarketEntityCandidate(
       conflicts.push(`Municipality differs (${input.municipality} vs ${entity.municipality})`);
     }
   }
-  if (inputTitleNumber && entityTitleNumber && inputTitleNumber === entityTitleNumber) {
+  if (inputTitleNumber && entityTitleNumbers.has(inputTitleNumber)) {
     score += 100;
     signals.push("Exact title number");
   }
-  if (inputLinc && entityLinc && inputLinc === entityLinc) {
+  if (inputLinc && entityLincs.has(inputLinc)) {
     score += 100;
     signals.push("Exact LINC");
   }

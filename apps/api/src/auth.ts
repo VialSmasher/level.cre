@@ -220,3 +220,20 @@ export async function requireMarketRecordProposalAuth(req: Request, res: Respons
 
   return requireAuth(req, res, next)
 }
+
+export async function requireBrokerAuth(req: Request, res: Response, next: NextFunction) {
+  const scopedAgent = getConfiguredMarketRecordAgent(req)
+    || getConfiguredSalesActivityAgent(req)
+    || getConfiguredAgentUser(req)
+  if (scopedAgent) {
+    return res.status(403).json({ message: 'Broker approval is required for this action.' })
+  }
+
+  return requireAuth(req, res, () => {
+    const role = String((req as any).user?.role || '')
+    if (role === 'agent' || role === 'market_record_agent' || role === 'sales_activity_agent') {
+      return res.status(403).json({ message: 'Broker approval is required for this action.' })
+    }
+    return next()
+  })
+}

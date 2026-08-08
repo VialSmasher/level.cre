@@ -7,13 +7,15 @@
   "scripts": {
     "dev": "DOTENV_CONFIG_PATH=../../.env tsx -r dotenv/config src/index.ts",
     "build": "esbuild src/index.ts --platform=node --bundle --format=esm --target=node22 --legal-comments=none --outdir=dist --external:@supabase/supabase-js --external:cookie-parser --external:cors --external:dotenv --external:drizzle-orm --external:express --external:helmet --external:jose --external:jsonwebtoken --external:pg --external:zod",
+    "prestart": "npm run brokerage-memory:migrate",
     "start": "npm run build && NODE_ENV=production node dist/index.js",
-    "test": "node --import tsx --test src/auth.test.ts src/lib/activityEventService.test.ts src/lib/activityPulse.test.ts src/lib/agentWorkflowIntelligence.test.ts src/lib/emailActivityReconciliation.test.ts src/lib/emailProspectMatching.test.ts src/lib/opportunityService.test.ts src/lib/pipelineHealth.test.ts src/lib/propertyTitleEvidenceAdapter.test.ts src/lib/salesBriefRanking.test.ts src/lib/toolAReview.test.ts src/lib/salesActivityImport.test.ts src/lib/supabaseAuthUsers.test.ts src/modules/industrial-intel/surveySyncExtraction.test.ts",
+    "test": "node --import tsx --test src/auth.test.ts src/lib/activityEventService.test.ts src/lib/activityPulse.test.ts src/lib/agentWorkflowIntelligence.test.ts src/lib/brokerageMemoryService.test.ts src/lib/emailActivityReconciliation.test.ts src/lib/emailProspectMatching.test.ts src/lib/opportunityService.test.ts src/lib/pipelineHealth.test.ts src/lib/propertyTitleEvidenceAdapter.test.ts src/lib/salesBriefRanking.test.ts src/lib/toolAReview.test.ts src/lib/salesActivityImport.test.ts src/lib/supabaseAuthUsers.test.ts src/modules/industrial-intel/surveySyncExtraction.test.ts",
     "check": "tsc --noEmit",
     "db:push": "drizzle-kit push",
     "db:prepare": "node ./scripts/ensure_pgcrypto.mjs && drizzle-kit push",
     "db:migrate-prospect-numerics": "node ./scripts/migrate_prospect_numeric_fields.mjs",
     "intel:migrate": "DOTENV_CONFIG_PATH=../../.env node --import dotenv/config scripts/run_industrial_intel_migrations.mjs",
+    "brokerage-memory:migrate": "DOTENV_CONFIG_PATH=../../.env node --import dotenv/config scripts/apply_brokerage_memory_migration.mjs",
     "intel:seed": "DOTENV_CONFIG_PATH=../../.env tsx -r dotenv/config scripts/seed-industrial-intel.ts",
     "intel:run-source": "DOTENV_CONFIG_PATH=../../.env tsx -r dotenv/config scripts/run-industrial-intel-source.ts",
     "intel:agent-smoke": "DOTENV_CONFIG_PATH=../../.env tsx -r dotenv/config scripts/smoke-agent-contract.ts"

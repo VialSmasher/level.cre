@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { requireAuth, requireSalesActivityAuth } from './auth'
+import { requireAuth, requireBrokerAuth, requireSalesActivityAuth } from './auth'
 
 function requestWithSalesKey(token: string) {
   return {
@@ -93,5 +93,61 @@ test('scoped sales activity credentials reject the wrong token', async () => {
     else process.env.SALES_ACTIVITY_AGENT_API_KEY = previousKey
     if (previousUserId === undefined) delete process.env.SALES_ACTIVITY_AGENT_USER_ID
     else process.env.SALES_ACTIVITY_AGENT_USER_ID = previousUserId
+  }
+})
+
+test('agent credentials cannot cross the broker approval gate', async () => {
+  const previousKey = process.env.INTEL_AGENT_API_KEY
+  const previousUserId = process.env.INTEL_AGENT_USER_ID
+  process.env.INTEL_AGENT_API_KEY = 'intel-agent-key'
+  process.env.INTEL_AGENT_USER_ID = 'patrick-user-id'
+
+  try {
+    const request = {
+      headers: { 'x-levelcre-agent-key': 'intel-agent-key' },
+      app: { get: () => 'production' },
+    } as any
+    const response = responseRecorder()
+    let nextCalled = false
+    await requireBrokerAuth(request, response, () => {
+      nextCalled = true
+    })
+
+    assert.equal(nextCalled, false)
+    assert.equal(response.statusCode, 403)
+    assert.deepEqual(response.payload, { message: 'Broker approval is required for this action.' })
+  } finally {
+    if (previousKey === undefined) delete process.env.INTEL_AGENT_API_KEY
+    else process.env.INTEL_AGENT_API_KEY = previousKey
+    if (previousUserId === undefined) delete process.env.INTEL_AGENT_USER_ID
+    else process.env.INTEL_AGENT_USER_ID = previousUserId
+  }
+})
+
+test('scoped market-record credentials cannot cross the broker approval gate', async () => {
+  const previousKey = process.env.MARKET_RECORD_AGENT_API_KEY
+  const previousUserId = process.env.MARKET_RECORD_AGENT_USER_ID
+  process.env.MARKET_RECORD_AGENT_API_KEY = 'market-agent-key'
+  process.env.MARKET_RECORD_AGENT_USER_ID = 'patrick-user-id'
+
+  try {
+    const request = {
+      headers: { 'x-levelcre-market-key': 'market-agent-key' },
+      app: { get: () => 'production' },
+    } as any
+    const response = responseRecorder()
+    let nextCalled = false
+    await requireBrokerAuth(request, response, () => {
+      nextCalled = true
+    })
+
+    assert.equal(nextCalled, false)
+    assert.equal(response.statusCode, 403)
+    assert.deepEqual(response.payload, { message: 'Broker approval is required for this action.' })
+  } finally {
+    if (previousKey === undefined) delete process.env.MARKET_RECORD_AGENT_API_KEY
+    else process.env.MARKET_RECORD_AGENT_API_KEY = previousKey
+    if (previousUserId === undefined) delete process.env.MARKET_RECORD_AGENT_USER_ID
+    else process.env.MARKET_RECORD_AGENT_USER_ID = previousUserId
   }
 })

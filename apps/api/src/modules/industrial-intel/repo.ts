@@ -852,8 +852,9 @@ export class IndustrialIntelRepository {
         ON public.intel_property_dossiers (created_by_user_id, canonical_listing_id)
         WHERE canonical_listing_id IS NOT NULL
     `);
+    await pool.query(`DROP INDEX IF EXISTS public.uq_intel_property_dossiers_user_address`);
     await pool.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_intel_property_dossiers_user_address
+      CREATE INDEX IF NOT EXISTS idx_intel_property_dossiers_user_address
         ON public.intel_property_dossiers (created_by_user_id, normalized_address)
         WHERE normalized_address IS NOT NULL
     `);
