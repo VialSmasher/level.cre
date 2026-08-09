@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -202,13 +202,14 @@ export function ProspectEditPanel({
   onContactPhoneChange,
   onContactPhoneBlur,
 }: ProspectEditPanelProps) {
+  const [activeTab, setActiveTab] = useState('property');
   const interactionsQuery = useQuery<ContactInteraction[]>({
     queryKey: ['/api/interactions', prospect.id],
     queryFn: async () => {
       const response = await apiRequest('GET', `/api/interactions?prospectId=${encodeURIComponent(prospect.id)}`);
       return response.json();
     },
-    enabled: Boolean(prospect.id),
+    enabled: Boolean(prospect.id) && activeTab === 'activity',
     staleTime: 60_000,
   });
   const recentInteractions = useMemo(
@@ -222,6 +223,7 @@ export function ProspectEditPanel({
   const shapeButtonLabel = isAreaShape
     ? isEditingShape ? 'Finish editing' : 'Edit shape'
     : 'Draw area';
+  const panelTitle = values.businessName.trim() || values.address.trim() || prospect.name || 'Prospect';
 
   return (
     <div
@@ -230,14 +232,14 @@ export function ProspectEditPanel({
     >
       <div className="sticky top-0 z-10 bg-white border-b px-4 pt-3 pb-2">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-800">Edit Prospect</h2>
+          <h2 className="min-w-0 truncate text-sm font-semibold text-gray-800">{panelTitle}</h2>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={onClose}
-                className="text-gray-400 hover:text-gray-600 h-6 w-6 p-0"
+                className="h-11 w-11 shrink-0 p-0 text-gray-400 hover:text-gray-600"
                 aria-label="Save and close"
               >
                 <X className="h-4 w-4" />
@@ -253,21 +255,21 @@ export function ProspectEditPanel({
           {saveStatus === 'saving' ? (
             <>
               <Loader2 className="h-3 w-3 animate-spin" />
-              <span>Saving changes…</span>
+              <span>Saving…</span>
             </>
           ) : saveStatus === 'error' ? (
             <>
               <AlertTriangle className="h-3 w-3 text-red-500" />
-              <span className="text-red-600">Save failed — changes kept for retry</span>
+              <span className="text-red-600">Retry needed</span>
             </>
           ) : (
             <>
               <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-              <span>All changes saved</span>
+              <span>Saved</span>
             </>
           )}
         </div>
-        <Tabs defaultValue="property" className="space-y-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="property" className="text-xs">Property</TabsTrigger>
             <TabsTrigger value="contact" className="text-xs">Contact</TabsTrigger>

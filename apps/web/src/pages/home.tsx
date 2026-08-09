@@ -31,6 +31,7 @@ import { Badge } from '@/components/ui/badge';
 import { STATUS_META } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
 import { ProspectEditPanel, computeFollowUpDue, formatSfWithCommas, getDisplayAddressValue } from '@/features/map/ProspectEditPanel';
+import { ProspectSaveQueue, type ProspectSaveQueueStatus } from '@/features/map/prospectSaveQueue';
 import { useTerraDrawGoogleMaps, type MapDrawMode, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
 import { AdvancedMapMarker } from '@/features/map/AdvancedMapMarker';
 import { composePropertyMapItems, getLinkedMemoryMarkerTitle } from '@/features/property-memory/composeMapItems';
@@ -135,6 +136,10 @@ type RenderableProspectEntry =
   | { id: string; prospect: Prospect; color: string; kind: 'polygon'; paths: Array<{ lat: number; lng: number }> };
 
 type SearchPin = MapSearchLocation & { id: 'temp-search' };
+type MapSelectionTarget =
+  | { kind: 'prospect'; prospect: Prospect; forceEditor?: boolean }
+  | { kind: 'memory'; anchor: MarketMemoryAnchor }
+  | { kind: 'none' };
 
 const MapOverlayLayer = memo(function MapOverlayLayer({
   renderableProspects,
@@ -204,10 +209,12 @@ const MarketMemoryOverlayLayer = memo(function MarketMemoryOverlayLayer({
   anchors,
   visibleLayers,
   onAnchorClick,
+  interactive,
 }: {
   anchors: MarketMemoryAnchor[];
   visibleLayers: Set<MarketMemoryLayer>;
   onAnchorClick: (anchor: MarketMemoryAnchor) => void;
+  interactive: boolean;
 }) {
   return (
     <>
@@ -228,7 +235,7 @@ const MarketMemoryOverlayLayer = memo(function MarketMemoryOverlayLayer({
             label={marker.label}
             scale={11}
             zIndex={5}
-            onClick={() => onAnchorClick(anchor)}
+            onClick={interactive ? () => onAnchorClick(anchor) : undefined}
           />
         );
       })}
@@ -357,6 +364,9 @@ export default function HomePage() {
   // Legend open/close managed inside StatusLegend component
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [isEditPanelOpen, setIsEditPanelOpen] = useState(false);
+  const selectedProspectIdRef = useRef<string | null>(null);
+  const selectionRequestVersionRef = useRef(0);
+  const requestMapSelectionRef = useRef<(target: MapSelectionTarget) => Promise<boolean>>(async () => false);
   const focusedProspectIdRef = useRef<string | null>(null);
   const resolvingProspectIdRef = useRef<string | null>(null);
   const focusedPropertyIdRef = useRef<string | null>(null);
@@ -636,12 +646,13 @@ export default function HomePage() {
 
   // Save data to user-scoped localStorage
   const saveData = useCallback(() => {
-    const data: MapData = { prospects, submarkets: [], touches };
+    const data: MapData = { prospects: isDemoMode ? prospects : [], submarkets: [], touches };
     writeJSON(nsKey(currentUser?.id, 'mapData'), data);
-  }, [prospects, touches, currentUser?.id]);
+  }, [isDemoMode, prospects, touches, currentUser?.id]);
 
   // Debounced persistence to localStorage to avoid blocking on every keystroke
   const persistTimerRef = useRef<number | null>(null);
+  const locallyPersistedProspects = isDemoMode ? prospects : EMPTY_PROSPECTS;
   useEffect(() => {
     if (!currentUser) return;
     if (persistTimerRef.current) {
@@ -650,8 +661,8 @@ export default function HomePage() {
     }
     persistTimerRef.current = window.setTimeout(() => {
       // Preserve prior behavior of not persisting an empty set on first load
-      if (prospects.length > 0) {
-        const data: MapData = { prospects, submarkets: [], touches };
+      if (locallyPersistedProspects.length > 0 || touches.length > 0) {
+        const data: MapData = { prospects: locallyPersistedProspects, submarkets: [], touches };
         writeJSON(nsKey(currentUser.id, 'mapData'), data);
       }
       persistTimerRef.current = null;
@@ -662,7 +673,7 @@ export default function HomePage() {
         persistTimerRef.current = null;
       }
     };
-  }, [prospects, touches, currentUser?.id]);
+  }, [locallyPersistedProspects, touches, currentUser?.id]);
 
   // Save UI state to user-scoped localStorage
   useEffect(() => {
@@ -977,30 +988,6 @@ export default function HomePage() {
     document.body.removeChild(link)
   }, [filteredProspects])
 
-  const openProspectEditor = useCallback((prospect: Prospect) => {
-    console.log('Prospect clicked:', prospect);
-    setSelectedMarketMemoryAnchor(null);
-    setPropertyMemoryReviewOpen(false);
-    setProspectMergeGroup(null);
-    setSelectedProspect(prospect);
-    setProspectSaveStatus('saved');
-    setIsEditPanelOpen(true);
-  }, []);
-
-  // A linked dossier enriches the existing prospect pin. Open the property
-  // story first, then let Patrick move into the prospect workflow explicitly.
-  const handleProspectClick = useCallback((prospect: Prospect) => {
-    const memory = linkedMemoryByProspectId.get(prospect.id);
-    const memoryLayer = memory ? (memory.previewLayer || memory.baseLayer) : null;
-    if (memory && memoryLayer && visibleMarketMemoryLayers.has(memoryLayer)) {
-      setSelectedProspect(null);
-      setIsEditPanelOpen(false);
-      setSelectedMarketMemoryAnchor(memory);
-      return;
-    }
-    openProspectEditor(prospect);
-  }, [linkedMemoryByProspectId, openProspectEditor, visibleMarketMemoryLayers]);
-
   // Handle location found from search
   const handleLocationFound = useCallback((location: MapSearchLocation) => {
     console.log('Creating search pin at:', location);
@@ -1103,6 +1090,7 @@ export default function HomePage() {
   );
 
   useEffect(() => {
+    selectedProspectIdRef.current = selectedProspect?.id || null;
     setProspectSaveStatus('saved');
   }, [selectedProspect?.id]);
 
@@ -1112,28 +1100,20 @@ export default function HomePage() {
     if (selectedProspect?.id) {
       url.searchParams.set('prospectId', selectedProspect.id);
       url.searchParams.delete('propertyId');
-    } else {
-      url.searchParams.delete('prospectId');
-    }
-    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
-  }, [selectedProspect?.id]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const url = new URL(window.location.href);
-    const propertyId = selectedMarketMemoryAnchor
+    } else if (selectedMarketMemoryAnchor) {
+      const propertyId = selectedMarketMemoryAnchor
       ? selectedMarketMemoryAnchor.persistence?.dossierId
         || selectedMarketMemoryAnchor.persistence?.importItemId
         || selectedMarketMemoryAnchor.id
       : null;
-    if (propertyId) {
-      url.searchParams.set('propertyId', propertyId);
+      if (propertyId) url.searchParams.set('propertyId', propertyId);
       url.searchParams.delete('prospectId');
     } else {
+      url.searchParams.delete('prospectId');
       url.searchParams.delete('propertyId');
     }
     window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
-  }, [selectedMarketMemoryAnchor]);
+  }, [selectedMarketMemoryAnchor, selectedProspect?.id]);
 
   useEffect(() => {
     if (!map || prospects.length === 0 || typeof window === 'undefined') return;
@@ -1255,8 +1235,10 @@ export default function HomePage() {
 
   const persistProspects = (next: Prospect[]) => {
     setProspects(next);
-    const dataToSave: MapData = { prospects: next, submarkets: [], touches };
-    writeJSON(nsKey(currentUser?.id, 'mapData'), dataToSave);
+    if (isDemoMode) {
+      const dataToSave: MapData = { prospects: next, submarkets: [], touches };
+      writeJSON(nsKey(currentUser?.id, 'mapData'), dataToSave);
+    }
   };
 
   // Submarket inference helper
@@ -1649,62 +1631,33 @@ export default function HomePage() {
     setEditingProspectId(prospectId);
     clearPolygonPathListeners(prospectId);
     
-    // Enable polygon editing with debounced auto-save on vertex edits
+    // Shape edits stay local until Save, close, Escape, or another asset is
+    // selected. This keeps Discard truthful and prevents overlapping PATCHes.
     setTimeout(() => {
       const polygon = polygonRefs.current.get(prospectId);
       if (polygon) {
         polygon.setEditable(true);
         polygon.setDraggable(true);
-        const path = polygon.getPath();
-
-        let timer: any = null;
-        const scheduleSave = () => {
-          if (timer) clearTimeout(timer);
-          timer = setTimeout(async () => {
-            const coords: [number, number][] = [];
-            for (let i = 0; i < path.getLength(); i++) {
-              const pt = path.getAt(i);
-              coords.push([pt.lng(), pt.lat()]);
-            }
-            if (coords.length > 0) coords.push(coords[0]);
-            const newGeom = { type: 'Polygon' as const, coordinates: [coords] };
-            const acres = calculatePolygonAcres(newGeom);
-            try {
-              manualLotOverrideRef.current.delete(prospectId);
-              const response = await apiRequest('PATCH', `/api/prospects/${prospectId}`, {
-                geometry: newGeom,
-                lotSizeAcres: acres
-              });
-              const payload = await response.json();
-              const { prospect: saved } = parseProspectPatchResponse(payload);
-              setProspects(prev => prev.map(p => p.id === saved.id ? saved : p));
-              if (selectedProspect && selectedProspect.id === saved.id) {
-                setSelectedProspect(saved);
-              }
-            } catch (err) {
-              console.error('Auto-save polygon error:', err);
-            }
-          }, 500); // debounce 500ms
+        const markShapeDirty = () => {
+          if (selectedProspectIdRef.current === prospectId) setProspectSaveStatus('saving');
         };
-
-        // Attach listeners
-        const listeners = [
-          path.addListener('set_at', scheduleSave),
-          path.addListener('insert_at', scheduleSave),
-          path.addListener('remove_at', scheduleSave),
-        ];
-        polygonPathListenersRef.current.set(prospectId, listeners);
+        const path = polygon.getPath();
+        polygonPathListenersRef.current.set(prospectId, [
+          path.addListener('set_at', markShapeDirty),
+          path.addListener('insert_at', markShapeDirty),
+          path.addListener('remove_at', markShapeDirty),
+        ]);
       }
     }, 100);
   }, [prospects, clearPolygonPathListeners, editingProspectId]);
 
   // Save current polygon changes
-  const savePolygonChanges = useCallback(async () => {
-    if (!editingProspectId) return;
-    
-    const polygon = polygonRefs.current.get(editingProspectId);
+  const savePolygonChanges = useCallback(async (prospectId = editingProspectId): Promise<boolean> => {
+    if (!prospectId) return true;
+
+    const polygon = polygonRefs.current.get(prospectId);
     if (!polygon) {
-      return;
+      return true;
     }
     
     // Get current coordinates from the polygon
@@ -1725,50 +1678,51 @@ export default function HomePage() {
     };
     
     const acres = calculatePolygonAcres(updatedGeometry);
-    const hadManualOverride = manualLotOverrideRef.current.has(editingProspectId);
+    const hadManualOverride = manualLotOverrideRef.current.has(prospectId);
     const polygonMoved = JSON.stringify(newCoordinates) !== JSON.stringify(originalPolygonCoordinates || []);
     const patchPayload: Record<string, any> = {
       geometry: updatedGeometry,
     };
     if (!hadManualOverride || polygonMoved) {
-      manualLotOverrideRef.current.delete(editingProspectId);
+      manualLotOverrideRef.current.delete(prospectId);
       patchPayload.lotSizeAcres = acres;
     }
     
     try {
-      const response = await apiRequest('PATCH', `/api/prospects/${editingProspectId}`, patchPayload);
+      const response = await apiRequest('PATCH', `/api/prospects/${prospectId}`, patchPayload);
       const payload = await response.json();
       const { prospect: savedProspect } = parseProspectPatchResponse(payload);
       
       // Update local state
       setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
       
-      if (selectedProspect && selectedProspect.id === savedProspect.id) {
-        setSelectedProspect(savedProspect);
-      }
+      setSelectedProspect((current) => current?.id === savedProspect.id ? savedProspect : current);
       
       // Exit edit mode
       polygon.setEditable(false);
       polygon.setDraggable(false);
-      clearPolygonPathListeners(editingProspectId);
-      setEditingProspectId(null);
+      clearPolygonPathListeners(prospectId);
+      setEditingProspectId((current) => current === prospectId ? null : current);
       setOriginalPolygonCoordinates(null);
+      if (selectedProspectIdRef.current === prospectId) setProspectSaveStatus('saved');
       
       toast({
         title: "Polygon Saved", 
         description: `Changes saved successfully${acres ? ` (${acres.toFixed(2)} acres)` : ''}`,
       });
-      
+      return true;
     } catch (error: any) {
       console.error('Error saving polygon changes:', error);
+      if (selectedProspectIdRef.current === prospectId) setProspectSaveStatus('error');
       toast({
         title: "Save Failed",
         description: "Could not save polygon changes. Please try again.",
         variant: "destructive",
         duration: 4000,
       });
+      return false;
     }
-  }, [editingProspectId, selectedProspect, toast, clearPolygonPathListeners, originalPolygonCoordinates]);
+  }, [editingProspectId, toast, clearPolygonPathListeners, originalPolygonCoordinates]);
 
   // Discard polygon changes and revert to original
   const discardPolygonChanges = useCallback(() => {
@@ -1800,10 +1754,6 @@ export default function HomePage() {
   }, [editingProspectId, originalPolygonCoordinates, toast, clearPolygonPathListeners]);
 
   // Update prospect handler - debounced + optimistic to reduce flicker while typing
-  const homeSaveTimerRef = useRef<number | null>(null);
-  const homeSaveInFlightRef = useRef(false);
-  const homePendingPatchRef = useRef<Partial<Prospect>>({});
-  const homeLastEditedIdRef = useRef<string | null>(null);
   const manualLotOverrideRef = useRef<Set<string>>(new Set());
   const [buildingSfInput, setBuildingSfInput] = useState('');
   const [lotSizeAcresInput, setLotSizeAcresInput] = useState('');
@@ -1814,33 +1764,33 @@ export default function HomePage() {
     'submarketId',
   ]));
 
-  const flushHomeQueuedSave = useCallback(async (): Promise<boolean> => {
-    if (!selectedProspect) return true;
-    if (homeSaveInFlightRef.current) return false;
-    const id = selectedProspect.id;
-    const patch = homePendingPatchRef.current;
-    homePendingPatchRef.current = {};
-    if (!patch || Object.keys(patch).length === 0) return true;
-    homeSaveInFlightRef.current = true;
-    setProspectSaveStatus('saving');
-    let saveSucceeded = false;
+  const prospectSavePersistenceRef = useRef<(prospectId: string, patch: Partial<Prospect>) => Promise<void>>(async () => {});
+  const prospectSaveStatusRef = useRef<(prospectId: string, status: ProspectSaveQueueStatus) => void>(() => {});
+  const prospectSaveQueueRef = useRef<ProspectSaveQueue<Partial<Prospect>> | null>(null);
+  if (!prospectSaveQueueRef.current) {
+    prospectSaveQueueRef.current = new ProspectSaveQueue<Partial<Prospect>>({
+      save: (prospectId, patch) => prospectSavePersistenceRef.current(prospectId, patch),
+      onStatus: (prospectId, status) => prospectSaveStatusRef.current(prospectId, status),
+    });
+  }
+
+  const persistProspectPatch = useCallback(async (id: string, patch: Partial<Prospect>) => {
     try {
       // In demo mode, persist locally without hitting the API
       if (isDemoMode) {
         setProspects(prev => {
           const next = prev.map(p => (p.id === id ? ({ ...p, ...patch } as Prospect) : p));
-          persistProspects(next);
+          const dataToSave: MapData = { prospects: next, submarkets: [], touches };
+          writeJSON(nsKey(currentUser?.id, 'mapData'), dataToSave);
           return next;
         });
         setSelectedProspect(prev => (prev && prev.id === id ? ({ ...prev, ...patch } as Prospect) : prev));
-        setProspectSaveStatus('saved');
-        saveSucceeded = true;
-        return true;
+        return;
       }
       const response = await apiRequest('PATCH', `/api/prospects/${id}`, patch);
       const payload = await response.json();
       const { prospect: savedProspect, newXpGained } = parseProspectPatchResponse(payload);
-      const pendingAfterRequest = homePendingPatchRef.current;
+      const pendingAfterRequest = prospectSaveQueueRef.current?.pendingPatch(id) || {};
       const currentProspect = { ...savedProspect, ...pendingAfterRequest } as Prospect;
       setProspects(prev => prev.map(p => p.id === savedProspect.id ? currentProspect : p));
       setSelectedProspect(prev => (prev && prev.id === savedProspect.id ? currentProspect : prev));
@@ -1849,41 +1799,28 @@ export default function HomePage() {
         bumpLocalSkillXp(newXpGained, 'followUp');
         triggerXpFeedback(newXpGained);
       }
-      setProspectSaveStatus(Object.keys(pendingAfterRequest).length > 0 ? 'saving' : 'saved');
-      saveSucceeded = true;
-      return true;
     } catch (error) {
       console.error('Error updating prospect:', error);
-      // Keep the failed patch in memory; newer edits take precedence on retry.
-      homePendingPatchRef.current = { ...patch, ...homePendingPatchRef.current };
-      setProspectSaveStatus('error');
-      return false;
-    } finally {
-      homeSaveInFlightRef.current = false;
-      if (saveSucceeded && Object.keys(homePendingPatchRef.current).length > 0) {
-        if (homeSaveTimerRef.current) window.clearTimeout(homeSaveTimerRef.current);
-        homeSaveTimerRef.current = window.setTimeout(() => {
-          homeSaveTimerRef.current = null;
-          void flushHomeQueuedSave();
-        }, 250);
-      }
+      throw error;
     }
-  }, [selectedProspect, isDemoMode, upsertProspectInCache, bumpLocalSkillXp, triggerXpFeedback]);
+  }, [isDemoMode, touches, currentUser?.id, upsertProspectInCache, bumpLocalSkillXp, triggerXpFeedback]);
+  prospectSavePersistenceRef.current = persistProspectPatch;
+  prospectSaveStatusRef.current = (prospectId, status) => {
+    if (selectedProspectIdRef.current === prospectId) setProspectSaveStatus(status);
+  };
+
+  useEffect(() => () => prospectSaveQueueRef.current?.dispose(), []);
+
+  const flushHomeQueuedSave = useCallback(async (prospectId = selectedProspect?.id || null): Promise<boolean> => {
+    if (!prospectId) return true;
+    return prospectSaveQueueRef.current?.flush(prospectId) ?? true;
+  }, [selectedProspect?.id]);
 
   const queueSelectedProspectPatch = useCallback((field: keyof Prospect, value: any) => {
     if (!selectedProspect) return;
     const id = selectedProspect.id;
-    if (homeLastEditedIdRef.current && homeLastEditedIdRef.current !== id && homeSaveTimerRef.current) {
-      window.clearTimeout(homeSaveTimerRef.current);
-      homeSaveTimerRef.current = null;
-      homePendingPatchRef.current = {};
-    }
-    homeLastEditedIdRef.current = id;
-    homePendingPatchRef.current = { ...homePendingPatchRef.current, [field]: value };
-    setProspectSaveStatus('saving');
-    if (homeSaveTimerRef.current) window.clearTimeout(homeSaveTimerRef.current);
-    homeSaveTimerRef.current = window.setTimeout(() => { homeSaveTimerRef.current = null; void flushHomeQueuedSave(); }, 500);
-  }, [selectedProspect, flushHomeQueuedSave]);
+    prospectSaveQueueRef.current?.enqueue(id, { [field]: value } as Partial<Prospect>);
+  }, [selectedProspect]);
 
   const updateSelectedProspect = useCallback((field: keyof Prospect, value: any) => {
     if (!selectedProspect) return;
@@ -1939,11 +1876,6 @@ export default function HomePage() {
 
     setQuickLogPendingType(type);
 
-    if (homeSaveTimerRef.current) {
-      window.clearTimeout(homeSaveTimerRef.current);
-      homeSaveTimerRef.current = null;
-    }
-
     try {
       const priorSaveSucceeded = await flushHomeQueuedSave();
       if (!priorSaveSucceeded) {
@@ -1985,12 +1917,8 @@ export default function HomePage() {
     if (!selectedProspect) return;
     
     try {
-      // Cancel any pending auto-save for this prospect to avoid race conditions
-      if (homeSaveTimerRef.current) {
-        window.clearTimeout(homeSaveTimerRef.current);
-        homeSaveTimerRef.current = null;
-        homePendingPatchRef.current = {};
-      }
+      // A confirmed delete should not race a queued edit for the same record.
+      prospectSaveQueueRef.current?.discard(selectedProspect.id);
 
       if (isDemoMode) {
         // Local delete in demo mode (no network)
@@ -2029,39 +1957,92 @@ export default function HomePage() {
     // Intentionally no-op: key is sourced from the configured env key.
   }, []);
 
-  // Close the edit panel, flush pending changes, and reset drawing state
-  const closeEditPanel = useCallback(async () => {
-    // If polygon editing is active, persist geometry before closing
-    if (editingProspectId) {
-      try {
-        await savePolygonChanges();
-      } catch {}
-    }
-    // Flush any pending debounced metadata save
-    if (homeSaveTimerRef.current) {
-      window.clearTimeout(homeSaveTimerRef.current);
-      homeSaveTimerRef.current = null;
-    }
-    const saveSucceeded = await flushHomeQueuedSave();
-    if (!saveSucceeded) {
-      toast({
-        title: 'Changes not saved yet',
-        description: 'The editor is staying open so you can retry without losing your changes.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    // Reset UI + selection
-    if (editingProspectId) {
-      clearPolygonPathListeners(editingProspectId);
-    }
-    setIsEditPanelOpen(false);
-    setSelectedProspect(null);
+  const commitOpenProspect = useCallback(async (prospectId: string): Promise<boolean> => {
+    const metadataSaved = await flushHomeQueuedSave(prospectId);
+    if (!metadataSaved) return false;
+    if (editingProspectId === prospectId) return savePolygonChanges(prospectId);
+    return true;
+  }, [editingProspectId, flushHomeQueuedSave, savePolygonChanges]);
+
+  const applyMapSelection = useCallback((target: MapSelectionTarget) => {
+    setPropertyMemoryReviewOpen(false);
+    setProspectMergeGroup(null);
+    setPropertyMemorySearchOpen(false);
     setDrawingForProspect(null);
-    // Reset drawing tools
+    setEditingProspectId(null);
+    setOriginalPolygonCoordinates(null);
+    if (selectedProspectIdRef.current === editingProspectId) setProspectSaveStatus('saved');
     try { setTerraModeSafe('select'); } catch {}
     try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false, clickableIcons: false } as google.maps.MapOptions); } catch {}
-  }, [editingProspectId, savePolygonChanges, flushHomeQueuedSave, setTerraModeSafe, map, clearPolygonPathListeners, toast]);
+
+    if (target.kind === 'prospect') {
+      const memory = linkedMemoryByProspectId.get(target.prospect.id);
+      const memoryLayer = memory ? (memory.previewLayer || memory.baseLayer) : null;
+      if (!target.forceEditor && memory && memoryLayer && visibleMarketMemoryLayers.has(memoryLayer)) {
+        selectedProspectIdRef.current = null;
+        setSelectedProspect(null);
+        setIsEditPanelOpen(false);
+        setSelectedMarketMemoryAnchor(memory);
+        return;
+      }
+      selectedProspectIdRef.current = target.prospect.id;
+      setSelectedMarketMemoryAnchor(null);
+      setSelectedProspect(target.prospect);
+      setProspectSaveStatus('saved');
+      setIsEditPanelOpen(true);
+      return;
+    }
+
+    selectedProspectIdRef.current = null;
+    setSelectedProspect(null);
+    setIsEditPanelOpen(false);
+    if (target.kind === 'memory') {
+      marketMemoryFocusReturnRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+      setSelectedMarketMemoryAnchor(target.anchor);
+    } else {
+      setSelectedMarketMemoryAnchor(null);
+    }
+  }, [linkedMemoryByProspectId, map, setTerraModeSafe, visibleMarketMemoryLayers]);
+
+  const requestMapSelection = useCallback(async (target: MapSelectionTarget): Promise<boolean> => {
+    if (
+      target.kind === 'prospect'
+      && isEditPanelOpen
+      && selectedProspect?.id === target.prospect.id
+    ) return true;
+
+    const requestVersion = ++selectionRequestVersionRef.current;
+    const openProspectId = isEditPanelOpen ? selectedProspect?.id || null : null;
+    if (openProspectId) {
+      const saveSucceeded = await commitOpenProspect(openProspectId);
+      if (!saveSucceeded) {
+        if (selectionRequestVersionRef.current === requestVersion) {
+          toast({
+            title: 'Retry needed',
+            description: 'This prospect is staying open because its latest changes could not be saved.',
+            variant: 'destructive',
+          });
+        }
+        return false;
+      }
+    }
+    if (selectionRequestVersionRef.current !== requestVersion) return false;
+    if (editingProspectId) clearPolygonPathListeners(editingProspectId);
+    applyMapSelection(target);
+    return true;
+  }, [applyMapSelection, clearPolygonPathListeners, commitOpenProspect, editingProspectId, isEditPanelOpen, selectedProspect?.id, toast]);
+  requestMapSelectionRef.current = requestMapSelection;
+
+  // Close is just another save-aware map selection. An unsaved review never traps navigation.
+  const closeEditPanel = useCallback(async (): Promise<boolean> => {
+    return requestMapSelection({ kind: 'none' });
+  }, [requestMapSelection]);
+
+  const handleProspectClick = useCallback((prospect: Prospect) => {
+    return requestMapSelectionRef.current({ kind: 'prospect', prospect });
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -2138,20 +2119,8 @@ export default function HomePage() {
   }, [map]);
 
   const handleMarketMemoryAnchorClick = useCallback((anchor: MarketMemoryAnchor) => {
-    if (isEditPanelOpen) {
-      toast({
-        title: 'Finish the open prospect first',
-        description: 'Close the prospect editor after its changes are saved, then inspect this property story.',
-      });
-      return;
-    }
-    marketMemoryFocusReturnRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    setPropertyMemoryReviewOpen(false);
-    setProspectMergeGroup(null);
-    setSelectedMarketMemoryAnchor(anchor);
-  }, [isEditPanelOpen, toast]);
+    void requestMapSelectionRef.current({ kind: 'memory', anchor });
+  }, []);
 
   const closeMarketMemoryStory = useCallback(() => {
     setPropertyMemoryReviewOpen(false);
@@ -2201,7 +2170,7 @@ export default function HomePage() {
     setProspectMergeGroup(group);
   }, [prospectMergeCandidatesQuery.data?.groups, selectedDuplicateProspectGroup, toast]);
 
-  const handlePropertyMemorySearchSelect = useCallback((row: PropertyMemorySearchRow) => {
+  const handlePropertyMemorySearchSelect = useCallback(async (row: PropertyMemorySearchRow) => {
     const anchor = marketMemoryAnchors.find((candidate) => candidate.id === row.anchor.id)
       || marketMemoryAnchors.find((candidate) => (
         (row.dossierId != null && candidate.persistence?.dossierId === row.dossierId)
@@ -2213,15 +2182,8 @@ export default function HomePage() {
       next.add(row.layer);
       return next;
     });
-    setSelectedProspect(null);
-    setIsEditPanelOpen(false);
-    marketMemoryFocusReturnRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    setPropertyMemoryReviewOpen(false);
-    setProspectMergeGroup(null);
-    setSelectedMarketMemoryAnchor(anchor);
-    setPropertyMemorySearchOpen(false);
+    const selectionApplied = await requestMapSelection({ kind: 'memory', anchor });
+    if (!selectionApplied) return;
     if (!map) return;
     const linkedProspect = row.linkedProspectId
       ? prospects.find((prospect) => prospect.id === row.linkedProspectId)
@@ -2235,7 +2197,7 @@ export default function HomePage() {
     map.setZoom(Math.max(map.getZoom() || 15, 16));
     setCenter(position);
     setZoom(Math.max(map.getZoom() || 16, 16));
-  }, [getProspectLatLng, map, marketMemoryAnchors, prospects]);
+  }, [getProspectLatLng, map, marketMemoryAnchors, prospects, requestMapSelection]);
 
   const toggleMarketMemoryLayer = useCallback((layer: MarketMemoryLayer) => {
     setVisibleMarketMemoryLayers((current) => {
@@ -2335,6 +2297,7 @@ export default function HomePage() {
             anchors={standaloneMarketMemoryAnchors}
             visibleLayers={visibleMarketMemoryLayers}
             onAnchorClick={handleMarketMemoryAnchorClick}
+            interactive={terraMode === 'select'}
           />
 
           {/* Search Pin */}
@@ -2377,7 +2340,7 @@ export default function HomePage() {
       <MapControls
         onSearch={handleMapSearch}
         prospects={prospects}
-        onProspectClick={(prospect) => {
+        onProspectClick={async (prospect) => {
           let target: { lat: number; lng: number } | null = null;
           if (prospect.geometry.type === 'Point') {
             const [lng, lat] = prospect.geometry.coordinates as [number, number];
@@ -2392,11 +2355,11 @@ export default function HomePage() {
               target = { lat, lng };
             }
           }
-          if (target && map) {
+          const selectionApplied = await handleProspectClick(prospect);
+          if (selectionApplied && target && map) {
             map.panTo(target);
             map.setZoom(Math.max(map.getZoom() || 15, 15));
           }
-          handleProspectClick(prospect);
         }}
         bounds={bounds}
         defaultCenter={DEFAULT_CENTER}
@@ -2537,14 +2500,14 @@ export default function HomePage() {
                       variant="outline"
                       className="h-8 w-8 p-0"
                       aria-label="Compare duplicate map records"
-                      title="Compare duplicate map records"
+                      title="Compare records"
                       disabled={prospectSaveStatus !== 'saved'}
                     >
                       <GitMerge className="h-3.5 w-3.5" />
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    {prospectSaveStatus === 'saved' ? 'Compare duplicate map records' : 'Wait for this prospect to finish saving'}
+                    {prospectSaveStatus === 'saved' ? 'Compare records' : 'Available after saving'}
                   </TooltipContent>
                 </Tooltip>
               ) : null}
@@ -2643,9 +2606,9 @@ export default function HomePage() {
             ? () => handleComparePropertyDuplicates()
             : undefined}
           onWorkProspect={selectedMarketMemoryAnchor.persistence?.linkedProspectId
-            ? () => {
+              ? () => {
                 const linked = prospects.find((prospect) => prospect.id === selectedMarketMemoryAnchor.persistence?.linkedProspectId);
-                if (linked) openProspectEditor(linked);
+                if (linked) void requestMapSelection({ kind: 'prospect', prospect: linked, forceEditor: true });
               }
             : undefined}
           isActionPending={decidePropertyMemory.isPending}

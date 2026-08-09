@@ -308,8 +308,10 @@ export function useDecidePropertyMemoryItem(
   return useMutation<PropertyMemoryDecisionResponse, Error, PropertyMemoryDecisionRequest>({
     mutationFn: decidePropertyMemoryItem,
     onSuccess: async (data, variables) => {
-      await invalidatePropertyMemoryAfterDecision(queryClient)
       await callbacks.onSuccess?.(data, variables)
+      void invalidatePropertyMemoryAfterDecision(queryClient).catch((error) => {
+        console.error('Property-memory refresh failed after a confirmed decision:', error)
+      })
     },
     onError: callbacks.onError,
   })

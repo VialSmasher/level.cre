@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Activity, Building2, FileSearch, FilterX, LoaderCircle, MapPin, Search, X } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -31,6 +31,8 @@ const EMPTY_FILTERS: PropertyMemorySearchFilters = {
   limit: 50,
 }
 
+const PROPERTY_MEMORY_SEARCH_DEBOUNCE_MS = 275
+
 function layerLabel(layer: PropertyMemorySearchRow['layer']) {
   if (layer === 'review') return 'Needs review'
   if (layer === 'existing') return 'Existing map record'
@@ -56,8 +58,8 @@ const MATCHED_FIELD_LABELS: Record<string, string> = {
 
 export function PropertyMemorySearchPanel({ open, onClose, onSelect }: Props) {
   const [filters, setFilters] = useState<PropertyMemorySearchFilters>(EMPTY_FILTERS)
-  const deferredFilters = useDeferredValue(filters)
-  const stableFilters = useMemo(() => ({ ...deferredFilters, limit: 50 }), [deferredFilters])
+  const [serverFilters, setServerFilters] = useState<PropertyMemorySearchFilters>(EMPTY_FILTERS)
+  const stableFilters = useMemo(() => ({ ...serverFilters, limit: 50 }), [serverFilters])
   const query = useInfinitePropertyMemorySearch(stableFilters, { enabled: open })
   const rows = useMemo(() => {
     const byCanonicalKey = new Map<string, PropertyMemorySearchRow>()
@@ -70,6 +72,12 @@ export function PropertyMemorySearchPanel({ open, onClose, onSelect }: Props) {
   }, [query.data])
   const firstPage = query.data?.pages[0]
   const hasFilters = Object.entries(filters).some(([key, value]) => key !== 'limit' && value && value !== 'any')
+
+  useEffect(() => {
+    if (!open) return undefined
+    const timer = window.setTimeout(() => setServerFilters(filters), PROPERTY_MEMORY_SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [filters, open])
 
   useEffect(() => {
     if (!open) return undefined
@@ -140,7 +148,17 @@ export function PropertyMemorySearchPanel({ open, onClose, onSelect }: Props) {
               <SelectItem value="never">Never touched</SelectItem>
             </SelectContent>
           </Select>
-          <Button type="button" variant="outline" size="sm" className="shrink-0" disabled={!hasFilters} onClick={() => setFilters(EMPTY_FILTERS)}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            disabled={!hasFilters}
+            onClick={() => {
+              setFilters(EMPTY_FILTERS)
+              setServerFilters(EMPTY_FILTERS)
+            }}
+          >
             <FilterX className="h-4 w-4" />Reset
           </Button>
         </div>

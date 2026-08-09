@@ -203,8 +203,10 @@ export function useApplyProspectMerge(callbacks: {
   return useMutation<ProspectMergeApplyResponse, Error, ProspectMergeApplyRequest>({
     mutationFn: async (request) => responseJson(await apiRequest('POST', prospectMergeRoutes.apply, request)),
     onSuccess: async (result) => {
-      await invalidateProspectMergeConsumers(queryClient)
       await callbacks.onSuccess?.(result)
+      void invalidateProspectMergeConsumers(queryClient).catch((error) => {
+        console.error('Prospect refresh failed after a confirmed merge:', error)
+      })
     },
     onError: callbacks.onError,
   })
@@ -222,8 +224,10 @@ export function useUndoProspectMerge(callbacks: {
       { confirmUndo },
     )),
     onSuccess: async (result) => {
-      await invalidateProspectMergeConsumers(queryClient)
       await callbacks.onSuccess?.(result)
+      void invalidateProspectMergeConsumers(queryClient).catch((error) => {
+        console.error('Prospect refresh failed after a confirmed merge undo:', error)
+      })
     },
     onError: callbacks.onError,
   })
