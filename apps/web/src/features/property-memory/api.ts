@@ -1,4 +1,5 @@
 import {
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -11,6 +12,13 @@ import type {
   MarketMemoryAnchor,
   MarketMemoryResolution,
 } from '@level-cre/shared'
+
+import {
+  propertyMemorySearchParams,
+  type PropertyMemorySearchFilters,
+} from './searchParams'
+
+export { propertyMemorySearchParams, type PropertyMemorySearchFilters } from './searchParams'
 
 export type PropertyMemoryFieldGroup = 'location' | 'municipal' | 'legal' | 'ownership' | 'context'
 
@@ -100,18 +108,54 @@ export type PropertyMemoryMapResponse = CurrentProjectsMarketMemoryPreview & {
   anchors: MarketMemoryAnchor[]
 }
 
+export type PropertyMemorySearchRow = {
+  canonicalKey: string
+  layer: 'existing' | 'market_memory' | 'review'
+  dossierId: string | null
+  importItemId: string | null
+  linkedProspectId: string | null
+  linkedListingId: string | null
+  address: string
+  latitude: number
+  longitude: number
+  owners: string[]
+  legalDescriptions: string[]
+  lincs: string[]
+  zoning: string[]
+  submarket: string | null
+  prospectStatus: string | null
+  lastActivityAt: string | null
+  activityCount: number
+  matchedFields: string[]
+  anchor: MarketMemoryAnchor
+}
+
+export type PropertyMemorySearchResponse = {
+  rows: PropertyMemorySearchRow[]
+  total: number
+  nextCursor: string | null
+  source: {
+    importId: string | null
+    generatedAt: string
+    anchorCount: number
+  }
+}
+
 // Keep endpoints in one place while the backend route surface settles.
 export const propertyMemoryRoutes = {
   preview: '/api/intel/brokerage-memory/preview',
   imports: '/api/intel/brokerage-memory/imports',
   review: '/api/intel/brokerage-memory/review',
   map: '/api/intel/brokerage-memory/map',
+  search: '/api/intel/brokerage-memory/search',
   decision: (itemId: string) => `/api/intel/brokerage-memory/items/${encodeURIComponent(itemId)}/decision`,
 } as const
 
 export const propertyMemoryKeys = {
   all: ['property-memory'] as const,
   map: () => ['property-memory', 'map'] as const,
+  search: (filters: PropertyMemorySearchFilters) => ['property-memory', 'search', filters] as const,
+  searchInfinite: (filters: PropertyMemorySearchFilters) => ['property-memory', 'search', 'infinite', filters] as const,
   reviewRoot: () => ['property-memory', 'review'] as const,
   review: (limit: number) => ['property-memory', 'review', limit] as const,
 } as const
@@ -139,6 +183,15 @@ export async function fetchPropertyMemoryReview(limit = 100): Promise<PropertyMe
 
 export async function fetchPropertyMemoryMap(): Promise<PropertyMemoryMapResponse> {
   return responseJson(await apiRequest('GET', propertyMemoryRoutes.map))
+}
+
+export async function fetchPropertyMemorySearch(
+  filters: PropertyMemorySearchFilters,
+): Promise<PropertyMemorySearchResponse> {
+  const params = propertyMemorySearchParams(filters)
+  const query = params.toString()
+  const suffix = query ? `?${query}` : ''
+  return responseJson(await apiRequest('GET', `${propertyMemoryRoutes.search}${suffix}`))
 }
 
 export async function decidePropertyMemoryItem(
@@ -191,6 +244,36 @@ export function usePropertyMemoryReview(options: { enabled?: boolean; limit?: nu
     queryFn: () => fetchPropertyMemoryReview(limit),
     enabled: options.enabled ?? true,
     staleTime: 15_000,
+  })
+}
+
+export function usePropertyMemorySearch(
+  filters: PropertyMemorySearchFilters,
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery<PropertyMemorySearchResponse>({
+    queryKey: propertyMemoryKeys.search(filters),
+    queryFn: () => fetchPropertyMemorySearch(filters),
+    enabled: options.enabled ?? true,
+    staleTime: 20_000,
+  })
+}
+
+export function useInfinitePropertyMemorySearch(
+  filters: PropertyMemorySearchFilters,
+  options: { enabled?: boolean } = {},
+) {
+  const baseFilters = { ...filters, cursor: undefined }
+  return useInfiniteQuery({
+    queryKey: propertyMemoryKeys.searchInfinite(baseFilters),
+    queryFn: ({ pageParam }) => fetchPropertyMemorySearch({
+      ...baseFilters,
+      cursor: pageParam || undefined,
+    }),
+    initialPageParam: '',
+    getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
+    enabled: options.enabled ?? true,
+    staleTime: 20_000,
   })
 }
 

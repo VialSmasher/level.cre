@@ -34,7 +34,9 @@ import { ProspectEditPanel, computeFollowUpDue, formatSfWithCommas, getDisplayAd
 import { useTerraDrawGoogleMaps, type MapDrawMode, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
 import { AdvancedMapMarker } from '@/features/map/AdvancedMapMarker';
 import { composePropertyMapItems, getLinkedMemoryMarkerTitle } from '@/features/property-memory/composeMapItems';
-import { usePropertyMemoryMap } from '@/features/property-memory/api';
+import { PropertyMemorySearchPanel } from '@/features/property-memory/PropertyMemorySearchPanel';
+import { usePropertyMemoryMap, type PropertyMemorySearchRow } from '@/features/property-memory/api';
+import { resolveProspectId } from '@/features/prospect-merge/api';
 import { SearchResultCard } from '@/features/map/SearchResultCard';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
 import { createStatusFilterSet, getStatusCounts } from '@/features/map/statusFilters';
@@ -336,6 +338,7 @@ export default function HomePage() {
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [isEditPanelOpen, setIsEditPanelOpen] = useState(false);
   const focusedProspectIdRef = useRef<string | null>(null);
+  const resolvingProspectIdRef = useRef<string | null>(null);
   const focusedPropertyIdRef = useRef<string | null>(null);
   const [editingProspectId, setEditingProspectId] = useState<string | null>(null);
   const [originalPolygonCoordinates, setOriginalPolygonCoordinates] = useState<[number, number][] | null>(null);
@@ -343,6 +346,7 @@ export default function HomePage() {
   const polygonPathListenersRef = useRef<Map<string, google.maps.MapsEventListener[]>>(new Map());
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [marketMemoryDialogOpen, setMarketMemoryDialogOpen] = useState(false);
+  const [propertyMemorySearchOpen, setPropertyMemorySearchOpen] = useState(false);
   const [marketMemoryPreview, setMarketMemoryPreview] = useState<CurrentProjectsMarketMemoryPreview | null>(null);
   const [selectedMarketMemoryAnchor, setSelectedMarketMemoryAnchor] = useState<MarketMemoryAnchor | null>(null);
   const [visibleMarketMemoryLayers, setVisibleMarketMemoryLayers] = useState<Set<MarketMemoryLayer>>(
@@ -1044,8 +1048,42 @@ export default function HomePage() {
     if (!targetId || focusedProspectIdRef.current === targetId) return;
 
     const targetProspect = prospects.find((prospect) => prospect.id === targetId);
-    if (!targetProspect) return;
+    if (!targetProspect) {
+      if (resolvingProspectIdRef.current === targetId) return;
+      resolvingProspectIdRef.current = targetId;
+      void resolveProspectId(targetId).then((resolution) => {
+        if (resolvingProspectIdRef.current !== targetId) return;
+        if (!resolution.merged || resolution.canonicalProspectId === targetId) return;
+        const canonical = prospects.find((prospect) => prospect.id === resolution.canonicalProspectId);
+        const url = new URL(window.location.href);
+        url.searchParams.set('prospectId', resolution.canonicalProspectId);
+        window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+        try {
+          window.localStorage.removeItem('levelcre:focusProspectId');
+        } catch {}
+        if (!canonical) return;
+        focusedProspectIdRef.current = resolution.canonicalProspectId;
+        const canonicalLatLng = getProspectLatLng(canonical);
+        if (canonicalLatLng) {
+          map.panTo(canonicalLatLng);
+          map.setZoom(Math.max(map.getZoom() || 15, 16));
+          setCenter(canonicalLatLng);
+          setZoom(Math.max(map.getZoom() || 16, 16));
+        }
+        setSelectedProspect(canonical);
+        setIsEditPanelOpen(true);
+        setIsControlPanelOpen(false);
+      }).catch(() => {
+        // Preserve the unresolved ID in the URL; the map must not guess at identity.
+      }).finally(() => {
+        if (resolvingProspectIdRef.current === targetId) {
+          resolvingProspectIdRef.current = null;
+        }
+      });
+      return;
+    }
 
+    resolvingProspectIdRef.current = null;
     focusedProspectIdRef.current = targetId;
     const targetLatLng = getProspectLatLng(targetProspect);
     if (targetLatLng) {
@@ -2013,6 +2051,37 @@ export default function HomePage() {
     setSelectedMarketMemoryAnchor(anchor);
   }, [isEditPanelOpen, toast]);
 
+  const handlePropertyMemorySearchSelect = useCallback((row: PropertyMemorySearchRow) => {
+    const anchor = marketMemoryAnchors.find((candidate) => candidate.id === row.anchor.id)
+      || marketMemoryAnchors.find((candidate) => (
+        (row.dossierId != null && candidate.persistence?.dossierId === row.dossierId)
+        || (row.importItemId != null && candidate.persistence?.importItemId === row.importItemId)
+        || (row.linkedProspectId != null && candidate.persistence?.linkedProspectId === row.linkedProspectId)
+      )) || row.anchor;
+    setVisibleMarketMemoryLayers((current) => {
+      const next = new Set(current);
+      next.add(row.layer);
+      return next;
+    });
+    setSelectedProspect(null);
+    setIsEditPanelOpen(false);
+    setSelectedMarketMemoryAnchor(anchor);
+    setPropertyMemorySearchOpen(false);
+    if (!map) return;
+    const linkedProspect = row.linkedProspectId
+      ? prospects.find((prospect) => prospect.id === row.linkedProspectId)
+      : null;
+    // A broker's manually adjusted prospect pin remains authoritative. The
+    // evidence coordinate is used only when no linked prospect position exists.
+    const position = linkedProspect
+      ? getProspectLatLng(linkedProspect) || { lat: row.latitude, lng: row.longitude }
+      : { lat: row.latitude, lng: row.longitude };
+    map.panTo(position);
+    map.setZoom(Math.max(map.getZoom() || 15, 16));
+    setCenter(position);
+    setZoom(Math.max(map.getZoom() || 16, 16));
+  }, [getProspectLatLng, map, marketMemoryAnchors, prospects]);
+
   const toggleMarketMemoryLayer = useCallback((layer: MarketMemoryLayer) => {
     setVisibleMarketMemoryLayers((current) => {
       const next = new Set(current);
@@ -2193,6 +2262,11 @@ export default function HomePage() {
           anchors={marketMemoryAnchors}
           visibleLayers={visibleMarketMemoryLayers}
           onOpenPreview={() => setMarketMemoryDialogOpen(true)}
+          onOpenSearch={() => {
+            setPropertyMemorySearchOpen(true);
+            setSelectedMarketMemoryAnchor(null);
+            setIsControlPanelOpen(false);
+          }}
           onToggleLayer={toggleMarketMemoryLayer}
           onClear={clearMarketMemoryPreview}
         />
@@ -2373,6 +2447,12 @@ export default function HomePage() {
           onContactPhoneChange={(value) => updateSelectedProspect('contactPhone', value)}
         />
       )}
+
+      <PropertyMemorySearchPanel
+        open={propertyMemorySearchOpen}
+        onClose={() => setPropertyMemorySearchOpen(false)}
+        onSelect={handlePropertyMemorySearchSelect}
+      />
 
       {selectedMarketMemoryAnchor ? (
         <MarketMemoryStoryPanel
