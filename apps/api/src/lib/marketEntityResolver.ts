@@ -32,7 +32,7 @@ export async function resolveMarketEntitiesForUser(params: {
              ai_metadata -> 'legalIdentity' ->> 'block' AS block,
              ai_metadata -> 'legalIdentity' ->> 'lot' AS lot
       FROM public.prospects
-      WHERE user_id = $1
+      WHERE user_id = $1 AND merged_into_prospect_id IS NULL
       ORDER BY updated_at DESC NULLS LAST, created_at DESC
       LIMIT 750
     `, [params.userId]),

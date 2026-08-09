@@ -1,8 +1,9 @@
 import { randomUUID } from 'crypto';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 
 import type { NormalizedSalesActivity } from './salesActivityImport';
+import { ProspectReferenceError, requireActiveOwnedProspect } from './prospectReferenceService';
 
 export const ACTIVITY_EVENT_TYPES = [
   'email_sent',
@@ -118,6 +119,8 @@ export type ActivityEventImportResult = {
   externalEventId?: string;
   inserted?: boolean;
   error?: string;
+  code?: string;
+  canonicalProspectId?: string;
 };
 
 export type ActivityEventImportSummary = {
@@ -129,13 +132,13 @@ export type ActivityEventImportSummary = {
 };
 
 async function assertOwnedReference(
-  pool: Pool,
+  db: Pick<Pool | PoolClient, 'query'>,
   userId: string,
-  table: 'prospects' | 'listings' | 'opportunities' | 'contact_interactions',
+  table: 'listings' | 'opportunities' | 'contact_interactions',
   id: string | null | undefined,
 ): Promise<string | null> {
   if (!id) return null;
-  const { rows } = await pool.query(
+  const { rows } = await db.query(
     `SELECT id FROM public.${table} WHERE id = $1 AND user_id = $2 LIMIT 1`,
     [id, userId],
   );
@@ -149,14 +152,48 @@ async function upsertActivityEvent(params: {
   defaultSource?: string;
   event: ActivityEventInput;
 }): Promise<{ id: string; inserted: boolean }> {
+  const client = await params.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await upsertActivityEventInTransaction({ ...params, client });
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function upsertActivityEventInTransaction(params: {
+  client: PoolClient;
+  userId: string;
+  defaultSource?: string;
+  event: ActivityEventInput;
+}): Promise<{ id: string; inserted: boolean }> {
   const source = params.event.source || params.defaultSource || 'codex';
-  const [prospectId, listingId, opportunityId, interactionId] = await Promise.all([
-    assertOwnedReference(params.pool, params.userId, 'prospects', params.event.prospectId),
-    assertOwnedReference(params.pool, params.userId, 'listings', params.event.listingId),
-    assertOwnedReference(params.pool, params.userId, 'opportunities', params.event.opportunityId),
-    assertOwnedReference(params.pool, params.userId, 'contact_interactions', params.event.interactionId),
+  const prospectIds = Array.from(new Set([
+    params.event.prospectId,
+    ...(params.event.links || [])
+      .filter((link) => link.entityType === 'prospect')
+      .map((link) => link.entityId),
+  ].filter((id): id is string => Boolean(id)))).sort();
+  for (const prospectId of prospectIds) {
+    await requireActiveOwnedProspect({
+      db: params.client,
+      userId: params.userId,
+      prospectId,
+      lock: true,
+    });
+  }
+  const prospectId = params.event.prospectId || null;
+  const [listingId, opportunityId, interactionId] = await Promise.all([
+    assertOwnedReference(params.client, params.userId, 'listings', params.event.listingId),
+    assertOwnedReference(params.client, params.userId, 'opportunities', params.event.opportunityId),
+    assertOwnedReference(params.client, params.userId, 'contact_interactions', params.event.interactionId),
   ]);
-  const { rows } = await params.pool.query(
+  const { rows } = await params.client.query(
     `
       INSERT INTO public.activity_events (
         id, user_id, source, external_event_id, event_type, direction,
@@ -233,7 +270,7 @@ async function upsertActivityEvent(params: {
   const row = rows[0];
 
   for (const link of params.event.links || []) {
-    await params.pool.query(
+    await params.client.query(
       `
         INSERT INTO public.activity_event_links (
           id, user_id, event_id, entity_type, entity_id, role, confidence, metadata
@@ -278,7 +315,14 @@ export async function importActivityEventBatch(params: {
       summary.results.push({ eventId: result.id, externalEventId: event.externalEventId, inserted: result.inserted });
     } catch (error: any) {
       summary.errors += 1;
-      summary.results.push({ externalEventId: event.externalEventId, error: error?.message || 'Failed to import activity event' });
+      summary.results.push({
+        externalEventId: event.externalEventId,
+        error: error?.message || 'Failed to import activity event',
+        ...(error instanceof ProspectReferenceError ? {
+          code: error.code,
+          ...(error.canonicalProspectId ? { canonicalProspectId: error.canonicalProspectId } : {}),
+        } : {}),
+      });
     }
   }
 
@@ -413,75 +457,96 @@ export async function reviewActivityEvent(params: {
   eventId: string;
   review: z.infer<typeof ActivityEventReviewSchema>;
 }) {
-  const existing = await params.pool.query(
-    `SELECT id, match_status, prospect_id FROM public.activity_events WHERE id = $1 AND user_id = $2 LIMIT 1`,
-    [params.eventId, params.userId],
-  );
-  const event = existing.rows[0];
-  if (!event) return null;
-  if (['matched', 'ignored'].includes(String(event.match_status))) {
-    return {
-      id: event.id,
-      action: event.match_status === 'matched' ? 'link' : 'ignore',
-      matchStatus: event.match_status,
-      prospectId: event.prospect_id || null,
-      alreadyReviewed: true,
-    };
-  }
+  const client = await params.pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (params.review.action === 'link') {
+      await requireActiveOwnedProspect({
+        db: client,
+        userId: params.userId,
+        prospectId: params.review.prospectId as string,
+        lock: true,
+      });
+    }
+    const existing = await client.query(
+      `SELECT id, match_status, prospect_id FROM public.activity_events WHERE id = $1 AND user_id = $2 LIMIT 1 FOR UPDATE`,
+      [params.eventId, params.userId],
+    );
+    const event = existing.rows[0];
+    if (!event) {
+      await client.query('COMMIT');
+      return null;
+    }
+    if (['matched', 'ignored'].includes(String(event.match_status))) {
+      await client.query('COMMIT');
+      return {
+        id: event.id,
+        action: event.match_status === 'matched' ? 'link' : 'ignore',
+        matchStatus: event.match_status,
+        prospectId: event.prospect_id || null,
+        alreadyReviewed: true,
+      };
+    }
 
-  const reviewedAt = new Date().toISOString();
-  if (params.review.action === 'ignore') {
-    const { rows } = await params.pool.query(
+    const reviewedAt = new Date().toISOString();
+    if (params.review.action === 'ignore') {
+      const { rows } = await client.query(
+        `
+          UPDATE public.activity_events
+          SET match_status = 'ignored', match_reason = 'broker_ignored_evidence', updated_at = now(),
+              source_metadata = COALESCE(source_metadata, '{}'::jsonb) || $3::jsonb
+          WHERE id = $1 AND user_id = $2 AND match_status NOT IN ('matched', 'ignored')
+          RETURNING id, match_status, prospect_id
+        `,
+        [params.eventId, params.userId, JSON.stringify({ review: { action: 'ignore', reviewedAt } })],
+      );
+      await client.query('COMMIT');
+      return rows[0] ? {
+        id: rows[0].id,
+        action: 'ignore' as const,
+        matchStatus: rows[0].match_status,
+        prospectId: rows[0].prospect_id || null,
+        alreadyReviewed: false,
+      } : null;
+    }
+
+    const { rows } = await client.query(
       `
         UPDATE public.activity_events
-        SET match_status = 'ignored', match_reason = 'broker_ignored_evidence', updated_at = now(),
-            source_metadata = COALESCE(source_metadata, '{}'::jsonb) || $3::jsonb
+        SET prospect_id = $3, match_status = 'matched', match_reason = 'broker_linked_evidence', updated_at = now(),
+            source_metadata = COALESCE(source_metadata, '{}'::jsonb) || $4::jsonb
         WHERE id = $1 AND user_id = $2 AND match_status NOT IN ('matched', 'ignored')
         RETURNING id, match_status, prospect_id
       `,
-      [params.eventId, params.userId, JSON.stringify({ review: { action: 'ignore', reviewedAt } })],
+      [params.eventId, params.userId, params.review.prospectId, JSON.stringify({ review: { action: 'link', reviewedAt } })],
     );
-    return rows[0] ? {
+    if (!rows[0]) {
+      await client.query('COMMIT');
+      return null;
+    }
+    await client.query(
+      `
+        INSERT INTO public.activity_event_links (
+          id, user_id, event_id, entity_type, entity_id, role, confidence, metadata
+        )
+        VALUES ($1, $2, $3, 'prospect', $4, 'broker_reviewed_subject', 100, $5::jsonb)
+        ON CONFLICT (event_id, entity_type, entity_id, role)
+        DO UPDATE SET confidence = 100, metadata = EXCLUDED.metadata
+      `,
+      [randomUUID(), params.userId, params.eventId, params.review.prospectId, JSON.stringify({ reviewedAt })],
+    );
+    await client.query('COMMIT');
+    return {
       id: rows[0].id,
-      action: 'ignore' as const,
+      action: 'link' as const,
       matchStatus: rows[0].match_status,
-      prospectId: rows[0].prospect_id || null,
+      prospectId: rows[0].prospect_id,
       alreadyReviewed: false,
-    } : null;
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
-
-  const prospect = await params.pool.query(
-    `SELECT id FROM public.prospects WHERE id = $1 AND user_id = $2 LIMIT 1`,
-    [params.review.prospectId, params.userId],
-  );
-  if (!prospect.rows[0]) throw new Error('Selected prospect was not found');
-  const { rows } = await params.pool.query(
-    `
-      UPDATE public.activity_events
-      SET prospect_id = $3, match_status = 'matched', match_reason = 'broker_linked_evidence', updated_at = now(),
-          source_metadata = COALESCE(source_metadata, '{}'::jsonb) || $4::jsonb
-      WHERE id = $1 AND user_id = $2 AND match_status NOT IN ('matched', 'ignored')
-      RETURNING id, match_status, prospect_id
-    `,
-    [params.eventId, params.userId, params.review.prospectId, JSON.stringify({ review: { action: 'link', reviewedAt } })],
-  );
-  if (!rows[0]) return null;
-  await params.pool.query(
-    `
-      INSERT INTO public.activity_event_links (
-        id, user_id, event_id, entity_type, entity_id, role, confidence, metadata
-      )
-      VALUES ($1, $2, $3, 'prospect', $4, 'broker_reviewed_subject', 100, $5::jsonb)
-      ON CONFLICT (event_id, entity_type, entity_id, role)
-      DO UPDATE SET confidence = 100, metadata = EXCLUDED.metadata
-    `,
-    [randomUUID(), params.userId, params.eventId, params.review.prospectId, JSON.stringify({ reviewedAt })],
-  );
-  return {
-    id: rows[0].id,
-    action: 'link' as const,
-    matchStatus: rows[0].match_status,
-    prospectId: rows[0].prospect_id,
-    alreadyReviewed: false,
-  };
 }

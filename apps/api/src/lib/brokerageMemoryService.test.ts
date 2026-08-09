@@ -4,10 +4,13 @@ import test from 'node:test'
 import type { MarketMemoryAnchor } from '@level-cre/shared'
 
 import {
+  BrokerageMemoryDecisionSchema,
+  BrokerageMemoryServiceError,
   buildApprovedBrokerageMemoryPayload,
   buildBrokerageMemoryFactDrafts,
   buildBrokerageMemoryReviewReasons,
   buildNewBrokerageMemoryDossierInsert,
+  decideBrokerageMemoryItem,
   previewBrokerageMemoryImport,
 } from './brokerageMemoryService'
 
@@ -276,4 +279,46 @@ test('prospect geometry supplies missing coordinates while duplicate candidates 
   const prospectSql = sqlSeen.find((sql) => /FROM public\.prospects/i.test(sql)) || ''
   assert.match(prospectSql, /COALESCE\([\s\S]*location_lat[\s\S]*ST_Y\(ST_Centroid\(geometry\)\)/i)
   assert.match(prospectSql, /COALESCE\([\s\S]*location_lng[\s\S]*ST_X\(ST_Centroid\(geometry\)\)/i)
+})
+
+test('brokerage-memory approval rejects a tombstone before locking or writing the review item', async () => {
+  const transactionalQueries: string[] = []
+  const client = {
+    query: async (sql: string) => {
+      transactionalQueries.push(sql.trim())
+      if (/FROM public\.prospects/i.test(sql)) {
+        return { rows: [{ id: 'duplicate-1', merged_into_prospect_id: 'canonical-1' }] }
+      }
+      return { rows: [] }
+    },
+    release: () => undefined,
+  }
+  let topLevelQuery = 0
+  const pool = {
+    query: async (sql: string) => {
+      topLevelQuery += 1
+      if (topLevelQuery <= 2) return { rows: [] }
+      if (/FROM public\.brokerage_memory_items/i.test(sql)) {
+        return { rows: [{ matched_prospect_id: 'duplicate-1' }] }
+      }
+      return { rows: [] }
+    },
+    connect: async () => client,
+  }
+
+  await assert.rejects(
+    decideBrokerageMemoryItem({
+      pool: pool as never,
+      userId: 'user-one',
+      itemId: 'item-one',
+      decision: BrokerageMemoryDecisionSchema.parse({ action: 'approve' }),
+    }),
+    (error: unknown) => error instanceof BrokerageMemoryServiceError && error.status === 409,
+  )
+
+  const prospectLock = transactionalQueries.findIndex((sql) => /FROM public\.prospects/i.test(sql) && /FOR UPDATE/i.test(sql))
+  const itemLock = transactionalQueries.findIndex((sql) => /FOR UPDATE OF items/i.test(sql))
+  assert.ok(prospectLock >= 0)
+  assert.equal(itemLock, -1)
+  assert.equal(transactionalQueries.includes('ROLLBACK'), true)
 })

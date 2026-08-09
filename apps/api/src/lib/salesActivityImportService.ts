@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 
 import {
@@ -9,6 +9,9 @@ import {
   shouldCreateInteractionFromSalesActivity,
   type NormalizedSalesActivity,
 } from './salesActivityImport';
+import { ProspectReferenceError, requireActiveOwnedProspect } from './prospectReferenceService';
+
+type Queryable = Pick<Pool | PoolClient, 'query'>;
 
 type ContactInteractionStorage = {
   createContactInteraction(interaction: any, options?: any): Promise<{ id: string }>;
@@ -45,6 +48,8 @@ export type SalesActivityImportResult = {
   interactionId?: string | null;
   duplicate?: boolean;
   error?: string;
+  code?: string;
+  canonicalProspectId?: string;
 };
 
 export type SalesActivityImportSummary = {
@@ -69,19 +74,19 @@ export class SalesActivityReviewError extends Error {
 }
 
 async function resolveSalesActivityProspect(
-  pool: Pool,
+  pool: Queryable,
   userId: string,
   activity: NormalizedSalesActivity,
+  options: { lock?: boolean } = {},
 ): Promise<{ prospectId: string | null; matchReason: string | null }> {
   if (activity.prospectId) {
-    const provided = await pool.query(
-      `SELECT id FROM public.prospects WHERE id = $1 AND user_id = $2 LIMIT 1`,
-      [activity.prospectId, userId],
-    );
-    if (provided.rows[0]) {
-      return { prospectId: provided.rows[0].id, matchReason: 'provided_prospect_id' };
-    }
-    return { prospectId: null, matchReason: 'provided_prospect_id_not_found' };
+    const provided = await requireActiveOwnedProspect({
+      db: pool,
+      userId,
+      prospectId: activity.prospectId,
+      lock: options.lock,
+    });
+    return { prospectId: provided.id, matchReason: 'provided_prospect_id' };
   }
 
   if (activity.email) {
@@ -90,10 +95,12 @@ async function resolveSalesActivityProspect(
         SELECT id
         FROM public.prospects
         WHERE user_id = $1
+          AND merged_into_prospect_id IS NULL
           AND contact_email IS NOT NULL
           AND lower(contact_email) = lower($2)
         ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
         LIMIT 1
+        ${options.lock ? 'FOR UPDATE' : ''}
       `,
       [userId, activity.email],
     );
@@ -106,7 +113,7 @@ async function resolveSalesActivityProspect(
 }
 
 async function upsertSalesActivityImport(
-  pool: Pool,
+  pool: Queryable,
   userId: string,
   activity: NormalizedSalesActivity,
   match: { matchStatus: string; matchReason: string; confidence: number },
@@ -210,6 +217,53 @@ async function upsertSalesActivityImport(
   return { row: result.rows[0], existing: existingRow };
 }
 
+async function updateSalesActivityImportInteraction(params: {
+  pool: Pool;
+  userId: string;
+  importId: string;
+  prospectId: string;
+  interactionId: string;
+  matchReason: string | null;
+  confidence: number;
+}) {
+  const client = await params.pool.connect();
+  try {
+    await client.query('BEGIN');
+    await requireActiveOwnedProspect({
+      db: client,
+      userId: params.userId,
+      prospectId: params.prospectId,
+      lock: true,
+    });
+    await client.query(
+      `
+        UPDATE public.sales_activity_imports
+        SET interaction_id = $4,
+            prospect_id = $3,
+            match_status = 'matched',
+            match_reason = COALESCE(match_reason, $5),
+            confidence = GREATEST(confidence, $6),
+            updated_at = now()
+        WHERE id = $1 AND user_id = $2
+      `,
+      [
+        params.importId,
+        params.userId,
+        params.prospectId,
+        params.interactionId,
+        params.matchReason,
+        params.confidence,
+      ],
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function importSalesActivityBatch(params: {
   pool: Pool;
   storage: ContactInteractionStorage;
@@ -254,7 +308,6 @@ export async function importSalesActivityBatch(params: {
         await params.requireEditAccess(activity.listingId);
       }
 
-      let resolved = await resolveSalesActivityProspect(params.pool, params.userId, activity);
       let capturedEmailInteraction: { interactionId: string; prospectId: string } | null = null;
       if (params.findCapturedEmailInteraction && shouldCreateInteractionFromSalesActivity(activity)) {
         try {
@@ -263,32 +316,58 @@ export async function importSalesActivityBatch(params: {
           console.warn('Failed to find a matching captured email interaction:', error);
         }
       }
-      const capturedProspectConflict = Boolean(
-        capturedEmailInteraction
-        && resolved.prospectId
-        && resolved.prospectId !== capturedEmailInteraction.prospectId,
-      );
-      if (capturedEmailInteraction && !capturedProspectConflict) {
-        resolved = {
-          prospectId: capturedEmailInteraction.prospectId,
-          matchReason: 'matching_captured_email_interaction',
-        };
-      }
-      const match = capturedProspectConflict
-        ? {
-            matchStatus: 'needs_review',
-            matchReason: 'conflicting_captured_email_prospect',
-            confidence: 50,
+      const client = await params.pool.connect();
+      let resolved: { prospectId: string | null; matchReason: string | null };
+      let capturedProspectConflict: boolean;
+      let match: { matchStatus: string; matchReason: string; confidence: number };
+      let importRow: { id: string; interaction_id: string | null; match_status: string; prospect_id: string | null };
+      let existing: { id: string; interaction_id: string | null } | null;
+      try {
+        await client.query('BEGIN');
+        resolved = await resolveSalesActivityProspect(client, params.userId, activity, { lock: true });
+        capturedProspectConflict = Boolean(
+          capturedEmailInteraction
+          && resolved.prospectId
+          && resolved.prospectId !== capturedEmailInteraction.prospectId,
+        );
+        if (capturedEmailInteraction && !capturedProspectConflict) {
+          if (capturedEmailInteraction.prospectId !== resolved.prospectId) {
+            await requireActiveOwnedProspect({
+              db: client,
+              userId: params.userId,
+              prospectId: capturedEmailInteraction.prospectId,
+              lock: true,
+            });
           }
-        : decideSalesActivityMatch(activity, resolved.prospectId, resolved.matchReason);
-      const { row: importRow, existing } = await upsertSalesActivityImport(
-        params.pool,
-        params.userId,
-        activity,
-        match,
-        resolved.prospectId,
-        capturedProspectConflict ? null : capturedEmailInteraction?.interactionId || null,
-      );
+          resolved = {
+            prospectId: capturedEmailInteraction.prospectId,
+            matchReason: 'matching_captured_email_interaction',
+          };
+        }
+        match = capturedProspectConflict
+          ? {
+              matchStatus: 'needs_review',
+              matchReason: 'conflicting_captured_email_prospect',
+              confidence: 50,
+            }
+          : decideSalesActivityMatch(activity, resolved.prospectId, resolved.matchReason);
+        const upserted = await upsertSalesActivityImport(
+          client,
+          params.userId,
+          activity,
+          match,
+          resolved.prospectId,
+          capturedProspectConflict ? null : capturedEmailInteraction?.interactionId || null,
+        );
+        importRow = upserted.row;
+        existing = upserted.existing;
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
       summary.imported += 1;
       if (existing) summary.duplicates += 1;
       if (!existing && capturedEmailInteraction && !capturedProspectConflict) summary.duplicates += 1;
@@ -355,19 +434,15 @@ export async function importSalesActivityBatch(params: {
         }
 
         if (interactionId) {
-          await params.pool.query(
-            `
-              UPDATE public.sales_activity_imports
-              SET interaction_id = $4,
-                  prospect_id = $3,
-                  match_status = 'matched',
-                  match_reason = COALESCE(match_reason, $5),
-                  confidence = GREATEST(confidence, $6),
-                  updated_at = now()
-              WHERE id = $1 AND user_id = $2
-            `,
-            [importRow.id, params.userId, resolved.prospectId, interactionId, resolved.matchReason, match.confidence],
-          );
+          await updateSalesActivityImportInteraction({
+            pool: params.pool,
+            userId: params.userId,
+            importId: importRow.id,
+            prospectId: resolved.prospectId,
+            interactionId,
+            matchReason: resolved.matchReason,
+            confidence: match.confidence,
+          });
         }
 
         if (!duplicateInteraction) {
@@ -379,7 +454,7 @@ export async function importSalesActivityBatch(params: {
                 last_contact_date = $3,
                 status = CASE WHEN status = 'prospect' THEN 'contacted' ELSE status END,
                 updated_at = now()
-              WHERE id = $1 AND user_id = $2
+              WHERE id = $1 AND user_id = $2 AND merged_into_prospect_id IS NULL
             `,
             [resolved.prospectId, params.userId, interactionDate],
           );
@@ -435,6 +510,10 @@ export async function importSalesActivityBatch(params: {
       summary.errors += 1;
       summary.results.push({
         error: error?.message || 'Failed to import sales activity',
+        ...(error instanceof ProspectReferenceError ? {
+          code: error.code,
+          ...(error.canonicalProspectId ? { canonicalProspectId: error.canonicalProspectId } : {}),
+        } : {}),
       });
     }
   }
@@ -552,7 +631,7 @@ export async function reviewSalesActivityImport(params: {
     `
       SELECT id, status
       FROM public.prospects
-      WHERE id = $1 AND user_id = $2
+      WHERE id = $1 AND user_id = $2 AND merged_into_prospect_id IS NULL
       LIMIT 1
     `,
     [params.decision.prospectId, params.userId],
@@ -625,26 +704,41 @@ export async function reviewSalesActivityImport(params: {
         SET last_contact_date = $3,
             status = CASE WHEN status = 'prospect' THEN 'contacted' ELSE status END,
             updated_at = now()
-        WHERE id = $1 AND user_id = $2
+        WHERE id = $1 AND user_id = $2 AND merged_into_prospect_id IS NULL
       `,
       [prospect.id, params.userId, interactionDate],
     );
   }
 
-  const linked = await params.pool.query(
-    `
-      UPDATE public.sales_activity_imports
-      SET prospect_id = $3,
-          interaction_id = $4,
-          match_status = 'matched',
-          match_reason = 'manual_prospect_link',
-          confidence = 100,
-          updated_at = now()
-      WHERE id = $1 AND user_id = $2
-      RETURNING id, match_status, match_reason, prospect_id, interaction_id, updated_at
-    `,
-    [params.importId, params.userId, prospect.id, interactionId],
-  );
-
-  return linked.rows[0];
+  const client = await params.pool.connect();
+  try {
+    await client.query('BEGIN');
+    await requireActiveOwnedProspect({
+      db: client,
+      userId: params.userId,
+      prospectId: prospect.id,
+      lock: true,
+    });
+    const linked = await client.query(
+      `
+        UPDATE public.sales_activity_imports
+        SET prospect_id = $3,
+            interaction_id = $4,
+            match_status = 'matched',
+            match_reason = 'manual_prospect_link',
+            confidence = 100,
+            updated_at = now()
+        WHERE id = $1 AND user_id = $2
+        RETURNING id, match_status, match_reason, prospect_id, interaction_id, updated_at
+      `,
+      [params.importId, params.userId, prospect.id, interactionId],
+    );
+    await client.query('COMMIT');
+    return linked.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }

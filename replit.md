@@ -136,20 +136,24 @@ Preferred communication style: Simple, everyday language.
 
 ## Deploying
 
-- Provision a managed Postgres (Supabase/Neon/RDS). Ensure SSL is enabled.
+- Provision a managed Postgres (Supabase/Neon/RDS). Ensure SSL is enabled and install the reviewed baseline Level CRE schema before applying incremental migrations.
 - Set these env vars in your host (do not commit `.env`):
   - `DATABASE_URL` (must allow SSL; required)
   - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (for OAuth; optional if demo only)
   - `JWT_SECRET` (cookie signing; any strong random string)
-- Prepare the database schema on the live DB:
-  - `npm run db:prepare` (ensures `pgcrypto` then runs Drizzle push)
+- Apply the current incremental database upgrades on the live DB:
+  - `npm --workspace @apps/api run brokerage-memory:migrate`
+  - The checksummed runner applies `drizzle/0018_brokerage_memory.sql` and then `drizzle/0019_prospect_merge.sql` in one transaction. It assumes the baseline schema already exists.
+  - `db:push` and `db:prepare` intentionally fail closed. Production constraints, partial/expression indexes, and audit protections are managed by reviewed SQL migrations, not an unmanaged Drizzle push.
 - Build and start:
-  - `npm run build && npm start`
+  - `npm start` runs the API workspace `prestart` migration hook before building and serving the API.
 - Health checks:
-  - `GET /health` (verifies DB connection)
+  - `GET /health` (database connection only)
+  - `GET /api/version` (deployed commit)
+  - Authenticated `GET /api/prospects` plus the feature-specific endpoint being released (schema readiness)
 
 Notes
-- The schema uses `gen_random_uuid()`, which requires the `pgcrypto` extension. The `db:prepare` script runs `CREATE EXTENSION IF NOT EXISTS pgcrypto` safely.
+- The schema uses `gen_random_uuid()`, which requires the `pgcrypto` extension. The checksummed migration runner runs `CREATE EXTENSION IF NOT EXISTS pgcrypto` safely.
 - In demo mode (`VITE_DEMO_MODE=1`), most routes work without a JWT; for production, provide a valid Supabase JWT in the `Authorization: Bearer <token>` header.
 
 

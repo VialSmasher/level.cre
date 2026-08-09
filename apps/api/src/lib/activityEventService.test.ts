@@ -11,6 +11,14 @@ import {
   reviewActivityEvent,
 } from './activityEventService';
 
+function transactionalPool(handler: (sql: string, params?: unknown[]) => Promise<any>) {
+  const client = {
+    query: handler,
+    release: () => undefined,
+  };
+  return { connect: async () => client, query: handler } as any;
+}
+
 test('activity events require a known type, bounded confidence, and brief evidence', () => {
   const valid = ActivityEventInputSchema.parse({
     externalEventId: 'message-1',
@@ -53,12 +61,13 @@ test('activity events require a known type, bounded confidence, and brief eviden
 
 test('activity event import is idempotent and reports an upsert as a duplicate', async () => {
   const queries: Array<{ sql: string; params: unknown[] }> = [];
-  const pool = {
-    query: async (sql: string, params: unknown[]) => {
-      queries.push({ sql, params });
+  const pool = transactionalPool(async (sql: string, params: unknown[] = []) => {
+    queries.push({ sql, params });
+    if (sql.includes('INSERT INTO public.activity_events')) {
       return { rows: [{ id: 'event-1', inserted: false }] };
-    },
-  } as any;
+    }
+    return { rows: [] };
+  });
 
   const result = await importActivityEventBatch({
     pool,
@@ -78,9 +87,42 @@ test('activity event import is idempotent and reports an upsert as a duplicate',
   assert.equal(result.imported, 1);
   assert.equal(result.inserted, 0);
   assert.equal(result.duplicates, 1);
-  assert.equal(queries.length, 1);
-  assert.match(queries[0].sql, /ON CONFLICT \(user_id, source, external_event_id\)/);
-  assert.match(queries[0].sql, /match_status IN \('matched', 'ignored'\)/);
+  const upsert = queries.find((query) => query.sql.includes('INSERT INTO public.activity_events'));
+  assert.ok(upsert);
+  assert.match(upsert.sql, /ON CONFLICT \(user_id, source, external_event_id\)/);
+  assert.match(upsert.sql, /match_status IN \('matched', 'ignored'\)/);
+  assert.equal(queries[0].sql, 'BEGIN');
+  assert.equal(queries.at(-1)?.sql, 'COMMIT');
+});
+
+test('activity event import rejects a tombstoned direct or generic prospect reference', async () => {
+  let inserted = false;
+  const pool = transactionalPool(async (sql: string) => {
+    if (sql.includes('FROM public.prospects')) {
+      return { rows: [{ id: 'duplicate-1', merged_into_prospect_id: 'canonical-1' }] };
+    }
+    if (sql.includes('INSERT INTO public.activity_events')) inserted = true;
+    return { rows: [] };
+  });
+
+  const result = await importActivityEventBatch({
+    pool,
+    userId: 'user-1',
+    payload: ActivityEventBatchSchema.parse({
+      events: [{
+        externalEventId: 'message-tombstone',
+        eventType: 'email_sent',
+        occurredAt: new Date('2026-07-12T18:00:00.000Z'),
+        prospectId: 'duplicate-1',
+        links: [{ entityType: 'prospect', entityId: 'duplicate-1', role: 'subject' }],
+      }],
+    }),
+  });
+
+  assert.equal(result.errors, 1);
+  assert.equal(result.results[0].code, 'prospect_merged');
+  assert.equal(result.results[0].canonicalProspectId, 'canonical-1');
+  assert.equal(inserted, false);
 });
 
 test('broker evidence review requires a prospect for link and preserves prior decisions', async () => {
@@ -88,32 +130,38 @@ test('broker evidence review requires a prospect for link and preserves prior de
   assert.equal(ActivityEventReviewSchema.safeParse({ action: 'link', prospectId: 'prospect-1' }).success, true);
   assert.equal(ActivityEventReviewSchema.safeParse({ action: 'ignore' }).success, true);
 
-  let queryCount = 0;
-  const pool = {
-    query: async () => {
-      queryCount += 1;
+  const queries: string[] = [];
+  const pool = transactionalPool(async (sql: string) => {
+    queries.push(sql);
+    if (sql.includes('FROM public.prospects')) {
+      return { rows: [{ id: 'prospect-1', merged_into_prospect_id: null }] };
+    }
+    if (sql.includes('FROM public.activity_events')) {
       return { rows: [{ id: 'event-1', match_status: 'ignored', prospect_id: null }] };
-    },
-  } as any;
+    }
+    return { rows: [] };
+  });
   const result = await reviewActivityEvent({
     pool,
     userId: 'user-1',
     eventId: 'event-1',
     review: ActivityEventReviewSchema.parse({ action: 'link', prospectId: 'prospect-1' }),
   });
-  assert.equal(queryCount, 1);
   assert.equal(result?.matchStatus, 'ignored');
   assert.equal(result?.alreadyReviewed, true);
+  assert.equal(queries.some((sql) => sql.includes('FROM public.prospects') && sql.includes('FOR UPDATE')), true);
+  assert.equal(queries.some((sql) => sql.includes('UPDATE public.activity_events')), false);
 });
 
 test('confirmed sent sales activity dual-writes metadata without raw payload or body', async () => {
   const queries: Array<{ sql: string; params: unknown[] }> = [];
-  const pool = {
-    query: async (sql: string, params: unknown[]) => {
-      queries.push({ sql, params });
+  const pool = transactionalPool(async (sql: string, params: unknown[] = []) => {
+    queries.push({ sql, params });
+    if (sql.includes('INSERT INTO public.activity_events')) {
       return { rows: [{ id: 'event-1', inserted: true }] };
-    },
-  } as any;
+    }
+    return { rows: [] };
+  });
   const activity = normalizeSalesActivityInput({
     externalActivityId: 'provider-message-1',
     status: 'sent',
@@ -141,10 +189,12 @@ test('confirmed sent sales activity dual-writes metadata without raw payload or 
   });
 
   assert.equal(result?.inserted, 1);
-  const serializedMetadata = String(queries[0].params[23]);
+  const upsert = queries.find((query) => query.sql.includes('INSERT INTO public.activity_events'));
+  assert.ok(upsert);
+  const serializedMetadata = String(upsert.params[23]);
   assert.equal(serializedMetadata.includes('full body'), false);
-  assert.equal(queries[0].params[4], 'email_sent');
-  assert.equal(queries[0].params[6], 'confirmed');
+  assert.equal(upsert.params[4], 'email_sent');
+  assert.equal(upsert.params[6], 'confirmed');
 });
 
 test('non-sent sales rows do not become canonical production activity', async () => {

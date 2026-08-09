@@ -32,6 +32,16 @@ function rejectAgentBrokerDecision(req: Request, res: Response, proposalEndpoint
   });
   return true;
 }
+
+function sendProspectReferenceError(res: Response, error: unknown): boolean {
+  if (!(error instanceof ProspectReferenceError)) return false;
+  res.status(error.status).json({
+    message: error.message,
+    code: error.code,
+    ...(error.canonicalProspectId ? { canonicalProspectId: error.canonicalProspectId } : {}),
+  });
+  return true;
+}
 import { createClient } from '@supabase/supabase-js';
 import { pool, db } from './db';
 import { listings, listingMembers, listingInvites, users, profiles, listingProspects, contactInteractions } from '@level-cre/shared/schema';
@@ -39,6 +49,7 @@ import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import fs from 'fs';
 import path from 'path';
 import { XP_VALUES, actionForInteractionType, xpForInteractionType } from './lib/gamification';
+import { ProspectReferenceError, requireActiveOwnedProspect } from './lib/prospectReferenceService';
 import { registerIndustrialIntelRoutes } from './modules/industrial-intel/registerRoutes';
 import {
   buildDataQualityReview,
@@ -168,7 +179,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     : null;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
   const supabaseAdmin = (supabaseUrl && supabaseServiceKey) ? createClient(supabaseUrl, supabaseServiceKey) : null;
-  const prospectSelect = 'id,user_id,name,status,notes,geometry,submarket_id,last_contact_date,follow_up_timeframe,follow_up_due_date,contact_name,contact_email,contact_phone,contact_company,business_name,website_url,created_at,address,location_lat,location_lng,geohash,building_sf,lot_size_acres,ai_metadata,market_key,market_confidence,market_context_source,market_context_status';
+  const prospectSelect = 'id,user_id,name,status,notes,geometry,submarket_id,last_contact_date,follow_up_timeframe,follow_up_due_date,contact_name,contact_email,contact_phone,contact_company,business_name,website_url,created_at,address,location_lat,location_lng,geohash,building_sf,lot_size_acres,ai_metadata,market_key,market_confidence,market_context_source,market_context_status,merged_into_prospect_id';
   const listingSelect = 'id,user_id,title,address,lat,lng,submarket,deal_type,size,price,created_at,archived_at';
 
   function shouldUseSupabaseReadFallback(error: unknown): boolean {
@@ -550,6 +561,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         website_url
       FROM public.prospects
       WHERE user_id = $1
+        AND merged_into_prospect_id IS NULL
       ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
     `, [userId]);
     return rows.map((row) => ({
@@ -590,19 +602,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     decision: EmailProspectMatchDecision;
     summary: string;
   }): Promise<{ id: string; interactionId: string | null; created: boolean }> {
-    let existing: any = null;
-    if (params.decision.prospectId) {
-      const exact = await pool.query(`
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      if (params.decision.prospectId) {
+        await requireActiveOwnedProspect({
+          db: client,
+          userId: params.userId,
+          prospectId: params.decision.prospectId,
+          lock: true,
+        });
+      }
+
+      let existing: any = null;
+      if (params.decision.prospectId) {
+        const exact = await client.query(`
         SELECT id, interaction_id
         FROM public.email_prospect_matches
         WHERE user_id = $1 AND email_message_id = $2 AND prospect_id = $3
         ORDER BY updated_at DESC NULLS LAST
         LIMIT 1
+        FOR UPDATE
       `, [params.userId, params.emailMessageId, params.decision.prospectId]);
-      existing = exact.rows[0] || null;
-    }
-    if (!existing) {
-      const unresolved = await pool.query(`
+        existing = exact.rows[0] || null;
+      }
+      if (!existing) {
+        const unresolved = await client.query(`
         SELECT id, interaction_id
         FROM public.email_prospect_matches
         WHERE user_id = $1
@@ -611,18 +636,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           AND match_status IN ('needs_context', 'pending_review')
         ORDER BY updated_at DESC NULLS LAST
         LIMIT 1
+        FOR UPDATE
       `, [params.userId, params.emailMessageId]);
-      existing = unresolved.rows[0] || null;
-    }
+        existing = unresolved.rows[0] || null;
+      }
 
-    const initialStatus = params.decision.status === 'auto_log'
-      ? 'pending_review'
-      : params.decision.status;
-    const reason = params.decision.evidence.length > 0
-      ? `${params.decision.reason}: ${params.decision.evidence.join('; ')}`
-      : params.decision.reason;
-    if (existing) {
-      const updated = await pool.query(`
+      const initialStatus = params.decision.status === 'auto_log'
+        ? 'pending_review'
+        : params.decision.status;
+      const reason = params.decision.evidence.length > 0
+        ? `${params.decision.reason}: ${params.decision.evidence.join('; ')}`
+        : params.decision.reason;
+      if (existing) {
+        const updated = await client.query(`
         UPDATE public.email_prospect_matches
         SET prospect_id = $4,
             confidence = $5,
@@ -646,10 +672,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         reason,
         params.summary,
       ]);
-      return { id: updated.rows[0].id, interactionId: updated.rows[0].interaction_id || null, created: false };
-    }
+        await client.query('COMMIT');
+        return { id: updated.rows[0].id, interactionId: updated.rows[0].interaction_id || null, created: false };
+      }
 
-    const inserted = await pool.query(`
+      const inserted = await client.query(`
       INSERT INTO public.email_prospect_matches (
         user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
         suggested_interaction_type, suggested_outcome, suggested_summary, updated_at
@@ -665,7 +692,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       reason,
       params.summary,
     ]);
-    return { id: inserted.rows[0].id, interactionId: inserted.rows[0].interaction_id || null, created: true };
+      await client.query('COMMIT');
+      return { id: inserted.rows[0].id, interactionId: inserted.rows[0].interaction_id || null, created: true };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async function markCapturedEmailDuplicate(params: {
@@ -677,8 +711,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       prospectId: string | null;
     };
   }) {
-    const reason = `duplicate_captured_email:${params.duplicate.id}`;
-    const updated = await pool.query(`
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      if (params.duplicate.prospectId) {
+        await requireActiveOwnedProspect({
+          db: client,
+          userId: params.userId,
+          prospectId: params.duplicate.prospectId,
+          lock: true,
+        });
+      }
+      const reason = `duplicate_captured_email:${params.duplicate.id}`;
+      const updated = await client.query(`
       UPDATE public.email_prospect_matches
       SET match_status = 'ignored',
           match_reason = $3,
@@ -691,9 +736,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         AND match_status IN ('needs_context', 'pending_review')
       RETURNING id
     `, [params.userId, params.emailMessageId, reason, params.duplicate.interactionId]);
-    if (updated.rows[0]) return;
+      if (updated.rows[0]) {
+        await client.query('COMMIT');
+        return;
+      }
 
-    await pool.query(`
+      await client.query(`
       INSERT INTO public.email_prospect_matches (
         user_id, email_message_id, prospect_id, confidence, match_status, match_reason,
         suggested_interaction_type, suggested_outcome, suggested_summary, interaction_id,
@@ -712,6 +760,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       reason,
       params.duplicate.interactionId,
     ]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async function processCapturedEmailMessage(params: {
@@ -883,7 +938,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           END,
           status = CASE WHEN status = 'prospect' THEN 'contacted' ELSE status END,
           updated_at = now()
-      WHERE id = $1 AND user_id = $2
+      WHERE id = $1 AND user_id = $2 AND merged_into_prospect_id IS NULL
     `, [decision.prospectId, params.userId, interactionDate]);
 
     return {
@@ -1438,7 +1493,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const { data, error } = await admin
       .from('prospects')
       .select(prospectSelect)
-      .in('id', prospectIds);
+      .in('id', prospectIds)
+      .is('merged_into_prospect_id', null);
     if (error) throw error;
     return (data || []).map(mapProspectRow);
   }
@@ -1448,7 +1504,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const { data: ownRows, error: ownError } = await admin
       .from('prospects')
       .select(prospectSelect)
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .is('merged_into_prospect_id', null);
     if (ownError) throw ownError;
 
     const accessibleListingIds = await getAccessibleListingIdsViaSupabase(userId);
@@ -1469,7 +1526,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const { data: sharedRows, error: sharedError } = await admin
           .from('prospects')
           .select(prospectSelect)
-          .in('id', sharedProspectIds);
+          .in('id', sharedProspectIds)
+          .is('merged_into_prospect_id', null);
         if (sharedError) throw sharedError;
         for (const row of sharedRows || []) {
           if (!deduped.has(row.id)) {
@@ -2682,20 +2740,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/listings/:id/prospects', requireAuth, async (req, res) => {
     try {
+      const userId = getUserId(req);
       await requireEditAccess(req, req.params.id);
       const { prospectId } = req.body || {};
       if (!prospectId) return res.status(400).json({ message: 'prospectId is required' });
       if (isDemo(req)) {
-        const userId = getUserId(req);
         await demo.linkProspect(userId, req.params.id, prospectId);
         return res.status(201).json({ ok: true });
       }
-      await storage.linkProspectToListingAny({ listingId: req.params.id, prospectId });
+      await storage.linkProspectToListingAny({ listingId: req.params.id, prospectId, userId });
       res.status(201).json({ ok: true });
     } catch (error) {
+      if (sendProspectReferenceError(res, error)) return;
       console.error('Error linking prospect:', error);
-      // Handle unique violation gracefully
-      return res.status(200).json({ ok: true });
+      return res.status(500).json({ message: 'Failed to link prospect' });
     }
   });
 
@@ -2874,7 +2932,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } else {
             const prospect = await storage.createProspect({ ...prospectInput, userId });
             try {
-              await storage.linkProspectToListingAny({ listingId: req.params.id, prospectId: prospect.id });
+              await storage.linkProspectToListingAny({ listingId: req.params.id, prospectId: prospect.id, userId });
             } catch (linkError) {
               await storage.deleteProspect(prospect.id, userId).catch(() => undefined);
               throw linkError;
@@ -3368,9 +3426,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await demo.linkProspect(userId, req.params.id, prospectId);
         return res.status(201).json({ ok: true });
       }
-      await storage.linkProspectToListingAny({ listingId: req.params.id, prospectId });
+      await storage.linkProspectToListingAny({ listingId: req.params.id, prospectId, userId });
       res.status(201).json({ ok: true });
     } catch (error: any) {
+      if (sendProspectReferenceError(res, error)) return;
       const status = (error && typeof error === 'object' && (error as any).status) || 500;
       if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
       console.error('Error linking prospect:', error);
@@ -3816,7 +3875,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (parseResult.data.marketKey) {
         const duplicateResult = await pool.query(
-          'SELECT id FROM public.prospects WHERE user_id = $1 AND market_key = $2 ORDER BY created_at ASC LIMIT 1',
+          'SELECT id FROM public.prospects WHERE user_id = $1 AND market_key = $2 AND merged_into_prospect_id IS NULL ORDER BY created_at ASC LIMIT 1',
           [userId, parseResult.data.marketKey],
         );
         if (duplicateResult.rows[0]?.id) {
@@ -3891,6 +3950,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!updated) return res.status(404).json({ message: 'Prospect not found' });
         return res.json({ ...updated, newXpGained: 0 });
       }
+      const mergedRecord = await pool.query(
+        `SELECT merged_into_prospect_id FROM public.prospects WHERE id = $1 AND user_id = $2 LIMIT 1`,
+        [req.params.id, userId],
+      );
+      if (mergedRecord.rows[0]?.merged_into_prospect_id) {
+        return res.status(409).json({
+          message: 'This prospect was consolidated into another record.',
+          code: 'prospect_merged',
+          canonicalProspectId: mergedRecord.rows[0].merged_into_prospect_id,
+        });
+      }
       const result = await storage.updateProspect(req.params.id, userId, parseResult.data);
       if (!result) {
         return res.status(404).json({ message: "Prospect not found" });
@@ -3917,6 +3987,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (isDemo(req)) {
         await demo.deleteProspect(userId, req.params.id);
         return res.status(204).send();
+      }
+      const mergedRecord = await pool.query(
+        `SELECT merged_into_prospect_id FROM public.prospects WHERE id = $1 AND user_id = $2 LIMIT 1`,
+        [req.params.id, userId],
+      );
+      if (mergedRecord.rows[0]?.merged_into_prospect_id) {
+        return res.status(409).json({
+          message: 'This prospect was consolidated and retained as an audit record.',
+          code: 'prospect_merged',
+          canonicalProspectId: mergedRecord.rows[0].merged_into_prospect_id,
+        });
       }
       const deleted = await storage.deleteProspect(req.params.id, userId);
       if (!deleted) {
@@ -4157,7 +4238,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let existingProspectId = review.data.prospectId || null;
       if (existingProspectId) {
         const owned = await pool.query(
-          'SELECT id FROM public.prospects WHERE id = $1 AND user_id = $2 LIMIT 1',
+          'SELECT id FROM public.prospects WHERE id = $1 AND user_id = $2 AND merged_into_prospect_id IS NULL LIMIT 1',
           [existingProspectId, userId],
         );
         if (!owned.rows[0]) return res.status(400).json({ message: 'Selected prospect was not found' });
@@ -4337,6 +4418,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       `, [proposal.sourceEventId, userId, opportunity.id]);
       res.json({ id: req.params.id, action: 'approve', opportunityId: opportunity.id, opportunity });
     } catch (error) {
+      if (sendProspectReferenceError(res, error)) return;
       if (error instanceof OpportunityServiceError) return res.status(error.status).json({ message: error.message });
       console.error('Error reviewing opportunity proposal:', error);
       res.status(500).json({ message: 'Failed to review opportunity proposal' });
@@ -4475,6 +4557,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof SalesActivityReviewError) {
         return res.status(error.status).json({ message: error.message });
       }
+      if (sendProspectReferenceError(res, error)) return;
       console.error('Error reviewing sales activity import:', error);
       res.status(500).json({ message: 'Failed to review sales activity import' });
     }
@@ -4538,10 +4621,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!result) return res.status(404).json({ message: 'Activity evidence was not found or was already reviewed' });
       res.json(result);
     } catch (error) {
+      if (sendProspectReferenceError(res, error)) return;
       const message = error instanceof Error ? error.message : 'Failed to review activity evidence';
-      const status = message === 'Selected prospect was not found' ? 400 : 500;
       console.error('Error reviewing activity evidence:', error);
-      res.status(status).json({ message });
+      res.status(500).json({ message });
     }
   });
 
@@ -4574,6 +4657,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const opportunity = await createOpportunity({ pool, userId, input: parsed.data });
       res.status(201).json(opportunity);
     } catch (error) {
+      if (sendProspectReferenceError(res, error)) return;
       if (error instanceof OpportunityServiceError) return res.status(error.status).json({ message: error.message });
       console.error('Error creating opportunity:', error);
       res.status(500).json({ message: 'Failed to create opportunity' });
@@ -4659,6 +4743,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const interaction = await storage.createContactInteraction(interactionData);
       res.json(interaction);
     } catch (error) {
+      if (sendProspectReferenceError(res, error)) return;
       console.error('Error creating contact interaction:', error);
       res.status(500).json({ message: 'Failed to create contact interaction' });
     }
@@ -5370,41 +5455,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: 'Invalid email review update', error: parsed.error.errors });
       }
       const update = parsed.data;
-      if (update.prospectId) {
-        const check = await pool.query('SELECT id FROM public.prospects WHERE id = $1 AND user_id = $2', [update.prospectId, userId]);
-        if (check.rowCount === 0) return res.status(400).json({ message: 'Prospect is not available to this user' });
-      }
       if (update.listingId) {
         await requireEditAccess(req, update.listingId);
       }
-      const result = await pool.query(`
-        UPDATE public.email_prospect_matches
-        SET
-          match_status = COALESCE($3, match_status),
-          prospect_id = CASE WHEN $4::boolean THEN $5 ELSE prospect_id END,
-          listing_id = CASE WHEN $6::boolean THEN $7 ELSE listing_id END,
-          suggested_summary = COALESCE($8, suggested_summary),
-          suggested_next_follow_up = CASE WHEN $9::boolean THEN $10::timestamp ELSE suggested_next_follow_up END,
-          reviewed_at = CASE WHEN $3 IS NULL THEN reviewed_at ELSE now() END,
-          reviewed_by_user_id = CASE WHEN $3 IS NULL THEN reviewed_by_user_id ELSE $2 END,
-          updated_at = now()
-        WHERE id = $1 AND user_id = $2
-        RETURNING id
-      `, [
-        req.params.id,
-        userId,
-        update.matchStatus || null,
-        Object.prototype.hasOwnProperty.call(update, 'prospectId'),
-        update.prospectId || null,
-        Object.prototype.hasOwnProperty.call(update, 'listingId'),
-        update.listingId || null,
-        update.suggestedSummary || null,
-        Object.prototype.hasOwnProperty.call(update, 'suggestedNextFollowUp'),
-        update.suggestedNextFollowUp ? new Date(update.suggestedNextFollowUp) : null,
-      ]);
+      const client = await pool.connect();
+      let result;
+      try {
+        await client.query('BEGIN');
+        if (update.prospectId) {
+          await requireActiveOwnedProspect({
+            db: client,
+            userId,
+            prospectId: update.prospectId,
+            lock: true,
+          });
+        }
+        result = await client.query(`
+          UPDATE public.email_prospect_matches
+          SET
+            match_status = COALESCE($3, match_status),
+            prospect_id = CASE WHEN $4::boolean THEN $5 ELSE prospect_id END,
+            listing_id = CASE WHEN $6::boolean THEN $7 ELSE listing_id END,
+            suggested_summary = COALESCE($8, suggested_summary),
+            suggested_next_follow_up = CASE WHEN $9::boolean THEN $10::timestamp ELSE suggested_next_follow_up END,
+            reviewed_at = CASE WHEN $3 IS NULL THEN reviewed_at ELSE now() END,
+            reviewed_by_user_id = CASE WHEN $3 IS NULL THEN reviewed_by_user_id ELSE $2 END,
+            updated_at = now()
+          WHERE id = $1 AND user_id = $2
+          RETURNING id
+        `, [
+          req.params.id,
+          userId,
+          update.matchStatus || null,
+          Object.prototype.hasOwnProperty.call(update, 'prospectId'),
+          update.prospectId || null,
+          Object.prototype.hasOwnProperty.call(update, 'listingId'),
+          update.listingId || null,
+          update.suggestedSummary || null,
+          Object.prototype.hasOwnProperty.call(update, 'suggestedNextFollowUp'),
+          update.suggestedNextFollowUp ? new Date(update.suggestedNextFollowUp) : null,
+        ]);
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
       if (result.rowCount === 0) return res.status(404).json({ message: 'Email match not found' });
       res.json({ id: req.params.id });
     } catch (error) {
+      if (sendProspectReferenceError(res, error)) return;
       console.error('Error updating email review item:', error);
       res.status(500).json({ message: 'Failed to update email review item' });
     }
@@ -5514,7 +5615,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           follow_up_due_date = CASE WHEN $5 THEN $4 ELSE COALESCE(follow_up_due_date, $4) END,
           status = CASE WHEN status = 'prospect' THEN 'contacted' ELSE status END,
           updated_at = now()
-        WHERE id = $1 AND user_id = $2
+        WHERE id = $1 AND user_id = $2 AND merged_into_prospect_id IS NULL
       `, [row.prospect_id, userId, interactionIso, nextFollowUpIso, hasRequestedNextFollowUp || Boolean(row.suggested_next_follow_up)]);
       res.json({ interactionId, duplicate: false, nextFollowUp: nextFollowUpIso, newXpGained: xpForInteractionType('email') });
     } catch (error) {
@@ -5616,6 +5717,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         newXpGained: xpForInteractionType(action.type),
       });
     } catch (error) {
+      if (sendProspectReferenceError(res, error)) return;
       console.error('Error logging broker action:', error);
       res.status(500).json({ message: 'Failed to log broker action' });
     }
@@ -6065,6 +6167,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           LEFT JOIN public.listings l
             ON l.id = lp.listing_id AND l.archived_at IS NULL
           WHERE p.user_id = $1
+            AND p.merged_into_prospect_id IS NULL
             AND COALESCE(p.status, '') <> 'no_go'
           GROUP BY p.id
           ORDER BY COALESCE(p.follow_up_due_date, MAX(ci.created_at), p.updated_at, p.created_at) ASC

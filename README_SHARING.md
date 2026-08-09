@@ -42,7 +42,9 @@ RLS (reference)
 
 Testing
 1) Prepare a database (recommended for full sharing behavior):
-   - Set DATABASE_URL and run `npm run db:prepare` (drizzle-kit push).
+   - Start from a database with the reviewed baseline Level CRE schema already installed.
+   - Do not run `db:push` or `db:prepare`; both commands intentionally fail closed because production schema changes are managed by ordered SQL migrations.
+   - On an existing Level CRE deployment, set `DATABASE_URL` and run `npm --workspace @apps/api run brokerage-memory:migrate` to apply the current checksummed `0018` then `0019` upgrade chain. This incremental command does not bootstrap the earlier sharing schema.
    - Start server and app with your Supabase auth configured.
 2) As the owner:
    - Create a workspace.

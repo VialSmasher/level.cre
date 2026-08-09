@@ -14,6 +14,14 @@ import {
   SalesActivityReviewActionSchema,
 } from './salesActivityImportService';
 
+function transactionalPool(handler: (sql: string, params?: unknown[]) => Promise<any>) {
+  const client = {
+    query: handler,
+    release: () => undefined,
+  };
+  return { connect: async () => client, query: handler } as any;
+}
+
 test('normalizes a Codex follow-up send log row into a stable sent email activity', () => {
   const activity = normalizeSalesActivityInput({
     timestamp_mdt: '2026-07-08',
@@ -142,10 +150,9 @@ test('manual review can ignore an unmatched activity without creating an interac
 
 test('manual review links sent Codex activity to a prospect exactly once', async () => {
   const queries: Array<{ sql: string; params: unknown[] }> = [];
-  const pool = {
-    query: async (sql: string, params: unknown[]) => {
+  const pool = transactionalPool(async (sql: string, params: unknown[] = []) => {
       queries.push({ sql, params });
-      if (queries.length === 1) {
+      if (sql.includes('FROM public.sales_activity_imports') && sql.includes('SELECT')) {
         return { rows: [{
           id: 'import-1',
           source: 'codex_followup',
@@ -165,18 +172,20 @@ test('manual review links sent Codex activity to a prospect exactly once', async
           interaction_id: null,
         }] };
       }
-      if (queries.length === 2) return { rows: [{ id: 'prospect-1', status: 'prospect' }] };
-      if (queries.length === 3) return { rows: [] };
-      if (queries.length === 4) return { rows: [] };
-      return { rows: [{
-        id: 'import-1',
-        match_status: 'matched',
-        match_reason: 'manual_prospect_link',
-        prospect_id: 'prospect-1',
-        interaction_id: 'interaction-1',
-      }] };
-    },
-  } as any;
+      if (sql.includes('FROM public.prospects')) {
+        return { rows: [{ id: 'prospect-1', status: 'prospect', merged_into_prospect_id: null }] };
+      }
+      if (sql.includes('UPDATE public.sales_activity_imports')) {
+        return { rows: [{
+          id: 'import-1',
+          match_status: 'matched',
+          match_reason: 'manual_prospect_link',
+          prospect_id: 'prospect-1',
+          interaction_id: 'interaction-1',
+        }] };
+      }
+      return { rows: [] };
+  });
   const created: any[] = [];
   const storage = {
     createContactInteraction: async (payload: any, options: any) => {
@@ -198,12 +207,12 @@ test('manual review links sent Codex activity to a prospect exactly once', async
   assert.equal(created[0].payload.sourceProvider, 'codex');
   assert.equal(created[0].payload.notes.includes('Subject: Follow up'), true);
   assert.deepEqual(created[0].options, { skipXp: true });
-  assert.equal(queries.length, 5);
+  assert.equal(queries.some((query) => query.sql.includes('FROM public.prospects') && query.sql.includes('FOR UPDATE')), true);
+  assert.equal(queries.some((query) => query.sql === 'COMMIT'), true);
 });
 
 test('a Postmark-first direct match creates one interaction without duplicate XP', async () => {
-  const pool = {
-    query: async (sql: string) => {
+  const pool = transactionalPool(async (sql: string) => {
       if (sql.includes('FROM public.prospects') && sql.includes('LIMIT 1')) return { rows: [{ id: 'prospect-1' }] };
       if (sql.includes('SELECT id, interaction_id') && sql.includes('sales_activity_imports')) return { rows: [] };
       if (sql.includes('INSERT INTO public.sales_activity_imports')) {
@@ -211,8 +220,7 @@ test('a Postmark-first direct match creates one interaction without duplicate XP
       }
       if (sql.includes('FROM public.contact_interactions')) return { rows: [] };
       return { rows: [], rowCount: 0 };
-    },
-  } as any;
+  });
   const created: any[] = [];
   const storage = {
     createContactInteraction: async (payload: any, options: any) => {
@@ -245,9 +253,39 @@ test('a Postmark-first direct match creates one interaction without duplicate XP
   assert.deepEqual(created[0].options, { skipXp: true });
 });
 
+test('sales activity import rolls back before upsert when the prospect was consolidated', async () => {
+  const queries: string[] = [];
+  const pool = transactionalPool(async (sql: string) => {
+    queries.push(sql);
+    if (sql.includes('FROM public.prospects')) {
+      return { rows: [{ id: 'duplicate-1', merged_into_prospect_id: 'canonical-1' }] };
+    }
+    return { rows: [] };
+  });
+
+  const result = await importSalesActivityBatch({
+    pool,
+    storage: { createContactInteraction: async () => ({ id: 'unused' }) },
+    userId: 'user-1',
+    payload: SalesActivityBatchSchema.parse({
+      activities: [{
+        externalActivityId: 'activity-tombstone',
+        status: 'sent',
+        prospectId: 'duplicate-1',
+        email: 'buyer@example.com',
+      }],
+    }),
+  });
+
+  assert.equal(result.errors, 1);
+  assert.equal(result.results[0].code, 'prospect_merged');
+  assert.equal(result.results[0].canonicalProspectId, 'canonical-1');
+  assert.equal(queries.some((sql) => sql.includes('INSERT INTO public.sales_activity_imports')), false);
+  assert.equal(queries.includes('ROLLBACK'), true);
+});
+
 test('a captured interaction is reused when Codex records the same sent email later', async () => {
-  const pool = {
-    query: async (sql: string) => {
+  const pool = transactionalPool(async (sql: string) => {
       if (sql.includes('FROM public.prospects') && sql.includes('LIMIT 1')) {
         return { rows: [{ id: 'prospect-1' }] };
       }
@@ -264,8 +302,7 @@ test('a captured interaction is reused when Codex records the same sent email la
       }
       if (sql.includes('FROM public.contact_interactions')) return { rows: [] };
       return { rows: [], rowCount: 0 };
-    },
-  } as any;
+  });
   let created = false;
   const storage = {
     createContactInteraction: async () => {
@@ -303,8 +340,7 @@ test('a captured interaction is reused when Codex records the same sent email la
 });
 
 test('a confirmed sales send is handed to the canonical event ledger after matching', async () => {
-  const pool = {
-    query: async (sql: string) => {
+  const pool = transactionalPool(async (sql: string) => {
       if (sql.includes('FROM public.prospects') && sql.includes('LIMIT 1')) return { rows: [{ id: 'prospect-1' }] };
       if (sql.includes('SELECT id, interaction_id') && sql.includes('sales_activity_imports')) return { rows: [] };
       if (sql.includes('INSERT INTO public.sales_activity_imports')) {
@@ -312,8 +348,7 @@ test('a confirmed sales send is handed to the canonical event ledger after match
       }
       if (sql.includes('FROM public.contact_interactions')) return { rows: [{ id: 'interaction-1' }] };
       return { rows: [], rowCount: 0 };
-    },
-  } as any;
+  });
   const recorded: any[] = [];
 
   await importSalesActivityBatch({

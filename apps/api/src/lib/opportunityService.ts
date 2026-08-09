@@ -2,6 +2,8 @@ import { randomUUID } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 
+import { requireActiveOwnedProspect } from './prospectReferenceService';
+
 export const OPPORTUNITY_TYPES = [
   'listing_pursuit',
   'tenant_requirement',
@@ -110,6 +112,10 @@ async function assertOwnedReference(
   id: string | null | undefined,
 ): Promise<void> {
   if (!id) return;
+  if (table === 'prospects') {
+    await requireActiveOwnedProspect({ db: client, userId, prospectId: id, lock: true });
+    return;
+  }
   const { rows } = await client.query(
     `SELECT id FROM public.${table} WHERE id = $1 AND user_id = $2 LIMIT 1`,
     [id, userId],

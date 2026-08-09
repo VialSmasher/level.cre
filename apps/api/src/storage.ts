@@ -15,9 +15,10 @@ import {
   listings, listingProspects, listingMembers
 } from "@level-cre/shared/schema";
 import { db } from "./db";
-import { eq, and, or, desc, gte, ne, sql, between } from "drizzle-orm";
+import { eq, and, or, desc, gte, ne, sql, between, isNull } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { XP_VALUES, actionForInteractionType, inferInteractionTypeFromNote, xpForInteractionType } from "./lib/gamification";
+import { ProspectReferenceError } from "./lib/prospectReferenceService";
 
 type ProspectCreateInput = Omit<
   InsertProspect,
@@ -346,18 +347,38 @@ export class DatabaseStorage implements IStorage {
     // Ensure listing belongs to user
     const listing = await this.getListing(params.listingId, params.userId);
     if (!listing) throw new Error('Listing not found');
-    // Insert link idempotently
-    await db.insert(listingProspects)
-      .values({ id: randomUUID(), listingId: params.listingId, prospectId: params.prospectId, role: 'target' })
-      .onConflictDoNothing({ target: [listingProspects.listingId, listingProspects.prospectId] });
+    await this.linkProspectToListingAny(params);
     return { ok: true };
   }
 
-  // Link prospect to listing without owner check (route must authorize via membership)
-  async linkProspectToListingAny(params: { listingId: string; prospectId: string }): Promise<{ ok: true }> {
-    await db.insert(listingProspects)
-      .values({ id: randomUUID(), listingId: params.listingId, prospectId: params.prospectId, role: 'target' })
-      .onConflictDoNothing({ target: [listingProspects.listingId, listingProspects.prospectId] });
+  // The route authorizes the listing. This transaction separately proves that
+  // the linked prospect is active and owned by the same signed-in broker.
+  async linkProspectToListingAny(params: { listingId: string; prospectId: string; userId: string }): Promise<{ ok: true }> {
+    await db.transaction(async (tx) => {
+      const [prospect] = await tx
+        .select({ id: prospects.id, mergedIntoProspectId: prospects.mergedIntoProspectId })
+        .from(prospects)
+        .where(and(eq(prospects.id, params.prospectId), eq(prospects.userId, params.userId)))
+        .for('update');
+      if (!prospect) {
+        throw new ProspectReferenceError({
+          message: 'Prospect was not found for the signed-in broker.',
+          status: 404,
+          code: 'prospect_not_found',
+        });
+      }
+      if (prospect.mergedIntoProspectId) {
+        throw new ProspectReferenceError({
+          message: 'This prospect was consolidated into another record.',
+          status: 409,
+          code: 'prospect_merged',
+          canonicalProspectId: prospect.mergedIntoProspectId,
+        });
+      }
+      await tx.insert(listingProspects)
+        .values({ id: randomUUID(), listingId: params.listingId, prospectId: params.prospectId, role: 'target' })
+        .onConflictDoNothing({ target: [listingProspects.listingId, listingProspects.prospectId] });
+    });
     return { ok: true };
   }
 
@@ -746,7 +767,7 @@ export class DatabaseStorage implements IStorage {
         createdAt: prospects.createdAt,
       })
       .from(prospects)
-      .where(and(eq(prospects.id, id), eq(prospects.userId, userId)));
+      .where(and(eq(prospects.id, id), eq(prospects.userId, userId), isNull(prospects.mergedIntoProspectId)));
     if (!row) return undefined;
     return {
       id: row.id,
@@ -816,7 +837,7 @@ export class DatabaseStorage implements IStorage {
         createdAt: prospects.createdAt,
       })
       .from(prospects)
-      .where(eq(prospects.userId, userId));
+      .where(and(eq(prospects.userId, userId), isNull(prospects.mergedIntoProspectId)));
 
     const sharedRows = await db
       .select({
@@ -846,6 +867,7 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(listingMembers, eq(listingMembers.listingId, listings.id))
       .where(and(
         ne(prospects.userId, userId),
+        isNull(prospects.mergedIntoProspectId),
         or(
           eq(listings.userId, userId),
           eq(listingMembers.userId, userId),
@@ -1034,7 +1056,7 @@ export class DatabaseStorage implements IStorage {
     // 1) Try as owner
     let rows = await db.update(prospects)
       .set(setPayload)
-      .where(and(eq(prospects.id, id), eq(prospects.userId, userId)))
+      .where(and(eq(prospects.id, id), eq(prospects.userId, userId), isNull(prospects.mergedIntoProspectId)))
       .returning({
         id: prospects.id,
         name: prospects.name,
@@ -1093,7 +1115,7 @@ export class DatabaseStorage implements IStorage {
       // Perform unrestricted-by-owner update when user has workspace edit rights
       rows = await db.update(prospects)
         .set(setPayload)
-        .where(eq(prospects.id, id))
+        .where(and(eq(prospects.id, id), isNull(prospects.mergedIntoProspectId)))
         .returning({
           id: prospects.id,
           name: prospects.name,
@@ -1202,7 +1224,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteProspect(id: string, userId: string): Promise<boolean> {
-    const result = await db.delete(prospects).where(and(eq(prospects.id, id), eq(prospects.userId, userId)));
+    const result = await db.delete(prospects).where(and(
+      eq(prospects.id, id),
+      eq(prospects.userId, userId),
+      isNull(prospects.mergedIntoProspectId),
+    ));
     return (result.rowCount ?? 0) > 0;
   }
 
@@ -1340,12 +1366,35 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createContactInteraction(interactionData: InsertContactInteraction & { userId: string; listingId?: string | null }, options?: { skipXp?: boolean }): Promise<ContactInteractionRow> {
-    const [result] = await db.insert(contactInteractions)
-      .values({
-        ...interactionData,
-        id: randomUUID()
-      })
-      .returning();
+    const result = await db.transaction(async (tx) => {
+      const [prospect] = await tx
+        .select({ id: prospects.id, mergedIntoProspectId: prospects.mergedIntoProspectId })
+        .from(prospects)
+        .where(and(eq(prospects.id, interactionData.prospectId), eq(prospects.userId, interactionData.userId)))
+        .for('update');
+      if (!prospect) {
+        throw new ProspectReferenceError({
+          message: 'Prospect was not found for the signed-in broker.',
+          status: 404,
+          code: 'prospect_not_found',
+        });
+      }
+      if (prospect.mergedIntoProspectId) {
+        throw new ProspectReferenceError({
+          message: 'This prospect was consolidated into another record.',
+          status: 409,
+          code: 'prospect_merged',
+          canonicalProspectId: prospect.mergedIntoProspectId,
+        });
+      }
+      const [created] = await tx.insert(contactInteractions)
+        .values({
+          ...interactionData,
+          id: randomUUID()
+        })
+        .returning();
+      return created;
+    });
 
     if (options?.skipXp) {
       return result;

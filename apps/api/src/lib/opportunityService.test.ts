@@ -9,6 +9,7 @@ import {
   changeOpportunityStage,
   createOpportunity,
 } from './opportunityService';
+import { ProspectReferenceError } from './prospectReferenceService';
 
 function transactionalPool(handler: (sql: string, params?: unknown[]) => Promise<any>) {
   const client = {
@@ -61,4 +62,33 @@ test('inferred evidence cannot close an opportunity as won or lost', async () =>
     }),
     (error: unknown) => error instanceof OpportunityServiceError && error.status === 400,
   );
+});
+
+test('opportunity creation rejects a tombstoned prospect before inserting', async () => {
+  const queries: string[] = [];
+  const pool = transactionalPool(async (sql) => {
+    queries.push(sql);
+    if (sql.includes('FROM public.prospects')) {
+      return { rows: [{ id: 'duplicate-1', merged_into_prospect_id: 'canonical-1' }] };
+    }
+    return { rows: [] };
+  });
+
+  await assert.rejects(
+    createOpportunity({
+      pool,
+      userId: 'user-1',
+      input: OpportunityCreateSchema.parse({
+        type: 'listing_pursuit',
+        title: 'Duplicate-linked pursuit',
+        prospectId: 'duplicate-1',
+      }),
+    }),
+    (error: unknown) => error instanceof ProspectReferenceError
+      && error.code === 'prospect_merged'
+      && error.canonicalProspectId === 'canonical-1',
+  );
+
+  assert.equal(queries.some((sql) => sql.includes('INSERT INTO public.opportunities')), false);
+  assert.equal(queries.some((sql) => sql === 'ROLLBACK'), true);
 });

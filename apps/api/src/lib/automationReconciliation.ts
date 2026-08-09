@@ -34,7 +34,7 @@ export async function buildAutomationReconciliation(params: {
              market_context_source, market_context_status, status, follow_up_due_date,
              updated_at, created_at
       FROM public.prospects
-      WHERE user_id = $1
+      WHERE user_id = $1 AND merged_into_prospect_id IS NULL
       ORDER BY updated_at DESC NULLS LAST, created_at DESC
       LIMIT 1000
     `, [params.userId]),

@@ -400,7 +400,7 @@ async function loadResolvableEntities(pool: Pool, userId: string): Promise<Resol
              ai_metadata -> 'legalIdentity' ->> 'block' AS block,
              ai_metadata -> 'legalIdentity' ->> 'lot' AS lot
       FROM public.prospects
-      WHERE user_id = $1
+      WHERE user_id = $1 AND merged_into_prospect_id IS NULL
       ORDER BY updated_at DESC NULLS LAST, created_at DESC
       LIMIT 1000
     `, [userId]),
@@ -819,9 +819,36 @@ export async function decideBrokerageMemoryItem(params: {
   decision: z.infer<typeof BrokerageMemoryDecisionSchema>
 }) {
   await assertBrokerageMemorySchema(params.pool)
+  let preflightProspectId: string | null = null
+  if (params.decision.action === 'approve') {
+    const preflight = await params.pool.query<BrokerageMemoryItemRow>(`
+      SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at
+      FROM public.brokerage_memory_items items
+      INNER JOIN public.brokerage_memory_imports imports ON imports.id = items.import_id
+      WHERE items.id = $1 AND items.user_id = $2
+    `, [params.itemId, params.userId])
+    const preflightItem = preflight.rows[0]
+    if (!preflightItem) throw new BrokerageMemoryServiceError('Brokerage-memory review item not found.', 404)
+    preflightProspectId = params.decision.targetProspectId === undefined
+      ? preflightItem.matched_prospect_id
+      : params.decision.targetProspectId
+  }
   const client = await params.pool.connect()
   try {
     await client.query('BEGIN')
+    if (preflightProspectId) {
+      const prospect = await client.query<{ id: string; merged_into_prospect_id: string | null }>(`
+        SELECT id, merged_into_prospect_id
+        FROM public.prospects
+        WHERE id = $1 AND user_id = $2
+        LIMIT 1
+        FOR UPDATE
+      `, [preflightProspectId, params.userId])
+      if (!prospect.rows[0]) throw new BrokerageMemoryServiceError('Selected prospect was not found.', 404)
+      if (prospect.rows[0].merged_into_prospect_id) {
+        throw new BrokerageMemoryServiceError('Selected prospect was consolidated. Refresh and select the canonical record.', 409)
+      }
+    }
     const itemResult = await client.query<BrokerageMemoryItemRow>(`
       SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at
       FROM public.brokerage_memory_items items
@@ -865,9 +892,8 @@ export async function decideBrokerageMemoryItem(params: {
     const requestedListingId = params.decision.targetListingId === undefined
       ? item.matched_listing_id
       : params.decision.targetListingId
-    if (requestedProspectId) {
-      const prospect = await client.query(`SELECT id FROM public.prospects WHERE id = $1 AND user_id = $2 LIMIT 1`, [requestedProspectId, params.userId])
-      if (!prospect.rows[0]) throw new BrokerageMemoryServiceError('Selected prospect was not found.', 404)
+    if (requestedProspectId !== preflightProspectId) {
+      throw new BrokerageMemoryServiceError('This review item changed while it was being approved. Refresh and try again.', 409)
     }
     if (requestedListingId) {
       const listing = await client.query(`SELECT id FROM public.listings WHERE id = $1 AND user_id = $2 LIMIT 1`, [requestedListingId, params.userId])
