@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { AlertTriangle, Building2, Database, ExternalLink, FileCheck2, Link2, MapPin, Scale, ShieldCheck, X } from 'lucide-react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { AlertTriangle, Building2, CheckCircle2, Database, ExternalLink, FileCheck2, GitMerge, Link2, LoaderCircle, MapPin, Scale, ShieldCheck, X } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,7 +10,10 @@ type Props = {
   anchor: MarketMemoryAnchor
   onClose: () => void
   onReview?: () => void
+  onQuickApprove?: () => void
+  onCompareDuplicates?: () => void
   onWorkProspect?: () => void
+  isActionPending?: boolean
 }
 
 function cleanDate(value: string | null) {
@@ -49,9 +52,20 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-export function MarketMemoryStoryPanel({ anchor, onClose, onReview, onWorkProspect }: Props) {
+export function MarketMemoryStoryPanel({
+  anchor,
+  onClose,
+  onReview,
+  onQuickApprove,
+  onCompareDuplicates,
+  onWorkProspect,
+  isActionPending = false,
+}: Props) {
+  const titleId = useId()
+  const titleRef = useRef<HTMLHeadingElement>(null)
   const meta = storyMeta(anchor)
   const candidate = anchor.resolution?.topCandidate
+  const prospectCandidates = (anchor.resolution?.candidates || []).filter((item) => item.entityType === 'prospect')
   const persistenceState = anchor.persistence?.state || 'local_preview'
   const persistenceMeta = persistenceState === 'approved'
     ? {
@@ -63,7 +77,7 @@ export function MarketMemoryStoryPanel({ anchor, onClose, onReview, onWorkProspe
       ? {
           badge: 'Awaiting broker approval',
           title: 'Saved to Today → Review',
-          description: 'This proposal is durable, but the canonical property record has not changed. Approve or reject it from Review.',
+          description: 'This proposal is durable, but the canonical property record has not changed. Review and approve it here without leaving the map.',
         }
       : {
           badge: 'Local preview',
@@ -71,8 +85,15 @@ export function MarketMemoryStoryPanel({ anchor, onClose, onReview, onWorkProspe
           description: 'This read-only preview has not changed Level CRE.',
         }
 
+  useEffect(() => {
+    titleRef.current?.focus({ preventScroll: true })
+  }, [anchor.id, anchor.persistence?.state])
+
   return (
-    <aside className="absolute bottom-2 left-2 right-2 z-[80] flex max-h-[78dvh] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl md:bottom-auto md:left-auto md:right-0 md:top-0 md:h-full md:max-h-none md:w-[380px] md:rounded-none md:border-y-0 md:border-r-0 md:border-l">
+    <aside
+      aria-labelledby={titleId}
+      className="absolute bottom-2 left-2 right-2 z-[80] flex max-h-[78dvh] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl md:bottom-auto md:left-auto md:right-0 md:top-0 md:h-full md:max-h-none md:w-[380px] md:rounded-none md:border-y-0 md:border-r-0 md:border-l"
+    >
       <div className="border-b border-slate-200 px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -83,10 +104,10 @@ export function MarketMemoryStoryPanel({ anchor, onClose, onReview, onWorkProspe
               </Badge>
               <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">{persistenceMeta.badge}</Badge>
             </div>
-            <h2 className="mt-2 text-base font-semibold leading-5 text-slate-950">{anchor.address}</h2>
-            <p className="mt-1 text-xs text-slate-500">{anchor.latitude.toFixed(6)}, {anchor.longitude.toFixed(6)}</p>
+            <h2 ref={titleRef} id={titleId} tabIndex={-1} className="mt-2 text-base font-semibold leading-5 text-slate-950 outline-none">{anchor.address}</h2>
+            <p className="mt-1 text-xs text-slate-500">Property evidence · {anchor.latitude.toFixed(6)}, {anchor.longitude.toFixed(6)}</p>
           </div>
-          <Button type="button" variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0" onClick={onClose} aria-label="Close property story">
+          <Button type="button" variant="ghost" size="sm" className="h-11 w-11 shrink-0 p-0" onClick={onClose} aria-label="Close property story">
             <X className="h-4 w-4" />
           </Button>
         </div>
@@ -104,6 +125,12 @@ export function MarketMemoryStoryPanel({ anchor, onClose, onReview, onWorkProspe
               <p className="font-semibold">{candidate.label}</p>
               <p className="mt-1">{Math.round(candidate.confidence)}% confidence · {candidate.signals.join(', ') || 'matching signals available'}</p>
               {candidate.conflicts.length ? <p className="mt-1 text-amber-800">Conflicts: {candidate.conflicts.join(', ')}</p> : null}
+              {prospectCandidates.length > 1 ? (
+                <div className="mt-2 border-t border-teal-200 pt-2 text-teal-900">
+                  <p className="font-semibold">{prospectCandidates.length} plausible map records</p>
+                  <p className="mt-0.5">Compare them before attaching this evidence to a survivor.</p>
+                </div>
+              ) : null}
             </div>
           </Section>
         ) : null}
@@ -170,10 +197,31 @@ export function MarketMemoryStoryPanel({ anchor, onClose, onReview, onWorkProspe
         </Section>
       </ScrollArea>
 
-      {onReview || onWorkProspect ? (
-        <div className="flex gap-2 border-t border-slate-200 bg-white px-4 py-3">
-          {onReview ? <Button type="button" variant="outline" className="flex-1" onClick={onReview}>Review changes</Button> : null}
-          {onWorkProspect ? <Button type="button" className="flex-1" onClick={onWorkProspect}>Work this prospect</Button> : null}
+      {onReview || onQuickApprove || onCompareDuplicates || onWorkProspect ? (
+        <div className="grid grid-cols-1 gap-2 border-t border-slate-200 bg-white px-4 py-3 sm:grid-cols-2">
+          {onCompareDuplicates ? (
+            <Button type="button" className="sm:col-span-2" onClick={onCompareDuplicates} disabled={isActionPending}>
+              <GitMerge className="h-4 w-4" aria-hidden />
+              Compare &amp; merge map records
+            </Button>
+          ) : null}
+          {onQuickApprove ? (
+            <Button type="button" className={onReview || onWorkProspect ? '' : 'sm:col-span-2'} onClick={onQuickApprove} disabled={isActionPending}>
+              {isActionPending ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden /> : <CheckCircle2 className="h-4 w-4" aria-hidden />}
+              {isActionPending ? 'Saving…' : 'Accept verified evidence'}
+            </Button>
+          ) : null}
+          {onReview ? (
+            <Button type="button" variant="outline" className={onQuickApprove || onWorkProspect ? '' : 'sm:col-span-2'} onClick={onReview} disabled={isActionPending}>
+              <FileCheck2 className="h-4 w-4" aria-hidden />
+              Review evidence
+            </Button>
+          ) : null}
+          {onWorkProspect ? (
+            <Button type="button" variant={onQuickApprove || onCompareDuplicates ? 'outline' : 'default'} className={onReview || onQuickApprove ? '' : 'sm:col-span-2'} onClick={onWorkProspect} disabled={isActionPending}>
+              Work this prospect
+            </Button>
+          ) : null}
         </div>
       ) : null}
     </aside>

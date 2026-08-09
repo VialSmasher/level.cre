@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { GoogleMap, useJsApiLoader, Polygon, InfoWindow } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
-import { Download, MapIcon, Satellite, ChevronLeft, ChevronRight, X, Filter, User, LogOut, Settings, Phone, Handshake } from 'lucide-react';
+import { Download, MapIcon, Satellite, ChevronLeft, ChevronRight, X, Filter, User, LogOut, Settings, Phone, Handshake, GitMerge } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MapControls } from '@/features/map/MapControls';
 import { MapContextMenu } from '@/features/map/MapContextMenu';
@@ -35,8 +35,28 @@ import { useTerraDrawGoogleMaps, type MapDrawMode, type TerraDrawFinishPayload }
 import { AdvancedMapMarker } from '@/features/map/AdvancedMapMarker';
 import { composePropertyMapItems, getLinkedMemoryMarkerTitle } from '@/features/property-memory/composeMapItems';
 import { PropertyMemorySearchPanel } from '@/features/property-memory/PropertyMemorySearchPanel';
-import { usePropertyMemoryMap, type PropertyMemorySearchRow } from '@/features/property-memory/api';
-import { resolveProspectId } from '@/features/prospect-merge/api';
+import { PropertyMemoryReviewDialog } from '@/features/property-memory/PropertyMemoryReviewDialog';
+import {
+  useDecidePropertyMemoryItem,
+  usePropertyMemoryMap,
+  usePropertyMemoryReview,
+  type PropertyMemoryDecision,
+  type PropertyMemorySearchRow,
+} from '@/features/property-memory/api';
+import {
+  findDuplicateProspectGroupForAnchor,
+  reconcileSelectedMarketMemoryAnchor,
+} from '@/features/property-memory/mapReviewFlow';
+import {
+  buildQuickPropertyMemoryApproval,
+  canQuickApprovePropertyMemory,
+} from '@/features/property-memory/reviewDecision';
+import { ProspectMergeDialog, type ProspectMergeDialogCandidate } from '@/features/prospect-merge/ProspectMergeDialog';
+import {
+  resolveProspectId,
+  useProspectMergeCandidates,
+  type ProspectMergeCandidateGroup,
+} from '@/features/prospect-merge/api';
 import { SearchResultCard } from '@/features/map/SearchResultCard';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
 import { createStatusFilterSet, getStatusCounts } from '@/features/map/statusFilters';
@@ -349,6 +369,9 @@ export default function HomePage() {
   const [propertyMemorySearchOpen, setPropertyMemorySearchOpen] = useState(false);
   const [marketMemoryPreview, setMarketMemoryPreview] = useState<CurrentProjectsMarketMemoryPreview | null>(null);
   const [selectedMarketMemoryAnchor, setSelectedMarketMemoryAnchor] = useState<MarketMemoryAnchor | null>(null);
+  const [propertyMemoryReviewOpen, setPropertyMemoryReviewOpen] = useState(false);
+  const [prospectMergeGroup, setProspectMergeGroup] = useState<ProspectMergeCandidateGroup | null>(null);
+  const marketMemoryFocusReturnRef = useRef<HTMLElement | null>(null);
   const [visibleMarketMemoryLayers, setVisibleMarketMemoryLayers] = useState<Set<MarketMemoryLayer>>(
     () => new Set<MarketMemoryLayer>(readJSON<MarketMemoryLayer[]>(
       nsKey(currentUser?.id, 'marketMemoryLayers'),
@@ -475,12 +498,84 @@ export default function HomePage() {
   const persistedMarketMemory = propertyMemoryMapQuery.data || null;
   const activeMarketMemory = marketMemoryPreview || persistedMarketMemory;
   const marketMemoryAnchors = activeMarketMemory?.anchors || EMPTY_MARKET_MEMORY_ANCHORS;
+  const selectedImportItemId = selectedMarketMemoryAnchor?.persistence?.state === 'pending'
+    ? selectedMarketMemoryAnchor.persistence.importItemId || null
+    : null;
+  const propertyMemoryReviewQuery = usePropertyMemoryReview({
+    enabled: Boolean(selectedImportItemId) && !isDemoMode,
+    limit: 250,
+  });
+  const selectedPropertyMemoryReviewItem = useMemo(
+    () => propertyMemoryReviewQuery.data?.rows.find((item) => item.id === selectedImportItemId) || null,
+    [propertyMemoryReviewQuery.data?.rows, selectedImportItemId],
+  );
+  const prospectMergeCandidatesQuery = useProspectMergeCandidates({
+    enabled: Boolean(selectedMarketMemoryAnchor || selectedProspect) && !isDemoMode,
+    limit: 50,
+  });
+  const selectedDuplicateProspectGroup = useMemo(
+    () => findDuplicateProspectGroupForAnchor(
+      selectedMarketMemoryAnchor,
+      prospectMergeCandidatesQuery.data?.groups || [],
+    ),
+    [prospectMergeCandidatesQuery.data?.groups, selectedMarketMemoryAnchor],
+  );
+  const selectedProspectDuplicateGroup = useMemo(
+    () => selectedProspect
+      ? (prospectMergeCandidatesQuery.data?.groups || []).find((group) => (
+          group.prospects.some((prospect) => prospect.id === selectedProspect.id)
+        )) || null
+      : null,
+    [prospectMergeCandidatesQuery.data?.groups, selectedProspect],
+  );
+  const quickPropertyMemoryApprovalAvailable = selectedPropertyMemoryReviewItem
+    && !propertyMemoryReviewQuery.isFetching
+    && !propertyMemoryReviewQuery.error
+    ? canQuickApprovePropertyMemory(selectedPropertyMemoryReviewItem)
+    : false;
+  const prospectMergeDialogCandidates = useMemo<ProspectMergeDialogCandidate[]>(() => (
+    (prospectMergeGroup?.prospects || []).map((prospect) => {
+      const relationshipCount = Object.values(prospect.relationshipCounts)
+        .reduce((total, count) => total + count, 0);
+      return {
+        id: prospect.id,
+        label: prospect.businessName || prospect.contactCompany || prospect.name || prospect.address || 'Prospect record',
+        description: [
+          prospect.address || 'No address recorded',
+          prospect.status.replaceAll('_', ' '),
+          `${relationshipCount} linked ${relationshipCount === 1 ? 'item' : 'items'}`,
+        ].join(' · '),
+      };
+    })
+  ), [prospectMergeGroup]);
+
+  const decidePropertyMemory = useDecidePropertyMemoryItem({
+    onSuccess: (result) => {
+      setPropertyMemoryReviewOpen(false);
+      toast({
+        title: result.action === 'approved' ? 'Property evidence saved' : 'Proposal dismissed',
+        description: result.action === 'approved'
+          ? 'The source-backed property story is now durable on the map.'
+          : 'The proposal was removed from your review queue.',
+      });
+    },
+    onError: (error) => toast({
+      title: 'Could not save the property decision',
+      description: error.message,
+      variant: 'destructive',
+    }),
+  });
 
   useEffect(() => {
     if (marketMemoryPreview?.importId && persistedMarketMemory?.importId === marketMemoryPreview.importId) {
       setMarketMemoryPreview(null);
     }
   }, [marketMemoryPreview?.importId, persistedMarketMemory?.importId]);
+
+  useEffect(() => {
+    if (!propertyMemoryMapQuery.isSuccess || marketMemoryPreview) return;
+    setSelectedMarketMemoryAnchor((current) => reconcileSelectedMarketMemoryAnchor(current, marketMemoryAnchors));
+  }, [marketMemoryAnchors, marketMemoryPreview, propertyMemoryMapQuery.isSuccess]);
 
   useEffect(() => {
     if (clearLegacyDemoMapData()) {
@@ -885,6 +980,8 @@ export default function HomePage() {
   const openProspectEditor = useCallback((prospect: Prospect) => {
     console.log('Prospect clicked:', prospect);
     setSelectedMarketMemoryAnchor(null);
+    setPropertyMemoryReviewOpen(false);
+    setProspectMergeGroup(null);
     setSelectedProspect(prospect);
     setProspectSaveStatus('saved');
     setIsEditPanelOpen(true);
@@ -2048,8 +2145,61 @@ export default function HomePage() {
       });
       return;
     }
+    marketMemoryFocusReturnRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    setPropertyMemoryReviewOpen(false);
+    setProspectMergeGroup(null);
     setSelectedMarketMemoryAnchor(anchor);
   }, [isEditPanelOpen, toast]);
+
+  const closeMarketMemoryStory = useCallback(() => {
+    setPropertyMemoryReviewOpen(false);
+    setProspectMergeGroup(null);
+    setSelectedMarketMemoryAnchor(null);
+    const focusTarget = marketMemoryFocusReturnRef.current;
+    marketMemoryFocusReturnRef.current = null;
+    if (focusTarget?.isConnected) {
+      window.requestAnimationFrame(() => focusTarget.focus({ preventScroll: true }));
+    }
+  }, []);
+
+  const submitPropertyMemoryDecision = useCallback((decision: PropertyMemoryDecision) => {
+    if (
+      !selectedPropertyMemoryReviewItem
+      || decidePropertyMemory.isPending
+      || propertyMemoryReviewQuery.isFetching
+      || propertyMemoryReviewQuery.error
+    ) return;
+    decidePropertyMemory.mutate({
+      itemId: selectedPropertyMemoryReviewItem.id,
+      decision,
+    });
+  }, [decidePropertyMemory, propertyMemoryReviewQuery.error, propertyMemoryReviewQuery.isFetching, selectedPropertyMemoryReviewItem]);
+
+  const handleQuickPropertyMemoryApproval = useCallback(() => {
+    if (!selectedPropertyMemoryReviewItem || !quickPropertyMemoryApprovalAvailable) return;
+    submitPropertyMemoryDecision(buildQuickPropertyMemoryApproval(selectedPropertyMemoryReviewItem));
+  }, [quickPropertyMemoryApprovalAvailable, selectedPropertyMemoryReviewItem, submitPropertyMemoryDecision]);
+
+  const handleComparePropertyDuplicates = useCallback((prospectIds: string[] = []) => {
+    const requestedIds = new Set(prospectIds);
+    const requestedGroup = requestedIds.size >= 2
+      ? (prospectMergeCandidatesQuery.data?.groups || []).find((group) => (
+          group.prospects.filter((prospect) => requestedIds.has(prospect.id)).length >= 2
+        ))
+      : null;
+    const group = requestedIds.size >= 2 ? requestedGroup : selectedDuplicateProspectGroup;
+    if (!group) {
+      toast({
+        title: 'No precise duplicate pair found',
+        description: 'Level CRE will keep these records separate until there is enough matching evidence.',
+      });
+      return;
+    }
+    setPropertyMemoryReviewOpen(false);
+    setProspectMergeGroup(group);
+  }, [prospectMergeCandidatesQuery.data?.groups, selectedDuplicateProspectGroup, toast]);
 
   const handlePropertyMemorySearchSelect = useCallback((row: PropertyMemorySearchRow) => {
     const anchor = marketMemoryAnchors.find((candidate) => candidate.id === row.anchor.id)
@@ -2065,6 +2215,11 @@ export default function HomePage() {
     });
     setSelectedProspect(null);
     setIsEditPanelOpen(false);
+    marketMemoryFocusReturnRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    setPropertyMemoryReviewOpen(false);
+    setProspectMergeGroup(null);
     setSelectedMarketMemoryAnchor(anchor);
     setPropertyMemorySearchOpen(false);
     if (!map) return;
@@ -2342,7 +2497,7 @@ export default function HomePage() {
       )}
 
       {/* Edit Panel - Content-Sized with Proper Scrolling */}
-      {isEditPanelOpen && selectedProspect && (
+      {isEditPanelOpen && selectedProspect && !prospectMergeGroup && (
         <ProspectEditPanel
           prospect={selectedProspect}
           saveStatus={prospectSaveStatus}
@@ -2373,6 +2528,26 @@ export default function HomePage() {
           ) : null}
           footerLeadingActions={(
             <>
+              {selectedProspectDuplicateGroup ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      onClick={() => setProspectMergeGroup(selectedProspectDuplicateGroup)}
+                      variant="outline"
+                      className="h-8 w-8 p-0"
+                      aria-label="Compare duplicate map records"
+                      title="Compare duplicate map records"
+                      disabled={prospectSaveStatus !== 'saved'}
+                    >
+                      <GitMerge className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {prospectSaveStatus === 'saved' ? 'Compare duplicate map records' : 'Wait for this prospect to finish saving'}
+                  </TooltipContent>
+                </Tooltip>
+              ) : null}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -2454,12 +2629,18 @@ export default function HomePage() {
         onSelect={handlePropertyMemorySearchSelect}
       />
 
-      {selectedMarketMemoryAnchor ? (
+      {selectedMarketMemoryAnchor && !propertyMemoryReviewOpen && !prospectMergeGroup ? (
         <MarketMemoryStoryPanel
           anchor={selectedMarketMemoryAnchor}
-          onClose={() => setSelectedMarketMemoryAnchor(null)}
-          onReview={selectedMarketMemoryAnchor.persistence?.state === 'pending'
-            ? () => { window.location.href = '/app/desk?tab=review'; }
+          onClose={closeMarketMemoryStory}
+          onReview={selectedImportItemId
+            ? () => setPropertyMemoryReviewOpen(true)
+            : undefined}
+          onQuickApprove={quickPropertyMemoryApprovalAvailable
+            ? handleQuickPropertyMemoryApproval
+            : undefined}
+          onCompareDuplicates={selectedDuplicateProspectGroup
+            ? () => handleComparePropertyDuplicates()
             : undefined}
           onWorkProspect={selectedMarketMemoryAnchor.persistence?.linkedProspectId
             ? () => {
@@ -2467,8 +2648,41 @@ export default function HomePage() {
                 if (linked) openProspectEditor(linked);
               }
             : undefined}
+          isActionPending={decidePropertyMemory.isPending}
         />
       ) : null}
+
+      <PropertyMemoryReviewDialog
+        open={propertyMemoryReviewOpen}
+        item={selectedPropertyMemoryReviewItem}
+        isLoading={propertyMemoryReviewQuery.isLoading || propertyMemoryReviewQuery.isFetching}
+        error={propertyMemoryReviewQuery.error}
+        isPending={decidePropertyMemory.isPending}
+        onOpenChange={setPropertyMemoryReviewOpen}
+        onApprove={submitPropertyMemoryDecision}
+        onReject={submitPropertyMemoryDecision}
+        onCompareDuplicates={handleComparePropertyDuplicates}
+        onRetry={() => { void propertyMemoryReviewQuery.refetch(); }}
+      />
+
+      <ProspectMergeDialog
+        key={prospectMergeGroup?.id || 'closed-prospect-merge'}
+        open={Boolean(prospectMergeGroup)}
+        candidates={prospectMergeDialogCandidates}
+        recommendedCanonicalId={prospectMergeGroup?.recommendedCanonicalId}
+        onOpenChange={(open) => { if (!open) setProspectMergeGroup(null); }}
+        onMerged={(result) => {
+          setProspectMergeGroup(null);
+          if (selectedProspect) {
+            const refreshedProspects = queryClient.getQueryData<Prospect[]>(['/api/prospects']) || [];
+            const canonical = refreshedProspects.find((prospect) => prospect.id === result.canonicalProspectId) || null;
+            setSelectedProspect(canonical);
+            setIsEditPanelOpen(Boolean(canonical));
+            setProspectSaveStatus('saved');
+          }
+          if (selectedImportItemId) setPropertyMemoryReviewOpen(true);
+        }}
+      />
 
       {/* Import Dialog */}
       {showImportDialog && (

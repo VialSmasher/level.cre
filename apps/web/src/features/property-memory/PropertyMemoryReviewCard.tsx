@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Archive, CheckCircle2, FileCheck2, GitMerge, Link2, MapPin } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
@@ -31,6 +31,7 @@ type Props = {
   onApprove: (decision: PropertyMemoryDecision) => void
   onReject: (decision: PropertyMemoryDecision) => void
   onCompareDuplicates?: (prospectIds: string[]) => void
+  showReject?: boolean
 }
 
 type FieldGroupDefinition = {
@@ -154,12 +155,19 @@ export function PropertyMemoryReviewCard({
   onApprove,
   onReject,
   onCompareDuplicates,
+  showReject = true,
 }: Props) {
   const [fieldDecisions, setFieldDecisions] = useState<PropertyMemoryFieldDecisions>(() => ({
     ...DEFAULT_PROPERTY_MEMORY_FIELD_DECISIONS,
   }))
   const [selectedTarget, setSelectedTarget] = useState(() => defaultTarget(item))
   const [confirmConflicts, setConfirmConflicts] = useState(false)
+
+  useEffect(() => {
+    setFieldDecisions({ ...DEFAULT_PROPERTY_MEMORY_FIELD_DECISIONS })
+    setSelectedTarget(defaultTarget(item))
+    setConfirmConflicts(false)
+  }, [item.id, item.matchedDossierId, item.matchedListingId, item.matchedProspectId])
   const displayedConflicts = useMemo(() => {
     const candidateConflicts = (item.resolution as {
       topCandidate?: { conflicts?: unknown }
@@ -305,16 +313,21 @@ export function PropertyMemoryReviewCard({
       </fieldset>
 
       {requiresConflictConfirmation ? (
-        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-md border border-amber-200 bg-white p-3 text-sm text-slate-800">
+        <div className="mt-4 flex items-start gap-3 rounded-md border border-amber-200 bg-white p-3 text-sm text-slate-800">
           <Checkbox
+            id={`property-memory-${item.id}-confirm-conflicts`}
             className="mt-0.5"
             checked={confirmConflicts}
             disabled={isPending}
             onCheckedChange={(value) => setConfirmConflicts(value === true)}
-            aria-label="Confirm reviewed property conflicts"
           />
-          <span><span className="font-semibold">I reviewed these conflicts.</span> Approve the selected evidence without moving or replacing any linked prospect pin.</span>
-        </label>
+          <Label
+            htmlFor={`property-memory-${item.id}-confirm-conflicts`}
+            className="cursor-pointer font-normal leading-5 text-slate-800"
+          >
+            <span className="font-semibold">I reviewed these conflicts.</span> Approve the selected evidence without moving or replacing any linked prospect pin.
+          </Label>
+        </div>
       ) : null}
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
@@ -322,12 +335,14 @@ export function PropertyMemoryReviewCard({
           {item.matchedProspectId || item.matchedDossierId || item.matchedListingId ? <Link2 className="h-4 w-4" aria-hidden /> : <MapPin className="h-4 w-4" aria-hidden />}
           {item.matchedProspectId || item.matchedDossierId || item.matchedListingId ? 'Existing target suggested' : 'New market-memory property'}
         </div>
-        <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" disabled={isPending} onClick={() => onReject(buildDecision('reject'))}>
-            <Archive className="h-4 w-4" aria-hidden />
-            Reject
-          </Button>
-          <Button type="button" disabled={approveDisabled} onClick={() => onApprove(buildDecision('approve'))}>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          {showReject ? (
+            <Button type="button" variant="outline" className="w-full sm:w-auto" disabled={isPending} onClick={() => onReject(buildDecision('reject'))}>
+              <Archive className="h-4 w-4" aria-hidden />
+              Dismiss proposal
+            </Button>
+          ) : null}
+          <Button type="button" className="w-full sm:w-auto" disabled={approveDisabled} onClick={() => onApprove(buildDecision('approve'))}>
             <CheckCircle2 className="h-4 w-4" aria-hidden />
             {isPending ? 'Saving…' : 'Approve selected evidence'}
           </Button>

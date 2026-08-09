@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ToastAction } from '@/components/ui/toast'
@@ -20,6 +21,7 @@ import { useToast } from '@/hooks/use-toast'
 import {
   type ProspectMergeFieldChoice,
   type ProspectMergeFieldKey,
+  type ProspectMergeApplyResponse,
   useApplyProspectMerge,
   useProspectMergePreview,
   useUndoProspectMerge,
@@ -36,6 +38,7 @@ type Props = {
   candidates: ProspectMergeDialogCandidate[]
   recommendedCanonicalId?: string | null
   onOpenChange: (open: boolean) => void
+  onMerged?: (result: ProspectMergeApplyResponse) => void | Promise<void>
 }
 
 const FIELD_GROUP_LABELS = {
@@ -79,7 +82,11 @@ function candidateLabel(candidates: ProspectMergeDialogCandidate[], id: string |
   return candidates.find((candidate) => candidate.id === id)?.label || 'Prospect record'
 }
 
-export function ProspectMergeDialog({ open, candidates, recommendedCanonicalId, onOpenChange }: Props) {
+function candidateDescription(candidates: ProspectMergeDialogCandidate[], id: string | null) {
+  return candidates.find((candidate) => candidate.id === id)?.description || null
+}
+
+export function ProspectMergeDialog({ open, candidates, recommendedCanonicalId, onOpenChange, onMerged }: Props) {
   const { toast } = useToast()
   const [canonicalId, setCanonicalId] = useState<string | null>(null)
   const [duplicateId, setDuplicateId] = useState<string | null>(null)
@@ -94,11 +101,20 @@ export function ProspectMergeDialog({ open, candidates, recommendedCanonicalId, 
       : candidates[0].id
     setCanonicalId(nextCanonical)
     setDuplicateId(candidates.find((candidate) => candidate.id !== nextCanonical)?.id || null)
+    setFieldChoices({})
     setConfirmed(false)
+    idempotencyRef.current = null
   }, [candidates, open, recommendedCanonicalId])
 
-  const previewQuery = useProspectMergePreview(canonicalId, duplicateId, { enabled: open })
-  const preview = previewQuery.data
+  const pairIsCurrent = Boolean(
+    canonicalId
+    && duplicateId
+    && canonicalId !== duplicateId
+    && candidates.some((candidate) => candidate.id === canonicalId)
+    && candidates.some((candidate) => candidate.id === duplicateId),
+  )
+  const previewQuery = useProspectMergePreview(canonicalId, duplicateId, { enabled: open && pairIsCurrent })
+  const preview = open && pairIsCurrent ? previewQuery.data : undefined
 
   useEffect(() => {
     if (!preview?.previewHash) return
@@ -135,6 +151,7 @@ export function ProspectMergeDialog({ open, candidates, recommendedCanonicalId, 
           </ToastAction>
         ),
       })
+      await onMerged?.(result)
       onOpenChange(false)
     },
     onError: (error) => toast({
@@ -144,13 +161,21 @@ export function ProspectMergeDialog({ open, candidates, recommendedCanonicalId, 
     }),
   })
 
+  const fieldsNeedingAttention = useMemo(() => (
+    (preview?.fieldComparisons || []).filter((field) => field.conflict || field.defaultChoice !== 'canonical')
+  ), [preview?.fieldComparisons])
+
+  const matchingFields = useMemo(() => (
+    (preview?.fieldComparisons || []).filter((field) => !field.conflict && field.defaultChoice === 'canonical')
+  ), [preview?.fieldComparisons])
+
   const groupedFields = useMemo(() => {
     const result = new Map<string, NonNullable<typeof preview>['fieldComparisons']>()
-    for (const field of preview?.fieldComparisons || []) {
+    for (const field of fieldsNeedingAttention) {
       result.set(field.group, [...(result.get(field.group) || []), field])
     }
     return Array.from(result.entries())
-  }, [preview])
+  }, [fieldsNeedingAttention, preview])
 
   const relationshipTotals = useMemo(() => {
     let canonical = 0
@@ -191,9 +216,23 @@ export function ProspectMergeDialog({ open, candidates, recommendedCanonicalId, 
     })
   }
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && applyMerge.isPending) return
+    onOpenChange(nextOpen)
+  }
+
+  const conflictCount = preview?.fieldComparisons.filter((field) => field.conflict).length || 0
+  const canonicalName = candidateLabel(candidates, canonicalId)
+  const duplicateName = candidateLabel(candidates, duplicateId)
+  const actionLabel = `Merge ${duplicateName} into ${canonicalName}`
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92dvh] max-w-5xl overflow-hidden p-0">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent
+        className="grid max-h-[92dvh] w-[calc(100vw-1.5rem)] max-w-4xl grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 lg:left-[calc(50%+7rem)] lg:w-[calc(100vw-16rem)]"
+        onEscapeKeyDown={(event) => { if (applyMerge.isPending) event.preventDefault() }}
+        onPointerDownOutside={(event) => { if (applyMerge.isPending) event.preventDefault() }}
+      >
         <DialogHeader className="border-b border-slate-200 px-6 py-5 pr-12">
           <DialogTitle className="flex items-center gap-2"><GitMerge className="h-5 w-5 text-blue-700" />Consolidate duplicate prospects</DialogTitle>
           <DialogDescription>
@@ -201,7 +240,7 @@ export function ProspectMergeDialog({ open, candidates, recommendedCanonicalId, 
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[calc(92dvh-176px)]">
+        <ScrollArea className="min-h-0">
           <div className="space-y-5 px-6 py-5">
             <section className="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[1fr_auto_1fr] lg:items-end">
               <div>
@@ -214,6 +253,7 @@ export function ProspectMergeDialog({ open, candidates, recommendedCanonicalId, 
                     ))}
                   </SelectContent>
                 </Select>
+                {candidateDescription(candidates, canonicalId) ? <p className="mt-2 text-xs font-medium text-slate-700">{candidateDescription(candidates, canonicalId)}</p> : null}
                 <p className="mt-2 text-xs text-slate-500">This ID and its map pin survive.</p>
               </div>
               <ArrowRight className="hidden h-5 w-5 text-slate-400 lg:block" aria-hidden />
@@ -227,18 +267,19 @@ export function ProspectMergeDialog({ open, candidates, recommendedCanonicalId, 
                     ))}
                   </SelectContent>
                 </Select>
+                {candidateDescription(candidates, duplicateId) ? <p className="mt-2 text-xs font-medium text-slate-700">{candidateDescription(candidates, duplicateId)}</p> : null}
                 <p className="mt-2 text-xs text-slate-500">Its source fields remain in the immutable audit snapshot.</p>
               </div>
             </section>
 
             {previewQuery.isLoading ? (
-              <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+              <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900" role="status" aria-live="polite">
                 <LoaderCircle className="h-4 w-4 animate-spin" />Tracing both records and their relationships
               </div>
             ) : null}
 
             {previewQuery.error ? (
-              <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800">{previewQuery.error.message}</div>
+              <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-800" role="alert">{previewQuery.error.message}</div>
             ) : null}
 
             {preview ? (
@@ -262,9 +303,11 @@ export function ProspectMergeDialog({ open, candidates, recommendedCanonicalId, 
                 </section>
 
                 {relationshipRows.length ? (
-                  <section className="rounded-md border border-slate-200 p-3" aria-labelledby="merge-relationship-counts">
-                    <h3 id="merge-relationship-counts" className="text-xs font-semibold uppercase tracking-wide text-slate-500">History by relationship</h3>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  <details className="rounded-md border border-slate-200">
+                    <summary className="cursor-pointer px-3 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      History by relationship ({relationshipRows.length})
+                    </summary>
+                    <div className="grid gap-2 border-t border-slate-200 p-3 sm:grid-cols-2 lg:grid-cols-3">
                       {relationshipRows.map((relationship) => (
                         <div key={relationship.key} className="flex items-center justify-between gap-3 rounded border border-slate-100 bg-slate-50 px-2.5 py-2 text-xs">
                           <span className="font-medium text-slate-700">{relationship.label}</span>
@@ -275,11 +318,11 @@ export function ProspectMergeDialog({ open, candidates, recommendedCanonicalId, 
                         </div>
                       ))}
                     </div>
-                  </section>
+                  </details>
                 ) : null}
 
                 {preview.blockers.length ? (
-                  <section className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-950">
+                  <section className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-950" role="alert">
                     <p className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Merge blocked</p>
                     <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">
                       {preview.blockers.map((blocker) => <li key={blocker.code}>{blocker.message}</li>)}
@@ -294,11 +337,16 @@ export function ProspectMergeDialog({ open, candidates, recommendedCanonicalId, 
                       <p className="mt-0.5 text-xs text-slate-500">Conflicting values default to the surviving record. Empty survivor fields may safely inherit the duplicate value.</p>
                     </div>
                     <Badge variant="outline" className="rounded bg-slate-50 text-slate-700">
-                      {preview.fieldComparisons.filter((field) => field.conflict).length} conflict(s)
+                      {fieldsNeedingAttention.length} field{fieldsNeedingAttention.length === 1 ? '' : 's'} to review
                     </Badge>
                   </div>
 
                   <div className="mt-3 space-y-5">
+                    {fieldsNeedingAttention.length === 0 ? (
+                      <div className="rounded-md border border-teal-200 bg-teal-50 p-3 text-sm text-teal-950">
+                        The records match across the compared fields. Confirm the survivor and relationship history below.
+                      </div>
+                    ) : null}
                     {groupedFields.map(([group, fields]) => (
                       <fieldset key={group} className="rounded-lg border border-slate-200">
                         <legend className="ml-3 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -343,37 +391,58 @@ export function ProspectMergeDialog({ open, candidates, recommendedCanonicalId, 
                         </div>
                       </fieldset>
                     ))}
+                    {matchingFields.length ? (
+                      <details className="rounded-md border border-slate-200 bg-slate-50">
+                        <summary className="cursor-pointer px-3 py-3 text-sm font-semibold text-slate-800">
+                          No decision needed ({matchingFields.length}) · survivor values will be kept
+                        </summary>
+                        <div className="grid gap-2 border-t border-slate-200 px-3 py-3 text-xs text-slate-600 sm:grid-cols-2">
+                          {matchingFields.map((field) => <span key={field.key}>{field.label}</span>)}
+                        </div>
+                      </details>
+                    ) : null}
                   </div>
                 </section>
 
-                <label className="flex cursor-pointer items-start gap-3 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+                <div className="flex items-start gap-3 rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
                   <Checkbox
+                    id="confirm-prospect-merge"
                     checked={confirmed}
                     onCheckedChange={(value) => setConfirmed(value === true)}
                     disabled={!preview.canApply || applyMerge.isPending}
                     className="mt-0.5"
-                    aria-label="Confirm duplicate prospect consolidation"
                   />
-                  <span>
-                    <span className="font-semibold">I reviewed the survivor and conflicting fields.</span>{' '}
+                  <Label htmlFor="confirm-prospect-merge" className="cursor-pointer font-normal leading-5 text-blue-950">
+                    <span className="font-semibold">
+                      {conflictCount
+                        ? `I reviewed ${conflictCount} conflict${conflictCount === 1 ? '' : 's'} and the surviving record.`
+                        : 'I reviewed both records and the surviving values.'}
+                    </span>{' '}
                     Consolidate the duplicate in one transaction and retain its original record as an audit redirect.
-                  </span>
-                </label>
+                  </Label>
+                </div>
               </>
             ) : null}
           </div>
         </ScrollArea>
 
-        <DialogFooter className="border-t border-slate-200 px-6 py-4">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={applyMerge.isPending}>Cancel</Button>
+        <DialogFooter className="flex-col gap-2 border-t border-slate-200 px-6 py-4 sm:flex-row sm:gap-0">
+          <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)} disabled={applyMerge.isPending}>Cancel</Button>
           {previewQuery.error ? (
-            <Button type="button" variant="outline" onClick={() => void previewQuery.refetch()}>
+            <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => void previewQuery.refetch()}>
               <RotateCcw className="h-4 w-4" />Refresh preview
             </Button>
           ) : null}
-          <Button type="button" onClick={submit} disabled={!preview?.canApply || !confirmed || applyMerge.isPending}>
+          <Button
+            type="button"
+            className="h-auto min-h-10 w-full min-w-0 py-2 sm:w-auto"
+            onClick={submit}
+            disabled={!preview?.canApply || !confirmed || applyMerge.isPending}
+            aria-busy={applyMerge.isPending}
+            aria-label={applyMerge.isPending ? 'Consolidating duplicate map records' : actionLabel}
+          >
             {applyMerge.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-            {applyMerge.isPending ? 'Consolidating…' : 'Consolidate duplicate'}
+            <span className="max-w-[min(62vw,32rem)] whitespace-normal text-center leading-4">{applyMerge.isPending ? 'Consolidating…' : actionLabel}</span>
           </Button>
         </DialogFooter>
       </DialogContent>
