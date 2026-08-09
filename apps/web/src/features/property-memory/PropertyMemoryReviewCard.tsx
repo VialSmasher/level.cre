@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, Archive, CheckCircle2, FileCheck2, Link2, MapPin } from 'lucide-react'
+import { AlertTriangle, Archive, CheckCircle2, FileCheck2, GitMerge, Link2, MapPin } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -30,6 +30,7 @@ type Props = {
   isPending?: boolean
   onApprove: (decision: PropertyMemoryDecision) => void
   onReject: (decision: PropertyMemoryDecision) => void
+  onCompareDuplicates?: (prospectIds: string[]) => void
 }
 
 type FieldGroupDefinition = {
@@ -152,6 +153,7 @@ export function PropertyMemoryReviewCard({
   isPending = false,
   onApprove,
   onReject,
+  onCompareDuplicates,
 }: Props) {
   const [fieldDecisions, setFieldDecisions] = useState<PropertyMemoryFieldDecisions>(() => ({
     ...DEFAULT_PROPERTY_MEMORY_FIELD_DECISIONS,
@@ -173,6 +175,14 @@ export function PropertyMemoryReviewCard({
   }, [item.resolution, item.reviewReasons, item.suggestedLayer])
   const requiresConflictConfirmation = displayedConflicts.length > 0
   const targets = targetOptions || EMPTY_TARGET_OPTIONS
+  const duplicateProspectIds = useMemo(() => {
+    const candidates = Array.isArray((item.resolution as { candidates?: unknown[] }).candidates)
+      ? (item.resolution as { candidates: Array<Record<string, unknown>> }).candidates
+      : []
+    return Array.from(new Set(candidates.flatMap((candidate) => (
+      candidate.entityType === 'prospect' && typeof candidate.id === 'string' ? [candidate.id] : []
+    ))))
+  }, [item.resolution])
 
   const availableTargets = useMemo(() => {
     const byValue = new Map<string, PropertyMemoryTargetOption>()
@@ -268,6 +278,11 @@ export function PropertyMemoryReviewCard({
           <ul className="mt-2 list-disc space-y-1 pl-5 leading-5">
             {displayedConflicts.map((reason) => <li key={reason}>{reason}</li>)}
           </ul>
+          {duplicateProspectIds.length > 1 && onCompareDuplicates ? (
+            <Button type="button" variant="outline" size="sm" className="mt-3 border-amber-300 bg-white text-amber-950" onClick={() => onCompareDuplicates(duplicateProspectIds)}>
+              <GitMerge className="h-4 w-4" />Compare duplicate map records
+            </Button>
+          ) : null}
         </div>
       ) : null}
 

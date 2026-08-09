@@ -1,4 +1,4 @@
-import { Database, Layers3, RotateCcw } from 'lucide-react'
+import { Database, Layers3, RotateCcw, Search } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -10,6 +10,7 @@ type Props = {
   anchors: MarketMemoryAnchor[]
   visibleLayers: Set<MarketMemoryLayer>
   onOpenPreview: () => void
+  onOpenSearch: () => void
   onToggleLayer: (layer: MarketMemoryLayer) => void
   onClear: () => void
 }
@@ -20,7 +21,7 @@ const LAYERS: Array<{ key: MarketMemoryLayer; label: string; color: string }> = 
   { key: 'review', label: 'Needs review', color: '#D97706' },
 ]
 
-export function MarketMemoryLayerControl({ anchors, visibleLayers, onOpenPreview, onToggleLayer, onClear }: Props) {
+export function MarketMemoryLayerControl({ anchors, visibleLayers, onOpenPreview, onOpenSearch, onToggleLayer, onClear }: Props) {
   if (anchors.length === 0) {
     return (
       <Button type="button" variant="outline" className="bg-white shadow-lg" onClick={onOpenPreview}>
@@ -46,6 +47,11 @@ export function MarketMemoryLayerControl({ anchors, visibleLayers, onOpenPreview
         </div>
         <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onOpenPreview} aria-label="Load a different brokerage memory file" title="Load a different file">
           <RotateCcw className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      <div className="border-b border-slate-200 px-3 py-2">
+        <Button type="button" variant="outline" size="sm" className="h-8 w-full justify-start text-xs" onClick={onOpenSearch}>
+          <Search className="h-3.5 w-3.5 text-blue-700" />Search property memory
         </Button>
       </div>
       <div className="space-y-2 px-3 py-3">
