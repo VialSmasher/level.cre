@@ -6,6 +6,7 @@ import {
   ProspectMergeUndoInputSchema,
   __prospectMergeUndoTesting,
   applyProspectMerge,
+  listProspectDuplicateCandidates,
   previewProspectMerge,
   resolveCanonicalProspect,
   undoProspectMerge,
@@ -55,11 +56,18 @@ function relationshipRowsForSql(sql: string, relationships: ReturnType<typeof em
   return null
 }
 
+function placeholderIndexes(sql: string) {
+  return Array.from(sql.matchAll(/\$(\d+)/g), (match) => Number(match[1]))
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .sort((left, right) => left - right)
+}
+
 function mergePool(options: {
   relationships?: ReturnType<typeof emptyRelationships>
   visibleProspects?: Array<ReturnType<typeof prospectRow>>
   priorEvent?: Record<string, unknown> | null
   failContactMove?: boolean
+  failOpportunityMove?: boolean
 } = {}) {
   const relationships = options.relationships || emptyRelationships()
   const prospects = options.visibleProspects || [prospectRow('canonical'), prospectRow('duplicate')]
@@ -88,6 +96,9 @@ function mergePool(options: {
       if (/^UPDATE public\.prospects/i.test(normalized)) return { rows: [], rowCount: 1 }
       if (/^UPDATE public\.contact_interactions/i.test(normalized) && options.failContactMove) {
         throw new Error('injected relationship failure')
+      }
+      if (/^UPDATE public\.opportunities/i.test(normalized) && options.failOpportunityMove) {
+        throw new Error('injected post-listing relationship failure')
       }
       if (/^UPDATE public\./i.test(normalized)) return { rows: [], rowCount: 1 }
       throw new Error(`Unexpected apply SQL: ${normalized}`)
@@ -290,6 +301,59 @@ test('merge preview blocks a unique listing-link collision', async () => {
 
   assert.equal(preview.canApply, false)
   assert.deepEqual(preview.blockers.map((blocker) => blocker.code), ['listing_link_collision'])
+})
+
+test('listing-link preview binds every parameter and scopes links through broker-owned listings', async () => {
+  const fake = mergePool()
+  await previewProspectMerge({
+    pool: fake.pool as never,
+    userId: 'user-one',
+    canonicalProspectId: 'canonical',
+    duplicateProspectId: 'duplicate',
+  })
+
+  const query = fake.sqlSeen.find((sql) => /FROM public\.listing_prospects\b/i.test(sql))
+  assert.ok(query)
+  assert.deepEqual(placeholderIndexes(query), [1, 2, 3])
+  assert.match(query, /INNER JOIN public\.listings listings/i)
+  assert.match(query, /listings\.user_id = \$1/i)
+})
+
+test('listing-link moves bind every parameter and cannot cross the broker listing boundary', async () => {
+  const relationships = emptyRelationships()
+  relationships.listingProspects = [
+    { id: 'duplicate-listing-link', listing_id: 'listing-two', prospect_id: 'duplicate', role: 'target' },
+  ]
+  relationships.opportunities = [
+    { id: 'duplicate-opportunity', prospect_id: 'duplicate' },
+  ]
+  const fake = mergePool({ relationships, failOpportunityMove: true })
+  const preview = await previewProspectMerge({
+    pool: fake.pool as never,
+    userId: 'user-one',
+    canonicalProspectId: 'canonical',
+    duplicateProspectId: 'duplicate',
+  })
+
+  await assert.rejects(
+    applyProspectMerge({
+      pool: fake.pool as never,
+      userId: 'user-one',
+      canonicalProspectId: 'canonical',
+      duplicateProspectId: 'duplicate',
+      previewHash: preview.previewHash,
+      idempotencyKey: 'listing-ownership-scope-test',
+      confirmConflicts: true,
+      fieldChoices: preview.defaultFieldChoices,
+    }),
+    /injected post-listing relationship failure/,
+  )
+
+  const query = fake.sqlSeen.find((sql) => /^UPDATE public\.listing_prospects\b/i.test(sql))
+  assert.ok(query)
+  assert.deepEqual(placeholderIndexes(query), [1, 2, 3, 4])
+  assert.match(query, /SELECT id FROM public\.listings WHERE user_id = \$1/i)
+  assert.equal(fake.sqlSeen.at(-1), 'ROLLBACK')
 })
 
 test('a stale preview rolls back before any merge mutation', async () => {
@@ -502,4 +566,177 @@ test('old prospect resolution retains the originating merge event', async () => 
   assert.equal(result.canonicalProspectId, 'canonical')
   assert.equal(result.mergeEventId, mergeEventId)
   assert.match(sqlSeen[1], /chain\.origin_merge_event_id/)
+})
+
+test('candidate discovery does not let a reused market key cluster unrelated prospects', async () => {
+  const sharedMarketKey = 'google-place:reused-corrupt-key'
+  const rows = [
+    prospectRow('duplicate-a', {
+      name: '14840 115 Avenue NW',
+      address: null,
+      market_key: sharedMarketKey,
+      resolved_lat: 53.566,
+      resolved_lng: -113.577,
+    }),
+    prospectRow('duplicate-b', {
+      name: '14840 115 Ave NW',
+      address: null,
+      market_key: sharedMarketKey,
+      resolved_lat: 53.56601,
+      resolved_lng: -113.57701,
+    }),
+    prospectRow('layfield', {
+      name: 'Layfield',
+      address: null,
+      market_key: sharedMarketKey,
+      resolved_lat: 53.52,
+      resolved_lng: -113.62,
+    }),
+    prospectRow('home-depot', {
+      name: 'Home Depot',
+      address: null,
+      market_key: sharedMarketKey,
+      resolved_lat: 53.48,
+      resolved_lng: -113.49,
+    }),
+  ].map((row) => ({
+    ...row,
+    listing_count: 0,
+    interaction_count: 0,
+    activity_count: 0,
+    opportunity_count: 0,
+    dossier_count: 0,
+  }))
+  const pool = {
+    query: async (sql: string) => {
+      if (/LEFT JOIN public\.prospect_merge_events events ON false/i.test(sql)) return { rows: [], rowCount: 0 }
+      if (/FROM public\.prospects p/i.test(sql)) return { rows, rowCount: rows.length }
+      throw new Error(`Unexpected candidate SQL: ${sql.replace(/\s+/g, ' ').trim()}`)
+    },
+  }
+
+  const result = await listProspectDuplicateCandidates({
+    pool: pool as never,
+    userId: 'user-one',
+  })
+
+  assert.equal(result.groups.length, 1)
+  assert.deepEqual(
+    result.groups[0].prospects.map((prospect) => prospect.id).sort(),
+    ['duplicate-a', 'duplicate-b'],
+  )
+  assert.ok(result.groups[0].reasons.includes('same normalized civic address'))
+  assert.equal(result.groups[0].reasons.includes('same durable market key'), false)
+})
+
+test('candidate discovery still trusts a small, spatially coherent durable-key group', async () => {
+  const rows = [
+    prospectRow('canonical-key', {
+      name: 'Layfield',
+      address: null,
+      market_key: 'google-place:stable-key',
+      resolved_lat: 53.52,
+      resolved_lng: -113.62,
+    }),
+    prospectRow('duplicate-key', {
+      name: 'Layfield Canada',
+      address: null,
+      market_key: 'google-place:stable-key',
+      resolved_lat: 53.52001,
+      resolved_lng: -113.62001,
+    }),
+  ].map((row) => ({
+    ...row,
+    listing_count: 0,
+    interaction_count: 0,
+    activity_count: 0,
+    opportunity_count: 0,
+    dossier_count: 0,
+  }))
+  const pool = {
+    query: async (sql: string) => {
+      if (/LEFT JOIN public\.prospect_merge_events events ON false/i.test(sql)) return { rows: [], rowCount: 0 }
+      if (/FROM public\.prospects p/i.test(sql)) return { rows, rowCount: rows.length }
+      throw new Error(`Unexpected candidate SQL: ${sql.replace(/\s+/g, ' ').trim()}`)
+    },
+  }
+
+  const result = await listProspectDuplicateCandidates({
+    pool: pool as never,
+    userId: 'user-one',
+  })
+
+  assert.equal(result.groups.length, 1)
+  assert.deepEqual(result.groups[0].reasons, ['same durable market key'])
+})
+
+test('candidate discovery does not trust a durable key without civic or coordinate corroboration', async () => {
+  const rows = [
+    prospectRow('missing-location-a', {
+      name: 'Layfield',
+      address: null,
+      market_key: 'google-place:unverifiable-key',
+      resolved_lat: null,
+      resolved_lng: null,
+    }),
+    prospectRow('missing-location-b', {
+      name: 'Home Depot',
+      address: null,
+      market_key: 'google-place:unverifiable-key',
+      resolved_lat: null,
+      resolved_lng: null,
+    }),
+  ].map((row) => ({
+    ...row,
+    listing_count: 0,
+    interaction_count: 0,
+    activity_count: 0,
+    opportunity_count: 0,
+    dossier_count: 0,
+  }))
+  const pool = {
+    query: async (sql: string) => {
+      if (/LEFT JOIN public\.prospect_merge_events events ON false/i.test(sql)) return { rows: [], rowCount: 0 }
+      if (/FROM public\.prospects p/i.test(sql)) return { rows, rowCount: rows.length }
+      throw new Error(`Unexpected candidate SQL: ${sql.replace(/\s+/g, ' ').trim()}`)
+    },
+  }
+
+  const result = await listProspectDuplicateCandidates({
+    pool: pool as never,
+    userId: 'user-one',
+  })
+
+  assert.deepEqual(result.groups, [])
+})
+
+test('candidate discovery caps even spatially coherent durable-key groups', async () => {
+  const rows = ['Layfield', 'Home Depot', 'Durum', 'Rebel Heart', 'Habitat', 'Company Six'].map((name, index) => ({
+    ...prospectRow(`shared-key-${index}`, {
+      name,
+      address: null,
+      market_key: 'google-place:overused-key',
+      resolved_lat: 53.52,
+      resolved_lng: -113.62,
+    }),
+    listing_count: 0,
+    interaction_count: 0,
+    activity_count: 0,
+    opportunity_count: 0,
+    dossier_count: 0,
+  }))
+  const pool = {
+    query: async (sql: string) => {
+      if (/LEFT JOIN public\.prospect_merge_events events ON false/i.test(sql)) return { rows: [], rowCount: 0 }
+      if (/FROM public\.prospects p/i.test(sql)) return { rows, rowCount: rows.length }
+      throw new Error(`Unexpected candidate SQL: ${sql.replace(/\s+/g, ' ').trim()}`)
+    },
+  }
+
+  const result = await listProspectDuplicateCandidates({
+    pool: pool as never,
+    userId: 'user-one',
+  })
+
+  assert.deepEqual(result.groups, [])
 })

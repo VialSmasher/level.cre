@@ -188,7 +188,15 @@ const RELATIONSHIP_QUERIES: Array<{ key: RelationshipKey; sql: string }> = [
   },
   {
     key: 'listingProspects',
-    sql: `SELECT id, listing_id, prospect_id, role FROM public.listing_prospects WHERE prospect_id IN ($2, $3) ORDER BY id`,
+    sql: `
+      SELECT links.id, links.listing_id, links.prospect_id, links.role
+      FROM public.listing_prospects links
+      INNER JOIN public.listings listings
+        ON listings.id = links.listing_id
+       AND listings.user_id = $1
+      WHERE links.prospect_id IN ($2, $3)
+      ORDER BY links.id
+    `,
   },
   {
     key: 'opportunities',
@@ -234,7 +242,15 @@ const RELATIONSHIP_QUERIES: Array<{ key: RelationshipKey; sql: string }> = [
 
 const MOVE_QUERIES: Record<RelationshipKey, string> = {
   contactInteractions: `UPDATE public.contact_interactions SET prospect_id = $2 WHERE user_id = $1 AND id = ANY($3::varchar[]) AND prospect_id = $4`,
-  listingProspects: `UPDATE public.listing_prospects SET prospect_id = $2 WHERE id = ANY($3::varchar[]) AND prospect_id = $4`,
+  listingProspects: `
+    UPDATE public.listing_prospects
+    SET prospect_id = $2
+    WHERE id = ANY($3::varchar[])
+      AND prospect_id = $4
+      AND listing_id IN (
+        SELECT id FROM public.listings WHERE user_id = $1
+      )
+  `,
   opportunities: `UPDATE public.opportunities SET prospect_id = $2, updated_at = now() WHERE user_id = $1 AND id = ANY($3::varchar[]) AND prospect_id = $4`,
   activityEvents: `UPDATE public.activity_events SET prospect_id = $2, updated_at = now() WHERE user_id = $1 AND id = ANY($3::varchar[]) AND prospect_id = $4`,
   salesActivityImports: `UPDATE public.sales_activity_imports SET prospect_id = $2, updated_at = now() WHERE user_id = $1 AND id = ANY($3::varchar[]) AND prospect_id = $4`,
@@ -1511,6 +1527,34 @@ function streetNumber(value: string) {
   return value.match(/\b\d{2,6}\b/)?.[0] || null
 }
 
+const MAX_COHERENT_MARKET_KEY_RECORDS = 5
+const MAX_COHERENT_MARKET_KEY_DISTANCE_METERS = 100
+
+function normalizedCivicKey(row: ProspectSnapshot) {
+  const value = normalizeMarketAddress(row.address || row.name || '')
+  return /\d/.test(value) && value.length >= 8 ? value : null
+}
+
+function isCoherentMarketKeyBucket(rows: ProspectSnapshot[], indexes: number[]) {
+  // market_key is imported data, not a database uniqueness constraint. A reused or
+  // corrupt value must not turn every record carrying it into one merge candidate.
+  if (indexes.length > MAX_COHERENT_MARKET_KEY_RECORDS) return false
+
+  for (let leftOffset = 0; leftOffset < indexes.length; leftOffset += 1) {
+    for (let rightOffset = leftOffset + 1; rightOffset < indexes.length; rightOffset += 1) {
+      const left = rows[indexes[leftOffset]]
+      const right = rows[indexes[rightOffset]]
+      const leftCivicKey = normalizedCivicKey(left)
+      const rightCivicKey = normalizedCivicKey(right)
+      const sameCivicKey = leftCivicKey != null && leftCivicKey === rightCivicKey
+      const distance = distanceMeters(left, right)
+      const sameMapLocation = distance != null && distance <= MAX_COHERENT_MARKET_KEY_DISTANCE_METERS
+      if (!sameCivicKey && !sameMapLocation) return false
+    }
+  }
+  return true
+}
+
 class UnionFind {
   private parent: number[]
 
@@ -1568,11 +1612,12 @@ export async function listProspectDuplicateCandidates(params: { pool: Queryable;
   const byMarketKey = new Map<string, number[]>()
   const byStreetNumber = new Map<string, number[]>()
   rows.forEach((row, index) => {
-    const addressKey = normalizeMarketAddress(row.address || row.name || '')
-    if (/\d/.test(addressKey) && addressKey.length >= 8) {
+    const addressKey = normalizedCivicKey(row)
+    if (addressKey) {
       byAddress.set(addressKey, [...(byAddress.get(addressKey) || []), index])
     }
-    if (row.market_key) byMarketKey.set(row.market_key, [...(byMarketKey.get(row.market_key) || []), index])
+    const marketKey = row.market_key?.trim()
+    if (marketKey) byMarketKey.set(marketKey, [...(byMarketKey.get(marketKey) || []), index])
     const addressStreetNumber = streetNumber(row.address || row.name || '')
     if (addressStreetNumber) {
       byStreetNumber.set(addressStreetNumber, [...(byStreetNumber.get(addressStreetNumber) || []), index])
@@ -1582,6 +1627,7 @@ export async function listProspectDuplicateCandidates(params: { pool: Queryable;
     for (let offset = 1; offset < indexes.length; offset += 1) addReason(indexes[0], indexes[offset], 'same normalized civic address')
   }
   for (const indexes of byMarketKey.values()) {
+    if (!isCoherentMarketKeyBucket(rows, indexes)) continue
     for (let offset = 1; offset < indexes.length; offset += 1) addReason(indexes[0], indexes[offset], 'same durable market key')
   }
   for (const indexes of byStreetNumber.values()) {
