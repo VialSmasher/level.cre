@@ -80,6 +80,10 @@ export type PropertyMemoryReviewResponse = {
   rows: PropertyMemoryReviewItem[]
 }
 
+export type PropertyMemoryReviewItemResponse = {
+  item: PropertyMemoryReviewItem
+}
+
 export type PropertyMemoryDecision = {
   action: 'approve' | 'reject'
   targetDossierId?: string | null
@@ -146,6 +150,7 @@ export const propertyMemoryRoutes = {
   preview: '/api/intel/brokerage-memory/preview',
   imports: '/api/intel/brokerage-memory/imports',
   review: '/api/intel/brokerage-memory/review',
+  reviewItem: (itemId: string) => `/api/intel/brokerage-memory/items/${encodeURIComponent(itemId)}/review`,
   map: '/api/intel/brokerage-memory/map',
   search: '/api/intel/brokerage-memory/search',
   decision: (itemId: string) => `/api/intel/brokerage-memory/items/${encodeURIComponent(itemId)}/decision`,
@@ -158,6 +163,7 @@ export const propertyMemoryKeys = {
   searchInfinite: (filters: PropertyMemorySearchFilters) => ['property-memory', 'search', 'infinite', filters] as const,
   reviewRoot: () => ['property-memory', 'review'] as const,
   review: (limit: number) => ['property-memory', 'review', limit] as const,
+  reviewItem: (itemId: string) => ['property-memory', 'review-item', itemId] as const,
 } as const
 
 async function responseJson<T>(response: Response): Promise<T> {
@@ -179,6 +185,10 @@ export async function stagePropertyMemoryImport(
 export async function fetchPropertyMemoryReview(limit = 100): Promise<PropertyMemoryReviewResponse> {
   const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 250)
   return responseJson(await apiRequest('GET', `${propertyMemoryRoutes.review}?limit=${boundedLimit}`))
+}
+
+export async function fetchPropertyMemoryReviewItem(itemId: string): Promise<PropertyMemoryReviewItemResponse> {
+  return responseJson(await apiRequest('GET', propertyMemoryRoutes.reviewItem(itemId)))
 }
 
 export async function fetchPropertyMemoryMap(): Promise<PropertyMemoryMapResponse> {
@@ -244,6 +254,18 @@ export function usePropertyMemoryReview(options: { enabled?: boolean; limit?: nu
     queryFn: () => fetchPropertyMemoryReview(limit),
     enabled: options.enabled ?? true,
     staleTime: 15_000,
+  })
+}
+
+export function usePropertyMemoryReviewItem(
+  itemId: string | null,
+  options: { enabled?: boolean } = {},
+) {
+  return useQuery<PropertyMemoryReviewItemResponse>({
+    queryKey: propertyMemoryKeys.reviewItem(itemId || ''),
+    queryFn: () => fetchPropertyMemoryReviewItem(itemId || ''),
+    enabled: Boolean(itemId) && (options.enabled ?? true),
+    staleTime: 30_000,
   })
 }
 

@@ -1,4 +1,5 @@
-import { MousePointer, MapPin, Shapes, LocateFixed, Map as MapIcon, Satellite, Square } from 'lucide-react';
+import { MousePointer, MapPin, Shapes, LocateFixed, Map as MapIcon, MoreHorizontal, Satellite, Square } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 interface MapToolsProps {
   onPolygon?: () => void;
@@ -31,6 +32,7 @@ export function MapTools({
   return (
     <div className="flex w-fit max-w-full items-center gap-0.5 overflow-x-auto rounded-md border border-slate-300 bg-white p-1 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
       <button
+        type="button"
         aria-label={mapType === 'hybrid' ? 'Show road map' : 'Show aerial map'}
         title={mapType === 'hybrid' ? 'Road map' : 'Aerial map'}
         className={`${buttonClass} ${inactiveClass}`}
@@ -43,22 +45,41 @@ export function MapTools({
         )}
       </button>
       <span className="mx-0.5 h-5 w-px shrink-0 bg-slate-200" aria-hidden />
-      <button aria-label="Pan" title="Pan" className={`${buttonClass} ${activeTerraMode === 'select' ? activeClass : inactiveClass}`} onClick={onSelect}>
+      <button type="button" aria-label="Pan" title="Pan" className={`${buttonClass} ${activeTerraMode === 'select' ? activeClass : inactiveClass}`} onClick={onSelect}>
         <MousePointer className="w-4 h-4" strokeWidth={1.5} />
       </button>
-      <button aria-label="Drop Pin" title="Point" className={`${buttonClass} ${activeTerraMode === 'point' ? activeClass : inactiveClass}`} onClick={onPin}>
+      <button type="button" aria-label="Drop Pin" title="Point" className={`${buttonClass} ${activeTerraMode === 'point' ? activeClass : inactiveClass}`} onClick={onPin}>
         <MapPin className="w-4 h-4" strokeWidth={1.5} />
       </button>
-      <button aria-label="Draw Polygon" title="Polygon" className={`${buttonClass} ${activeTerraMode === 'polygon' ? activeClass : inactiveClass}`} onClick={onPolygon}>
-        <Shapes className="w-4 h-4" strokeWidth={1.5} />
-      </button>
-      <button aria-label="Draw Rectangle" title="Rectangle" className={`${buttonClass} ${activeTerraMode === 'rectangle' ? activeClass : inactiveClass}`} onClick={onRectangle}>
-        <Square className="w-4 h-4" strokeWidth={1.5} />
-      </button>
-      <span className="mx-0.5 h-5 w-px shrink-0 bg-slate-200" aria-hidden />
-      <button aria-label="My Location" title="My Location" className={`${buttonClass} ${inactiveClass}`} onClick={onMyLocation}>
-        <LocateFixed className="w-4 h-4" strokeWidth={1.5} />
-      </button>
+      <div className="hidden items-center sm:flex">
+        <button type="button" aria-label="Draw Polygon" title="Polygon" className={`${buttonClass} ${activeTerraMode === 'polygon' ? activeClass : inactiveClass}`} onClick={onPolygon}>
+          <Shapes className="w-4 h-4" strokeWidth={1.5} />
+        </button>
+        <button type="button" aria-label="Draw Rectangle" title="Rectangle" className={`${buttonClass} ${activeTerraMode === 'rectangle' ? activeClass : inactiveClass}`} onClick={onRectangle}>
+          <Square className="w-4 h-4" strokeWidth={1.5} />
+        </button>
+        <span className="mx-0.5 h-5 w-px shrink-0 bg-slate-200" aria-hidden />
+        <button type="button" aria-label="My Location" title="My Location" className={`${buttonClass} ${inactiveClass}`} onClick={onMyLocation}>
+          <LocateFixed className="w-4 h-4" strokeWidth={1.5} />
+        </button>
+      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="More map tools"
+            title="More map tools"
+            className={`${buttonClass} sm:hidden ${activeTerraMode === 'polygon' || activeTerraMode === 'rectangle' ? activeClass : inactiveClass}`}
+          >
+            <MoreHorizontal className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="sm:hidden">
+          <DropdownMenuItem onClick={onPolygon}><Shapes className="mr-2 h-4 w-4" />Draw polygon</DropdownMenuItem>
+          <DropdownMenuItem onClick={onRectangle}><Square className="mr-2 h-4 w-4" />Draw rectangle</DropdownMenuItem>
+          <DropdownMenuItem onClick={onMyLocation}><LocateFixed className="mr-2 h-4 w-4" />Reset to my market</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

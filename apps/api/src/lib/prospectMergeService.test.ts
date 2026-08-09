@@ -740,3 +740,57 @@ test('candidate discovery caps even spatially coherent durable-key groups', asyn
 
   assert.deepEqual(result.groups, [])
 })
+
+test('targeted candidate discovery queries only the selected prospect and plausible matches', async () => {
+  const target = {
+    ...prospectRow('selected-prospect', {
+      name: '100 First Street NW',
+      address: '100 First Street NW',
+      market_key: 'market-key:selected',
+      resolved_lat: 53.52,
+      resolved_lng: -113.62,
+    }),
+    listing_count: 1,
+    interaction_count: 2,
+    activity_count: 0,
+    opportunity_count: 0,
+    dossier_count: 1,
+  }
+  const duplicate = {
+    ...prospectRow('duplicate-prospect', {
+      name: '100 First St NW',
+      address: '100 First St NW',
+      market_key: 'market-key:selected',
+      resolved_lat: 53.52001,
+      resolved_lng: -113.62001,
+    }),
+    listing_count: 0,
+    interaction_count: 0,
+    activity_count: 0,
+    opportunity_count: 0,
+    dossier_count: 0,
+  }
+  const calls: Array<{ sql: string; values?: unknown[] }> = []
+  const pool = {
+    query: async (sql: string, values?: unknown[]) => {
+      calls.push({ sql, values })
+      if (/LEFT JOIN public\.prospect_merge_events events ON false/i.test(sql)) return { rows: [], rowCount: 0 }
+      if (/p\.id = \$2/i.test(sql) && /LIMIT 1/i.test(sql)) return { rows: [target], rowCount: 1 }
+      if (/p\.id <> \$2/i.test(sql)) return { rows: [duplicate], rowCount: 1 }
+      throw new Error(`Unexpected targeted candidate SQL: ${sql.replace(/\s+/g, ' ').trim()}`)
+    },
+  }
+
+  const result = await listProspectDuplicateCandidates({
+    pool: pool as never,
+    userId: 'user-one',
+    prospectId: 'selected-prospect',
+  })
+
+  assert.equal(result.groups.length, 1)
+  assert.deepEqual(result.groups[0].prospects.map((prospect) => prospect.id).sort(), ['duplicate-prospect', 'selected-prospect'])
+  const candidateCall = calls.find(({ sql }) => /p\.id <> \$2/i.test(sql))
+  assert.equal(candidateCall?.values?.[1], 'selected-prospect')
+  assert.equal(candidateCall?.values?.[2], 'market-key:selected')
+  assert.match(candidateCall?.sql || '', /LIMIT 249/)
+})

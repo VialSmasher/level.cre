@@ -63,6 +63,16 @@ export const ProspectMergeApplyInputSchema = z.object({
 
 export const ProspectMergeCandidateQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(20),
+  prospectId: z.string().trim().min(1).optional(),
+  propertyReviewItemId: z.string().trim().min(1).optional(),
+}).superRefine((value, context) => {
+  if (!value.prospectId && !value.propertyReviewItemId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['prospectId'],
+      message: 'Select a prospect or property-review item before checking duplicates.',
+    })
+  }
 })
 
 export const ProspectMergeUndoInputSchema = z.object({
@@ -1575,30 +1585,119 @@ class UnionFind {
   }
 }
 
-export async function listProspectDuplicateCandidates(params: { pool: Queryable; userId: string; limit?: number }) {
-  await assertProspectMergeSchema(params.pool)
-  const result = await params.pool.query<ProspectSnapshot & {
-    listing_count: number | string
-    interaction_count: number | string
-    activity_count: number | string
-    opportunity_count: number | string
-    dossier_count: number | string
-  }>(`
-    SELECT p.*,
-           ST_AsGeoJSON(p.geometry) AS geometry_json,
-           COALESCE(p.location_lat, ST_Y(ST_Centroid(p.geometry))) AS resolved_lat,
-           COALESCE(p.location_lng, ST_X(ST_Centroid(p.geometry))) AS resolved_lng,
-           (SELECT COUNT(*) FROM public.listing_prospects lp WHERE lp.prospect_id = p.id) AS listing_count,
-           (SELECT COUNT(*) FROM public.contact_interactions ci WHERE ci.user_id = $1 AND ci.prospect_id = p.id) AS interaction_count,
-           (SELECT COUNT(*) FROM public.activity_events ae WHERE ae.user_id = $1 AND ae.prospect_id = p.id) AS activity_count,
-           (SELECT COUNT(*) FROM public.opportunities o WHERE o.user_id = $1 AND o.prospect_id = p.id) AS opportunity_count,
-           (SELECT COUNT(*) FROM public.intel_property_dossiers d WHERE d.created_by_user_id = $1 AND d.prospect_id = p.id) AS dossier_count
-    FROM public.prospects p
-    WHERE p.user_id = $1 AND p.merged_into_prospect_id IS NULL
+type ProspectCandidateRow = ProspectSnapshot & {
+  listing_count: number | string
+  interaction_count: number | string
+  activity_count: number | string
+  opportunity_count: number | string
+  dossier_count: number | string
+}
+
+const PROSPECT_CANDIDATE_SELECT = `
+  SELECT p.*,
+         ST_AsGeoJSON(p.geometry) AS geometry_json,
+         COALESCE(p.location_lat, ST_Y(ST_Centroid(p.geometry))) AS resolved_lat,
+         COALESCE(p.location_lng, ST_X(ST_Centroid(p.geometry))) AS resolved_lng,
+         (SELECT COUNT(*) FROM public.listing_prospects lp WHERE lp.prospect_id = p.id) AS listing_count,
+         (SELECT COUNT(*) FROM public.contact_interactions ci WHERE ci.user_id = $1 AND ci.prospect_id = p.id) AS interaction_count,
+         (SELECT COUNT(*) FROM public.activity_events ae WHERE ae.user_id = $1 AND ae.prospect_id = p.id) AS activity_count,
+         (SELECT COUNT(*) FROM public.opportunities o WHERE o.user_id = $1 AND o.prospect_id = p.id) AS opportunity_count,
+         (SELECT COUNT(*) FROM public.intel_property_dossiers d WHERE d.created_by_user_id = $1 AND d.prospect_id = p.id) AS dossier_count
+  FROM public.prospects p
+`
+
+function prospectIdsFromPropertyResolution(resolution: unknown) {
+  const parsed = typeof resolution === 'string' ? JSON.parse(resolution) as Record<string, unknown> : resolution
+  if (!parsed || typeof parsed !== 'object') return []
+  const record = parsed as {
+    topCandidate?: { entityType?: unknown; id?: unknown } | null
+    candidates?: Array<{ entityType?: unknown; id?: unknown }>
+  }
+  return [record.topCandidate, ...(Array.isArray(record.candidates) ? record.candidates : [])]
+    .flatMap((candidate) => (
+      candidate?.entityType === 'prospect' && typeof candidate.id === 'string' ? [candidate.id] : []
+    ))
+}
+
+async function loadTargetedProspectCandidateRows(params: {
+  pool: Queryable
+  userId: string
+  prospectId?: string
+  propertyReviewItemId?: string
+}) {
+  const targetIds = new Set<string>()
+  if (params.prospectId) targetIds.add(params.prospectId)
+  if (params.propertyReviewItemId) {
+    const itemResult = await params.pool.query<{
+      matched_prospect_id: string | null
+      resolution_json: unknown
+    }>(`
+      SELECT matched_prospect_id, resolution_json
+      FROM public.brokerage_memory_items
+      WHERE id = $2 AND user_id = $1 AND status = 'pending'
+      LIMIT 1
+    `, [params.userId, params.propertyReviewItemId])
+    const item = itemResult.rows[0]
+    if (!item) throw new ProspectMergeServiceError('Property-review item not found.', 404, 'property_review_not_found')
+    if (item.matched_prospect_id) targetIds.add(item.matched_prospect_id)
+    for (const id of prospectIdsFromPropertyResolution(item.resolution_json)) targetIds.add(id)
+  }
+  if (targetIds.size === 0) return []
+
+  if (targetIds.size > 1) {
+    const result = await params.pool.query<ProspectCandidateRow>(`
+      ${PROSPECT_CANDIDATE_SELECT}
+      WHERE p.user_id = $1
+        AND p.merged_into_prospect_id IS NULL
+        AND p.id = ANY($2::varchar[])
+      ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC
+      LIMIT 50
+    `, [params.userId, Array.from(targetIds)])
+    return result.rows
+  }
+
+  const targetId = Array.from(targetIds)[0]
+  const targetResult = await params.pool.query<ProspectCandidateRow>(`
+    ${PROSPECT_CANDIDATE_SELECT}
+    WHERE p.user_id = $1 AND p.id = $2 AND p.merged_into_prospect_id IS NULL
+    LIMIT 1
+  `, [params.userId, targetId])
+  const target = targetResult.rows[0]
+  if (!target) throw new ProspectMergeServiceError('Prospect not found.', 404, 'prospect_not_found')
+  const targetStreetNumber = streetNumber(target.address || target.name || '')
+  const streetNumberPattern = targetStreetNumber ? `(^|[^0-9])${targetStreetNumber}([^0-9]|$)` : null
+  const candidateResult = await params.pool.query<ProspectCandidateRow>(`
+    ${PROSPECT_CANDIDATE_SELECT}
+    WHERE p.user_id = $1
+      AND p.id <> $2
+      AND p.merged_into_prospect_id IS NULL
+      AND (
+        ($3::text IS NOT NULL AND p.market_key = $3)
+        OR ($4::text IS NOT NULL AND COALESCE(p.address, p.name, '') ~ $4)
+      )
     ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC
-    LIMIT 2500
-  `, [params.userId])
-  const rows = result.rows
+    LIMIT 249
+  `, [params.userId, targetId, target.market_key || null, streetNumberPattern])
+  return [target, ...candidateResult.rows]
+}
+
+export async function listProspectDuplicateCandidates(params: {
+  pool: Queryable
+  userId: string
+  limit?: number
+  prospectId?: string
+  propertyReviewItemId?: string
+}) {
+  await assertProspectMergeSchema(params.pool)
+  const targeted = Boolean(params.prospectId || params.propertyReviewItemId)
+  const rows = targeted
+    ? await loadTargetedProspectCandidateRows(params)
+    : (await params.pool.query<ProspectCandidateRow>(`
+        ${PROSPECT_CANDIDATE_SELECT}
+        WHERE p.user_id = $1 AND p.merged_into_prospect_id IS NULL
+        ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC
+        LIMIT 2500
+      `, [params.userId])).rows
   const union = new UnionFind(rows.length)
   const reasons = new Map<string, Set<string>>()
   const addReason = (leftIndex: number, rightIndex: number, reason: string) => {
@@ -1682,6 +1781,7 @@ export async function listProspectDuplicateCandidates(params: { pool: Queryable;
         })),
       }
     })
+    .filter((group) => !params.prospectId || group.prospects.some((prospect) => prospect.id === params.prospectId))
     .sort((left, right) => right.prospects.length - left.prospects.length || left.id.localeCompare(right.id))
     .slice(0, Math.min(Math.max(params.limit || 20, 1), 50))
 

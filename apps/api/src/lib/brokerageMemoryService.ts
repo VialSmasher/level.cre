@@ -742,6 +742,24 @@ export async function listBrokerageMemoryReview(params: { pool: Pool; userId: st
   return { rows: result.rows.map(itemResponse) }
 }
 
+export async function getBrokerageMemoryReviewItem(params: {
+  pool: Pool
+  userId: string
+  itemId: string
+}) {
+  await assertBrokerageMemorySchema(params.pool)
+  const result = await params.pool.query<BrokerageMemoryItemRow>(`
+    SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at
+    FROM public.brokerage_memory_items items
+    INNER JOIN public.brokerage_memory_imports imports ON imports.id = items.import_id
+    WHERE items.id = $1 AND items.user_id = $2 AND imports.status <> 'superseded'
+    LIMIT 1
+  `, [params.itemId, params.userId])
+  const item = result.rows[0]
+  if (!item) throw new BrokerageMemoryServiceError('Brokerage-memory review item not found.', 404)
+  return { item: itemResponse(item) }
+}
+
 function factId(anchor: MarketMemoryAnchor, factKey: string, sourceIdentity: string, value: unknown) {
   return stableHash({ anchorId: anchor.id, factKey, sourceIdentity, value })
 }

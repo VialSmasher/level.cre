@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useGoogleMap } from '@react-google-maps/api';
 import { createCircleMarkerContent, loadAdvancedMarkerLibrary } from './advancedMarkers';
 
@@ -11,6 +11,10 @@ type AdvancedMapMarkerProps = {
   labelColor?: string;
   scale?: number;
   zIndex?: number;
+  markerId?: string;
+  markerKind?: 'asset' | 'cluster' | 'temporary';
+  markerCategory?: string;
+  selected?: boolean;
   onClick?: () => void;
 };
 
@@ -23,9 +27,19 @@ export function AdvancedMapMarker({
   labelColor = '#ffffff',
   scale = 8,
   zIndex,
+  markerId,
+  markerKind = 'asset',
+  markerCategory,
+  selected = false,
   onClick,
 }: AdvancedMapMarkerProps) {
   const map = useGoogleMap();
+  const onClickRef = useRef(onClick);
+  const interactive = Boolean(onClick);
+
+  useEffect(() => {
+    onClickRef.current = onClick;
+  }, [onClick]);
 
   useEffect(() => {
     if (!map) return undefined;
@@ -41,16 +55,20 @@ export function AdvancedMapMarker({
         const { AdvancedMarkerElement } = await loadAdvancedMarkerLibrary();
         if (disposed) return;
 
-        content = createCircleMarkerContent({ color, borderColor, label, labelColor, scale });
-        content.style.cursor = onClick ? 'pointer' : 'default';
-        if (onClick) {
+        content = createCircleMarkerContent({ color, borderColor, label, labelColor, scale, selected });
+        content.dataset.mapMarkerId = markerId || '';
+        content.dataset.mapMarkerKind = markerKind;
+        content.dataset.mapMarkerCategory = markerCategory || '';
+        content.dataset.mapMarkerSelected = selected ? 'true' : 'false';
+        content.style.cursor = interactive ? 'pointer' : 'default';
+        if (interactive) {
           content.tabIndex = 0;
           content.setAttribute('role', 'button');
           content.setAttribute('aria-label', title || 'Open map property');
           keyListener = (event) => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
-            onClick();
+            onClickRef.current?.();
           };
           content.addEventListener('keydown', keyListener);
         }
@@ -61,8 +79,8 @@ export function AdvancedMapMarker({
           content,
           zIndex,
         });
-        if (onClick) {
-          listener = marker.addListener('click', onClick);
+        if (interactive) {
+          listener = marker.addListener('click', () => onClickRef.current?.());
         }
       } catch (error) {
         console.error('Failed to create advanced map marker', error);
@@ -89,7 +107,11 @@ export function AdvancedMapMarker({
     labelColor,
     scale,
     zIndex,
-    onClick,
+    markerId,
+    markerKind,
+    markerCategory,
+    selected,
+    interactive,
   ]);
 
   return null;

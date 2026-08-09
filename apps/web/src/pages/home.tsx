@@ -34,18 +34,19 @@ import { ProspectEditPanel, computeFollowUpDue, formatSfWithCommas, getDisplayAd
 import { ProspectSaveQueue, type ProspectSaveQueueStatus } from '@/features/map/prospectSaveQueue';
 import { useTerraDrawGoogleMaps, type MapDrawMode, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
 import { AdvancedMapMarker } from '@/features/map/AdvancedMapMarker';
+import { ClusteredMapMarkers, type ClusteredMapMarkerEntry } from '@/features/map/ClusteredMapMarkers';
+import { padViewportBounds, pointInViewport } from '@/features/map/viewportClustering';
 import { composePropertyMapItems, getLinkedMemoryMarkerTitle } from '@/features/property-memory/composeMapItems';
 import { PropertyMemorySearchPanel } from '@/features/property-memory/PropertyMemorySearchPanel';
 import { PropertyMemoryReviewDialog } from '@/features/property-memory/PropertyMemoryReviewDialog';
 import {
   useDecidePropertyMemoryItem,
   usePropertyMemoryMap,
-  usePropertyMemoryReview,
+  usePropertyMemoryReviewItem,
   type PropertyMemoryDecision,
   type PropertyMemorySearchRow,
 } from '@/features/property-memory/api';
 import {
-  findDuplicateProspectGroupForAnchor,
   reconcileSelectedMarketMemoryAnchor,
 } from '@/features/property-memory/mapReviewFlow';
 import {
@@ -54,9 +55,11 @@ import {
 } from '@/features/property-memory/reviewDecision';
 import { ProspectMergeDialog, type ProspectMergeDialogCandidate } from '@/features/prospect-merge/ProspectMergeDialog';
 import {
+  fetchProspectMergeCandidates,
+  prospectMergeKeys,
   resolveProspectId,
-  useProspectMergeCandidates,
   type ProspectMergeCandidateGroup,
+  type ProspectMergeCandidateTarget,
 } from '@/features/prospect-merge/api';
 import { SearchResultCard } from '@/features/map/SearchResultCard';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
@@ -147,33 +150,31 @@ const MapOverlayLayer = memo(function MapOverlayLayer({
   editingProspectId,
   onProspectClick,
   polygonRefs,
+  bounds,
+  selectedProspectId,
 }: {
   renderableProspects: RenderableProspectEntry[];
   terraMode: string;
   editingProspectId: string | null;
   onProspectClick: (prospect: Prospect) => void;
   polygonRefs: { current: Map<string, google.maps.Polygon> };
+  bounds: google.maps.LatLngBoundsLiteral | null;
+  selectedProspectId: string | null;
 }) {
   const savedOverlaysInteractive = terraMode === 'select';
+  const viewportPolygons = useMemo(() => {
+    const paddedBounds = bounds ? padViewportBounds(bounds) : null;
+    return renderableProspects.filter((entry): entry is Extract<RenderableProspectEntry, { kind: 'polygon' }> => {
+      if (entry.kind !== 'polygon') return false;
+      if (entry.id === selectedProspectId || entry.id === editingProspectId) return true;
+      if (!paddedBounds) return false;
+      return entry.paths.some((position) => pointInViewport(position, paddedBounds));
+    });
+  }, [bounds, editingProspectId, renderableProspects, selectedProspectId]);
 
   return (
     <>
-      {renderableProspects.map((entry) => {
-        if (entry.kind === 'point') {
-          return (
-            <AdvancedMapMarker
-              key={entry.id}
-              position={entry.position}
-               title={entry.markerTitle || getProspectDisplayName(entry.prospect)}
-               color={entry.color}
-               borderColor={entry.memoryBorderColor}
-               label={entry.memoryLabel}
-              scale={8}
-              onClick={savedOverlaysInteractive ? () => onProspectClick(entry.prospect) : undefined}
-            />
-          );
-        }
-        return (
+      {viewportPolygons.map((entry) => (
           <Polygon
             key={entry.id}
             paths={entry.paths}
@@ -193,8 +194,7 @@ const MapOverlayLayer = memo(function MapOverlayLayer({
               zIndex: editingProspectId === entry.id ? 2 : 1,
             }}
           />
-        );
-      })}
+      ))}
     </>
   );
 });
@@ -204,44 +204,6 @@ const MARKET_MEMORY_MARKER_META: Record<MarketMemoryLayer, { color: string; labe
   market_memory: { color: '#2563EB', label: 'M', title: 'Verified market memory' },
   review: { color: '#D97706', label: '?', title: 'Review before merge' },
 };
-
-const MarketMemoryOverlayLayer = memo(function MarketMemoryOverlayLayer({
-  anchors,
-  visibleLayers,
-  onAnchorClick,
-  interactive,
-}: {
-  anchors: MarketMemoryAnchor[];
-  visibleLayers: Set<MarketMemoryLayer>;
-  onAnchorClick: (anchor: MarketMemoryAnchor) => void;
-  interactive: boolean;
-}) {
-  return (
-    <>
-      {anchors.map((anchor) => {
-        const layer = anchor.previewLayer || anchor.baseLayer;
-        if (!visibleLayers.has(layer)) return null;
-        const marker = MARKET_MEMORY_MARKER_META[layer];
-        const markerTitle = anchor.persistence?.state === 'pending'
-          ? layer === 'review' ? 'Conflict review pending' : 'Awaiting broker approval'
-          : marker.title;
-        return (
-          <AdvancedMapMarker
-            key={anchor.id}
-            position={{ lat: anchor.latitude, lng: anchor.longitude }}
-            title={`${markerTitle}: ${anchor.address}`}
-            color={marker.color}
-            borderColor="#ffffff"
-            label={marker.label}
-            scale={11}
-            zIndex={5}
-            onClick={interactive ? () => onAnchorClick(anchor) : undefined}
-          />
-        );
-      })}
-    </>
-  );
-});
 
 // Function to calculate polygon area in square feet and convert to acres
 const calculatePolygonAcres = (geometry: any): number | null => {
@@ -377,6 +339,8 @@ export default function HomePage() {
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [marketMemoryDialogOpen, setMarketMemoryDialogOpen] = useState(false);
   const [propertyMemorySearchOpen, setPropertyMemorySearchOpen] = useState(false);
+  const [duplicateLookupPending, setDuplicateLookupPending] = useState<string | null>(null);
+  const duplicateLookupRequestRef = useRef(0);
   const [marketMemoryPreview, setMarketMemoryPreview] = useState<CurrentProjectsMarketMemoryPreview | null>(null);
   const [selectedMarketMemoryAnchor, setSelectedMarketMemoryAnchor] = useState<MarketMemoryAnchor | null>(null);
   const [propertyMemoryReviewOpen, setPropertyMemoryReviewOpen] = useState(false);
@@ -511,33 +475,10 @@ export default function HomePage() {
   const selectedImportItemId = selectedMarketMemoryAnchor?.persistence?.state === 'pending'
     ? selectedMarketMemoryAnchor.persistence.importItemId || null
     : null;
-  const propertyMemoryReviewQuery = usePropertyMemoryReview({
+  const propertyMemoryReviewQuery = usePropertyMemoryReviewItem(selectedImportItemId, {
     enabled: Boolean(selectedImportItemId) && !isDemoMode,
-    limit: 250,
   });
-  const selectedPropertyMemoryReviewItem = useMemo(
-    () => propertyMemoryReviewQuery.data?.rows.find((item) => item.id === selectedImportItemId) || null,
-    [propertyMemoryReviewQuery.data?.rows, selectedImportItemId],
-  );
-  const prospectMergeCandidatesQuery = useProspectMergeCandidates({
-    enabled: Boolean(selectedMarketMemoryAnchor || selectedProspect) && !isDemoMode,
-    limit: 50,
-  });
-  const selectedDuplicateProspectGroup = useMemo(
-    () => findDuplicateProspectGroupForAnchor(
-      selectedMarketMemoryAnchor,
-      prospectMergeCandidatesQuery.data?.groups || [],
-    ),
-    [prospectMergeCandidatesQuery.data?.groups, selectedMarketMemoryAnchor],
-  );
-  const selectedProspectDuplicateGroup = useMemo(
-    () => selectedProspect
-      ? (prospectMergeCandidatesQuery.data?.groups || []).find((group) => (
-          group.prospects.some((prospect) => prospect.id === selectedProspect.id)
-        )) || null
-      : null,
-    [prospectMergeCandidatesQuery.data?.groups, selectedProspect],
-  );
+  const selectedPropertyMemoryReviewItem = propertyMemoryReviewQuery.data?.item || null;
   const quickPropertyMemoryApprovalAvailable = selectedPropertyMemoryReviewItem
     && !propertyMemoryReviewQuery.isFetching
     && !propertyMemoryReviewQuery.error
@@ -1965,6 +1906,8 @@ export default function HomePage() {
   }, [editingProspectId, flushHomeQueuedSave, savePolygonChanges]);
 
   const applyMapSelection = useCallback((target: MapSelectionTarget) => {
+    duplicateLookupRequestRef.current += 1;
+    setDuplicateLookupPending(null);
     setPropertyMemoryReviewOpen(false);
     setProspectMergeGroup(null);
     setPropertyMemorySearchOpen(false);
@@ -2125,6 +2068,8 @@ export default function HomePage() {
   const closeMarketMemoryStory = useCallback(() => {
     setPropertyMemoryReviewOpen(false);
     setProspectMergeGroup(null);
+    duplicateLookupRequestRef.current += 1;
+    setDuplicateLookupPending(null);
     setSelectedMarketMemoryAnchor(null);
     const focusTarget = marketMemoryFocusReturnRef.current;
     marketMemoryFocusReturnRef.current = null;
@@ -2150,25 +2095,6 @@ export default function HomePage() {
     if (!selectedPropertyMemoryReviewItem || !quickPropertyMemoryApprovalAvailable) return;
     submitPropertyMemoryDecision(buildQuickPropertyMemoryApproval(selectedPropertyMemoryReviewItem));
   }, [quickPropertyMemoryApprovalAvailable, selectedPropertyMemoryReviewItem, submitPropertyMemoryDecision]);
-
-  const handleComparePropertyDuplicates = useCallback((prospectIds: string[] = []) => {
-    const requestedIds = new Set(prospectIds);
-    const requestedGroup = requestedIds.size >= 2
-      ? (prospectMergeCandidatesQuery.data?.groups || []).find((group) => (
-          group.prospects.filter((prospect) => requestedIds.has(prospect.id)).length >= 2
-        ))
-      : null;
-    const group = requestedIds.size >= 2 ? requestedGroup : selectedDuplicateProspectGroup;
-    if (!group) {
-      toast({
-        title: 'No precise duplicate pair found',
-        description: 'Level CRE will keep these records separate until there is enough matching evidence.',
-      });
-      return;
-    }
-    setPropertyMemoryReviewOpen(false);
-    setProspectMergeGroup(group);
-  }, [prospectMergeCandidatesQuery.data?.groups, selectedDuplicateProspectGroup, toast]);
 
   const handlePropertyMemorySearchSelect = useCallback(async (row: PropertyMemorySearchRow) => {
     const anchor = marketMemoryAnchors.find((candidate) => candidate.id === row.anchor.id)
@@ -2211,7 +2137,99 @@ export default function HomePage() {
   const clearMarketMemoryPreview = useCallback(() => {
     setVisibleMarketMemoryLayers(new Set<MarketMemoryLayer>());
     setSelectedMarketMemoryAnchor(null);
+    setPropertyMemoryReviewOpen(false);
+    setProspectMergeGroup(null);
+    duplicateLookupRequestRef.current += 1;
+    setDuplicateLookupPending(null);
   }, []);
+
+  const checkTargetedDuplicates = useCallback(async (target: ProspectMergeCandidateTarget) => {
+    const requestId = duplicateLookupRequestRef.current + 1;
+    duplicateLookupRequestRef.current = requestId;
+    const pendingKey = target.prospectId || target.propertyReviewItemId || 'selected';
+    const normalizedTarget = { ...target, limit: 10 };
+    setDuplicateLookupPending(pendingKey);
+    try {
+      const result = await queryClient.fetchQuery({
+        queryKey: prospectMergeKeys.candidates(normalizedTarget),
+        queryFn: () => fetchProspectMergeCandidates(normalizedTarget),
+        staleTime: 30_000,
+      });
+      if (duplicateLookupRequestRef.current !== requestId) return;
+      const group = result.groups[0];
+      if (!group) {
+        toast({ title: 'No duplicate map records found', description: 'The selected property has no targeted duplicate candidates.' });
+        return;
+      }
+      setPropertyMemoryReviewOpen(false);
+      setProspectMergeGroup(group);
+    } catch (error) {
+      if (duplicateLookupRequestRef.current !== requestId) return;
+      toast({
+        title: 'Could not check duplicates',
+        description: error instanceof Error ? error.message : 'Targeted duplicate lookup failed.',
+        variant: 'destructive',
+      });
+    } finally {
+      if (duplicateLookupRequestRef.current === requestId) setDuplicateLookupPending(null);
+    }
+  }, [toast]);
+
+  const clusteredMapMarkerEntries = useMemo<ClusteredMapMarkerEntry[]>(() => {
+    const prospectMarkers = renderableProspects.flatMap((entry) => {
+      if (entry.kind !== 'point') return [];
+      const category = entry.prospect.status === 'listing'
+        ? 'listing' as const
+        : entry.prospect.status === 'client'
+          ? 'client' as const
+          : 'prospect' as const;
+      return [{
+        id: `prospect:${entry.id}`,
+        position: entry.position,
+        category,
+        title: entry.markerTitle || getProspectDisplayName(entry.prospect),
+        color: entry.color,
+        borderColor: entry.memoryBorderColor,
+        label: entry.memoryLabel,
+        scale: 8,
+        zIndex: entry.memoryLabel ? 8 : 2,
+        onClick: () => handleProspectClick(entry.prospect),
+      }];
+    });
+    const memoryMarkers = standaloneMarketMemoryAnchors.flatMap((anchor) => {
+      const layer = anchor.previewLayer || anchor.baseLayer;
+      if (!visibleMarketMemoryLayers.has(layer)) return [];
+      const marker = MARKET_MEMORY_MARKER_META[layer];
+      const markerTitle = anchor.persistence?.state === 'pending'
+        ? layer === 'review' ? 'Conflict review pending' : 'Awaiting broker approval'
+        : marker.title;
+      return [{
+        id: `memory:${anchor.id}`,
+        position: { lat: anchor.latitude, lng: anchor.longitude },
+        category: layer === 'review' ? 'review' as const : 'memory' as const,
+        title: `${markerTitle}: ${anchor.address}`,
+        color: marker.color,
+        borderColor: '#ffffff',
+        label: marker.label,
+        scale: 11,
+        zIndex: 5,
+        onClick: () => handleMarketMemoryAnchorClick(anchor),
+      }];
+    });
+    return [...prospectMarkers, ...memoryMarkers];
+  }, [handleMarketMemoryAnchorClick, handleProspectClick, renderableProspects, standaloneMarketMemoryAnchors, visibleMarketMemoryLayers]);
+
+  const selectedMapMarkerIds = useMemo(() => {
+    const selected = new Set<string>();
+    if (selectedProspect) selected.add(`prospect:${selectedProspect.id}`);
+    if (selectedMarketMemoryAnchor) {
+      const linkedProspectId = selectedMarketMemoryAnchor.persistence?.linkedProspectId;
+      selected.add(linkedProspectId
+        ? `prospect:${linkedProspectId}`
+        : `memory:${selectedMarketMemoryAnchor.id}`);
+    }
+    return selected;
+  }, [selectedMarketMemoryAnchor, selectedProspect]);
 
   const prospectsErrorMessage = prospectsError instanceof Error
     ? prospectsError.message
@@ -2262,6 +2280,7 @@ export default function HomePage() {
             if (!map) return;
             const c = map.getCenter();
             const z = map.getZoom();
+            if (typeof z === 'number') setZoom((current) => current === z ? current : z);
             if (c) {
               const next = { lat: c.lat(), lng: c.lng() };
               // Persist viewport only; avoid setting React state here to prevent render loops
@@ -2291,12 +2310,15 @@ export default function HomePage() {
             editingProspectId={editingProspectId}
             onProspectClick={handleProspectClick}
             polygonRefs={polygonRefs}
+            bounds={bounds}
+            selectedProspectId={selectedProspect?.id || null}
           />
 
-          <MarketMemoryOverlayLayer
-            anchors={standaloneMarketMemoryAnchors}
-            visibleLayers={visibleMarketMemoryLayers}
-            onAnchorClick={handleMarketMemoryAnchorClick}
+          <ClusteredMapMarkers
+            entries={clusteredMapMarkerEntries}
+            bounds={bounds}
+            zoom={zoom}
+            selectedIds={selectedMapMarkerIds}
             interactive={terraMode === 'select'}
           />
 
@@ -2375,7 +2397,7 @@ export default function HomePage() {
         activeTerraMode={terraMode as any}
       />
 
-      <div className="absolute right-3 top-3 z-40" style={{ pointerEvents: 'auto' }}>
+      <div className="absolute right-3 top-[7.25rem] z-40 sm:top-3" style={{ pointerEvents: 'auto' }}>
         <MarketMemoryLayerControl
           anchors={marketMemoryAnchors}
           visibleLayers={visibleMarketMemoryLayers}
@@ -2491,26 +2513,6 @@ export default function HomePage() {
           ) : null}
           footerLeadingActions={(
             <>
-              {selectedProspectDuplicateGroup ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      onClick={() => setProspectMergeGroup(selectedProspectDuplicateGroup)}
-                      variant="outline"
-                      className="h-8 w-8 p-0"
-                      aria-label="Compare duplicate map records"
-                      title="Compare records"
-                      disabled={prospectSaveStatus !== 'saved'}
-                    >
-                      <GitMerge className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {prospectSaveStatus === 'saved' ? 'Compare records' : 'Available after saving'}
-                  </TooltipContent>
-                </Tooltip>
-              ) : null}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -2540,6 +2542,27 @@ export default function HomePage() {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Quick meeting follow-up</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() => void checkTargetedDuplicates({ prospectId: selectedProspect.id })}
+                    variant="outline"
+                    className="h-8 w-8 p-0"
+                    aria-label="Check selected prospect for duplicates"
+                    title="Check duplicates"
+                    disabled={prospectSaveStatus !== 'saved' || duplicateLookupPending === selectedProspect.id}
+                  >
+                    <GitMerge className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {prospectSaveStatus !== 'saved'
+                    ? 'Wait for this prospect to finish saving'
+                    : duplicateLookupPending === selectedProspect.id
+                      ? 'Checking this prospect...'
+                      : 'Check this prospect for duplicates'}
+                </TooltipContent>
               </Tooltip>
             </>
           )}
@@ -2602,8 +2625,8 @@ export default function HomePage() {
           onQuickApprove={quickPropertyMemoryApprovalAvailable
             ? handleQuickPropertyMemoryApproval
             : undefined}
-          onCompareDuplicates={selectedDuplicateProspectGroup
-            ? () => handleComparePropertyDuplicates()
+          onCompareDuplicates={selectedImportItemId
+            ? () => { void checkTargetedDuplicates({ propertyReviewItemId: selectedImportItemId }); }
             : undefined}
           onWorkProspect={selectedMarketMemoryAnchor.persistence?.linkedProspectId
               ? () => {
@@ -2624,7 +2647,9 @@ export default function HomePage() {
         onOpenChange={setPropertyMemoryReviewOpen}
         onApprove={submitPropertyMemoryDecision}
         onReject={submitPropertyMemoryDecision}
-        onCompareDuplicates={handleComparePropertyDuplicates}
+        onCompareDuplicates={() => {
+          if (selectedImportItemId) void checkTargetedDuplicates({ propertyReviewItemId: selectedImportItemId });
+        }}
         onRetry={() => { void propertyMemoryReviewQuery.refetch(); }}
       />
 

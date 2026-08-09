@@ -11,6 +11,7 @@ import {
   buildBrokerageMemoryReviewReasons,
   buildNewBrokerageMemoryDossierInsert,
   decideBrokerageMemoryItem,
+  getBrokerageMemoryReviewItem,
   previewBrokerageMemoryImport,
 } from './brokerageMemoryService'
 
@@ -321,4 +322,48 @@ test('brokerage-memory approval rejects a tombstone before locking or writing th
   assert.ok(prospectLock >= 0)
   assert.equal(itemLock, -1)
   assert.equal(transactionalQueries.includes('ROLLBACK'), true)
+})
+
+test('single-item review lookup scopes the selected item to its broker', async () => {
+  const queries: Array<{ sql: string; values?: unknown[] }> = []
+  const sourceAnchor = anchor()
+  const pool = {
+    query: async (sql: string, values?: unknown[]) => {
+      queries.push({ sql, values })
+      if (/WHERE items\.id = \$1 AND items\.user_id = \$2/i.test(sql)) {
+        return { rows: [{
+          id: 'item-one',
+          import_id: 'import-one',
+          user_id: 'user-one',
+          status: 'pending',
+          suggested_layer: 'review',
+          matched_dossier_id: null,
+          matched_prospect_id: null,
+          matched_listing_id: null,
+          match_confidence: 72,
+          resolution_json: {},
+          review_reasons: ['Confirm the canonical parcel'],
+          anchor_payload: sourceAnchor,
+          lat: sourceAnchor.latitude,
+          lng: sourceAnchor.longitude,
+          source_file_name: 'memory.json',
+          created_at: '2026-08-08T12:00:00.000Z',
+          updated_at: '2026-08-08T12:00:00.000Z',
+        }] }
+      }
+      return { rows: [] }
+    },
+  }
+
+  const result = await getBrokerageMemoryReviewItem({
+    pool: pool as never,
+    userId: 'user-one',
+    itemId: 'item-one',
+  })
+
+  assert.equal(result.item.id, 'item-one')
+  assert.equal(result.item.anchor.address, sourceAnchor.address)
+  const selectedQuery = queries.find(({ sql }) => /WHERE items\.id = \$1/i.test(sql))
+  assert.deepEqual(selectedQuery?.values, ['item-one', 'user-one'])
+  assert.match(selectedQuery?.sql || '', /imports\.status <> 'superseded'/)
 })

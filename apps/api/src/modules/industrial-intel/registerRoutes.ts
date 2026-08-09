@@ -16,6 +16,7 @@ import {
   BrokerageMemoryPreviewInputSchema,
   BrokerageMemoryServiceError,
   decideBrokerageMemoryItem,
+  getBrokerageMemoryReviewItem,
   getBrokerageMemoryMap,
   listBrokerageMemoryReview,
   previewBrokerageMemoryImport,
@@ -1063,6 +1064,24 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/intel/brokerage-memory/items/:id/review", requireMarketRecordProposalAuth, async (req, res) => {
+    try {
+      await ensureIntelActor(req);
+      const result = await getBrokerageMemoryReviewItem({
+        pool,
+        userId: getUserId(req),
+        itemId: req.params.id,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof BrokerageMemoryServiceError) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      console.error("Error loading brokerage-memory review item:", error);
+      res.status(500).json({ message: "Failed to load brokerage-memory review item" });
+    }
+  });
+
   app.post("/api/intel/brokerage-memory/items/:id/decision", requireBrokerAuth, async (req, res) => {
     try {
       const parsed = BrokerageMemoryDecisionSchema.safeParse(req.body);
@@ -1133,6 +1152,8 @@ export function registerIndustrialIntelRoutes(app: Express): void {
         pool,
         userId: getUserId(req),
         limit: parsed.data.limit,
+        prospectId: parsed.data.prospectId,
+        propertyReviewItemId: parsed.data.propertyReviewItemId,
       });
       res.json(result);
     } catch (error) {

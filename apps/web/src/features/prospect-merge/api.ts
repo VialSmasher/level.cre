@@ -70,6 +70,12 @@ export type ProspectMergeCandidatesResponse = {
   groups: ProspectMergeCandidateGroup[]
 }
 
+export type ProspectMergeCandidateTarget = {
+  prospectId?: string
+  propertyReviewItemId?: string
+  limit?: number
+}
+
 export type ProspectMergeFieldComparison = {
   key: ProspectMergeFieldKey
   label: string
@@ -139,7 +145,13 @@ export const prospectMergeRoutes = {
 
 export const prospectMergeKeys = {
   all: ['prospect-merge'] as const,
-  candidates: (limit: number) => ['prospect-merge', 'candidates', limit] as const,
+  candidates: (target: ProspectMergeCandidateTarget) => [
+    'prospect-merge',
+    'candidates',
+    target.prospectId || '',
+    target.propertyReviewItemId || '',
+    target.limit || 20,
+  ] as const,
   preview: (canonicalProspectId: string, duplicateProspectId: string) => [
     'prospect-merge', 'preview', canonicalProspectId, duplicateProspectId,
   ] as const,
@@ -169,12 +181,26 @@ async function invalidateProspectMergeConsumers(queryClient: QueryClient) {
   ])
 }
 
-export function useProspectMergeCandidates(options: { enabled?: boolean; limit?: number } = {}) {
-  const limit = Math.min(Math.max(Math.trunc(options.limit ?? 20), 1), 50)
+export async function fetchProspectMergeCandidates(
+  target: ProspectMergeCandidateTarget,
+): Promise<ProspectMergeCandidatesResponse> {
+  const limit = Math.min(Math.max(Math.trunc(target.limit ?? 20), 1), 50)
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (target.prospectId) params.set('prospectId', target.prospectId)
+  if (target.propertyReviewItemId) params.set('propertyReviewItemId', target.propertyReviewItemId)
+  return responseJson(await apiRequest('GET', `${prospectMergeRoutes.candidates}?${params.toString()}`))
+}
+
+export function useProspectMergeCandidates(
+  target: ProspectMergeCandidateTarget,
+  options: { enabled?: boolean } = {},
+) {
+  const normalizedTarget = { ...target, limit: Math.min(Math.max(Math.trunc(target.limit ?? 20), 1), 50) }
+  const hasTarget = Boolean(target.prospectId || target.propertyReviewItemId)
   return useQuery<ProspectMergeCandidatesResponse>({
-    queryKey: prospectMergeKeys.candidates(limit),
-    queryFn: async () => responseJson(await apiRequest('GET', `${prospectMergeRoutes.candidates}?limit=${limit}`)),
-    enabled: options.enabled ?? true,
+    queryKey: prospectMergeKeys.candidates(normalizedTarget),
+    queryFn: () => fetchProspectMergeCandidates(normalizedTarget),
+    enabled: hasTarget && (options.enabled ?? true),
     staleTime: 30_000,
   })
 }

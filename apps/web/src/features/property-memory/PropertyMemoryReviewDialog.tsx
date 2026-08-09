@@ -75,7 +75,7 @@ export function PropertyMemoryReviewDialog({
               <FileCheck2 className="h-5 w-5 text-blue-700" aria-hidden />
               Review changes
             </h2>
-            <p className="mt-1 text-xs text-slate-500">Choose what to save.</p>
+            <p className="mt-1 text-xs text-slate-500">Only this selected property is loaded. Choose what to save.</p>
           </div>
           <Button
             type="button"
@@ -95,7 +95,7 @@ export function PropertyMemoryReviewDialog({
         {isLoading ? (
           <div className="flex items-center gap-2 px-5 py-8 text-sm text-blue-900" role="status" aria-live="polite">
             <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden />
-            Loading changes
+            Loading the selected proposal
           </div>
         ) : null}
 

@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   Clock3,
   Flame,
-  GitMerge,
   Inbox,
   ListTodo,
   Mail,
@@ -40,11 +39,6 @@ import {
   ProspectMergeDialog,
   type ProspectMergeDialogCandidate,
 } from '@/features/prospect-merge/ProspectMergeDialog'
-import {
-  prospectMergeKeys,
-  type ProspectMergeCandidateProspect,
-  useProspectMergeCandidates,
-} from '@/features/prospect-merge/api'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Select,
@@ -371,18 +365,6 @@ function prospectLabel(prospect: Prospect) {
   return prospect.contactCompany || prospect.businessName || prospect.name || 'Untitled prospect'
 }
 
-function prospectRelationshipSummary(candidate: ProspectMergeCandidateProspect) {
-  const counts = candidate.relationshipCounts
-  const parts = [
-    counts.listings ? `${counts.listings} listing${counts.listings === 1 ? '' : 's'}` : null,
-    counts.interactions ? `${counts.interactions} interaction${counts.interactions === 1 ? '' : 's'}` : null,
-    counts.activities ? `${counts.activities} activit${counts.activities === 1 ? 'y' : 'ies'}` : null,
-    counts.opportunities ? `${counts.opportunities} pursuit${counts.opportunities === 1 ? '' : 's'}` : null,
-    counts.dossiers ? `${counts.dossiers} dossier${counts.dossiers === 1 ? '' : 's'}` : null,
-  ].filter((part): part is string => Boolean(part))
-  return parts.join(' / ') || 'No linked history yet'
-}
-
 function actionHref(action: SalesBriefAction) {
   if (action.automationHints?.href) return action.automationHints.href
   if (action.prospect?.id) return `/app?prospectId=${encodeURIComponent(action.prospect.id)}`
@@ -580,10 +562,6 @@ export default function DailyDeskPage() {
     queryKey: ['/api/activity-events?source=codex_property_title_audit&matchStatus=needs_review&limit=250'],
   })
   const propertyMemoryReviewQuery = usePropertyMemoryReview({ limit: 250 })
-  const duplicateCandidatesQuery = useProspectMergeCandidates({
-    enabled: activeTab === 'review',
-    limit: 20,
-  })
   const watchlistQuery = useQuery<IntelWatchlistResponse>({
     queryKey: ['/api/intel/watchlist?days=30&limit=12'],
   })
@@ -648,7 +626,6 @@ export default function DailyDeskPage() {
   const opportunityProposals = opportunityProposalsQuery.data?.rows || []
   const propertyEvidence = propertyEvidenceQuery.data?.rows || []
   const propertyMemoryItems = propertyMemoryReviewQuery.data?.rows || []
-  const duplicateCandidateGroups = duplicateCandidatesQuery.data?.groups || []
   const prospects = useMemo(
     () => [...(prospectsQuery.data || [])].sort((left, right) => prospectLabel(left).localeCompare(prospectLabel(right))),
     [prospectsQuery.data],
@@ -784,7 +761,6 @@ export default function DailyDeskPage() {
     queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] })
     queryClient.invalidateQueries({ queryKey: ['/api/automation/activity-pulse'] })
     queryClient.invalidateQueries({ queryKey: ['property-memory'] })
-    queryClient.invalidateQueries({ queryKey: prospectMergeKeys.all })
   }
 
   const handleEvidenceImported = () => {
@@ -796,11 +772,11 @@ export default function DailyDeskPage() {
   const tabCounts: Record<DeskTab, number> = {
     today: queues.today.length,
     waiting: queues.waiting.length,
-    review: queues.review.length + duplicateCandidateGroups.length + propertyMemoryItems.length + imports.length + marketProposals.length + opportunityProposals.length + propertyEvidence.length,
+    review: queues.review.length + propertyMemoryItems.length + imports.length + marketProposals.length + opportunityProposals.length + propertyEvidence.length,
     develop: queues.develop.length,
   }
-  const isLoading = salesBriefQuery.isLoading || importsQuery.isLoading || marketProposalsQuery.isLoading || opportunityProposalsQuery.isLoading || propertyEvidenceQuery.isLoading || duplicateCandidatesQuery.isLoading
-  const hasError = salesBriefQuery.isError || importsQuery.isError || marketProposalsQuery.isError || opportunityProposalsQuery.isError || propertyEvidenceQuery.isError || propertyMemoryReviewQuery.isError || duplicateCandidatesQuery.isError
+  const isLoading = salesBriefQuery.isLoading || importsQuery.isLoading || marketProposalsQuery.isLoading || opportunityProposalsQuery.isLoading || propertyEvidenceQuery.isLoading
+  const hasError = salesBriefQuery.isError || importsQuery.isError || marketProposalsQuery.isError || opportunityProposalsQuery.isError || propertyEvidenceQuery.isError || propertyMemoryReviewQuery.isError
   const generatedAt = formatWhen(salesBriefQuery.data?.generatedAt)
   const pulseMetrics = [
     { group: 'Effort', label: 'Touches / 28 days', value: activityPulseQuery.data?.total ?? 0, icon: Activity, tone: 'text-blue-700 bg-blue-50' },
@@ -941,58 +917,6 @@ export default function DailyDeskPage() {
                   <ActionRow key={action.id} action={action} featured={activeTab === 'today' && index === 0} />
                 ))
               : null}
-
-            {activeTab === 'review' && duplicateCandidateGroups.length ? (
-              <section aria-labelledby="duplicate-prospect-review-heading">
-                <div className="border-b border-violet-200 bg-violet-50 px-4 py-3 sm:px-5">
-                  <h3 id="duplicate-prospect-review-heading" className="flex items-center gap-2 text-sm font-semibold text-violet-950">
-                    <GitMerge className="h-4 w-4" aria-hidden />
-                    Duplicate map records
-                  </h3>
-                  <p className="mt-0.5 text-xs text-violet-800">Compare every field and linked relationship before choosing the record that survives.</p>
-                </div>
-                {duplicateCandidateGroups.map((group) => (
-                  <article key={group.id} className="border-b border-slate-200 px-4 py-4 sm:px-5">
-                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-xs font-medium text-violet-700">{group.reasons.join(' / ') || 'Potential duplicate property identity'}</p>
-                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                          {group.prospects.map((candidate) => (
-                            <div key={candidate.id} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="text-sm font-semibold text-slate-950">{candidate.contactCompany || candidate.businessName || candidate.name}</p>
-                                {candidate.id === group.recommendedCanonicalId ? (
-                                  <Badge variant="outline" className="rounded border-violet-200 bg-white text-violet-800">Suggested survivor</Badge>
-                                ) : null}
-                              </div>
-                              <p className="mt-1 text-xs text-slate-600">{candidate.address || 'No address'} / {candidate.status.replace(/_/g, ' ')}</p>
-                              <p className="mt-1 text-xs text-slate-500">{prospectRelationshipSummary(candidate)}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="shrink-0"
-                        onClick={() => openProspectMerge(
-                          group.prospects.map((candidate) => ({
-                            id: candidate.id,
-                            label: candidate.contactCompany || candidate.businessName || candidate.name,
-                            description: [candidate.address, candidate.status.replace(/_/g, ' ')].filter(Boolean).join(' / '),
-                          })),
-                          group.recommendedCanonicalId,
-                        )}
-                      >
-                        <GitMerge className="h-4 w-4" aria-hidden />
-                        Compare
-                      </Button>
-                    </div>
-                  </article>
-                ))}
-              </section>
-            ) : null}
 
             {activeTab === 'review' && propertyMemoryReviewQuery.isLoading ? (
               <div className="border-b border-slate-200 px-5 py-5">
@@ -1252,7 +1176,7 @@ export default function DailyDeskPage() {
                   )
                 })}
                 {queues.review.map((action) => <ActionRow key={action.id} action={action} />)}
-                {duplicateCandidateGroups.length === 0 && propertyMemoryItems.length === 0 && marketProposals.length === 0 && opportunityProposals.length === 0 && propertyEvidence.length === 0 && imports.length === 0 && queues.review.length === 0 ? <EmptyQueue tab="review" /> : null}
+                {propertyMemoryItems.length === 0 && marketProposals.length === 0 && opportunityProposals.length === 0 && propertyEvidence.length === 0 && imports.length === 0 && queues.review.length === 0 ? <EmptyQueue tab="review" /> : null}
               </div>
             ) : null}
           </section>

@@ -1,4 +1,5 @@
-import { Database, Layers3, RotateCcw, Search } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronDown, Database, Layers3, RotateCcw, Search } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -22,6 +23,7 @@ const LAYERS: Array<{ key: MarketMemoryLayer; label: string; color: string }> = 
 ]
 
 export function MarketMemoryLayerControl({ anchors, visibleLayers, onOpenPreview, onOpenSearch, onToggleLayer, onClear }: Props) {
+  const [mobileOpen, setMobileOpen] = useState(false)
   if (anchors.length === 0) {
     return (
       <Button type="button" variant="outline" className="bg-white shadow-lg" onClick={onOpenPreview}>
@@ -32,8 +34,7 @@ export function MarketMemoryLayerControl({ anchors, visibleLayers, onOpenPreview
   }
 
   const pendingCount = anchors.filter((anchor) => anchor.persistence?.state === 'pending').length
-
-  return (
+  const panel = (
     <div className="w-64 rounded-lg border border-slate-200 bg-white/95 shadow-xl backdrop-blur-sm">
       <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2.5">
         <div>
@@ -75,5 +76,28 @@ export function MarketMemoryLayerControl({ anchors, visibleLayers, onOpenPreview
         <Button type="button" variant="ghost" size="sm" className="h-7 w-full text-xs text-slate-600" onClick={onClear}>Hide all memory layers</Button>
       </div>
     </div>
+  )
+
+  return (
+    <>
+      <div className="sm:hidden">
+        <Button
+          type="button"
+          variant="outline"
+          className="h-9 gap-2 bg-white px-3 shadow-lg"
+          onClick={() => setMobileOpen((open) => !open)}
+          aria-expanded={mobileOpen}
+          aria-label="Toggle brokerage memory controls"
+        >
+          <Layers3 className="h-4 w-4 text-blue-700" />
+          Memory
+          <span className="rounded bg-slate-100 px-1.5 text-xs tabular-nums text-slate-600">{anchors.length}</span>
+          {pendingCount ? <span className="h-2 w-2 rounded-full bg-amber-500" aria-label={`${pendingCount} awaiting review`} /> : null}
+          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${mobileOpen ? 'rotate-180' : ''}`} aria-hidden />
+        </Button>
+        {mobileOpen ? <div className="mt-2">{panel}</div> : null}
+      </div>
+      <div className="hidden sm:block">{panel}</div>
+    </>
   )
 }
