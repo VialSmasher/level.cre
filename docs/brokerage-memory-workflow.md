@@ -36,10 +36,12 @@ For a Codex-assisted run:
 
 ## Safe release and pilot
 
-1. Deploy the backend before exposing the frontend workflow. Railway's API `prestart` hook applies the checksummed `drizzle/0018_brokerage_memory.sql` transaction before the new server begins listening.
-2. Verify the live brokerage-memory endpoint does not return the migration-required `503`. If Railway is configured to bypass npm lifecycle scripts, run `npm --workspace @apps/api run brokerage-memory:migrate` once in its production shell.
-3. Stage the 60-title / 55-property source and verify zero prospect mutations and zero canonical dossier writes.
-4. Approve only a small pilot: one exact existing property, one clean new memory property, and one conflict case.
-5. Reload the main map and verify one-pin composition, provenance, story detail, and preserved manual fields before processing the remaining queue.
+1. Deploy backend/schema changes before exposing the frontend workflow. Railway's API `prestart` hook applies the ordered, checksummed `drizzle/0018_brokerage_memory.sql` and `drizzle/0019_prospect_merge.sql` migrations in one transaction before the new server begins listening.
+2. Confirm Railway starts through `npm start` (or `npm --workspace @apps/api run start`) so the API workspace `prestart` lifecycle runs. If the service bypasses npm lifecycle scripts, run `npm --workspace @apps/api run brokerage-memory:migrate` in its production shell before starting the new API.
+3. In Railway logs, verify `Level CRE brokerage-memory migrations are current` appears before the API begins listening. `GET /health` proves only that the database is reachable; also verify the deployed commit at `GET /api/version`, an authenticated `GET /api/prospects`, `GET /api/prospects/duplicate-merges/candidates`, and `GET /api/intel/brokerage-memory/search`.
+4. Deploy the frontend only after those backend checks pass. Vercel previews use the production Railway API, so preview merge actions also target production data.
+5. Stage the 60-title / 55-property source and verify zero prospect mutations and zero canonical dossier writes.
+6. Approve only a small pilot: one exact existing property, one clean new memory property, and one conflict case. Duplicate consolidation must first be previewed and explicitly confirmed by the broker.
+7. Reload the main map and verify one-pin composition, provenance, story detail, property-memory search, and preserved manual fields before processing the remaining queue.
 
-Do not use `db:push` for this migration. The raw SQL migration is the schema authority for the dossier and brokerage-memory tables.
+Do not use `db:push` or `db:prepare`. Both commands intentionally fail closed because the reviewed SQL migrations contain constraints, partial indexes, expression indexes, and audit protections that must not be reconciled by an unmanaged Drizzle push. The raw SQL migration chain is the schema authority for these tables. The `brokerage-memory:migrate` command is incremental and assumes the baseline Level CRE schema already exists; it is not a fresh-database bootstrap.

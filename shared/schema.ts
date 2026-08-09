@@ -329,39 +329,111 @@ export const pgGeometry = customType<{ data: unknown; driverData: unknown }>({
   dataType() { return 'geometry'; },
 });
 
-export const prospects = pgTable("prospects", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").notNull().references(() => users.id),
-  name: varchar("name").notNull(),
-  status: varchar("status").notNull(), // prospect, contacted, listing, client, no_go
-  notes: varchar("notes").default(""),
-  // PostGIS geometry column (SRID enforced via DB constraint/migration)
-  geometry: pgGeometry("geometry").notNull(),
-  submarketId: varchar("submarket_id"),
-  lastContactDate: varchar("last_contact_date"),
-  followUpTimeframe: varchar("follow_up_timeframe"), // 1_month, 3_month, 6_month, 1_year
-  // Calculated due date for next follow-up
-  followUpDueDate: timestamp("follow_up_due_date"),
-  contactName: varchar("contact_name"),
-  contactEmail: varchar("contact_email"),
-  contactPhone: varchar("contact_phone"),
-  contactCompany: varchar("contact_company"),
-  buildingSf: integer("building_sf"), // Building area in square feet
-  lotSizeAcres: numeric("lot_size_acres", { precision: 10, scale: 2 }), // Lot size in acres
-  aiMetadata: jsonb("ai_metadata"), // Reserved for AI enrichment data
-  businessName: varchar("business_name"), // Business name from Google Places
-  websiteUrl: varchar("website_url"), // Business website URL
-  address: varchar("address"),
-  locationLat: doublePrecision("location_lat"),
-  locationLng: doublePrecision("location_lng"),
-  geohash: varchar("geohash"),
-  marketKey: varchar("market_key"),
-  marketConfidence: integer("market_confidence"),
-  marketContextSource: varchar("market_context_source"),
-  marketContextStatus: varchar("market_context_status").default("unknown"),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
+export const prospects = pgTable(
+  "prospects",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: varchar("user_id").notNull().references(() => users.id),
+    name: varchar("name").notNull(),
+    status: varchar("status").notNull(), // prospect, contacted, listing, client, no_go
+    notes: varchar("notes").default(""),
+    // PostGIS geometry column (SRID enforced via DB constraint/migration)
+    geometry: pgGeometry("geometry").notNull(),
+    submarketId: varchar("submarket_id"),
+    lastContactDate: varchar("last_contact_date"),
+    followUpTimeframe: varchar("follow_up_timeframe"), // 1_month, 3_month, 6_month, 1_year
+    // Calculated due date for next follow-up
+    followUpDueDate: timestamp("follow_up_due_date"),
+    contactName: varchar("contact_name"),
+    contactEmail: varchar("contact_email"),
+    contactPhone: varchar("contact_phone"),
+    contactCompany: varchar("contact_company"),
+    buildingSf: integer("building_sf"), // Building area in square feet
+    lotSizeAcres: numeric("lot_size_acres", { precision: 10, scale: 2 }), // Lot size in acres
+    aiMetadata: jsonb("ai_metadata"), // Reserved for AI enrichment data
+    businessName: varchar("business_name"), // Business name from Google Places
+    websiteUrl: varchar("website_url"), // Business website URL
+    address: varchar("address"),
+    locationLat: doublePrecision("location_lat"),
+    locationLng: doublePrecision("location_lng"),
+    geohash: varchar("geohash"),
+    marketKey: varchar("market_key"),
+    marketConfidence: integer("market_confidence"),
+    marketContextSource: varchar("market_context_source"),
+    marketContextStatus: varchar("market_context_status").default("unknown"),
+    mergedIntoProspectId: varchar("merged_into_prospect_id").references(
+      (): AnyPgColumn => prospects.id,
+      { onDelete: "restrict" },
+    ),
+    mergedAt: timestamp("merged_at", { withTimezone: true }),
+    mergedByUserId: varchar("merged_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    mergeEventId: varchar("merge_event_id").references(
+      (): AnyPgColumn => prospectMergeEvents.id,
+      { onDelete: "restrict" },
+    ),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    check(
+      "chk_prospects_not_self_merged",
+      sql`${table.mergedIntoProspectId} IS NULL OR ${table.mergedIntoProspectId} <> ${table.id}`,
+    ),
+    check(
+      "chk_prospects_merge_state_complete",
+      sql`(
+        ${table.mergedIntoProspectId} IS NULL
+        AND ${table.mergedAt} IS NULL
+        AND ${table.mergeEventId} IS NULL
+      ) OR (
+        ${table.mergedIntoProspectId} IS NOT NULL
+        AND ${table.mergedAt} IS NOT NULL
+        AND ${table.mergeEventId} IS NOT NULL
+      )`,
+    ),
+    index("idx_prospects_active_user_updated")
+      .on(table.userId, table.updatedAt.desc())
+      .where(sql`${table.mergedIntoProspectId} IS NULL`),
+    index("idx_prospects_merged_into")
+      .on(table.mergedIntoProspectId)
+      .where(sql`${table.mergedIntoProspectId} IS NOT NULL`),
+  ],
+);
+
+export const prospectMergeEvents = pgTable(
+  "prospect_merge_events",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()::text`),
+    userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    canonicalProspectId: varchar("canonical_prospect_id").notNull().references(() => prospects.id, { onDelete: "restrict" }),
+    duplicateProspectIds: varchar("duplicate_prospect_ids").array().notNull(),
+    previewHash: varchar("preview_hash").notNull(),
+    idempotencyKey: varchar("idempotency_key").notNull(),
+    fieldChoices: jsonb("field_choices").$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+    beforeSnapshot: jsonb("before_snapshot").$type<Record<string, unknown>>().notNull(),
+    relationshipSnapshot: jsonb("relationship_snapshot").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    afterSnapshot: jsonb("after_snapshot").$type<Record<string, unknown>>(),
+    movedCounts: jsonb("moved_counts").$type<Record<string, number>>().notNull().default(sql`'{}'::jsonb`),
+    status: varchar("status").notNull().default("completed"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
+    reversedByUserId: varchar("reversed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  },
+  (table) => [
+    check(
+      "chk_prospect_merge_event_status",
+      sql`${table.status} IN ('completed', 'reversed')`,
+    ),
+    check(
+      "chk_prospect_merge_event_duplicates",
+      sql`cardinality(${table.duplicateProspectIds}) BETWEEN 1 AND 10`,
+    ),
+    uniqueIndex("uq_prospect_merge_events_idempotency").on(table.userId, table.idempotencyKey),
+    index("idx_prospect_merge_events_user_created").on(table.userId, table.createdAt.desc()),
+    index("idx_prospect_merge_events_canonical").on(table.canonicalProspectId, table.createdAt.desc()),
+  ],
+).enableRLS();
 
 // Listing <-> Prospect link table (after prospects)
 export const listingProspects = pgTable(
@@ -1537,6 +1609,8 @@ export type BrokerageMemoryImport = typeof brokerageMemoryImports.$inferSelect;
 export type InsertBrokerageMemoryImport = typeof brokerageMemoryImports.$inferInsert;
 export type BrokerageMemoryItem = typeof brokerageMemoryItems.$inferSelect;
 export type InsertBrokerageMemoryItem = typeof brokerageMemoryItems.$inferInsert;
+export type ProspectMergeEvent = typeof prospectMergeEvents.$inferSelect;
+export type InsertProspectMergeEvent = typeof prospectMergeEvents.$inferInsert;
 export type IntelDossierFact = typeof intelDossierFacts.$inferSelect;
 export type InsertIntelDossierFact = typeof intelDossierFacts.$inferInsert;
 export type IntelDossierEntityLink = typeof intelDossierEntityLinks.$inferSelect;

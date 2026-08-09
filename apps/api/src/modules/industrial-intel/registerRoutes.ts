@@ -21,6 +21,23 @@ import {
   previewBrokerageMemoryImport,
   stageBrokerageMemoryImport,
 } from "../../lib/brokerageMemoryService";
+import {
+  ProspectMergeApplyInputSchema,
+  ProspectMergeCandidateQuerySchema,
+  ProspectMergePreviewInputSchema,
+  ProspectMergeServiceError,
+  ProspectMergeUndoInputSchema,
+  applyProspectMerge,
+  listProspectDuplicateCandidates,
+  previewProspectMerge,
+  resolveCanonicalProspect,
+  undoProspectMerge,
+} from "../../lib/prospectMergeService";
+import {
+  PropertyMemorySearchError,
+  PropertyMemorySearchQuerySchema,
+  searchPropertyMemory,
+} from "../../lib/propertyMemorySearchService";
 
 const intelRequirementSchema = z.object({
   title: z.string().trim().min(1),
@@ -1080,6 +1097,143 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       }
       console.error("Error loading brokerage-memory map:", error);
       res.status(500).json({ message: "Failed to load brokerage-memory map" });
+    }
+  });
+
+  app.get("/api/intel/brokerage-memory/search", requireMarketRecordProposalAuth, async (req, res) => {
+    try {
+      const parsed = PropertyMemorySearchQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid property-memory search", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const result = await searchPropertyMemory({
+        pool,
+        userId: getUserId(req),
+        query: parsed.data,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof PropertyMemorySearchError || error instanceof BrokerageMemoryServiceError) {
+        return res.status(error.status).json({ message: error.message });
+      }
+      console.error("Error searching property memory:", error);
+      res.status(500).json({ message: "Failed to search property memory" });
+    }
+  });
+
+  app.get("/api/prospects/duplicate-merges/candidates", requireMarketRecordProposalAuth, async (req, res) => {
+    try {
+      const parsed = ProspectMergeCandidateQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid duplicate candidate query", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const result = await listProspectDuplicateCandidates({
+        pool,
+        userId: getUserId(req),
+        limit: parsed.data.limit,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ProspectMergeServiceError) {
+        return res.status(error.status).json({ message: error.message, code: error.code, details: error.details });
+      }
+      console.error("Error loading duplicate prospect candidates:", error);
+      res.status(500).json({ message: "Failed to load duplicate prospect candidates" });
+    }
+  });
+
+  app.post("/api/prospects/duplicate-merges/preview", requireMarketRecordProposalAuth, async (req, res) => {
+    try {
+      const parsed = ProspectMergePreviewInputSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid prospect merge preview", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const result = await previewProspectMerge({
+        pool,
+        userId: getUserId(req),
+        ...parsed.data,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ProspectMergeServiceError) {
+        return res.status(error.status).json({ message: error.message, code: error.code, details: error.details });
+      }
+      console.error("Error previewing prospect merge:", error);
+      res.status(500).json({ message: "Failed to preview prospect merge" });
+    }
+  });
+
+  app.post("/api/prospects/duplicate-merges", requireBrokerAuth, async (req, res) => {
+    try {
+      const parsed = ProspectMergeApplyInputSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid prospect merge decision", issues: parsed.error.flatten() });
+      }
+      if (req.headers["x-demo-mode"] === "true") {
+        return res.status(409).json({ message: "Duplicate consolidation is available only against the durable database." });
+      }
+      await ensureIntelActor(req);
+      const result = await applyProspectMerge({
+        pool,
+        userId: getUserId(req),
+        ...parsed.data,
+      });
+      res.status(result.alreadyApplied ? 200 : 201).json(result);
+    } catch (error) {
+      if (error instanceof ProspectMergeServiceError) {
+        return res.status(error.status).json({ message: error.message, code: error.code, details: error.details });
+      }
+      console.error("Error applying prospect merge:", error);
+      res.status(500).json({ message: "Failed to consolidate duplicate prospect" });
+    }
+  });
+
+  app.post("/api/prospects/duplicate-merges/:eventId/undo", requireBrokerAuth, async (req, res) => {
+    try {
+      const parsed = ProspectMergeUndoInputSchema.safeParse(req.body);
+      if (!parsed.success || !z.string().uuid().safeParse(req.params.eventId).success) {
+        return res.status(400).json({
+          message: "Invalid prospect merge undo request",
+          issues: parsed.success ? undefined : parsed.error.flatten(),
+        });
+      }
+      if (req.headers["x-demo-mode"] === "true") {
+        return res.status(409).json({ message: "Duplicate consolidation undo is available only against the durable database." });
+      }
+      await ensureIntelActor(req);
+      const result = await undoProspectMerge({
+        pool,
+        userId: getUserId(req),
+        mergeEventId: req.params.eventId,
+        ...parsed.data,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ProspectMergeServiceError) {
+        return res.status(error.status).json({ message: error.message, code: error.code, details: error.details });
+      }
+      console.error("Error undoing prospect merge:", error);
+      res.status(500).json({ message: "Failed to undo duplicate prospect consolidation" });
+    }
+  });
+
+  app.get("/api/prospects/:id/resolve", requireAuth, async (req, res) => {
+    try {
+      const result = await resolveCanonicalProspect({
+        pool,
+        userId: getUserId(req),
+        prospectId: req.params.id,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof ProspectMergeServiceError) {
+        return res.status(error.status).json({ message: error.message, code: error.code, details: error.details });
+      }
+      console.error("Error resolving canonical prospect:", error);
+      res.status(500).json({ message: "Failed to resolve canonical prospect" });
     }
   });
 
