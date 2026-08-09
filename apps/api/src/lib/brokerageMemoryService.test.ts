@@ -6,6 +6,7 @@ import type { MarketMemoryAnchor } from '@level-cre/shared'
 import {
   buildApprovedBrokerageMemoryPayload,
   buildBrokerageMemoryFactDrafts,
+  buildBrokerageMemoryReviewReasons,
   buildNewBrokerageMemoryDossierInsert,
   previewBrokerageMemoryImport,
 } from './brokerageMemoryService'
@@ -220,4 +221,59 @@ test('server preview performs reads only and returns a stable source hash', asyn
   assert.equal(first.preview.anchors[0].id, 'edmonton-account-set:1000')
   assert.ok(sqlSeen.length >= 5)
   assert.equal(sqlSeen.every((sql) => /^SELECT\b/i.test(sql)), true)
+})
+
+test('prospect geometry supplies missing coordinates while duplicate candidates remain in review', async () => {
+  const sqlSeen: string[] = []
+  const fakePool = {
+    query: async (sql: string) => {
+      const normalized = sql.trim()
+      sqlSeen.push(normalized)
+      if (/FROM public\.prospects/i.test(normalized)) {
+        return {
+          rows: [
+            {
+              id: 'manual-coordinate-candidate',
+              name: 'Henry Van Steen Bergen Holdings',
+              address: '100 First Street NW',
+              location_lat: 53.5004,
+              location_lng: -113.5,
+              resolved_lat: 53.5004,
+              resolved_lng: -113.5,
+            },
+            {
+              id: 'geometry-coordinate-candidate',
+              name: 'Henry Van Steen Bergen Holdings',
+              address: '100 First Street NW',
+              location_lat: null,
+              location_lng: null,
+              resolved_lat: 53.50015,
+              resolved_lng: -113.5,
+            },
+          ],
+        }
+      }
+      return { rows: [] }
+    },
+  }
+
+  const result = await previewBrokerageMemoryImport({
+    pool: fakePool as never,
+    userId: 'user-one',
+    sourceFileName: 'enriched.json',
+    payload: payload(),
+  })
+  const resolved = result.preview.anchors[0]
+
+  assert.equal(resolved.resolution?.topCandidate?.id, 'geometry-coordinate-candidate')
+  assert.equal(resolved.resolution?.topCandidate?.distanceMeters, 17)
+  assert.equal(resolved.resolution?.decision, 'review')
+  assert.equal(resolved.previewLayer, 'review')
+  assert.equal(resolved.resolution?.candidates.length, 2)
+  assert.match(buildBrokerageMemoryReviewReasons(resolved).join(' '), /Multiple existing Level CRE candidates are plausible \(2\)/)
+  assert.match(buildBrokerageMemoryReviewReasons(resolved).join(' '), /geometry-coordinate-candidate|Henry Van Steen Bergen Holdings/)
+
+  const prospectSql = sqlSeen.find((sql) => /FROM public\.prospects/i.test(sql)) || ''
+  assert.match(prospectSql, /COALESCE\([\s\S]*location_lat[\s\S]*ST_Y\(ST_Centroid\(geometry\)\)/i)
+  assert.match(prospectSql, /COALESCE\([\s\S]*location_lng[\s\S]*ST_X\(ST_Centroid\(geometry\)\)/i)
 })

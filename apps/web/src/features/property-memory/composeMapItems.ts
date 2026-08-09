@@ -1,6 +1,8 @@
 import type { MarketMemoryAnchor } from '@level-cre/shared'
 import type { Prospect, ProspectStatusType } from '@level-cre/shared/schema'
 
+import { getProspectDisplayName, isPlaceholderProspectName } from '../../lib/prospectDisplay'
+
 export type PropertyMemoryPosition = { lat: number; lng: number }
 
 export type ComposedPropertyMapItem = {
@@ -37,6 +39,18 @@ function anchorLayer(anchor: MarketMemoryAnchor) {
 
 function isPending(anchor: MarketMemoryAnchor) {
   return anchor.persistence?.state === 'pending' || anchor.persistence?.state === 'local_preview'
+}
+
+export function getLinkedMemoryMarkerTitle(prospect: Prospect, anchor: MarketMemoryAnchor) {
+  const hasMeaningfulProspectLabel = Boolean(
+    prospect.businessName?.trim()
+    || prospect.contactCompany?.trim()
+    || (prospect.name?.trim() && !isPlaceholderProspectName(prospect.name)),
+  )
+  const label = !hasMeaningfulProspectLabel && anchor.address?.trim()
+    ? anchor.address.trim()
+    : getProspectDisplayName(prospect)
+  return `${label} · ${isPending(anchor) ? 'memory approval pending' : 'brokerage memory saved'}`
 }
 
 function anchorPriority(anchor: MarketMemoryAnchor) {

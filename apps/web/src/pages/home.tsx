@@ -33,7 +33,7 @@ import { StatusLegend } from '@/features/map/StatusLegend';
 import { ProspectEditPanel, computeFollowUpDue, formatSfWithCommas, getDisplayAddressValue } from '@/features/map/ProspectEditPanel';
 import { useTerraDrawGoogleMaps, type MapDrawMode, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
 import { AdvancedMapMarker } from '@/features/map/AdvancedMapMarker';
-import { composePropertyMapItems } from '@/features/property-memory/composeMapItems';
+import { composePropertyMapItems, getLinkedMemoryMarkerTitle } from '@/features/property-memory/composeMapItems';
 import { usePropertyMemoryMap } from '@/features/property-memory/api';
 import { SearchResultCard } from '@/features/map/SearchResultCard';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
@@ -705,7 +705,6 @@ export default function HomePage() {
       const memory = linkedMemoryByProspectId.get(prospect.id);
       const memoryLayer: MarketMemoryLayer | null = memory ? (memory.previewLayer || memory.baseLayer) : null;
       const showMemoryState = Boolean(memory && memoryLayer && visibleMarketMemoryLayers.has(memoryLayer));
-      const memoryIsPending = memory?.persistence?.state === 'pending';
       if (prospect.geometry.type === 'Point') {
         const [lng, lat] = prospect.geometry.coordinates as [number, number];
         return {
@@ -718,8 +717,8 @@ export default function HomePage() {
           memoryBorderColor: showMemoryState
             ? memoryLayer === 'review' ? '#D97706' : '#0F766E'
             : undefined,
-          markerTitle: showMemoryState
-            ? `${getProspectDisplayName(prospect)} · ${memoryIsPending ? 'memory approval pending' : 'brokerage memory saved'}`
+          markerTitle: showMemoryState && memory
+            ? getLinkedMemoryMarkerTitle(prospect, memory)
             : undefined,
         };
       }

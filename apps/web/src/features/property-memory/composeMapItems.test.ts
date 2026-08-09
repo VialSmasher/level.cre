@@ -4,7 +4,7 @@ import test from 'node:test'
 import type { MarketMemoryAnchor } from '@level-cre/shared'
 import type { Prospect } from '@level-cre/shared/schema'
 
-import { composePropertyMapItems } from './composeMapItems'
+import { composePropertyMapItems, getLinkedMemoryMarkerTitle } from './composeMapItems'
 
 function prospect(overrides: Partial<Prospect> = {}): Prospect {
   return {
@@ -66,6 +66,15 @@ test('linked prospect coordinates win over incoming memory coordinates', () => {
 
   assert.deepEqual(items[0]?.position, { lat: 53.6, lng: -113.6 })
   assert.equal(items[0]?.positionSource, 'prospect')
+})
+
+test('approved memory gives a generic dropped pin a useful address label', () => {
+  const title = getLinkedMemoryMarkerTitle(
+    prospect({ name: 'New marker', address: null, contactCompany: null, businessName: null }),
+    anchor({ address: '12404 - 153 STREET NW, T5V1S5' }),
+  )
+
+  assert.equal(title, '12404 - 153 STREET NW, T5V1S5 · brokerage memory saved')
 })
 
 test('an unmatched pending item remains visible in the review layer', () => {

@@ -123,6 +123,7 @@ function itemToAnchor(row: BrokerageMemoryItemRow): MarketMemoryAnchor {
     resolution: (row.resolution_json || undefined) as MarketMemoryAnchor['resolution'],
     latitude: numberOrNull(row.lat) ?? anchor.latitude,
     longitude: numberOrNull(row.lng) ?? anchor.longitude,
+    reviewReasons: Array.isArray(row.review_reasons) ? row.review_reasons : anchor.reviewReasons,
     previewLayer: row.suggested_layer,
     persistence: {
       state: row.status === 'approved' ? 'approved' : 'pending',
@@ -301,10 +302,18 @@ export function buildNewBrokerageMemoryDossierInsert(params: {
   }
 }
 
-function reviewReasonsForAnchor(anchor: MarketMemoryAnchor) {
+export function buildBrokerageMemoryReviewReasons(anchor: MarketMemoryAnchor) {
+  const resolution = anchor.resolution
+  const multipleCandidateReason = resolution?.decision === 'review' && resolution.candidates.length > 1
+    ? `Multiple existing Level CRE candidates are plausible (${resolution.candidates.length}): ${resolution.candidates
+        .slice(0, 3)
+        .map((candidate) => `${candidate.label} [${candidate.entityType}]${candidate.distanceMeters == null ? '' : ` - ${candidate.distanceMeters} m away`}`)
+        .join('; ')}. Choose the canonical property before approval.`
+    : null
   return uniqueStrings([
     ...anchor.reviewReasons,
-    ...(anchor.resolution?.topCandidate?.conflicts || []),
+    ...(resolution?.topCandidate?.conflicts || []),
+    multipleCandidateReason,
   ])
 }
 
@@ -372,7 +381,16 @@ export async function assertBrokerageMemorySchema(pool: Pool | PoolClient) {
 async function loadResolvableEntities(pool: Pool, userId: string): Promise<ResolvableMarketEntity[]> {
   const [prospects, listings, dossiers] = await Promise.all([
     pool.query(`
-      SELECT id, name, address, location_lat, location_lng, market_key,
+      SELECT id, name, address, location_lat, location_lng,
+             COALESCE(
+               location_lat,
+               CASE WHEN geometry IS NULL OR ST_IsEmpty(geometry) THEN NULL ELSE ST_Y(ST_Centroid(geometry)) END
+             ) AS resolved_lat,
+             COALESCE(
+               location_lng,
+               CASE WHEN geometry IS NULL OR ST_IsEmpty(geometry) THEN NULL ELSE ST_X(ST_Centroid(geometry)) END
+             ) AS resolved_lng,
+             market_key,
              contact_phone, contact_email, website_url, business_name, contact_company,
              ai_metadata -> 'googlePlace' ->> 'placeId' AS place_id,
              ai_metadata -> 'legalIdentity' ->> 'municipality' AS municipality,
@@ -419,8 +437,8 @@ async function loadResolvableEntities(pool: Pool, userId: string): Promise<Resol
       id: row.id,
       label: row.business_name || row.contact_company || row.name || row.address || 'Untitled prospect',
       address: row.address || row.name || null,
-      latitude: numberOrNull(row.location_lat),
-      longitude: numberOrNull(row.location_lng),
+      latitude: numberOrNull(row.resolved_lat),
+      longitude: numberOrNull(row.resolved_lng),
       placeId: row.place_id || null,
       marketKey: row.market_key || null,
       phone: row.contact_phone || null,
@@ -674,7 +692,7 @@ export async function stageBrokerageMemoryImport(params: {
         matches.matchedListingId,
         matches.confidence,
         JSON.stringify(safeResolution(anchor.resolution) || {}),
-        JSON.stringify(reviewReasonsForAnchor(anchor)),
+        JSON.stringify(buildBrokerageMemoryReviewReasons(anchor)),
         JSON.stringify(stagingAnchorPayload(anchor)),
       ])
     }
