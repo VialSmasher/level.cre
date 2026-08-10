@@ -76,6 +76,26 @@ test('auto-logs a unique non-free company domain match', () => {
   assert.equal(result.reason, 'unique_company_domain');
 });
 
+test('keeps non-exact received-email matches reviewable', () => {
+  const domain = resolveEmailProspectMatch({
+    direction: 'received',
+    senderEmail: 'operations@clear-glass.ca',
+    recipientEmails: ['patrick@example.com'],
+    subject: 'Checking in',
+  }, prospects);
+  const address = resolveEmailProspectMatch({
+    direction: 'received',
+    senderEmail: 'buyer@gmail.com',
+    recipientEmails: ['patrick@example.com'],
+    subject: '10735 214 St tour',
+  }, prospects);
+
+  assert.equal(domain.status, 'pending_review');
+  assert.equal(domain.reason, 'unique_company_domain');
+  assert.equal(address.status, 'pending_review');
+  assert.equal(address.reason, 'unique_exact_address');
+});
+
 test('auto-logs a unique exact address mention after normalizing street suffixes', () => {
   const result = resolveEmailProspectMatch({
     direction: 'sent',

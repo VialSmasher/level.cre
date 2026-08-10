@@ -70,6 +70,7 @@ export function isSameEmailActivity(
 export async function findMatchingCodexEmailImport(params: {
   pool: Pool;
   userId: string;
+  direction?: string | null;
   subject?: string | null;
   counterpartyEmails?: Array<string | null | undefined>;
   occurredAt?: Date | string | null;
@@ -77,6 +78,7 @@ export async function findMatchingCodexEmailImport(params: {
   const occurredAt = parseDate(params.occurredAt);
   const emails = normalizeEmailList(params.counterpartyEmails);
   const subject = normalizeEmailActivitySubject(params.subject);
+  const activityStatus = String(params.direction || '').toLowerCase() === 'received' ? 'received' : 'sent';
   if (!occurredAt || emails.length === 0 || !subject) return null;
 
   const { rows } = await params.pool.query(
@@ -85,7 +87,7 @@ export async function findMatchingCodexEmailImport(params: {
       FROM public.sales_activity_imports
       WHERE user_id = $1
         AND source = ANY($4::varchar[])
-        AND activity_status = 'sent'
+        AND activity_status = $5
         AND activity_type = 'email'
         AND lower(email) = ANY($2::varchar[])
         AND activity_at BETWEEN $3::timestamp - interval '${RECONCILIATION_WINDOW_MINUTES} minutes'
@@ -93,7 +95,7 @@ export async function findMatchingCodexEmailImport(params: {
       ORDER BY ABS(EXTRACT(EPOCH FROM (activity_at - $3::timestamp))) ASC
       LIMIT 20
     `,
-    [params.userId, emails, occurredAt, [...RECONCILABLE_SALES_ACTIVITY_SOURCES]],
+    [params.userId, emails, occurredAt, [...RECONCILABLE_SALES_ACTIVITY_SOURCES], activityStatus],
   );
 
   const matching = rows.find((row) => isSameEmailActivity(
@@ -197,9 +199,10 @@ async function findMatchingCapturedEmailMessageIds(params: {
   const { activity } = params;
   const occurredAt = parseDate(activity.activityAt);
   const subject = normalizeEmailActivitySubject(activity.subject);
+  const capturedDirection = activity.direction === 'inbound' ? 'received' : 'sent';
   if (
     !isReconcilableSalesActivitySource(activity.source)
-    || activity.activityStatus !== 'sent'
+    || !['sent', 'received'].includes(activity.activityStatus)
     || activity.activityType !== 'email'
     || !activity.email
     || !occurredAt
@@ -208,21 +211,25 @@ async function findMatchingCapturedEmailMessageIds(params: {
 
   const { rows } = await params.pool.query(
     `
-      SELECT id, subject, recipient_emails, sent_at, received_at
+      SELECT id, direction, subject, sender_email, recipient_emails, sent_at, received_at
       FROM public.email_messages
       WHERE user_id = $1
-        AND direction = 'sent'
-        AND lower($2) = ANY(
-          SELECT lower(recipient)
-          FROM unnest(COALESCE(recipient_emails, ARRAY[]::varchar[])) AS recipient
-        )
-        AND COALESCE(sent_at, received_at)
-          BETWEEN $3::timestamp - interval '${RECONCILIATION_WINDOW_MINUTES} minutes'
-              AND $3::timestamp + interval '${RECONCILIATION_WINDOW_MINUTES} minutes'
-      ORDER BY ABS(EXTRACT(EPOCH FROM (COALESCE(sent_at, received_at) - $3::timestamp))) ASC
-      LIMIT 20
+        AND direction = $3
+        AND CASE
+              WHEN direction = 'received' THEN COALESCE(received_at, sent_at)
+              ELSE COALESCE(sent_at, received_at)
+            END
+          BETWEEN $2::timestamp - interval '${RECONCILIATION_WINDOW_MINUTES} minutes'
+              AND $2::timestamp + interval '${RECONCILIATION_WINDOW_MINUTES} minutes'
+      ORDER BY ABS(EXTRACT(EPOCH FROM ((
+        CASE
+          WHEN direction = 'received' THEN COALESCE(received_at, sent_at)
+          ELSE COALESCE(sent_at, received_at)
+        END
+      ) - $2::timestamp))) ASC
+      LIMIT 50
     `,
-    [params.userId, activity.email, occurredAt],
+    [params.userId, occurredAt, capturedDirection],
   );
 
   return rows
@@ -230,8 +237,14 @@ async function findMatchingCapturedEmailMessageIds(params: {
       { subject: activity.subject, counterpartyEmails: [activity.email], occurredAt },
       {
         subject: row.subject,
-        counterpartyEmails: row.recipient_emails || [],
-        occurredAt: row.sent_at || row.received_at,
+        counterpartyEmails: counterpartyEmailsForMessage({
+          direction: row.direction,
+          senderEmail: row.sender_email,
+          recipientEmails: row.recipient_emails || [],
+        }),
+        occurredAt: row.direction === 'received'
+          ? (row.received_at || row.sent_at)
+          : (row.sent_at || row.received_at),
       },
     ))
     .map((row) => row.id);
@@ -247,7 +260,7 @@ export async function findMatchingSalesActivityInteraction(params: {
   const subject = normalizeEmailActivitySubject(activity.subject);
   if (
     !isReconcilableSalesActivitySource(activity.source)
-    || activity.activityStatus !== 'sent'
+    || !['sent', 'received'].includes(activity.activityStatus)
     || activity.activityType !== 'email'
     || !activity.email
     || !occurredAt
@@ -268,7 +281,7 @@ export async function findMatchingSalesActivityInteraction(params: {
       FROM public.sales_activity_imports candidate
       WHERE candidate.user_id = $1
         AND candidate.source = $2
-        AND candidate.activity_status = 'sent'
+        AND candidate.activity_status = $6
         AND candidate.activity_type = 'email'
         AND candidate.interaction_id IS NOT NULL
         AND candidate.prospect_id IS NOT NULL
@@ -286,7 +299,14 @@ export async function findMatchingSalesActivityInteraction(params: {
       ORDER BY ABS(EXTRACT(EPOCH FROM (candidate.activity_at - $5::timestamp))) ASC
       LIMIT 20
     `,
-    [params.userId, counterpartSource, activity.email, activity.source, occurredAt],
+    [
+      params.userId,
+      counterpartSource,
+      activity.email,
+      activity.source,
+      occurredAt,
+      activity.activityStatus,
+    ],
   );
 
   const matching = rows.find((row) => isSameEmailActivity(

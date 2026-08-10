@@ -5,12 +5,12 @@ This is the Level CRE bridge for Codex-led sales work. It is intentionally conse
 ## Rules
 
 1. Codex sales workflows write activity into `sales_activity_imports` first.
-2. Only `sent` activity creates a `contact_interactions` row automatically.
+2. Confirmed `sent` and `received` email activity can create a `contact_interactions` row automatically. Received mail is recorded as an inbound outcome: it earns no XP, does not count toward production, and does not create an automatic 14-day follow-up.
 3. Automatic interaction creation requires either:
    - a provided `prospectId` that belongs to the user, or
    - an exact match against an existing prospect `contact_email`.
 4. Do not create fake prospects or map pins from email-only contacts.
-5. Unmatched sent activity stays in `needs_review`.
+5. Unmatched sent or received activity stays in `needs_review`.
 6. `hold`, `low_priority`, and `skipped` rows stay in the ledger as `ignored`.
 7. Idempotency is by `(user_id, source, external_activity_id)`.
 8. Existing interactions are detected by `source_provider = 'codex'` and `source_message_id = external_activity_id`.
@@ -45,6 +45,29 @@ Request:
 }
 ```
 
+For received Outlook mail, pass the sender as the contact/email and use the exact provider message ID:
+
+```json
+{
+  "source": "outlook_sync",
+  "runId": "outlook-sync-2026-08-10",
+  "activities": [
+    {
+      "externalActivityId": "exact-outlook-message-id",
+      "activityAt": "2026-08-10T15:30:00-06:00",
+      "activityType": "email",
+      "status": "received",
+      "contact": "Pat Prospect",
+      "email": "pat@example.com",
+      "subject": "Re: Edmonton requirement",
+      "notes": "Observed in Outlook Inbox by scheduled sync; message body not stored."
+    }
+  ]
+}
+```
+
+The bridge stores metadata only. Never send message bodies, previews, snippets, HTML, attachments, signatures, or quoted history.
+
 Response includes counts plus per-row `matchStatus`, `matchReason`, `interactionId`, and `duplicate`.
 
 ### `GET /api/agent/sales-activity/imports`
@@ -60,7 +83,7 @@ Optional query params:
 
 Resolves an activity that could not be matched confidently during import.
 
-Link a sent activity to an existing prospect:
+Link a sent or received activity to an existing prospect:
 
 ```json
 {
@@ -96,6 +119,6 @@ The page keeps `/app` as the map and links matched prospects back to `/app?prosp
 
 ## Follow-Up Work
 
-The `outlook-sales-followup` Codex skill records approved sends through this endpoint. It keeps a local JSONL outbox when credentials or the API are unavailable and flushes that outbox on a later successful run. Approved sales emails also use the configured Postmark BCC as delivery evidence. New mapped prospects should still be created only when a real address/property is known.
+The `outlook-sales-followup` Codex skill records confirmed sends and scheduled Outlook reconciliation records eligible received messages through this endpoint. It keeps a local JSONL outbox when credentials or the API are unavailable and flushes that outbox on a later successful run. Postmark remains a fallback capture path. New mapped prospects should still be created only when a real address/property is known.
 
 The repository copy of the recorder is `scripts/codex/record-levelcre-sales-activity.ps1`, so the workflow travels with the project across Patrick's Codex computers.

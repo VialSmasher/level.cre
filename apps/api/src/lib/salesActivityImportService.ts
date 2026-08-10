@@ -148,11 +148,14 @@ async function resolveSalesActivityProspect(
           AND contact_email IS NOT NULL
           AND lower(contact_email) = lower($2)
         ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
-        LIMIT 1
+        LIMIT 2
         ${options.lock ? 'FOR UPDATE' : ''}
       `,
       [userId, activity.email],
     );
+    if (byEmail.rows.length > 1) {
+      return { prospectId: null, matchReason: 'ambiguous_contact_email' };
+    }
     if (byEmail.rows[0]) {
       return { prospectId: byEmail.rows[0].id, matchReason: 'exact_contact_email' };
     }
@@ -423,6 +426,7 @@ export async function importSalesActivityBatch(params: {
 
       let interactionId: string | null = importRow.interaction_id || existing?.interaction_id || null;
       let duplicateInteraction = Boolean(interactionId);
+      const interactionSourceProvider = activity.source === 'outlook_sync' ? 'outlook' : 'codex';
       if (
         params.payload.createInteractions
         && shouldCreateInteractionFromSalesActivity(activity)
@@ -439,7 +443,7 @@ export async function importSalesActivityBatch(params: {
               AND prospect_id = $4
             LIMIT 1
           `,
-          [params.userId, 'codex', activity.externalActivityId, resolved.prospectId],
+          [params.userId, interactionSourceProvider, activity.externalActivityId, resolved.prospectId],
         );
 
         if (existingInteraction.rows[0]) {
@@ -464,7 +468,7 @@ export async function importSalesActivityBatch(params: {
             outcome: 'contacted',
             notes: buildSalesActivityInteractionNotes(activity),
             nextFollowUp: null,
-            sourceProvider: 'codex',
+            sourceProvider: interactionSourceProvider,
             sourceMessageId: activity.externalActivityId,
             sourceThreadId: null,
             sourceEmailMessageId: null,
@@ -476,8 +480,11 @@ export async function importSalesActivityBatch(params: {
               email: activity.email,
               company: activity.company,
               contactName: activity.contactName,
+              direction: activity.direction,
+              captureDirection: activity.activityStatus === 'received' ? 'received' : 'sent',
+              evidenceStatus: 'confirmed',
             },
-          }, capturedEmailAlreadyAwardedXp ? { skipXp: true } : undefined);
+          }, capturedEmailAlreadyAwardedXp || activity.direction === 'inbound' ? { skipXp: true } : undefined);
           interactionId = interaction.id;
           summary.createdInteractions += 1;
         }
@@ -500,7 +507,10 @@ export async function importSalesActivityBatch(params: {
             `
               UPDATE public.prospects
               SET
-                last_contact_date = $3,
+                last_contact_date = CASE
+                  WHEN last_contact_date IS NULL OR last_contact_date < $3 THEN $3
+                  ELSE last_contact_date
+                END,
                 status = CASE WHEN status = 'prospect' THEN 'contacted' ELSE status END,
                 updated_at = now()
               WHERE id = $1 AND user_id = $2 AND merged_into_prospect_id IS NULL
@@ -509,7 +519,7 @@ export async function importSalesActivityBatch(params: {
           );
         }
 
-        if (interactionId && activity.activityType === 'email') {
+        if (interactionId && activity.activityType === 'email' && activity.direction === 'outbound') {
           await protectOutboundEmailFollowUp({
             pool: params.pool,
             userId: params.userId,
@@ -708,18 +718,21 @@ export async function reviewSalesActivityImport(params: {
       SELECT id
       FROM public.contact_interactions
       WHERE user_id = $1
-        AND source_provider = 'codex'
+        AND source_provider = $4
         AND source_message_id = $2
         AND prospect_id = $3
       LIMIT 1
     `,
-    [params.userId, row.external_activity_id, prospect.id],
+    [params.userId, row.external_activity_id, prospect.id, row.source === 'outlook_sync' ? 'outlook' : 'codex'],
   );
 
   let interactionId = row.interaction_id || existingInteraction.rows[0]?.id || null;
   if (!interactionId) {
-    if (row.activity_status !== 'sent') {
-      throw new SalesActivityReviewError(409, 'Only sent activity can be logged as an interaction');
+    if (
+      row.activity_status !== 'sent'
+      && !(row.activity_status === 'received' && (row.activity_type || 'email') === 'email')
+    ) {
+      throw new SalesActivityReviewError(409, 'Only sent activity or received email can be logged as an interaction');
     }
     const interactionDate = row.activity_at
       ? new Date(row.activity_at).toISOString()
@@ -739,7 +752,7 @@ export async function reviewSalesActivityImport(params: {
       outcome: 'contacted',
       notes: noteParts.join('\n'),
       nextFollowUp: null,
-      sourceProvider: 'codex',
+      sourceProvider: row.source === 'outlook_sync' ? 'outlook' : 'codex',
       sourceMessageId: row.external_activity_id,
       sourceThreadId: null,
       sourceEmailMessageId: null,
@@ -752,6 +765,9 @@ export async function reviewSalesActivityImport(params: {
         company: row.company,
         contactName: row.contact_name,
         manuallyLinked: true,
+        direction: row.activity_status === 'received' ? 'inbound' : (row.activity_type === 'note' ? 'internal' : 'outbound'),
+        captureDirection: row.activity_status === 'received' ? 'received' : 'sent',
+        evidenceStatus: 'confirmed',
       },
     }, { skipXp: true });
     interactionId = interaction.id;
@@ -759,7 +775,10 @@ export async function reviewSalesActivityImport(params: {
     await params.pool.query(
       `
         UPDATE public.prospects
-        SET last_contact_date = $3,
+        SET last_contact_date = CASE
+              WHEN last_contact_date IS NULL OR last_contact_date < $3 THEN $3
+              ELSE last_contact_date
+            END,
             status = CASE WHEN status = 'prospect' THEN 'contacted' ELSE status END,
             updated_at = now()
         WHERE id = $1 AND user_id = $2 AND merged_into_prospect_id IS NULL

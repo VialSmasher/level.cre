@@ -214,6 +214,7 @@ export function resolveEmailProspectMatch(
   message: CapturedEmailEvidence,
   candidates: EmailProspectCandidate[],
 ): EmailProspectMatchDecision {
+  const isReceived = String(message.direction || '').toLowerCase() === 'received';
   const counterparties = getEmailCounterpartyEmails(message);
   const exactEmailMatches = candidates.filter((candidate) => {
     const candidateEmail = normalizeEmail(candidate.contactEmail);
@@ -250,7 +251,7 @@ export function resolveEmailProspectMatch(
     if (domainCandidate) {
       return {
         prospectId: domainCandidate.id,
-        status: 'auto_log',
+        status: isReceived ? 'pending_review' : 'auto_log',
         confidence: 94,
         reason: 'unique_company_domain',
         evidence: [`Unique company domain: ${domain}`],
@@ -281,7 +282,7 @@ export function resolveEmailProspectMatch(
   if (addressCandidate) {
     return {
       prospectId: addressCandidate.id,
-      status: 'auto_log',
+      status: isReceived ? 'pending_review' : 'auto_log',
       confidence: 92,
       reason: 'unique_exact_address',
       evidence: [`Unique address mention: ${addressCandidate.address || addressCandidate.name || ''}`],

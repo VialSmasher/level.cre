@@ -111,6 +111,13 @@ const outcomeLabels: Record<EmailOutcome, string> = {
   follow_up_later: 'Follow up later',
 }
 
+const inboundOutcomeLabels: Record<EmailOutcome, string> = {
+  contacted: 'Reply received',
+  scheduled_meeting: 'Meeting booked',
+  not_interested: 'Not interested',
+  follow_up_later: 'Follow up later',
+}
+
 const followUpChoices: Array<{ value: FollowUpChoice; label: string; days?: number }> = [
   { value: 'tomorrow', label: 'Tomorrow', days: 1 },
   { value: '3d', label: '3d', days: 3 },
@@ -127,6 +134,16 @@ function formatEmailDate(item: EmailReviewItem) {
   const date = new Date(value)
   if (!Number.isFinite(date.getTime())) return 'No date'
   return `${formatDistanceToNow(date, { addSuffix: true })}`
+}
+
+function isInboundEmail(item: EmailReviewItem) {
+  const direction = String(item.email.direction || '').toLowerCase()
+  return direction === 'received' || direction === 'inbound'
+}
+
+function isOutboundEmail(item: EmailReviewItem) {
+  const direction = String(item.email.direction || '').toLowerCase()
+  return direction === 'sent' || direction === 'outbound'
 }
 
 function addDaysAtNoonIso(days: number) {
@@ -213,12 +230,11 @@ export default function InboxPage() {
     (counts?.ignored ?? 0) +
     (counts?.rejected ?? 0)
   )
-  const estimatedEmailXp = capturedCount * 10
   const dashboardCards = [
-    { label: 'Captured', value: capturedCount, helper: 'Automatic email activity', tone: 'text-slate-950' },
+    { label: 'Captured', value: capturedCount, helper: 'Inbox and sent evidence', tone: 'text-slate-950' },
     { label: 'Needs Context', value: counts?.needsContext ?? 0, helper: 'Optional cleanup', tone: 'text-amber-700' },
     { label: 'Logged', value: counts?.autoLogged ?? 0, helper: 'Prospect interactions', tone: 'text-emerald-700' },
-    { label: 'Email XP', value: estimatedEmailXp, helper: 'Captured activity value', tone: 'text-blue-700' },
+    { label: 'Production credit', value: 'Outbound only', helper: 'Inbound emails are outcomes', tone: 'text-blue-700' },
   ]
 
   const invalidate = () => {
@@ -290,7 +306,7 @@ export default function InboxPage() {
     setLogOutcome('contacted')
     setLogPropertyContext('')
     setLogNote(defaultEmailNote(item))
-    setFollowUpChoice('2w')
+    setFollowUpChoice(isOutboundEmail(item) ? '2w' : 'none')
     setCustomFollowUpDate('')
   }
 
@@ -321,7 +337,7 @@ export default function InboxPage() {
         <PageHeader
           label="Business development ledger"
           title="Activity"
-          description="Captured sales touches waiting for context, logging, or archive."
+          description="Captured outbound actions and inbound responses waiting for context, logging, or archive."
           icon={InboxIcon}
           actions={(
             <>
@@ -486,11 +502,23 @@ export default function InboxPage() {
                         </Badge>
                         <Badge
                           variant="outline"
+                          className={isInboundEmail(item)
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                            : isOutboundEmail(item)
+                              ? 'border-blue-200 bg-blue-50 text-blue-800'
+                              : 'border-amber-200 bg-amber-50 text-amber-800'}
+                        >
+                          {isInboundEmail(item)
+                            ? 'Inbound email · outcome'
+                            : isOutboundEmail(item) ? 'Outbound email · production' : 'Direction unconfirmed'}
+                        </Badge>
+                        <Badge
+                          variant="outline"
                           className={item.prospect ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-600 border-slate-200'}
                         >
                           {item.prospect ? 'Context attached' : 'Unattached'}
                         </Badge>
-                        {item.matchStatus === 'needs_context' ? (
+                        {item.matchStatus === 'needs_context' && isOutboundEmail(item) ? (
                           <Badge variant="outline" className="bg-blue-50 text-blue-700">
                             <Sparkles className="mr-1 h-3 w-3" />
                             XP captured
@@ -570,7 +598,13 @@ export default function InboxPage() {
                       </div>
                     ) : (
                       <div className="mt-2 space-y-2">
-                        <p className="text-sm text-slate-500">Captured as sales activity. Attach context only if it is worth it.</p>
+                        <p className="text-sm text-slate-500">
+                          {isInboundEmail(item)
+                            ? 'Captured as a response signal, not production credit. Attach context if it changes the next move.'
+                            : isOutboundEmail(item)
+                              ? 'Captured as an outbound action. Attach context only if it is worth it.'
+                              : 'Confirm the direction before treating this as production. Attach context only if it is useful.'}
+                        </p>
                         <Select
                           value={prospectDrafts[item.id] || ''}
                           onValueChange={(value) => setProspectDrafts((prev) => ({ ...prev, [item.id]: value }))}
@@ -606,9 +640,11 @@ export default function InboxPage() {
       <Dialog open={Boolean(logItem)} onOpenChange={(open) => !open && setLogItem(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Log Email</DialogTitle>
+            <DialogTitle>{logItem && isInboundEmail(logItem) ? 'Log inbound email' : 'Log sent email'}</DialogTitle>
             <DialogDescription>
-              Confirm the CRM context before this becomes a prospect interaction.
+              {logItem && isInboundEmail(logItem)
+                ? 'Save this as response context. It will not count as a production action.'
+                : 'Confirm the CRM context before this becomes a prospect interaction.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -635,7 +671,9 @@ export default function InboxPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {(Object.keys(outcomeLabels) as EmailOutcome[]).map((outcome) => (
-                      <SelectItem key={outcome} value={outcome}>{outcomeLabels[outcome]}</SelectItem>
+                      <SelectItem key={outcome} value={outcome}>
+                        {logItem && isInboundEmail(logItem) ? inboundOutcomeLabels[outcome] : outcomeLabels[outcome]}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -697,7 +735,9 @@ export default function InboxPage() {
               disabled={!logItem?.prospect || logInteractionMutation.isPending || (followUpChoice === 'custom' && !customFollowUpDate)}
               onClick={submitLogEmail}
             >
-              {logInteractionMutation.isPending ? 'Logging...' : 'Log Email'}
+              {logInteractionMutation.isPending
+                ? 'Logging...'
+                : logItem && isInboundEmail(logItem) ? 'Save inbound email' : 'Log sent email'}
             </Button>
           </DialogFooter>
         </DialogContent>

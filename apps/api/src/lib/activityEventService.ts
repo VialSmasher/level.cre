@@ -330,6 +330,7 @@ export async function importActivityEventBatch(params: {
 }
 
 function eventTypeFromSalesActivity(activity: NormalizedSalesActivity): typeof ACTIVITY_EVENT_TYPES[number] {
+  if (activity.activityStatus === 'received' && activity.activityType === 'email') return 'email_received';
   if (activity.activityType === 'call') return 'call_attempted';
   if (activity.activityType === 'meeting') return 'meeting';
   if (activity.activityType === 'note') return 'note';
@@ -348,7 +349,10 @@ export async function recordActivityEventFromSalesActivity(params: {
   matchReason: string | null;
   confidence: number;
 }): Promise<ActivityEventImportSummary | null> {
-  if (params.activity.activityStatus !== 'sent') return null;
+  if (
+    params.activity.activityStatus !== 'sent'
+    && !(params.activity.activityStatus === 'received' && params.activity.activityType === 'email')
+  ) return null;
   return importActivityEventBatch({
     pool: params.pool,
     userId: params.userId,
@@ -357,7 +361,7 @@ export async function recordActivityEventFromSalesActivity(params: {
       events: [{
         externalEventId: params.activity.externalActivityId,
         eventType: eventTypeFromSalesActivity(params.activity),
-        direction: params.activity.activityType === 'note' ? 'internal' : 'outbound',
+        direction: params.activity.direction,
         evidenceStatus: 'confirmed',
         occurredAt: params.activity.activityAt || new Date(),
         contactName: params.activity.contactName,
@@ -375,6 +379,8 @@ export async function recordActivityEventFromSalesActivity(params: {
           salesActivityImportId: params.importId,
           runId: params.activity.runId,
           activityStatus: params.activity.activityStatus,
+          direction: params.activity.direction,
+          captureDirection: params.activity.activityStatus === 'received' ? 'received' : 'sent',
         },
       }],
     }),

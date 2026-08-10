@@ -57,3 +57,32 @@ test('buildActivityPulse compares the current half of the window with the prior 
   assert.equal(pulse.previousPeriodTotal, 1)
   assert.equal(pulse.trendPercent, 100)
 })
+
+test('keeps received email as an outcome signal instead of production credit', () => {
+  const pulse = buildActivityPulse([
+    {
+      date: '2026-07-10T16:00:00.000Z',
+      type: 'email',
+      sourceProvider: 'outlook',
+      sourceMetadata: { captureDirection: 'received' },
+    },
+    {
+      date: '2026-07-10T17:00:00.000Z',
+      type: 'email',
+      sourceProvider: 'outlook',
+      sourceMetadata: { captureDirection: 'sent' },
+    },
+  ], {
+    days: 14,
+    now: new Date('2026-07-10T18:00:00.000Z'),
+    timeZone: 'America/Edmonton',
+  })
+
+  assert.equal(pulse.total, 1)
+  assert.equal(pulse.inboundEmail, 1)
+  assert.equal(pulse.activeDays, 1)
+  assert.equal(pulse.automated, 1)
+  assert.equal(pulse.series.at(-1)?.email, 1)
+  assert.equal(pulse.series.at(-1)?.inboundEmail, 1)
+  assert.equal(pulse.series.at(-1)?.total, 1)
+})

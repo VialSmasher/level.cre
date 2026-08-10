@@ -74,6 +74,41 @@ test('finds a matching Codex import only after strict in-memory subject verifica
   assert.equal(queries.length, 1);
   assert.deepEqual(queries[0].params.slice(0, 2), ['user-1', ['buyer@example.com']]);
   assert.deepEqual(queries[0].params[3], ['codex_followup', 'outlook_sync']);
+  assert.equal(queries[0].params[4], 'sent');
+});
+
+test('native received capture reconciles only with received imports using the sender as counterparty', async () => {
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
+  const pool = {
+    query: async (sql: string, params: unknown[]) => {
+      queries.push({ sql, params });
+      return { rows: [{
+        id: 'inbound-import-1',
+        interaction_id: 'interaction-inbound-1',
+        match_status: 'matched',
+        subject: 'RE: Lease requirement',
+        email: 'sender@example.com',
+        activity_at: new Date('2026-08-10T15:04:00.000Z'),
+      }] };
+    },
+  } as any;
+
+  const result = await findMatchingCodexEmailImport({
+    pool,
+    userId: 'user-1',
+    direction: 'received',
+    subject: 'Lease requirement',
+    counterpartyEmails: ['sender@example.com'],
+    occurredAt: '2026-08-10T15:00:00.000Z',
+  });
+
+  assert.deepEqual(result, {
+    id: 'inbound-import-1',
+    interactionId: 'interaction-inbound-1',
+    matchStatus: 'matched',
+  });
+  assert.equal(queries[0].params[4], 'received');
+  assert.match(queries[0].sql, /activity_status = \$5/);
 });
 
 test('reuses one strict cross-channel sales interaction in either ingestion order', async () => {
@@ -305,6 +340,40 @@ test('reuses a matching captured email interaction when Postmark arrives before 
 
   assert.deepEqual(await findMatchingCapturedEmailInteraction({ pool, userId: 'user-1', activity }), {
     interactionId: 'interaction-1',
+    prospectId: 'prospect-1',
+  });
+});
+
+test('reuses a native Outlook inbox interaction for the same received provider evidence', async () => {
+  let queryCount = 0;
+  const pool = {
+    query: async () => {
+      queryCount += 1;
+      if (queryCount === 1) {
+        return { rows: [{
+          id: 'email-message-inbound-1',
+          direction: 'received',
+          subject: 'RE: Lease requirement',
+          sender_email: 'sender@example.com',
+          recipient_emails: ['patrick@example.com'],
+          sent_at: null,
+          received_at: new Date('2026-08-10T15:03:00.000Z'),
+        }] };
+      }
+      return { rows: [{ id: 'interaction-inbound-1', prospect_id: 'prospect-1' }] };
+    },
+  } as any;
+  const activity = normalizeSalesActivityInput({
+    source: 'outlook_sync',
+    status: 'received',
+    activityType: 'email',
+    email: 'sender@example.com',
+    subject: 'Lease requirement',
+    activityAt: '2026-08-10T15:00:00.000Z',
+  });
+
+  assert.deepEqual(await findMatchingCapturedEmailInteraction({ pool, userId: 'user-1', activity }), {
+    interactionId: 'interaction-inbound-1',
     prospectId: 'prospect-1',
   });
 });

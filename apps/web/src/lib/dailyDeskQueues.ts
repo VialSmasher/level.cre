@@ -11,8 +11,35 @@ export type DailyActivityDay = {
   call: number;
   meeting: number;
   other: number;
+  inboundEmail?: number;
   total: number;
 };
+
+export function describeSalesActivityDirection(activityStatus: unknown) {
+  const normalized = String(activityStatus || '').trim().toLowerCase();
+  if (normalized === 'received' || normalized === 'inbound') {
+    return {
+      kind: 'inbound' as const,
+      label: 'Inbound email · outcome',
+      countsTowardProduction: false,
+      linkLabel: 'Link response',
+    };
+  }
+  if (normalized === 'sent' || normalized === 'outbound') {
+    return {
+      kind: 'outbound' as const,
+      label: 'Outbound email · production',
+      countsTowardProduction: true,
+      linkLabel: 'Link activity',
+    };
+  }
+  return {
+    kind: 'unknown' as const,
+    label: 'Direction unconfirmed',
+    countsTowardProduction: false,
+    linkLabel: 'Link activity',
+  };
+}
 
 export function buildDailyActivityPace(series: DailyActivityDay[], dailyCallTarget?: number | null) {
   const today = series.at(-1) || { email: 0, call: 0, meeting: 0, other: 0, total: 0 };

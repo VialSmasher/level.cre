@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildDailyActivityPace, buildDailyDeskQueues, type DailyDeskAction } from './dailyDeskQueues';
+import {
+  buildDailyActivityPace,
+  buildDailyDeskQueues,
+  describeSalesActivityDirection,
+  type DailyDeskAction,
+} from './dailyDeskQueues';
 
 function action(id: string, type: string, priorityScore: number, stage?: string): DailyDeskAction {
   return {
@@ -86,4 +91,25 @@ test('prefers the broker configured daily call target when one exists', () => {
   assert.equal(pace.paceTarget, 12);
   assert.equal(pace.remainingToPace, 9);
   assert.equal(pace.progressPercent, 25);
+});
+
+test('does not count inbound email responses toward production pace', () => {
+  const pace = buildDailyActivityPace([
+    { email: 0, call: 0, meeting: 0, other: 0, inboundEmail: 3, total: 0 },
+  ], 10);
+
+  assert.equal(pace.completed, 0);
+  assert.equal(pace.remainingToPace, 10);
+  assert.equal(pace.today.inboundEmail, 3);
+});
+
+test('labels inbound review evidence as an outcome and reserves production credit for confirmed outbound activity', () => {
+  assert.deepEqual(describeSalesActivityDirection('received'), {
+    kind: 'inbound',
+    label: 'Inbound email · outcome',
+    countsTowardProduction: false,
+    linkLabel: 'Link response',
+  });
+  assert.equal(describeSalesActivityDirection('sent').countsTowardProduction, true);
+  assert.equal(describeSalesActivityDirection('draft').countsTowardProduction, false);
 });
