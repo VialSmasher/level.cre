@@ -48,9 +48,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { apiRequest } from '@/lib/queryClient'
-import { buildDailyDeskQueues } from '@/lib/dailyDeskQueues'
+import { buildDailyActivityPace, buildDailyDeskQueues } from '@/lib/dailyDeskQueues'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import { useProfile } from '@/hooks/useProfile'
 
 type DeskTab = 'today' | 'waiting' | 'review' | 'develop'
 type ActionPriority = 'critical' | 'high' | 'medium' | 'low'
@@ -443,8 +444,8 @@ function ActionRow({ action, featured = false }: { action: SalesBriefAction; fea
 function EmptyQueue({ tab }: { tab: DeskTab }) {
   const copy: Record<DeskTab, { title: string; body: string }> = {
     today: {
-      title: 'No urgent work is queued',
-      body: 'When Level CRE sees an overdue follow-up, live pursuit action, or verified sales signal, it will appear here.',
+      title: 'No urgent follow-up is queued',
+      body: 'Open the call queue to keep creating new conversations. Level CRE will keep watching for anything that needs to come back.',
     },
     waiting: {
       title: 'Nothing is waiting on a reply',
@@ -533,6 +534,7 @@ function ActivityMomentum({ data, maxDailyActivity }: { data: ActivityPulseRespo
 export default function DailyDeskPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const { profile } = useProfile()
   const [activeTab, setActiveTab] = useState<DeskTab>(() => {
     if (typeof window === 'undefined') return 'today'
     const requested = new URLSearchParams(window.location.search).get('tab')
@@ -778,8 +780,20 @@ export default function DailyDeskPage() {
   const isLoading = salesBriefQuery.isLoading || importsQuery.isLoading || marketProposalsQuery.isLoading || opportunityProposalsQuery.isLoading || propertyEvidenceQuery.isLoading
   const hasError = salesBriefQuery.isError || importsQuery.isError || marketProposalsQuery.isError || opportunityProposalsQuery.isError || propertyEvidenceQuery.isError || propertyMemoryReviewQuery.isError
   const generatedAt = formatWhen(salesBriefQuery.data?.generatedAt)
+  const activityPace = useMemo(
+    () => buildDailyActivityPace(activityPulseQuery.data?.series || [], profile?.goals?.callsPerDay),
+    [activityPulseQuery.data?.series, profile?.goals?.callsPerDay],
+  )
   const pulseMetrics = [
-    { group: 'Effort', label: 'Touches / 28 days', value: activityPulseQuery.data?.total ?? 0, icon: Activity, tone: 'text-blue-700 bg-blue-50' },
+    {
+      group: 'Today',
+      label: activityPace.hasConfiguredCallTarget
+        ? 'Calls vs daily target'
+        : activityPace.hasBaseline ? 'Touches vs recent pace' : 'Touches logged today',
+      value: activityPace.paceTarget > 0 ? `${activityPace.completed}/${activityPace.paceTarget}` : activityPace.completed,
+      icon: Activity,
+      tone: 'text-blue-700 bg-blue-50',
+    },
     { group: 'Momentum', label: 'Active-day streak', value: `${activityPulseQuery.data?.streakDays ?? statsQuery.data?.streakDays ?? 0}d`, icon: Flame, tone: 'text-orange-700 bg-orange-50' },
     { group: 'Pipeline', label: 'With a next move', value: `${salesBriefQuery.data?.pipelineHealth?.nextActionCoveragePercent ?? 0}%`, icon: Target, tone: 'text-violet-700 bg-violet-50' },
     { group: 'Follow-up', label: 'Completed this week', value: statsQuery.data?.followupsLogged ?? 0, icon: Send, tone: 'text-emerald-700 bg-emerald-50' },
@@ -792,7 +806,7 @@ export default function DailyDeskPage() {
         <PageHeader
           label="Broker desk"
           title="Today"
-          description="The shortest path from current market activity to revenue-moving work."
+          description="Make the moves, keep every follow-up visible, and let Level CRE capture the trail."
           icon={ListTodo}
           actions={(
             <>
@@ -871,7 +885,7 @@ export default function DailyDeskPage() {
             <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div>
                 <h2 className="text-sm font-semibold text-slate-950">
-                  {activeTab === 'today' && 'Revenue-moving actions'}
+                  {activeTab === 'today' && "Today's moves"}
                   {activeTab === 'waiting' && 'Sent work waiting on others'}
                   {activeTab === 'review' && 'Activity, property evidence, and proposals needing context'}
                   {activeTab === 'develop' && 'Pipeline development'}
@@ -1182,32 +1196,47 @@ export default function DailyDeskPage() {
           </section>
 
           <aside className="space-y-5">
-            <section className="rounded-md border border-slate-900 bg-[#0b1220] p-5 text-white shadow-md">
+            <section className="rounded-md border border-slate-900 bg-[#0b1220] p-5 text-white shadow-md" aria-label="Today's activity pace">
               <div className="flex items-center gap-2 text-xs font-semibold uppercase text-blue-300">
-                <Target className="h-4 w-4" />
-                Best next move
+                <Activity className="h-4 w-4" />
+                Today's activity pace
               </div>
-              {salesBriefQuery.data?.nextBestAction ? (
-                <div className="mt-3">
-                  <h2 className="text-base font-semibold leading-6 text-white">{salesBriefQuery.data.nextBestAction.title}</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-300">{salesBriefQuery.data.nextBestAction.suggestedAction}</p>
-                  {actionHref(salesBriefQuery.data.nextBestAction) ? (
-                    <Button asChild className="mt-4 w-full bg-blue-600 hover:bg-blue-500" size="sm">
-                      <Link href={actionHref(salesBriefQuery.data.nextBestAction)!}>
-                        Work this now
-                        <ArrowRight className="h-4 w-4" />
-                      </Link>
-                    </Button>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="mt-3">
-                  <p className="text-sm leading-6 text-slate-300">No ranked action yet. Add prospects or connect activity sources to build the queue.</p>
-                  <Button asChild variant="outline" size="sm" className="mt-4 w-full border-white/20 bg-white/5 text-white hover:bg-white/10 hover:text-white">
-                    <Link href="/app"><MapPin className="h-4 w-4" />Open map</Link>
-                  </Button>
-                </div>
-              )}
+              <div className="mt-3 flex items-end gap-2">
+                <p className="text-4xl font-bold tabular-nums text-white">{activityPace.completed}</p>
+                <p className="pb-1 text-sm text-slate-300">{activityPace.goalKind === 'calls' ? `call${activityPace.completed === 1 ? '' : 's'}` : `touch${activityPace.completed === 1 ? '' : 'es'}`} today</p>
+              </div>
+              <div
+                className="mt-4 h-2 overflow-hidden rounded-full bg-white/10"
+                role="progressbar"
+                aria-label="Progress against recent active-day pace"
+                aria-valuemin={0}
+                aria-valuemax={activityPace.paceTarget || 1}
+                aria-valuenow={Math.min(activityPace.completed, activityPace.paceTarget || 1)}
+              >
+                <div className="h-full rounded-full bg-blue-500" style={{ width: `${activityPace.progressPercent}%` }} />
+              </div>
+              <p className="mt-3 text-sm leading-6 text-slate-300">
+                {activityPace.hasConfiguredCallTarget && activityPace.remainingToPace > 0
+                  ? `${activityPace.remainingToPace} more call${activityPace.remainingToPace === 1 ? '' : 's'} to reach your daily target of ${activityPace.paceTarget}.`
+                  : activityPace.hasConfiguredCallTarget
+                    ? 'Daily call target reached. Keep going—every extra conversation creates another chance.'
+                    : !activityPace.hasBaseline
+                  ? 'Start with one useful touch. Level CRE will learn your normal active-day pace.'
+                  : activityPace.remainingToPace > 0
+                    ? `${activityPace.remainingToPace} more to match your recent active-day pace of ${activityPace.recentActiveDayAverage}.`
+                    : 'Recent pace matched. Keep going—every extra touch creates another chance.'}
+              </p>
+              <dl className="mt-4 grid grid-cols-3 gap-2 border-y border-white/10 py-3 text-center">
+                <div><dt className="text-[10px] uppercase text-slate-400">Calls</dt><dd className="mt-1 text-base font-semibold tabular-nums">{activityPace.today.call}</dd></div>
+                <div><dt className="text-[10px] uppercase text-slate-400">Emails</dt><dd className="mt-1 text-base font-semibold tabular-nums">{activityPace.today.email}</dd></div>
+                <div><dt className="text-[10px] uppercase text-slate-400">Meetings</dt><dd className="mt-1 text-base font-semibold tabular-nums">{activityPace.today.meeting}</dd></div>
+              </dl>
+              <Button asChild className="mt-4 w-full bg-blue-600 hover:bg-blue-500" size="sm">
+                <Link href="/app/followup">
+                  Open call queue
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
             </section>
 
             <section className="rounded-md border border-slate-200 bg-white p-5">

@@ -19,6 +19,19 @@ export type BrokerActivityInput = {
   date?: string;
 };
 
+type ContactCoverageProspect = Pick<Prospect, 'contactName' | 'contactEmail' | 'contactPhone' | 'contactCompany'>;
+type FollowUpProspect = Pick<Prospect, 'followUpDueDate'>;
+
+export function hasContactCoverage(prospect: ContactCoverageProspect) {
+  return Boolean(prospect.contactName || prospect.contactEmail || prospect.contactPhone || prospect.contactCompany);
+}
+
+export function isFollowUpDue(prospect: FollowUpProspect, now = new Date()) {
+  if (!prospect.followUpDueDate) return false;
+  const dueAt = new Date(prospect.followUpDueDate);
+  return Number.isFinite(dueAt.getTime()) && dueAt.getTime() <= now.getTime();
+}
+
 export function buildBrokerActivityPayload(input: BrokerActivityInput) {
   return {
     prospectId: input.prospect.id,

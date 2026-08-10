@@ -338,7 +338,10 @@ export default function HomePage() {
   const polygonPathListenersRef = useRef<Map<string, google.maps.MapsEventListener[]>>(new Map());
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [marketMemoryDialogOpen, setMarketMemoryDialogOpen] = useState(false);
-  const [propertyMemorySearchOpen, setPropertyMemorySearchOpen] = useState(false);
+  const [propertyMemorySearchOpen, setPropertyMemorySearchOpen] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return new URLSearchParams(window.location.search).get('memorySearch') === '1';
+  });
   const [duplicateLookupPending, setDuplicateLookupPending] = useState<string | null>(null);
   const duplicateLookupRequestRef = useRef(0);
   const [marketMemoryPreview, setMarketMemoryPreview] = useState<CurrentProjectsMarketMemoryPreview | null>(null);
