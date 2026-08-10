@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/ui/page-header';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowRight, Building2, Calendar, CheckCircle2, Clock, Database, Mail, MapPin, MessageSquare, Phone, Trophy, Users, Wrench } from 'lucide-react';
+import { ArrowRight, Building2, Calendar, CheckCircle2, Clock, Database, Mail, MapPin, MessageSquare, Phone, Search, Trophy, Users, Wrench } from 'lucide-react';
 import { Prospect, Submarket } from '@level-cre/shared/schema';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
@@ -18,6 +18,7 @@ import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospect
 import { apiRequest } from '@/lib/queryClient';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { getLifetimeProductionBadge, readTrackRecordMetrics, TRACK_RECORD_STORAGE_KEY } from '@/lib/trackRecordMetrics';
+import { buildProspectActivityPatch, getFollowUpDueDate, hasContactCoverage, isActionableFollowUpDue } from '@/lib/brokerActions';
 
 function getInteractionDate(interaction: any) {
   const parsed = new Date(interaction?.date || interaction?.createdAt || '');
@@ -185,8 +186,8 @@ export default function Knowledge() {
       interactionsByProspectId.set(interaction.prospectId, list);
     }
 
-    // Contact coverage: % with status != 'prospect'
-    const contacted = filteredProspects.filter(p => p.status !== 'prospect').length;
+    // Contact coverage reflects actual usable contact/company information.
+    const contacted = filteredProspects.filter(hasContactCoverage).length;
     const contactPercent = total > 0 ? (contacted / total) * 100 : 0;
 
     // Freshness: % with interaction in last 60 days
@@ -210,9 +211,12 @@ export default function Knowledge() {
       !p.contactName && !p.contactEmail && !p.contactPhone && !p.contactCompany
     );
     const newProspects = noTouches.filter(p => p.status === 'prospect');
-    const relationshipProspects = staleProspects.filter(p =>
-      ['contacted', 'followup', 'listing', 'client', 'development'].includes(p.status)
-    );
+    const dueFollowUps = filteredProspects
+      .filter((prospect) => isActionableFollowUpDue(prospect))
+      .sort((left, right) => (
+        (getFollowUpDueDate(left)?.getTime() ?? Number.POSITIVE_INFINITY)
+        - (getFollowUpDueDate(right)?.getTime() ?? Number.POSITIVE_INFINITY)
+      ));
 
     return {
       total,
@@ -224,7 +228,7 @@ export default function Knowledge() {
       newProspects,
       missingContacts,
       staleProspects,
-      relationshipProspects,
+      dueFollowUps,
       interactionsByProspectId,
     };
   }, [filteredProspects, safeInteractions]);
@@ -310,8 +314,8 @@ export default function Knowledge() {
       title: 'Follow-up Lane',
       description: 'Relationship records that need a touch.',
       icon: Clock,
-      count: analytics.relationshipProspects.length,
-      items: analytics.relationshipProspects,
+      count: analytics.dueFollowUps.length,
+      items: analytics.dueFollowUps,
       tint: 'orange',
       action: 'Move forward',
     },
@@ -366,7 +370,7 @@ export default function Knowledge() {
       ? 'new'
       : analytics.missingContacts.some((prospect) => prospect.id === selectedProspect.id)
         ? 'missing'
-        : analytics.relationshipProspects.some((prospect) => prospect.id === selectedProspect.id)
+        : analytics.dueFollowUps.some((prospect) => prospect.id === selectedProspect.id)
           ? 'followups'
           : 'stale'
     : activeQueue;
@@ -410,20 +414,16 @@ export default function Knowledge() {
       outcome: 'contacted' | 'no_answer' | 'left_message' | 'scheduled_meeting' | 'not_interested' | 'follow_up_later';
       notes?: string;
     }) => {
+      const activityAt = new Date();
       await apiRequest('POST', '/api/interactions', {
         prospectId: prospect.id,
-        date: new Date().toISOString(),
+        date: activityAt.toISOString(),
         type,
         outcome,
         notes: notes || '',
       });
 
-      const patch: Record<string, string> = {
-        lastContactDate: new Date().toISOString(),
-      };
-      if (prospect.status === 'prospect' && type !== 'note') {
-        patch.status = 'contacted';
-      }
+      const patch = buildProspectActivityPatch(prospect, type, activityAt);
       await apiRequest('PATCH', `/api/prospects/${prospect.id}`, patch);
     },
     onSuccess: async () => {
@@ -480,19 +480,30 @@ export default function Knowledge() {
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
-          label="Database health"
+          label="Brokerage intelligence"
           title="Market Memory"
-          description="Keep companies, properties, contacts, and recent activity useful enough to trust on the map."
+          description="Search what Level CRE knows, then keep properties, companies, contacts, and activity current enough to trust."
           icon={Database}
           actions={(
-            <Button
-              type="button"
-              className="w-full gap-2 bg-slate-950 text-white hover:bg-slate-800 md:w-auto"
-              onClick={() => setLocation('/app/followup')}
-            >
-              Open call queue
-              <ArrowRight className="h-4 w-4" />
-            </Button>
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full gap-2 md:w-auto"
+                onClick={() => setLocation('/app?memorySearch=1')}
+              >
+                <Search className="h-4 w-4" />
+                Search memory
+              </Button>
+              <Button
+                type="button"
+                className="w-full gap-2 bg-slate-950 text-white hover:bg-slate-800 md:w-auto"
+                onClick={() => setLocation('/app/followup')}
+              >
+                Open call queue
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </>
           )}
         />
 
@@ -695,19 +706,19 @@ export default function Knowledge() {
                   Follow-ups
                 </span>
                 <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
-                  {analytics.relationshipProspects.length}
+                  {analytics.dueFollowUps.length}
                 </Badge>
               </CardTitle>
               <CardDescription>Relationship records that need a timely next touch.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-                {analytics.relationshipProspects.length === 0 ? (
+                {analytics.dueFollowUps.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
                     All caught up.
                   </div>
                 ) : (
-                  analytics.relationshipProspects
+                  analytics.dueFollowUps
                     .slice(0, 8)
                     .map((prospect) => {
                       const latestInteraction = getLatestInteractionDate(analytics.interactionsByProspectId.get(prospect.id) ?? []);
