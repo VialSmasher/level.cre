@@ -60,6 +60,7 @@ import {
 import {
   importSalesActivityBatch,
   listSalesActivityImports,
+  protectOutboundEmailFollowUp,
   reviewSalesActivityImport,
   SalesActivityBatchSchema,
   SalesActivityReviewActionSchema,
@@ -69,6 +70,7 @@ import {
   findMatchingCodexEmailImport,
   findMatchingCapturedEmailMessage,
   findMatchingCapturedEmailInteraction,
+  findMatchingSalesActivityInteraction,
   hasMatchingCapturedEmailEvidence,
   shouldSuppressDuplicateCapture,
   suppressEmailReviewsMatchingSalesActivity,
@@ -777,7 +779,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     prospects?: EmailProspectCandidate[];
   }) {
     const existingResult = await pool.query(`
-      SELECT interaction_id, match_status, match_reason
+      SELECT interaction_id, match_status, match_reason, prospect_id
       FROM public.email_prospect_matches
       WHERE user_id = $1 AND email_message_id = $2
       ORDER BY (interaction_id IS NOT NULL) DESC, updated_at DESC NULLS LAST
@@ -785,6 +787,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     `, [params.userId, params.emailMessageId]);
     const existing = existingResult.rows[0];
     if (existing?.interaction_id) {
+      if (String(params.messageData.direction || '').toLowerCase() === 'sent' && existing.prospect_id) {
+        await protectOutboundEmailFollowUp({
+          pool,
+          userId: params.userId,
+          prospectId: existing.prospect_id,
+          activityAt: params.messageData.sentAt || params.messageData.receivedAt || null,
+        });
+      }
       return {
         matchesCreated: 0,
         xpAwarded: false,
@@ -940,6 +950,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           updated_at = now()
       WHERE id = $1 AND user_id = $2 AND merged_into_prospect_id IS NULL
     `, [decision.prospectId, params.userId, interactionDate]);
+    if (String(params.messageData.direction || '').toLowerCase() === 'sent') {
+      await protectOutboundEmailFollowUp({
+        pool,
+        userId: params.userId,
+        prospectId: decision.prospectId,
+        activityAt: interactionDate,
+      });
+    }
 
     return {
       matchesCreated: match.created ? 1 : 0,
@@ -4464,11 +4482,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userId,
           activity,
         }),
-        findCapturedEmailInteraction: async (activity) => findMatchingCapturedEmailInteraction({
-          pool,
-          userId,
-          activity,
-        }),
+        findCapturedEmailInteraction: async (activity) => (
+          await findMatchingSalesActivityInteraction({ pool, userId, activity })
+          || findMatchingCapturedEmailInteraction({ pool, userId, activity })
+        ),
         reconcileEmailEvidence: async (activity) => suppressEmailReviewsMatchingSalesActivity({
           pool,
           userId,

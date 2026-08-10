@@ -17,6 +17,55 @@ type ContactInteractionStorage = {
   createContactInteraction(interaction: any, options?: any): Promise<{ id: string }>;
 };
 
+const DEFAULT_OUTBOUND_EMAIL_FOLLOW_UP_DAYS = 14;
+
+export function defaultOutboundEmailFollowUp(activityAt: Date | string | null): string {
+  const parsed = activityAt ? new Date(activityAt) : new Date();
+  const anchor = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  anchor.setUTCDate(anchor.getUTCDate() + DEFAULT_OUTBOUND_EMAIL_FOLLOW_UP_DAYS);
+  return new Date(Date.UTC(
+    anchor.getUTCFullYear(),
+    anchor.getUTCMonth(),
+    anchor.getUTCDate(),
+    12,
+    0,
+    0,
+  )).toISOString();
+}
+
+export async function protectOutboundEmailFollowUp(params: {
+  pool: Queryable;
+  userId: string;
+  prospectId: string;
+  activityAt: Date | string | null;
+}) {
+  const nextFollowUp = defaultOutboundEmailFollowUp(params.activityAt);
+  await params.pool.query(
+    `
+      UPDATE public.prospects AS prospect
+      SET follow_up_due_date = $3,
+          updated_at = now()
+      WHERE prospect.id = $1
+        AND prospect.user_id = $2
+        AND prospect.merged_into_prospect_id IS NULL
+        AND prospect.follow_up_due_date IS NULL
+        AND prospect.status IN ('prospect', 'contacted')
+        AND NOT EXISTS (
+          SELECT 1
+          FROM public.opportunities AS opportunity
+          WHERE opportunity.user_id = prospect.user_id
+            AND opportunity.prospect_id = prospect.id
+            AND opportunity.archived_at IS NULL
+            AND (
+              opportunity.status IN ('won', 'lost')
+              OR opportunity.stage NOT IN ('target', 'researching', 'contacting', 'engaged', 'nurture')
+            )
+        )
+    `,
+    [params.prospectId, params.userId, nextFollowUp],
+  );
+}
+
 export const SalesActivityBatchSchema = z.object({
   source: z.string().trim().min(1).max(80).optional(),
   runId: z.string().trim().max(120).nullable().optional(),
@@ -459,6 +508,15 @@ export async function importSalesActivityBatch(params: {
             [resolved.prospectId, params.userId, interactionDate],
           );
         }
+
+        if (interactionId && activity.activityType === 'email') {
+          await protectOutboundEmailFollowUp({
+            pool: params.pool,
+            userId: params.userId,
+            prospectId: resolved.prospectId,
+            activityAt: activity.activityAt,
+          });
+        }
       }
 
       const finalMatchStatus = interactionId ? 'matched' : importRow.match_status;
@@ -708,6 +766,15 @@ export async function reviewSalesActivityImport(params: {
       `,
       [prospect.id, params.userId, interactionDate],
     );
+  }
+
+  if (interactionId && row.activity_status === 'sent' && (row.activity_type || 'email') === 'email') {
+    await protectOutboundEmailFollowUp({
+      pool: params.pool,
+      userId: params.userId,
+      prospectId: prospect.id,
+      activityAt: row.activity_at || null,
+    });
   }
 
   const client = await params.pool.connect();

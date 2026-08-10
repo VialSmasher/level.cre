@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import type { NormalizedSalesActivity } from './salesActivityImport';
 
 const RECONCILIATION_WINDOW_MINUTES = 15;
+const RECONCILABLE_SALES_ACTIVITY_SOURCES = ['codex_followup', 'outlook_sync'] as const;
 
 type EmailEvidence = {
   subject?: string | null;
@@ -30,6 +31,12 @@ function parseDate(value: Date | string | null | undefined): Date | null {
   if (!value) return null;
   const parsed = value instanceof Date ? value : new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isReconcilableSalesActivitySource(source: string): boolean {
+  return RECONCILABLE_SALES_ACTIVITY_SOURCES.includes(
+    source as typeof RECONCILABLE_SALES_ACTIVITY_SOURCES[number],
+  );
 }
 
 export function normalizeEmailActivitySubject(value: string | null | undefined): string {
@@ -77,7 +84,7 @@ export async function findMatchingCodexEmailImport(params: {
       SELECT id, interaction_id, match_status, subject, email, activity_at
       FROM public.sales_activity_imports
       WHERE user_id = $1
-        AND source = 'codex_followup'
+        AND source = ANY($4::varchar[])
         AND activity_status = 'sent'
         AND activity_type = 'email'
         AND lower(email) = ANY($2::varchar[])
@@ -86,7 +93,7 @@ export async function findMatchingCodexEmailImport(params: {
       ORDER BY ABS(EXTRACT(EPOCH FROM (activity_at - $3::timestamp))) ASC
       LIMIT 20
     `,
-    [params.userId, emails, occurredAt],
+    [params.userId, emails, occurredAt, [...RECONCILABLE_SALES_ACTIVITY_SOURCES]],
   );
 
   const matching = rows.find((row) => isSameEmailActivity(
@@ -191,7 +198,7 @@ async function findMatchingCapturedEmailMessageIds(params: {
   const occurredAt = parseDate(activity.activityAt);
   const subject = normalizeEmailActivitySubject(activity.subject);
   if (
-    activity.source !== 'codex_followup'
+    !isReconcilableSalesActivitySource(activity.source)
     || activity.activityStatus !== 'sent'
     || activity.activityType !== 'email'
     || !activity.email
@@ -228,6 +235,67 @@ async function findMatchingCapturedEmailMessageIds(params: {
       },
     ))
     .map((row) => row.id);
+}
+
+export async function findMatchingSalesActivityInteraction(params: {
+  pool: Pool;
+  userId: string;
+  activity: NormalizedSalesActivity;
+}): Promise<{ interactionId: string; prospectId: string } | null> {
+  const { activity } = params;
+  const occurredAt = parseDate(activity.activityAt);
+  const subject = normalizeEmailActivitySubject(activity.subject);
+  if (
+    !isReconcilableSalesActivitySource(activity.source)
+    || activity.activityStatus !== 'sent'
+    || activity.activityType !== 'email'
+    || !activity.email
+    || !occurredAt
+    || !subject
+  ) return null;
+
+  const counterpartSource = activity.source === 'codex_followup'
+    ? 'outlook_sync'
+    : 'codex_followup';
+  const { rows } = await params.pool.query(
+    `
+      SELECT
+        candidate.interaction_id,
+        candidate.prospect_id,
+        candidate.subject,
+        candidate.email,
+        candidate.activity_at
+      FROM public.sales_activity_imports candidate
+      WHERE candidate.user_id = $1
+        AND candidate.source = $2
+        AND candidate.activity_status = 'sent'
+        AND candidate.activity_type = 'email'
+        AND candidate.interaction_id IS NOT NULL
+        AND candidate.prospect_id IS NOT NULL
+        AND lower(candidate.email) = lower($3)
+        AND candidate.activity_at
+          BETWEEN $5::timestamp - interval '${RECONCILIATION_WINDOW_MINUTES} minutes'
+              AND $5::timestamp + interval '${RECONCILIATION_WINDOW_MINUTES} minutes'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM public.sales_activity_imports claimed
+          WHERE claimed.user_id = candidate.user_id
+            AND claimed.source = $4
+            AND claimed.interaction_id = candidate.interaction_id
+        )
+      ORDER BY ABS(EXTRACT(EPOCH FROM (candidate.activity_at - $5::timestamp))) ASC
+      LIMIT 20
+    `,
+    [params.userId, counterpartSource, activity.email, activity.source, occurredAt],
+  );
+
+  const matching = rows.find((row) => isSameEmailActivity(
+    { subject: activity.subject, counterpartyEmails: [activity.email], occurredAt },
+    { subject: row.subject, counterpartyEmails: [row.email], occurredAt: row.activity_at },
+  ));
+  return matching
+    ? { interactionId: matching.interaction_id, prospectId: matching.prospect_id }
+    : null;
 }
 
 export async function hasMatchingCapturedEmailEvidence(params: {

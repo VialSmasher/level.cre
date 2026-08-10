@@ -9,6 +9,7 @@ import {
 } from './salesActivityImport';
 import {
   importSalesActivityBatch,
+  protectOutboundEmailFollowUp,
   reviewSalesActivityImport,
   SalesActivityBatchSchema,
   SalesActivityReviewActionSchema,
@@ -107,6 +108,180 @@ test('interaction notes preserve useful context without raw body dumping', () =>
     buildSalesActivityInteractionNotes(activity),
     'Subject: Catch up\nShort approved send note.\nCodex activity: Brian Beckett | KSM RIG & EQUIPMENT | bb.ksm@ksmrig.com',
   );
+});
+
+test('sales activity normalization retains metadata but drops Outlook message content', () => {
+  const activity = normalizeSalesActivityInput({
+    externalActivityId: 'outlook-message-1',
+    activityAt: '2026-07-11T06:00:00.000Z',
+    contact: 'Pat Prospect',
+    company: 'Prospect Co',
+    email: 'pat@example.com',
+    status: 'sent',
+    subject: 'Follow up',
+    notes: 'Captured during the scheduled Outlook sync.',
+    body: 'Full plain-text message body must not be retained.',
+    htmlBody: '<p>Full HTML message body must not be retained.</p>',
+    attachments: [{ name: 'confidential.pdf' }],
+  });
+
+  assert.equal(activity.rawPayload.externalActivityId, 'outlook-message-1');
+  assert.equal(activity.rawPayload.subject, 'Follow up');
+  assert.equal(activity.rawPayload.notes, 'Captured during the scheduled Outlook sync.');
+  assert.equal(Object.prototype.hasOwnProperty.call(activity.rawPayload, 'body'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(activity.rawPayload, 'htmlBody'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(activity.rawPayload, 'attachments'), false);
+});
+
+function salesActivityPersistenceHarness(initialFollowUpDueDate: string | null = null) {
+  const state = {
+    importRow: null as null | {
+      id: string;
+      interaction_id: string | null;
+      match_status: string;
+      prospect_id: string | null;
+    },
+    interactionId: null as string | null,
+    createdInteractions: 0,
+    followUpDueDate: initialFollowUpDueDate,
+    followUpWrites: 0,
+  };
+
+  const handler = async (sql: string, params: unknown[] = []) => {
+    if (sql.includes('FROM public.prospects') && sql.includes('SELECT')) {
+      return { rows: [{ id: 'prospect-1', merged_into_prospect_id: null }] };
+    }
+    if (sql.includes('SELECT id, interaction_id') && sql.includes('sales_activity_imports')) {
+      return { rows: state.importRow ? [{ id: state.importRow.id, interaction_id: state.importRow.interaction_id }] : [] };
+    }
+    if (sql.includes('INSERT INTO public.sales_activity_imports')) {
+      state.importRow = state.importRow || {
+        id: String(params[0]),
+        interaction_id: (params[19] as string | null) || null,
+        match_status: String(params[16]),
+        prospect_id: (params[14] as string | null) || null,
+      };
+      return { rows: [{ ...state.importRow }] };
+    }
+    if (sql.includes('FROM public.contact_interactions')) {
+      return { rows: state.interactionId ? [{ id: state.interactionId }] : [] };
+    }
+    if (sql.includes('UPDATE public.sales_activity_imports') && sql.includes('SET interaction_id')) {
+      if (state.importRow) state.importRow.interaction_id = String(params[3]);
+      return { rows: [] };
+    }
+    if (sql.includes('UPDATE public.prospects') && sql.includes('follow_up_due_date = $3')) {
+      if (state.followUpDueDate === null) {
+        state.followUpDueDate = String(params[2]);
+        state.followUpWrites += 1;
+        return { rows: [], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    }
+    return { rows: [], rowCount: 0 };
+  };
+
+  const pool = transactionalPool(handler);
+  const storage = {
+    createContactInteraction: async () => {
+      state.createdInteractions += 1;
+      state.interactionId = 'interaction-1';
+      return { id: state.interactionId };
+    },
+  };
+
+  return { state, pool, storage };
+}
+
+test('an exact-email matched Outlook activity creates one interaction and protects a missing follow-up across retries', async () => {
+  const harness = salesActivityPersistenceHarness();
+  const payload = SalesActivityBatchSchema.parse({
+    source: 'outlook_sync',
+    activities: [{
+      externalActivityId: 'outlook-message-1',
+      status: 'sent',
+      activityType: 'email',
+      email: 'pat@example.com',
+      subject: 'Follow up',
+      activityAt: '2026-07-11T06:00:00.000Z',
+    }],
+  });
+
+  const first = await importSalesActivityBatch({
+    pool: harness.pool,
+    storage: harness.storage,
+    userId: 'user-1',
+    payload,
+  });
+  const retry = await importSalesActivityBatch({
+    pool: harness.pool,
+    storage: harness.storage,
+    userId: 'user-1',
+    payload,
+  });
+
+  assert.equal(first.createdInteractions, 1);
+  assert.equal(first.results[0].matchReason, 'exact_contact_email');
+  assert.equal(retry.createdInteractions, 0);
+  assert.equal(retry.duplicates, 1);
+  assert.equal(harness.state.createdInteractions, 1);
+  assert.equal(harness.state.followUpDueDate, '2026-07-25T12:00:00.000Z');
+  assert.equal(harness.state.followUpWrites, 1);
+});
+
+test('a matched Outlook email never overwrites an existing prospect follow-up', async () => {
+  const existingFollowUp = '2026-08-01T16:00:00.000Z';
+  const harness = salesActivityPersistenceHarness(existingFollowUp);
+
+  await importSalesActivityBatch({
+    pool: harness.pool,
+    storage: harness.storage,
+    userId: 'user-1',
+    payload: SalesActivityBatchSchema.parse({
+      source: 'outlook_sync',
+      activities: [{
+        externalActivityId: 'outlook-message-with-existing-follow-up',
+        status: 'sent',
+        activityType: 'email',
+        prospectId: 'prospect-1',
+        activityAt: '2026-07-11T06:00:00.000Z',
+      }],
+    }),
+  });
+
+  assert.equal(harness.state.createdInteractions, 1);
+  assert.equal(harness.state.followUpDueDate, existingFollowUp);
+  assert.equal(harness.state.followUpWrites, 0);
+});
+
+test('automatic email follow-up is limited to pre-qualified business-development records', async () => {
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
+  await protectOutboundEmailFollowUp({
+    pool: {
+      query: async (sql: string, params: unknown[]) => {
+        queries.push({ sql, params });
+        return { rows: [], rowCount: 0 };
+      },
+    } as any,
+    userId: 'user-1',
+    prospectId: 'prospect-1',
+    activityAt: '2026-07-11T06:00:00.000Z',
+  });
+
+  assert.equal(queries.length, 1);
+  assert.deepEqual(queries[0].params, [
+    'prospect-1',
+    'user-1',
+    '2026-07-25T12:00:00.000Z',
+  ]);
+  assert.match(queries[0].sql, /prospect\.status IN \('prospect', 'contacted'\)/);
+  assert.match(queries[0].sql, /opportunity\.archived_at IS NULL/);
+  assert.match(queries[0].sql, /opportunity\.status IN \('won', 'lost'\)/);
+  assert.match(
+    queries[0].sql,
+    /opportunity\.stage NOT IN \('target', 'researching', 'contacting', 'engaged', 'nurture'\)/,
+  );
+  assert.match(queries[0].sql, /NOT EXISTS/);
 });
 
 test('sales activity review actions accept only link or ignore decisions', () => {

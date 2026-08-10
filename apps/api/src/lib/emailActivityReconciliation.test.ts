@@ -5,6 +5,7 @@ import {
   findMatchingCodexEmailImport,
   findMatchingCapturedEmailMessage,
   findMatchingCapturedEmailInteraction,
+  findMatchingSalesActivityInteraction,
   hasMatchingCapturedEmailEvidence,
   isSameEmailActivity,
   normalizeEmailActivitySubject,
@@ -72,6 +73,85 @@ test('finds a matching Codex import only after strict in-memory subject verifica
   assert.deepEqual(result, { id: 'import-1', interactionId: 'interaction-1', matchStatus: 'matched' });
   assert.equal(queries.length, 1);
   assert.deepEqual(queries[0].params.slice(0, 2), ['user-1', ['buyer@example.com']]);
+  assert.deepEqual(queries[0].params[3], ['codex_followup', 'outlook_sync']);
+});
+
+test('reuses one strict cross-channel sales interaction in either ingestion order', async () => {
+  for (const [source, counterpartSource] of [
+    ['outlook_sync', 'codex_followup'],
+    ['codex_followup', 'outlook_sync'],
+  ] as const) {
+    const queries: Array<{ sql: string; params: unknown[] }> = [];
+    const pool = {
+      query: async (sql: string, params: unknown[]) => {
+        queries.push({ sql, params });
+        return { rows: [
+          {
+            interaction_id: 'unrelated-interaction',
+            prospect_id: 'unrelated-prospect',
+            subject: 'Different property',
+            email: 'buyer@example.com',
+            activity_at: new Date('2026-07-10T15:01:00.000Z'),
+          },
+          {
+            interaction_id: 'interaction-1',
+            prospect_id: 'prospect-1',
+            subject: 'RE: 10735 214 St follow-up',
+            email: 'buyer@example.com',
+            activity_at: new Date('2026-07-10T15:04:00.000Z'),
+          },
+        ] };
+      },
+    } as any;
+    const activity = normalizeSalesActivityInput({
+      source,
+      status: 'sent',
+      activityType: 'email',
+      email: 'buyer@example.com',
+      subject: '10735 214 St follow-up',
+      activityAt: '2026-07-10T15:00:00.000Z',
+    });
+
+    assert.deepEqual(
+      await findMatchingSalesActivityInteraction({ pool, userId: 'user-1', activity }),
+      { interactionId: 'interaction-1', prospectId: 'prospect-1' },
+    );
+    assert.equal(queries.length, 1);
+    assert.deepEqual(queries[0].params.slice(0, 4), [
+      'user-1',
+      counterpartSource,
+      'buyer@example.com',
+      source,
+    ]);
+    assert.match(queries[0].sql, /NOT EXISTS/);
+    assert.match(queries[0].sql, /claimed\.source = \$4/);
+    assert.match(queries[0].sql, /claimed\.interaction_id = candidate\.interaction_id/);
+  }
+});
+
+test('does not collapse a different cross-channel email with the same recipient and nearby timestamp', async () => {
+  const pool = {
+    query: async () => ({ rows: [{
+      interaction_id: 'interaction-1',
+      prospect_id: 'prospect-1',
+      subject: 'Different property',
+      email: 'buyer@example.com',
+      activity_at: new Date('2026-07-10T15:04:00.000Z'),
+    }] }),
+  } as any;
+  const activity = normalizeSalesActivityInput({
+    source: 'outlook_sync',
+    status: 'sent',
+    activityType: 'email',
+    email: 'buyer@example.com',
+    subject: '10735 214 St follow-up',
+    activityAt: '2026-07-10T15:00:00.000Z',
+  });
+
+  assert.equal(
+    await findMatchingSalesActivityInteraction({ pool, userId: 'user-1', activity }),
+    null,
+  );
 });
 
 test('finds the same captured email across providers without weakening the evidence', async () => {
@@ -197,7 +277,7 @@ test('detects captured evidence before a direct interaction awards XP', async ()
   assert.equal(await hasMatchingCapturedEmailEvidence({ pool, userId: 'user-1', activity }), true);
 });
 
-test('reuses a matching captured email interaction when Postmark arrives before Codex', async () => {
+test('reuses a matching captured email interaction when Postmark arrives before Outlook sync', async () => {
   let queryCount = 0;
   const pool = {
     query: async () => {
@@ -215,7 +295,7 @@ test('reuses a matching captured email interaction when Postmark arrives before 
     },
   } as any;
   const activity = normalizeSalesActivityInput({
-    source: 'codex_followup',
+    source: 'outlook_sync',
     status: 'sent',
     activityType: 'email',
     email: 'buyer@example.com',
