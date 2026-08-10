@@ -28,6 +28,15 @@ type FollowUpProspect = {
 };
 
 type ActionableFollowUpProspect = FollowUpProspect & Pick<Prospect, 'status'>;
+type ActivityPatchProspect = FollowUpProspect & Pick<Prospect, 'status'>;
+
+type ProspectActivityPatch = {
+  lastContactDate: string;
+  status?: Prospect['status'];
+  followUpDueDate?: null;
+};
+
+const BROKER_TIME_ZONE = 'America/Edmonton';
 
 const followUpTimeframeMonths: Record<NonNullable<Prospect['followUpTimeframe']>, number> = {
   '1_month': 1,
@@ -50,6 +59,17 @@ function addMonthsSafe(value: Date, months: number) {
   return date;
 }
 
+function calendarDayKey(value: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value);
+  const part = (type: 'year' | 'month' | 'day') => parts.find((entry) => entry.type === type)?.value || '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
 export function hasContactCoverage(prospect: ContactCoverageProspect) {
   return Boolean(prospect.contactName || prospect.contactEmail || prospect.contactPhone || prospect.contactCompany);
 }
@@ -66,11 +86,32 @@ export function getFollowUpDueDate(prospect: FollowUpProspect) {
 
 export function isFollowUpDue(prospect: FollowUpProspect, now = new Date()) {
   const dueAt = getFollowUpDueDate(prospect);
-  return Boolean(dueAt && dueAt.getTime() <= now.getTime());
+  return Boolean(dueAt && calendarDayKey(dueAt, BROKER_TIME_ZONE) <= calendarDayKey(now, BROKER_TIME_ZONE));
 }
 
 export function isActionableFollowUpDue(prospect: ActionableFollowUpProspect, now = new Date()) {
   return prospect.status !== 'no_go' && isFollowUpDue(prospect, now);
+}
+
+export function buildProspectActivityPatch(
+  prospect: ActivityPatchProspect,
+  type: BrokerActivityType,
+  activityAt = new Date(),
+): ProspectActivityPatch {
+  const patch: ProspectActivityPatch = {
+    lastContactDate: activityAt.toISOString(),
+  };
+
+  if (prospect.status === 'prospect' && type !== 'note') {
+    patch.status = 'contacted';
+  }
+
+  const storedDueDate = parseFollowUpDate(prospect.followUpDueDate);
+  if (type !== 'note' && storedDueDate && isFollowUpDue({ followUpDueDate: storedDueDate }, activityAt)) {
+    patch.followUpDueDate = null;
+  }
+
+  return patch;
 }
 
 export function buildBrokerActivityPayload(input: BrokerActivityInput) {

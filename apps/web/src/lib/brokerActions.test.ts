@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildBrokerActivityPayload, hasContactCoverage, isActionableFollowUpDue, isFollowUpDue } from './brokerActions';
+import {
+  buildBrokerActivityPayload,
+  buildProspectActivityPatch,
+  getFollowUpDueDate,
+  hasContactCoverage,
+  isActionableFollowUpDue,
+  isFollowUpDue,
+} from './brokerActions';
 
 test('buildBrokerActivityPayload maps a quick call to the broker action API shape', () => {
   const payload = buildBrokerActivityPayload({
@@ -43,6 +50,13 @@ test('follow-up due uses the recorded due date rather than record staleness', ()
   assert.equal(isFollowUpDue({ followUpDueDate: null }, now), false);
 });
 
+test('follow-up due is evaluated by the Edmonton calendar day', () => {
+  const morningInEdmonton = new Date('2026-08-10T14:00:00.000Z');
+
+  assert.equal(isFollowUpDue({ followUpDueDate: '2026-08-11T05:30:00.000Z' }, morningInEdmonton), true);
+  assert.equal(isFollowUpDue({ followUpDueDate: '2026-08-11T06:30:00.000Z' }, morningInEdmonton), false);
+});
+
 test('follow-up due falls back to timeframe from the last contact or creation date', () => {
   const now = new Date('2026-08-10T18:00:00.000Z');
 
@@ -75,4 +89,60 @@ test('no-go prospects do not enter an actionable follow-up lane', () => {
 
   assert.equal(isActionableFollowUpDue({ status: 'no_go', followUpDueDate: dueDate }, now), false);
   assert.equal(isActionableFollowUpDue({ status: 'prospect', followUpDueDate: dueDate }, now), true);
+});
+
+test('logging a touch consumes a due stored date and restarts the timeframe from the new contact', () => {
+  const activityAt = new Date('2026-08-10T16:00:00.000Z');
+  const prospect = {
+    status: 'prospect' as const,
+    followUpDueDate: '2026-08-09T12:00:00.000Z',
+    followUpTimeframe: '1_month' as const,
+    lastContactDate: '2026-07-01T12:00:00.000Z',
+  };
+
+  const patch = buildProspectActivityPatch(prospect, 'call', activityAt);
+
+  assert.deepEqual(patch, {
+    lastContactDate: activityAt.toISOString(),
+    status: 'contacted',
+    followUpDueDate: null,
+  });
+  assert.equal(getFollowUpDueDate({ ...prospect, ...patch })?.toISOString(), '2026-09-10T16:00:00.000Z');
+});
+
+test('logging a touch preserves a future stored follow-up date', () => {
+  const activityAt = new Date('2026-08-10T16:00:00.000Z');
+  const patch = buildProspectActivityPatch({
+    status: 'contacted',
+    followUpDueDate: '2026-08-12T12:00:00.000Z',
+  }, 'email', activityAt);
+
+  assert.deepEqual(patch, {
+    lastContactDate: activityAt.toISOString(),
+  });
+});
+
+test('logging a touch consumes a reminder later on the same Edmonton day', () => {
+  const activityAt = new Date('2026-08-10T14:00:00.000Z');
+  const patch = buildProspectActivityPatch({
+    status: 'contacted',
+    followUpDueDate: '2026-08-11T05:30:00.000Z',
+  }, 'meeting', activityAt);
+
+  assert.deepEqual(patch, {
+    lastContactDate: activityAt.toISOString(),
+    followUpDueDate: null,
+  });
+});
+
+test('logging a note preserves an overdue reminder', () => {
+  const activityAt = new Date('2026-08-10T16:00:00.000Z');
+  const patch = buildProspectActivityPatch({
+    status: 'contacted',
+    followUpDueDate: '2026-08-09T12:00:00.000Z',
+  }, 'note', activityAt);
+
+  assert.deepEqual(patch, {
+    lastContactDate: activityAt.toISOString(),
+  });
 });

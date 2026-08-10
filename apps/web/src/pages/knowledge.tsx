@@ -18,7 +18,7 @@ import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospect
 import { apiRequest } from '@/lib/queryClient';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { getLifetimeProductionBadge, readTrackRecordMetrics, TRACK_RECORD_STORAGE_KEY } from '@/lib/trackRecordMetrics';
-import { getFollowUpDueDate, hasContactCoverage, isActionableFollowUpDue } from '@/lib/brokerActions';
+import { buildProspectActivityPatch, getFollowUpDueDate, hasContactCoverage, isActionableFollowUpDue } from '@/lib/brokerActions';
 
 function getInteractionDate(interaction: any) {
   const parsed = new Date(interaction?.date || interaction?.createdAt || '');
@@ -414,20 +414,16 @@ export default function Knowledge() {
       outcome: 'contacted' | 'no_answer' | 'left_message' | 'scheduled_meeting' | 'not_interested' | 'follow_up_later';
       notes?: string;
     }) => {
+      const activityAt = new Date();
       await apiRequest('POST', '/api/interactions', {
         prospectId: prospect.id,
-        date: new Date().toISOString(),
+        date: activityAt.toISOString(),
         type,
         outcome,
         notes: notes || '',
       });
 
-      const patch: Record<string, string> = {
-        lastContactDate: new Date().toISOString(),
-      };
-      if (prospect.status === 'prospect' && type !== 'note') {
-        patch.status = 'contacted';
-      }
+      const patch = buildProspectActivityPatch(prospect, type, activityAt);
       await apiRequest('PATCH', `/api/prospects/${prospect.id}`, patch);
     },
     onSuccess: async () => {
