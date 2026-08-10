@@ -17,7 +17,8 @@ param(
     [string] $Endpoint = "https://levelcre-production.up.railway.app/api/agent/sales-activity/batch",
     [string] $ConfigPath = "$env:USERPROFILE\.codex\secrets\levelcre-sales-activity.json",
     [string] $OutboxPath = "$env:USERPROFILE\.codex\state\levelcre-sales-activity-outbox.jsonl",
-    [switch] $FlushOnly
+    [switch] $FlushOnly,
+    [string] $Source = "codex_followup"
 )
 
 Set-StrictMode -Version Latest
@@ -87,6 +88,7 @@ if (-not $FlushOnly.IsPresent) {
         $ExternalActivityId = Get-StableActivityId -Seed (@($Status, $ActivityType, $Email, $Subject, $ActivityAt) -join "|")
     }
     $activity = [ordered]@{
+        source = $Source
         externalActivityId = $ExternalActivityId
         activityAt = $ActivityAt
         activityType = $ActivityType

@@ -37,6 +37,8 @@ export type SalesActivityDefaults = {
   runId?: string | null;
 };
 
+const MAX_SALES_ACTIVITY_NOTE_LENGTH = 1000;
+
 const STATUS_ALIASES: Record<string, SalesActivityStatus> = {
   sent: 'sent',
   send: 'sent',
@@ -90,6 +92,11 @@ function normalizeString(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   const trimmed = String(value).trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeShortNote(value: unknown): string | null {
+  const normalized = normalizeString(value);
+  return normalized ? normalized.slice(0, MAX_SALES_ACTIVITY_NOTE_LENGTH) : null;
 }
 
 function getAlias(record: Record<string, unknown>, aliases: string[]): unknown {
@@ -178,11 +185,11 @@ export function normalizeSalesActivityInput(
     email,
     emailDomain: extractEmailDomain(email),
     subject: normalizeString(getAlias(input, ['subject', 'Subject'])),
-    notes: normalizeString(getAlias(input, ['notes', 'Notes', 'note', 'Note'])),
+    notes: normalizeShortNote(getAlias(input, ['notes', 'Notes', 'note', 'Note'])),
     activityAt: parseActivityAt(getAlias(input, ['activityAt', 'activity_at', 'timestamp_mdt', 'timestampMdt', 'date', 'Date'])),
     prospectId: normalizeString(getAlias(input, ['prospectId', 'prospect_id'])),
     listingId: normalizeString(getAlias(input, ['listingId', 'listing_id'])),
-    rawPayload: { ...input },
+    rawPayload: {},
   };
 
   const explicitId = normalizeString(getAlias(input, [
@@ -194,9 +201,28 @@ export function normalizeSalesActivityInput(
     'Id',
   ]));
 
+  const externalActivityId = explicitId || stableActivityId(partial);
+
   return {
     ...partial,
-    externalActivityId: explicitId || stableActivityId(partial),
+    externalActivityId,
+    // The activity bridge intentionally stores metadata only. Outlook message
+    // bodies, HTML, snippets, and attachments do not belong in Level CRE.
+    rawPayload: {
+      source,
+      runId,
+      externalActivityId,
+      activityStatus,
+      activityType,
+      contactName: partial.contactName,
+      company: partial.company,
+      email: partial.email,
+      subject: partial.subject,
+      notes: partial.notes,
+      activityAt: partial.activityAt?.toISOString() ?? null,
+      prospectId: partial.prospectId,
+      listingId: partial.listingId,
+    },
   };
 }
 
