@@ -20,16 +20,57 @@ export type BrokerActivityInput = {
 };
 
 type ContactCoverageProspect = Pick<Prospect, 'contactName' | 'contactEmail' | 'contactPhone' | 'contactCompany'>;
-type FollowUpProspect = Pick<Prospect, 'followUpDueDate'>;
+type FollowUpProspect = {
+  followUpDueDate?: Prospect['followUpDueDate'] | Date | null;
+  followUpTimeframe?: Prospect['followUpTimeframe'] | null;
+  lastContactDate?: Prospect['lastContactDate'] | null;
+  createdDate?: Prospect['createdDate'] | null;
+};
+
+type ActionableFollowUpProspect = FollowUpProspect & Pick<Prospect, 'status'>;
+
+const followUpTimeframeMonths: Record<NonNullable<Prospect['followUpTimeframe']>, number> = {
+  '1_month': 1,
+  '3_month': 3,
+  '6_month': 6,
+  '1_year': 12,
+};
+
+function parseFollowUpDate(value?: string | Date | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function addMonthsSafe(value: Date, months: number) {
+  const date = new Date(value);
+  const day = date.getDate();
+  date.setMonth(date.getMonth() + months);
+  if (date.getDate() < day) date.setDate(0);
+  return date;
+}
 
 export function hasContactCoverage(prospect: ContactCoverageProspect) {
   return Boolean(prospect.contactName || prospect.contactEmail || prospect.contactPhone || prospect.contactCompany);
 }
 
+export function getFollowUpDueDate(prospect: FollowUpProspect) {
+  const storedDueDate = parseFollowUpDate(prospect.followUpDueDate);
+  if (storedDueDate) return storedDueDate;
+  if (!prospect.followUpTimeframe) return null;
+
+  const anchor = parseFollowUpDate(prospect.lastContactDate) || parseFollowUpDate(prospect.createdDate);
+  if (!anchor) return null;
+  return addMonthsSafe(anchor, followUpTimeframeMonths[prospect.followUpTimeframe]);
+}
+
 export function isFollowUpDue(prospect: FollowUpProspect, now = new Date()) {
-  if (!prospect.followUpDueDate) return false;
-  const dueAt = new Date(prospect.followUpDueDate);
-  return Number.isFinite(dueAt.getTime()) && dueAt.getTime() <= now.getTime();
+  const dueAt = getFollowUpDueDate(prospect);
+  return Boolean(dueAt && dueAt.getTime() <= now.getTime());
+}
+
+export function isActionableFollowUpDue(prospect: ActionableFollowUpProspect, now = new Date()) {
+  return prospect.status !== 'no_go' && isFollowUpDue(prospect, now);
 }
 
 export function buildBrokerActivityPayload(input: BrokerActivityInput) {

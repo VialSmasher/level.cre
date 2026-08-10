@@ -1196,10 +1196,13 @@ export default function DailyDeskPage() {
           </section>
 
           <aside className="space-y-5">
-            <section className="rounded-md border border-slate-900 bg-[#0b1220] p-5 text-white shadow-md" aria-label="Today's activity pace">
+            <section
+              className="rounded-md border border-slate-900 bg-[#0b1220] p-5 text-white shadow-md"
+              aria-label={activityPace.hasConfiguredCallTarget ? "Today's call target" : "Today's activity pace"}
+            >
               <div className="flex items-center gap-2 text-xs font-semibold uppercase text-blue-300">
                 <Activity className="h-4 w-4" />
-                Today's activity pace
+                {activityPace.hasConfiguredCallTarget ? "Today's call target" : "Today's activity pace"}
               </div>
               <div className="mt-3 flex items-end gap-2">
                 <p className="text-4xl font-bold tabular-nums text-white">{activityPace.completed}</p>
@@ -1208,10 +1211,13 @@ export default function DailyDeskPage() {
               <div
                 className="mt-4 h-2 overflow-hidden rounded-full bg-white/10"
                 role="progressbar"
-                aria-label="Progress against recent active-day pace"
+                aria-label={activityPace.hasConfiguredCallTarget ? 'Progress against daily call target' : 'Progress against recent active-day pace'}
                 aria-valuemin={0}
                 aria-valuemax={activityPace.paceTarget || 1}
                 aria-valuenow={Math.min(activityPace.completed, activityPace.paceTarget || 1)}
+                aria-valuetext={activityPace.paceTarget > 0
+                  ? `${activityPace.completed} of ${activityPace.paceTarget} ${activityPace.goalKind}`
+                  : `${activityPace.completed} touches logged today`}
               >
                 <div className="h-full rounded-full bg-blue-500" style={{ width: `${activityPace.progressPercent}%` }} />
               </div>

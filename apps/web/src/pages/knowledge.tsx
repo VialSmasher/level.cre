@@ -18,7 +18,7 @@ import { getProspectDisplayName, getProspectSecondaryName } from '@/lib/prospect
 import { apiRequest } from '@/lib/queryClient';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { getLifetimeProductionBadge, readTrackRecordMetrics, TRACK_RECORD_STORAGE_KEY } from '@/lib/trackRecordMetrics';
-import { hasContactCoverage, isFollowUpDue } from '@/lib/brokerActions';
+import { getFollowUpDueDate, hasContactCoverage, isActionableFollowUpDue } from '@/lib/brokerActions';
 
 function getInteractionDate(interaction: any) {
   const parsed = new Date(interaction?.date || interaction?.createdAt || '');
@@ -212,8 +212,11 @@ export default function Knowledge() {
     );
     const newProspects = noTouches.filter(p => p.status === 'prospect');
     const dueFollowUps = filteredProspects
-      .filter((prospect) => isFollowUpDue(prospect))
-      .sort((left, right) => new Date(left.followUpDueDate!).getTime() - new Date(right.followUpDueDate!).getTime());
+      .filter((prospect) => isActionableFollowUpDue(prospect))
+      .sort((left, right) => (
+        (getFollowUpDueDate(left)?.getTime() ?? Number.POSITIVE_INFINITY)
+        - (getFollowUpDueDate(right)?.getTime() ?? Number.POSITIVE_INFINITY)
+      ));
 
     return {
       total,

@@ -13,16 +13,28 @@ function action(id: string, type: string, priorityScore: number, stage?: string)
   };
 }
 
-test('caps Today at three ranked actions and routes overflow to Develop', () => {
+test('caps Today at three ranked business-development actions and routes overflow to Develop', () => {
   const queues = buildDailyDeskQueues([
     action('a', 'follow_up_due', 99),
-    action('b', 'listing_progress', 94),
     action('c', 'outlook_signal', 88),
     action('d', 'follow_up_due', 82),
+    action('e', 'market_watch', 75),
   ]);
 
-  assert.deepEqual(queues.today.map((item) => item.id), ['a', 'b', 'c']);
-  assert.deepEqual(queues.develop.map((item) => item.id), ['d']);
+  assert.deepEqual(queues.today.map((item) => item.id), ['a', 'c', 'd']);
+  assert.deepEqual(queues.develop.map((item) => item.id), ['e']);
+});
+
+test('keeps listing progress out of every Daily Desk queue', () => {
+  const queues = buildDailyDeskQueues([
+    action('listing', 'listing_progress', 99),
+    action('follow-up', 'follow_up_due', 82),
+  ]);
+
+  assert.deepEqual(queues.today.map((item) => item.id), ['follow-up']);
+  assert.deepEqual(queues.waiting, []);
+  assert.deepEqual(queues.review, []);
+  assert.deepEqual(queues.develop, []);
 });
 
 test('keeps waiting, cleanup, and stale work out of Today without duplicating rows', () => {

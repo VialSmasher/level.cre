@@ -56,11 +56,12 @@ export function buildDailyDeskQueues<T extends DailyDeskAction>(actions: T[]) {
       && action.type !== 'email_cleanup'
       && action.type !== 'research_target'
       && action.type !== 'stale_prospect'
+      && action.type !== 'listing_progress'
     ))
     .sort((left, right) => right.priorityScore - left.priorityScore)
     .slice(0, 3);
   const review = actions.filter((action) => action.type === 'email_cleanup');
   const usedIds = new Set([...today, ...waiting, ...review].map((action) => action.id));
-  const develop = actions.filter((action) => !usedIds.has(action.id));
+  const develop = actions.filter((action) => !usedIds.has(action.id) && action.type !== 'listing_progress');
   return { today, waiting, review, develop };
 }
