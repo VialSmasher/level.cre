@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 
 export const SALES_ACTIVITY_STATUSES = [
   'sent',
+  'received',
   'hold',
   'draft',
   'research',
@@ -12,6 +13,7 @@ export const SALES_ACTIVITY_STATUSES = [
 
 export type SalesActivityStatus = typeof SALES_ACTIVITY_STATUSES[number];
 export type SalesActivityType = 'email' | 'call' | 'meeting' | 'note';
+export type SalesActivityDirection = 'inbound' | 'outbound' | 'internal';
 export type SalesActivityMatchStatus = 'matched' | 'needs_review' | 'ignored';
 
 export type NormalizedSalesActivity = {
@@ -20,6 +22,7 @@ export type NormalizedSalesActivity = {
   externalActivityId: string;
   activityStatus: SalesActivityStatus;
   activityType: SalesActivityType;
+  direction: SalesActivityDirection;
   contactName: string | null;
   company: string | null;
   email: string | null;
@@ -47,6 +50,10 @@ const STATUS_ALIASES: Record<string, SalesActivityStatus> = {
   logged: 'sent',
   completed: 'sent',
   complete: 'sent',
+  received: 'received',
+  inbound: 'received',
+  replied: 'received',
+  reply: 'received',
   hold: 'hold',
   held: 'hold',
   defer: 'hold',
@@ -134,6 +141,23 @@ function normalizeActivityType(value: unknown): SalesActivityType {
   return ACTIVITY_TYPE_ALIASES[key] ?? 'email';
 }
 
+function normalizeDirection(
+  value: unknown,
+  activityStatus: SalesActivityStatus,
+  activityType: SalesActivityType,
+): SalesActivityDirection {
+  // Delivery status is the authoritative direction for confirmed email
+  // evidence. A contradictory free-form direction must never turn received
+  // mail into outbound production.
+  if (activityStatus === 'received') return 'inbound';
+  if (activityStatus === 'sent') return activityType === 'note' ? 'internal' : 'outbound';
+
+  const normalized = normalizeString(value)?.toLowerCase().replace(/[^a-z]+/g, '_') || '';
+  if (['inbound', 'incoming', 'received'].includes(normalized)) return 'inbound';
+  if (['internal', 'note'].includes(normalized)) return 'internal';
+  return 'outbound';
+}
+
 function parseActivityAt(value: unknown): Date | null {
   const text = normalizeString(value);
   if (!text) return null;
@@ -174,12 +198,18 @@ export function normalizeSalesActivityInput(
   const runId = normalizeString(getAlias(input, ['runId', 'run_id', 'RunId', 'Run ID']) ?? defaults.runId);
   const activityStatus = normalizeStatus(getAlias(input, ['activityStatus', 'activity_status', 'status', 'Status']));
   const activityType = normalizeActivityType(getAlias(input, ['activityType', 'activity_type', 'type', 'Type']));
+  const direction = normalizeDirection(
+    getAlias(input, ['direction', 'Direction']),
+    activityStatus,
+    activityType,
+  );
   const email = normalizeEmail(getAlias(input, ['email', 'Email', 'contactEmail', 'contact_email']));
   const partial: Omit<NormalizedSalesActivity, 'externalActivityId'> = {
     source,
     runId,
     activityStatus,
     activityType,
+    direction,
     contactName: normalizeString(getAlias(input, ['contactName', 'contact_name', 'contact', 'Contact', 'DisplayName'])),
     company: normalizeString(getAlias(input, ['company', 'Company', 'contactCompany', 'contact_company'])),
     email,
@@ -214,6 +244,7 @@ export function normalizeSalesActivityInput(
       externalActivityId,
       activityStatus,
       activityType,
+      direction: partial.direction,
       contactName: partial.contactName,
       company: partial.company,
       email: partial.email,
@@ -227,7 +258,8 @@ export function normalizeSalesActivityInput(
 }
 
 export function shouldCreateInteractionFromSalesActivity(activity: NormalizedSalesActivity): boolean {
-  return activity.activityStatus === 'sent';
+  return activity.activityStatus === 'sent'
+    || (activity.activityStatus === 'received' && activity.activityType === 'email');
 }
 
 export function decideSalesActivityMatch(
@@ -235,6 +267,28 @@ export function decideSalesActivityMatch(
   prospectId: string | null,
   matchReason: string | null,
 ): { matchStatus: SalesActivityMatchStatus; matchReason: string; confidence: number } {
+  if (activity.activityStatus === 'received') {
+    if (activity.activityType !== 'email') {
+      return {
+        matchStatus: 'needs_review',
+        matchReason: 'unsupported_received_activity',
+        confidence: 0,
+      };
+    }
+    if (!prospectId) {
+      return {
+        matchStatus: 'needs_review',
+        matchReason: matchReason || 'no_confident_prospect_match',
+        confidence: 0,
+      };
+    }
+    return {
+      matchStatus: 'matched',
+      matchReason: matchReason || 'matched_existing_prospect',
+      confidence: matchReason === 'provided_prospect_id' || matchReason === 'exact_contact_email' ? 100 : 95,
+    };
+  }
+
   if (!shouldCreateInteractionFromSalesActivity(activity)) {
     const ignored = activity.activityStatus === 'hold'
       || activity.activityStatus === 'low_priority'

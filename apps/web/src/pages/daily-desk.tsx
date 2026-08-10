@@ -16,7 +16,6 @@ import {
   MapPin,
   Minus,
   RefreshCw,
-  Send,
   Target,
   TrendingDown,
   TrendingUp,
@@ -48,7 +47,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { apiRequest } from '@/lib/queryClient'
-import { buildDailyActivityPace, buildDailyDeskQueues } from '@/lib/dailyDeskQueues'
+import { buildDailyActivityPace, buildDailyDeskQueues, describeSalesActivityDirection } from '@/lib/dailyDeskQueues'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useProfile } from '@/hooks/useProfile'
@@ -93,8 +92,10 @@ type SalesBriefAction = {
     id?: string
     subject?: string
     sender?: string
+    direction?: string
     sentAt?: string | null
     snippet?: string
+    sourceUrl?: string
   } | null
   automationHints?: {
     stage?: 'needs_response' | 'waiting_on_reply' | 'active_work' | 'stale_work'
@@ -152,6 +153,7 @@ type ActivityPulseResponse = {
   streakDays: number
   automated: number
   manual: number
+  inboundEmail?: number
   currentPeriodTotal: number
   previousPeriodTotal: number
   trendPercent: number
@@ -162,6 +164,7 @@ type ActivityPulseResponse = {
     call: number
     meeting: number
     other: number
+    inboundEmail?: number
     total: number
   }>
 }
@@ -344,7 +347,7 @@ const actionIcons: Record<ActionType, typeof ListTodo> = {
 }
 
 const activityChartConfig = {
-  email: { label: 'Email', color: '#2563eb' },
+  email: { label: 'Outbound email', color: '#2563eb' },
   call: { label: 'Call', color: '#059669' },
   meeting: { label: 'Meeting', color: '#ea580c' },
   other: { label: 'Other', color: '#a855f7' },
@@ -393,6 +396,8 @@ function ActionRow({ action, featured = false }: { action: SalesBriefAction; fea
   const Icon = actionIcons[action.type]
   const href = actionHref(action)
   const context = action.prospect?.address || action.listing?.address || action.email?.sender || null
+  const emailDirection = String(action.email?.direction || '').toLowerCase()
+  const isInboundEmail = emailDirection === 'received' || emailDirection === 'inbound'
 
   return (
     <article
@@ -412,6 +417,11 @@ function ActionRow({ action, featured = false }: { action: SalesBriefAction; fea
               {priorityLabels[action.priority]}
             </Badge>
             <span className="text-xs text-slate-500">{sourceLabel(action)}</span>
+            {isInboundEmail ? (
+              <Badge variant="outline" className="rounded border-emerald-200 bg-emerald-50 text-[11px] font-semibold text-emerald-800">
+                Inbound email · outcome only
+              </Badge>
+            ) : null}
             {action.dueAt ? <span className="text-xs text-slate-500">{formatWhen(action.dueAt)}</span> : null}
           </div>
           <h3 className="mt-2 text-sm font-semibold text-slate-950 sm:text-[15px]">{action.title}</h3>
@@ -453,7 +463,7 @@ function EmptyQueue({ tab }: { tab: DeskTab }) {
     },
     review: {
       title: 'The review queue is clear',
-      body: 'Ambiguous Codex and inbox activity will pause here until it can be safely linked or archived.',
+      body: 'Ambiguous outbound activity and inbound email context will pause here until it can be safely linked or archived.',
     },
     develop: {
       title: 'No development work is queued',
@@ -470,17 +480,19 @@ function EmptyQueue({ tab }: { tab: DeskTab }) {
 }
 
 function ActivityMomentum({ data, maxDailyActivity }: { data: ActivityPulseResponse; maxDailyActivity: number }) {
+  const inboundEmail = data.inboundEmail ?? 0
   return (
-    <section className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white" aria-label="28-day sales momentum">
+    <section className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white" aria-label="28-day outbound production momentum">
       <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
         <div>
-          <h2 className="text-sm font-semibold text-slate-950">28-day momentum</h2>
+          <h2 className="text-sm font-semibold text-slate-950">28-day production momentum</h2>
           <p className="mt-0.5 text-xs text-slate-500">
-            {data.total} logged touch{data.total === 1 ? '' : 'es'} across {data.activeDays} active day{data.activeDays === 1 ? '' : 's'}
+            {data.total} outbound action{data.total === 1 ? '' : 's'} across {data.activeDays} production day{data.activeDays === 1 ? '' : 's'}
           </p>
         </div>
         <div className="flex items-center gap-4 text-xs">
-          <span className="text-slate-500">{data.automated} captured automatically</span>
+          <span className="text-emerald-700">{inboundEmail} inbound email{inboundEmail === 1 ? '' : 's'}</span>
+          <span className="text-slate-500">{data.automated} outbound captured automatically</span>
           <span className={cn(
             'inline-flex items-center gap-1 font-semibold',
             data.trendPercent > 0 && 'text-emerald-700',
@@ -495,10 +507,10 @@ function ActivityMomentum({ data, maxDailyActivity }: { data: ActivityPulseRespo
         </div>
       </div>
       <div className="px-2 pb-3 pt-4 sm:px-4">
-        <div className="relative h-[104px] border-b border-slate-200" role="img" aria-label="Stacked daily activity for the last 28 days">
+        <div className="relative h-[104px] border-b border-slate-200" role="img" aria-label="Stacked daily outbound production activity for the last 28 days">
           <div className="absolute inset-0 flex items-end gap-1 sm:gap-1.5">
             {data.series.map((day) => (
-              <div key={day.date} className="flex h-full min-w-0 flex-1 items-end" title={`${day.label}: ${day.total} touch${day.total === 1 ? '' : 'es'}`}>
+              <div key={day.date} className="flex h-full min-w-0 flex-1 items-end" title={`${day.label}: ${day.total} outbound action${day.total === 1 ? '' : 's'}, ${day.inboundEmail ?? 0} inbound email${day.inboundEmail === 1 ? '' : 's'}`}>
                 <div
                   className={cn('flex w-full flex-col-reverse overflow-hidden rounded-t-sm', day.total === 0 && 'bg-slate-100')}
                   style={{ height: day.total === 0 ? 2 : `${Math.max(8, (day.total / maxDailyActivity) * 100)}%` }}
@@ -663,7 +675,7 @@ export default function DailyDeskPage() {
   }
 
   const reviewMutation = useMutation({
-    mutationFn: async ({ importId, action, prospectId }: { importId: string; action: 'link' | 'ignore'; prospectId?: string }) => {
+    mutationFn: async ({ importId, action, prospectId }: { importId: string; action: 'link' | 'ignore'; prospectId?: string; activityStatus?: string }) => {
       const response = await apiRequest('PATCH', `/api/agent/sales-activity/imports/${importId}`, {
         action,
         ...(action === 'link' ? { prospectId } : {}),
@@ -675,9 +687,13 @@ export default function DailyDeskPage() {
       queryClient.invalidateQueries({ queryKey: ['/api/automation/sales-brief?limit=25'] })
       queryClient.invalidateQueries({ queryKey: ['/api/prospects'] })
       toast({
-        title: variables.action === 'link' ? 'Activity linked' : 'Activity archived',
+        title: variables.action === 'link'
+          ? variables.activityStatus === 'received' ? 'Inbound email linked' : 'Activity linked'
+          : 'Activity archived',
         description: variables.action === 'link'
-          ? 'The sent email is now part of the prospect activity history.'
+          ? variables.activityStatus === 'received'
+            ? 'The inbound email is now saved as response context and does not count toward production.'
+            : 'The outbound action is now part of the prospect activity history.'
           : 'The activity will no longer compete for attention.',
       })
     },
@@ -789,14 +805,14 @@ export default function DailyDeskPage() {
       group: 'Today',
       label: activityPace.hasConfiguredCallTarget
         ? 'Calls vs daily target'
-        : activityPace.hasBaseline ? 'Touches vs recent pace' : 'Touches logged today',
+        : activityPace.hasBaseline ? 'Outbound vs recent pace' : 'Outbound actions today',
       value: activityPace.paceTarget > 0 ? `${activityPace.completed}/${activityPace.paceTarget}` : activityPace.completed,
       icon: Activity,
       tone: 'text-blue-700 bg-blue-50',
     },
     { group: 'Momentum', label: 'Active-day streak', value: `${activityPulseQuery.data?.streakDays ?? statsQuery.data?.streakDays ?? 0}d`, icon: Flame, tone: 'text-orange-700 bg-orange-50' },
     { group: 'Pipeline', label: 'With a next move', value: `${salesBriefQuery.data?.pipelineHealth?.nextActionCoveragePercent ?? 0}%`, icon: Target, tone: 'text-violet-700 bg-violet-50' },
-    { group: 'Follow-up', label: 'Completed this week', value: statsQuery.data?.followupsLogged ?? 0, icon: Send, tone: 'text-emerald-700 bg-emerald-50' },
+    { group: 'Response', label: 'Inbound emails (28d)', value: activityPulseQuery.data?.inboundEmail ?? 0, icon: Mail, tone: 'text-emerald-700 bg-emerald-50' },
   ]
   const maxDailyActivity = Math.max(1, ...(activityPulseQuery.data?.series.map((day) => day.total) || [1]))
 
@@ -891,7 +907,7 @@ export default function DailyDeskPage() {
                   {activeTab === 'develop' && 'Pipeline development'}
                 </h2>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  {activeTab === 'review' ? 'Evidence stays reviewable; only your approval can link or create a map record.' : 'Ranked from current Level CRE and captured sales evidence.'}
+                  {activeTab === 'review' ? 'Inbound emails stay outcome signals; only outbound actions count toward production.' : 'Ranked from current Level CRE and captured sales evidence.'}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -1134,12 +1150,27 @@ export default function DailyDeskPage() {
                 })}
                 {imports.map((item) => {
                   const selectedProspect = prospectDrafts[item.id] || ''
+                  const direction = describeSalesActivityDirection(item.activity_status)
+                  const isInbound = direction.kind === 'inbound'
+                  const isOutbound = direction.kind === 'outbound'
+                  const captureSource = item.source === 'outlook_sync' ? 'Outlook' : item.source === 'codex_followup' ? 'Codex' : item.source
                   return (
                     <article key={item.id} className="border-b border-slate-200 px-4 py-4 sm:px-5">
                       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant="outline" className="rounded border-blue-200 bg-blue-50 text-blue-800">Codex sent</Badge>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                'rounded',
+                                isInbound && 'border-emerald-200 bg-emerald-50 text-emerald-800',
+                                isOutbound && 'border-blue-200 bg-blue-50 text-blue-800',
+                                !isInbound && !isOutbound && 'border-amber-200 bg-amber-50 text-amber-800',
+                              )}
+                            >
+                              {direction.label}
+                            </Badge>
+                            <span className="text-xs text-slate-500">{captureSource}</span>
                             <span className="text-xs text-slate-500">{formatWhen(item.activity_at || item.created_at)}</span>
                           </div>
                           <h3 className="mt-2 truncate text-sm font-semibold text-slate-950">{item.subject || '(No subject)'}</h3>
@@ -1168,10 +1199,15 @@ export default function DailyDeskPage() {
                             <Button
                               size="sm"
                               disabled={!selectedProspect || reviewMutation.isPending}
-                              onClick={() => reviewMutation.mutate({ importId: item.id, action: 'link', prospectId: selectedProspect })}
+                              onClick={() => reviewMutation.mutate({
+                                importId: item.id,
+                                action: 'link',
+                                prospectId: selectedProspect,
+                                activityStatus: item.activity_status,
+                              })}
                             >
                               <CheckCircle2 className="h-4 w-4" />
-                              Link activity
+                              {direction.linkLabel}
                             </Button>
                             <Button
                               size="icon"
@@ -1179,7 +1215,7 @@ export default function DailyDeskPage() {
                               title="Archive this activity"
                               aria-label="Archive this activity"
                               disabled={reviewMutation.isPending}
-                              onClick={() => reviewMutation.mutate({ importId: item.id, action: 'ignore' })}
+                              onClick={() => reviewMutation.mutate({ importId: item.id, action: 'ignore', activityStatus: item.activity_status })}
                             >
                               <Archive className="h-4 w-4" />
                             </Button>
@@ -1217,7 +1253,7 @@ export default function DailyDeskPage() {
                 aria-valuenow={Math.min(activityPace.completed, activityPace.paceTarget || 1)}
                 aria-valuetext={activityPace.paceTarget > 0
                   ? `${activityPace.completed} of ${activityPace.paceTarget} ${activityPace.goalKind}`
-                  : `${activityPace.completed} touches logged today`}
+                  : `${activityPace.completed} outbound actions logged today`}
               >
                 <div className="h-full rounded-full bg-blue-500" style={{ width: `${activityPace.progressPercent}%` }} />
               </div>
@@ -1229,12 +1265,12 @@ export default function DailyDeskPage() {
                     : !activityPace.hasBaseline
                   ? 'Start with one useful touch. Level CRE will learn your normal active-day pace.'
                   : activityPace.remainingToPace > 0
-                    ? `${activityPace.remainingToPace} more to match your recent active-day pace of ${activityPace.recentActiveDayAverage}.`
+                    ? `${activityPace.remainingToPace} more outbound action${activityPace.remainingToPace === 1 ? '' : 's'} to match your recent production-day pace of ${activityPace.recentActiveDayAverage}.`
                     : 'Recent pace matched. Keep going—every extra touch creates another chance.'}
               </p>
               <dl className="mt-4 grid grid-cols-3 gap-2 border-y border-white/10 py-3 text-center">
                 <div><dt className="text-[10px] uppercase text-slate-400">Calls</dt><dd className="mt-1 text-base font-semibold tabular-nums">{activityPace.today.call}</dd></div>
-                <div><dt className="text-[10px] uppercase text-slate-400">Emails</dt><dd className="mt-1 text-base font-semibold tabular-nums">{activityPace.today.email}</dd></div>
+                <div><dt className="text-[10px] uppercase text-slate-400">Emails sent</dt><dd className="mt-1 text-base font-semibold tabular-nums">{activityPace.today.email}</dd></div>
                 <div><dt className="text-[10px] uppercase text-slate-400">Meetings</dt><dd className="mt-1 text-base font-semibold tabular-nums">{activityPace.today.meeting}</dd></div>
               </dl>
               <Button asChild className="mt-4 w-full bg-blue-600 hover:bg-blue-500" size="sm">

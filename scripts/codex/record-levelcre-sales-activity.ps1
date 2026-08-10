@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string] $ExternalActivityId,
-    [ValidateSet("sent", "hold", "draft", "research", "low_priority", "skipped", "error")]
+    [ValidateSet("sent", "received", "hold", "draft", "research", "low_priority", "skipped", "error")]
     [string] $Status = "sent",
     [ValidateSet("email", "call", "meeting", "note")]
     [string] $ActivityType = "email",

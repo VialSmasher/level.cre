@@ -46,11 +46,53 @@ test('normalizes a Codex follow-up send log row into a stable sent email activit
   assert.equal(activity.source, 'codex_followup');
   assert.equal(activity.activityStatus, 'sent');
   assert.equal(activity.activityType, 'email');
+  assert.equal(activity.direction, 'outbound');
   assert.equal(activity.email, 'bb.ksm@ksmrig.com');
   assert.equal(activity.emailDomain, 'ksmrig.com');
   assert.equal(activity.activityAt?.toISOString(), '2026-07-08T12:00:00.000Z');
   assert.equal(activity.externalActivityId, duplicate.externalActivityId);
   assert.equal(shouldCreateInteractionFromSalesActivity(activity), true);
+});
+
+test('normalizes confirmed received mail as inbound metadata with a direction-safe identity', () => {
+  const received = normalizeSalesActivityInput({
+    source: 'outlook_sync',
+    status: 'received',
+    direction: 'outbound',
+    externalActivityId: 'outlook-inbox-message-1',
+    activityType: 'email',
+    email: 'sender@example.com',
+    subject: 'RE: Lease requirement',
+    activityAt: '2026-08-10T15:00:00.000Z',
+    body: 'Do not retain this body.',
+  });
+
+  assert.equal(received.activityStatus, 'received');
+  assert.equal(received.direction, 'inbound');
+  assert.equal(received.externalActivityId, 'outlook-inbox-message-1');
+  assert.equal(received.rawPayload.direction, 'inbound');
+  assert.equal(Object.prototype.hasOwnProperty.call(received.rawPayload, 'body'), false);
+  assert.equal(shouldCreateInteractionFromSalesActivity(received), true);
+  assert.deepEqual(decideSalesActivityMatch(received, 'prospect-1', 'exact_contact_email'), {
+    matchStatus: 'matched',
+    matchReason: 'exact_contact_email',
+    confidence: 100,
+  });
+});
+
+test('received status is accepted only as email evidence', () => {
+  const activity = normalizeSalesActivityInput({
+    status: 'received',
+    activityType: 'call',
+    prospectId: 'prospect-1',
+  });
+
+  assert.equal(shouldCreateInteractionFromSalesActivity(activity), false);
+  assert.deepEqual(decideSalesActivityMatch(activity, 'prospect-1', 'provided_prospect_id'), {
+    matchStatus: 'needs_review',
+    matchReason: 'unsupported_received_activity',
+    confidence: 0,
+  });
 });
 
 test('hold and low priority rows are retained but not converted into CRM interactions', () => {
@@ -254,6 +296,104 @@ test('a matched Outlook email never overwrites an existing prospect follow-up', 
   assert.equal(harness.state.followUpWrites, 0);
 });
 
+test('an exact-email received Outlook activity logs one inbound interaction without XP or outbound follow-up', async () => {
+  const queries: string[] = [];
+  const pool = transactionalPool(async (sql: string, params: unknown[] = []) => {
+    queries.push(sql);
+    if (sql.includes('FROM public.prospects') && sql.includes('SELECT')) {
+      return { rows: [{ id: 'prospect-1', merged_into_prospect_id: null }] };
+    }
+    if (sql.includes('SELECT id, interaction_id') && sql.includes('sales_activity_imports')) return { rows: [] };
+    if (sql.includes('INSERT INTO public.sales_activity_imports')) {
+      return { rows: [{
+        id: String(params[0]),
+        interaction_id: null,
+        match_status: String(params[16]),
+        prospect_id: String(params[14]),
+      }] };
+    }
+    if (sql.includes('FROM public.contact_interactions')) return { rows: [] };
+    return { rows: [], rowCount: 0 };
+  });
+  const created: Array<{ payload: any; options: any }> = [];
+
+  const result = await importSalesActivityBatch({
+    pool,
+    storage: {
+      createContactInteraction: async (payload: any, options: any) => {
+        created.push({ payload, options });
+        return { id: 'interaction-inbound-1' };
+      },
+    },
+    userId: 'user-1',
+    payload: SalesActivityBatchSchema.parse({
+      source: 'outlook_sync',
+      activities: [{
+        externalActivityId: 'outlook-inbox-message-1',
+        status: 'received',
+        activityType: 'email',
+        email: 'sender@example.com',
+        subject: 'Lease requirement',
+        activityAt: '2026-08-10T15:00:00.000Z',
+      }],
+    }),
+  });
+
+  assert.equal(result.createdInteractions, 1);
+  assert.equal(result.matched, 1);
+  assert.equal(created.length, 1);
+  assert.equal(created[0].payload.sourceProvider, 'outlook');
+  assert.equal(created[0].payload.sourceMessageId, 'outlook-inbox-message-1');
+  assert.equal(created[0].payload.sourceMetadata.direction, 'inbound');
+  assert.equal(created[0].payload.sourceMetadata.captureDirection, 'received');
+  assert.deepEqual(created[0].options, { skipXp: true });
+  assert.equal(queries.some((sql) => sql.includes('follow_up_due_date = $3')), false);
+  assert.equal(queries.some((sql) => /last_contact_date\s+IS NULL OR last_contact_date < \$3/.test(sql)), true);
+});
+
+test('ambiguous exact contact-email evidence stays in review and creates no interaction', async () => {
+  let created = false;
+  const pool = transactionalPool(async (sql: string, params: unknown[] = []) => {
+    if (sql.includes('FROM public.prospects') && sql.includes('SELECT')) {
+      return { rows: [{ id: 'prospect-1' }, { id: 'prospect-2' }] };
+    }
+    if (sql.includes('SELECT id, interaction_id') && sql.includes('sales_activity_imports')) return { rows: [] };
+    if (sql.includes('INSERT INTO public.sales_activity_imports')) {
+      return { rows: [{
+        id: String(params[0]),
+        interaction_id: null,
+        match_status: String(params[16]),
+        prospect_id: null,
+      }] };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+
+  const result = await importSalesActivityBatch({
+    pool,
+    storage: {
+      createContactInteraction: async () => {
+        created = true;
+        return { id: 'unexpected' };
+      },
+    },
+    userId: 'user-1',
+    payload: SalesActivityBatchSchema.parse({
+      source: 'outlook_sync',
+      activities: [{
+        externalActivityId: 'ambiguous-inbound-1',
+        status: 'received',
+        email: 'shared@example.com',
+        subject: 'Reply',
+      }],
+    }),
+  });
+
+  assert.equal(result.needsReview, 1);
+  assert.equal(result.results[0].matchReason, 'ambiguous_contact_email');
+  assert.equal(created, false);
+});
+
 test('automatic email follow-up is limited to pre-qualified business-development records', async () => {
   const queries: Array<{ sql: string; params: unknown[] }> = [];
   await protectOutboundEmailFollowUp({
@@ -384,6 +524,69 @@ test('manual review links sent Codex activity to a prospect exactly once', async
   assert.deepEqual(created[0].options, { skipXp: true });
   assert.equal(queries.some((query) => query.sql.includes('FROM public.prospects') && query.sql.includes('FOR UPDATE')), true);
   assert.equal(queries.some((query) => query.sql === 'COMMIT'), true);
+});
+
+test('manual review links received Outlook evidence without XP or an outbound follow-up', async () => {
+  const queries: string[] = [];
+  const pool = transactionalPool(async (sql: string) => {
+    queries.push(sql);
+    if (sql.includes('FROM public.sales_activity_imports') && sql.includes('SELECT')) {
+      return { rows: [{
+        id: 'import-inbound-1',
+        source: 'outlook_sync',
+        run_id: 'inbox-run-1',
+        external_activity_id: 'outlook-inbox-message-1',
+        activity_status: 'received',
+        activity_type: 'email',
+        contact_name: 'Pat Prospect',
+        company: 'Prospect Co',
+        email: 'pat@example.com',
+        subject: 'RE: Follow up',
+        notes: 'Received in Outlook.',
+        activity_at: new Date('2026-08-10T15:00:00.000Z'),
+        prospect_id: null,
+        listing_id: null,
+        match_status: 'needs_review',
+        interaction_id: null,
+      }] };
+    }
+    if (sql.includes('FROM public.prospects')) {
+      return { rows: [{ id: 'prospect-1', status: 'prospect', merged_into_prospect_id: null }] };
+    }
+    if (sql.includes('UPDATE public.sales_activity_imports')) {
+      return { rows: [{
+        id: 'import-inbound-1',
+        match_status: 'matched',
+        match_reason: 'manual_prospect_link',
+        prospect_id: 'prospect-1',
+        interaction_id: 'interaction-inbound-1',
+      }] };
+    }
+    return { rows: [] };
+  });
+  const created: Array<{ payload: any; options: any }> = [];
+
+  const result = await reviewSalesActivityImport({
+    pool,
+    storage: {
+      createContactInteraction: async (payload: any, options: any) => {
+        created.push({ payload, options });
+        return { id: 'interaction-inbound-1' };
+      },
+    },
+    userId: 'user-1',
+    importId: 'import-inbound-1',
+    decision: { action: 'link', prospectId: 'prospect-1' },
+  });
+
+  assert.equal(result.match_status, 'matched');
+  assert.equal(created.length, 1);
+  assert.equal(created[0].payload.sourceProvider, 'outlook');
+  assert.equal(created[0].payload.sourceMetadata.direction, 'inbound');
+  assert.equal(created[0].payload.sourceMetadata.captureDirection, 'received');
+  assert.deepEqual(created[0].options, { skipXp: true });
+  assert.equal(queries.some((sql) => sql.includes('follow_up_due_date = $3')), false);
+  assert.equal(queries.some((sql) => /last_contact_date\s+IS NULL OR last_contact_date < \$3/.test(sql)), true);
 });
 
 test('a Postmark-first direct match creates one interaction without duplicate XP', async () => {

@@ -525,13 +525,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     emailMessageId: string,
     messageData: any,
   ) {
-    if (messageData.direction !== 'sent') return null;
+    const captureDirection = String(messageData.direction || '').toLowerCase();
+    if (captureDirection !== 'sent' && captureDirection !== 'received') return null;
+    const isReceived = captureDirection === 'received';
     const codexImport = await findMatchingCodexEmailImport({
       pool,
       userId,
+      direction: messageData.direction,
       subject: messageData.subject,
-      counterpartyEmails: messageData.recipientEmails,
-      occurredAt: messageData.sentAt || messageData.receivedAt,
+      counterpartyEmails: isReceived ? [messageData.senderEmail] : messageData.recipientEmails,
+      occurredAt: isReceived
+        ? (messageData.receivedAt || messageData.sentAt)
+        : (messageData.sentAt || messageData.receivedAt),
     });
     if (!codexImport) return null;
 
@@ -926,6 +931,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           matchConfidence: decision.confidence,
           matchEvidence: decision.evidence,
           captureDirection: params.messageData.direction,
+          direction: String(params.messageData.direction || '').toLowerCase() === 'received' ? 'inbound' : 'outbound',
           autoLogged: true,
         },
       }, { skipXp: true });
@@ -5548,6 +5554,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           em.provider,
           em.provider_message_id,
           em.provider_thread_id,
+          em.direction,
           em.sent_at,
           em.received_at,
           em.subject,
@@ -5579,7 +5586,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ interactionId: existing.rows[0].id, duplicate: true });
       }
 
-      const interactionDate = row.sent_at || row.received_at || new Date();
+      const isInbound = String(row.direction || '').toLowerCase() === 'received';
+      const interactionDate = (isInbound
+        ? (row.received_at || row.sent_at)
+        : (row.sent_at || row.received_at)) || new Date();
       const defaultNotes = row.suggested_summary || [
         row.subject ? `Subject: ${row.subject}` : '',
         row.snippet || '',
@@ -5592,7 +5602,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? (input.nextFollowUp ? new Date(input.nextFollowUp).toISOString() : null)
         : (row.suggested_next_follow_up
           ? new Date(row.suggested_next_follow_up).toISOString()
-          : addDaysAtNoonUtc(new Date(interactionDate), 14));
+          : isInbound ? null : addDaysAtNoonUtc(new Date(interactionDate), 14));
       const emailAlreadyAwarded = await pool.query(`
         SELECT id FROM public.skill_activities
         WHERE user_id = $1
@@ -5616,9 +5626,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sourceEmailMessageId: row.email_message_id,
         sourceMetadata: {
           emailReviewMatchId: req.params.id,
-          defaultFollowUpDays: hasRequestedNextFollowUp || row.suggested_next_follow_up ? null : 14,
+          direction: isInbound ? 'inbound' : 'outbound',
+          captureDirection: isInbound ? 'received' : 'sent',
+          defaultFollowUpDays: hasRequestedNextFollowUp || row.suggested_next_follow_up || isInbound ? null : 14,
         },
-      }, { skipXp: Boolean(emailAlreadyAwarded.rows[0]) });
+      }, { skipXp: isInbound || Boolean(emailAlreadyAwarded.rows[0]) });
       const interactionId = interaction.id;
       await pool.query(`
         UPDATE public.email_prospect_matches
@@ -5628,13 +5640,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await pool.query(`
         UPDATE public.prospects
         SET
-          last_contact_date = $3,
+          last_contact_date = CASE
+            WHEN last_contact_date IS NULL OR last_contact_date < $3 THEN $3
+            ELSE last_contact_date
+          END,
           follow_up_due_date = CASE WHEN $5 THEN $4 ELSE COALESCE(follow_up_due_date, $4) END,
           status = CASE WHEN status = 'prospect' THEN 'contacted' ELSE status END,
           updated_at = now()
         WHERE id = $1 AND user_id = $2 AND merged_into_prospect_id IS NULL
       `, [row.prospect_id, userId, interactionIso, nextFollowUpIso, hasRequestedNextFollowUp || Boolean(row.suggested_next_follow_up)]);
-      res.json({ interactionId, duplicate: false, nextFollowUp: nextFollowUpIso, newXpGained: xpForInteractionType('email') });
+      res.json({
+        interactionId,
+        duplicate: false,
+        nextFollowUp: nextFollowUpIso,
+        newXpGained: isInbound ? 0 : xpForInteractionType('email'),
+      });
     } catch (error) {
       console.error('Error creating interaction from email review item:', error);
       res.status(500).json({ message: 'Failed to create interaction from email' });

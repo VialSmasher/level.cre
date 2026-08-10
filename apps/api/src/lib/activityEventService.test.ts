@@ -197,6 +197,75 @@ test('confirmed sent sales activity dual-writes metadata without raw payload or 
   assert.equal(upsert.params[6], 'confirmed');
 });
 
+test('confirmed received Outlook email becomes an inbound canonical event with provider idempotency', async () => {
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
+  const pool = transactionalPool(async (sql: string, params: unknown[] = []) => {
+    queries.push({ sql, params });
+    if (sql.includes('INSERT INTO public.activity_events')) {
+      return { rows: [{ id: 'event-inbound-1', inserted: false }] };
+    }
+    return { rows: [] };
+  });
+  const activity = normalizeSalesActivityInput({
+    source: 'outlook_sync',
+    externalActivityId: 'outlook-inbox-message-1',
+    status: 'received',
+    direction: 'outbound',
+    activityType: 'email',
+    contact: 'Pat Prospect',
+    email: 'pat@example.com',
+    subject: 'RE: Lease requirement',
+    notes: 'Metadata-only Outlook receipt.',
+    activityAt: '2026-08-10T15:00:00.000Z',
+  });
+
+  const result = await recordActivityEventFromSalesActivity({
+    pool,
+    userId: 'user-1',
+    activity,
+    importId: 'import-inbound-1',
+    prospectId: null,
+    listingId: null,
+    interactionId: null,
+    matchStatus: 'needs_review',
+    matchReason: 'no_confident_prospect_match',
+    confidence: 0,
+  });
+
+  assert.equal(result?.duplicates, 1);
+  const upsert = queries.find((query) => query.sql.includes('INSERT INTO public.activity_events'));
+  assert.ok(upsert);
+  assert.equal(upsert.params[2], 'outlook_sync');
+  assert.equal(upsert.params[3], 'outlook-inbox-message-1');
+  assert.equal(upsert.params[4], 'email_received');
+  assert.equal(upsert.params[5], 'inbound');
+  assert.equal(upsert.params[6], 'confirmed');
+  assert.equal(upsert.params[16], 'needs_review');
+  assert.match(String(upsert.params[23]), /"captureDirection":"received"/);
+});
+
+test('received non-email rows never become canonical activity', async () => {
+  let queried = false;
+  const pool = { query: async () => { queried = true; return { rows: [] }; } } as any;
+  const activity = normalizeSalesActivityInput({ status: 'received', activityType: 'call' });
+
+  const result = await recordActivityEventFromSalesActivity({
+    pool,
+    userId: 'user-1',
+    activity,
+    importId: 'import-1',
+    prospectId: null,
+    listingId: null,
+    interactionId: null,
+    matchStatus: 'needs_review',
+    matchReason: 'unsupported_received_activity',
+    confidence: 0,
+  });
+
+  assert.equal(result, null);
+  assert.equal(queried, false);
+});
+
 test('non-sent sales rows do not become canonical production activity', async () => {
   let queried = false;
   const pool = { query: async () => { queried = true; return { rows: [] }; } } as any;

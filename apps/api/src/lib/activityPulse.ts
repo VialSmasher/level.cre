@@ -2,7 +2,9 @@ export type ActivityPulseInput = {
   date?: unknown
   createdAt?: unknown
   type?: unknown
+  direction?: unknown
   sourceProvider?: unknown
+  sourceMetadata?: unknown
 }
 
 export type ActivityPulseDay = {
@@ -12,6 +14,7 @@ export type ActivityPulseDay = {
   call: number
   meeting: number
   other: number
+  inboundEmail: number
   total: number
 }
 
@@ -22,6 +25,7 @@ export type ActivityPulse = {
   streakDays: number
   automated: number
   manual: number
+  inboundEmail: number
   currentPeriodTotal: number
   previousPeriodTotal: number
   trendPercent: number
@@ -76,6 +80,25 @@ function parseActivityDate(row: ActivityPulseInput) {
   return Number.isFinite(date.getTime()) ? date : null
 }
 
+function activityDirection(row: ActivityPulseInput) {
+  const metadata = row.sourceMetadata && typeof row.sourceMetadata === 'object'
+    ? row.sourceMetadata as Record<string, unknown>
+    : {}
+  const value = String(
+    row.direction
+    || metadata.captureDirection
+    || metadata.direction
+    || metadata.emailDirection
+    || '',
+  ).trim().toLowerCase()
+  const type = String(row.type || '').trim().toLowerCase()
+  if (value === 'received' || value === 'inbound') return 'inbound'
+  if (value === 'sent' || value === 'outbound') return 'outbound'
+  if (value === 'internal') return 'internal'
+  if (type.includes('email_received') || type.includes('inbound_email')) return 'inbound'
+  return 'unknown'
+}
+
 export function buildActivityPulse(
   rows: ActivityPulseInput[],
   options: { days?: number; now?: Date; timeZone?: string } = {},
@@ -92,11 +115,13 @@ export function buildActivityPulse(
     call: 0,
     meeting: 0,
     other: 0,
+    inboundEmail: 0,
     total: 0,
   }]))
 
   let automated = 0
   let manual = 0
+  let inboundEmail = 0
   for (const row of rows) {
     const activityDate = parseActivityDate(row)
     if (!activityDate) continue
@@ -105,6 +130,11 @@ export function buildActivityPulse(
     const day = byDate.get(key)
     if (!day) continue
     const category = activityCategory(row.type)
+    if (category === 'email' && activityDirection(row) === 'inbound') {
+      day.inboundEmail += 1
+      inboundEmail += 1
+      continue
+    }
     day[category] += 1
     day.total += 1
     const provider = String(row.sourceProvider || '').trim().toLowerCase()
@@ -139,6 +169,7 @@ export function buildActivityPulse(
     streakDays,
     automated,
     manual,
+    inboundEmail,
     currentPeriodTotal,
     previousPeriodTotal,
     trendPercent,
