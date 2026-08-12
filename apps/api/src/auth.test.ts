@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { requireAuth, requireBrokerAuth, requireSalesActivityAuth } from './auth'
+import { requireAuth, requireBrokerAuth, requireMarketRecordProposalAuth, requireSalesActivityAuth } from './auth'
 
 function requestWithSalesKey(token: string) {
   return {
@@ -88,6 +88,31 @@ test('scoped sales activity credentials reject the wrong token', async () => {
 
     assert.equal(nextCalled, false)
     assert.equal(response.statusCode, 401)
+  } finally {
+    if (previousKey === undefined) delete process.env.SALES_ACTIVITY_AGENT_API_KEY
+    else process.env.SALES_ACTIVITY_AGENT_API_KEY = previousKey
+    if (previousUserId === undefined) delete process.env.SALES_ACTIVITY_AGENT_USER_ID
+    else process.env.SALES_ACTIVITY_AGENT_USER_ID = previousUserId
+  }
+})
+
+test('scoped sales activity credentials can submit map proposals without crossing the approval gate', async () => {
+  const previousKey = process.env.SALES_ACTIVITY_AGENT_API_KEY
+  const previousUserId = process.env.SALES_ACTIVITY_AGENT_USER_ID
+  process.env.SALES_ACTIVITY_AGENT_API_KEY = 'scoped-sales-key'
+  process.env.SALES_ACTIVITY_AGENT_USER_ID = 'patrick-user-id'
+
+  try {
+    const request = requestWithSalesKey('scoped-sales-key')
+    const response = responseRecorder()
+    let nextCalled = false
+    await requireMarketRecordProposalAuth(request, response, () => {
+      nextCalled = true
+    })
+
+    assert.equal(nextCalled, true)
+    assert.equal(request.user.id, 'patrick-user-id')
+    assert.equal(request.user.role, 'sales_activity_agent')
   } finally {
     if (previousKey === undefined) delete process.env.SALES_ACTIVITY_AGENT_API_KEY
     else process.env.SALES_ACTIVITY_AGENT_API_KEY = previousKey

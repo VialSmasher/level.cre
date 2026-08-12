@@ -14,6 +14,7 @@ This is the Level CRE bridge for Codex-led sales work. It is intentionally conse
 6. `hold`, `low_priority`, and `skipped` rows stay in the ledger as `ignored`.
 7. Idempotency is by `(user_id, source, external_activity_id)`.
 8. Existing interactions are detected by `source_provider = 'codex'` and `source_message_id = external_activity_id`.
+9. A confirmed operating address may travel with the activity as metadata, but map creation is handled by the separate verified sales-prospect map batch.
 
 ## Endpoints
 
@@ -69,6 +70,25 @@ For received Outlook mail, pass the sender as the contact/email and use the exac
 The bridge stores metadata only. Never send message bodies, previews, snippets, HTML, attachments, signatures, or quoted history.
 
 Response includes counts plus per-row `matchStatus`, `matchReason`, `interactionId`, and `duplicate`.
+
+Optional verified-location metadata on an activity includes `propertyAddress`, `latitude`, `longitude`, `placeId`, `websiteUrl`, `addressSource`, `addressConfidence`, and `addressVerified`. This metadata is copied into the canonical event ledger; it does not create a pin during the send request.
+
+### `POST /api/agent/sales-prospect-maps/batch`
+
+Uses the scoped sales-activity credential. Submit verified map candidates in batches of up to 50 after the outreach batch is complete. Each candidate must include:
+
+- the matching `externalActivityId` and `activitySource`;
+- company, civic address, latitude and longitude;
+- `addressSource`, confidence of at least 80, and `verified: true`.
+
+The batch performs inexpensive duplicate checks first: the activity's existing prospect, exact contact email, Google Place ID, normalized civic address, coordinates, domain, and business name. It then:
+
+- enriches and links a decisive existing prospect;
+- creates a new mapped prospect only when no candidate exists and confidence is at least 85;
+- places ambiguous or conflicting candidates in Daily Desk Review;
+- links the confirmed email interaction and canonical activity event to the resulting prospect.
+
+The Codex recorder keeps verified candidates in a separate durable local outbox and submits them only on `-FlushOnly`, allowing drafting and sending to continue without waiting for map work between prospects.
 
 ### `GET /api/agent/sales-activity/imports`
 

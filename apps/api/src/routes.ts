@@ -112,6 +112,11 @@ import {
   submitMarketRecordProposal,
 } from './lib/marketRecordProposalService';
 import {
+  linkSalesActivityReference,
+  processSalesProspectMapBatch,
+  SalesProspectMapBatchSchema,
+} from './lib/salesProspectMappingService';
+import {
   OpportunityPromotionProposalInputSchema,
   OpportunityPromotionProposalReviewSchema,
   submitOpportunityPromotionProposal,
@@ -4333,12 +4338,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
           JSON.stringify({ review: { action: 'approve', reviewedAt: new Date().toISOString(), created } }),
         ],
       );
+      let salesActivityLink: Record<string, unknown> | null = null;
+      const proposalMetadata = proposal.sourceMetadata || {};
+      const salesActivityExternalId = typeof proposalMetadata.salesActivityExternalId === 'string'
+        ? proposalMetadata.salesActivityExternalId
+        : null;
+      if (salesActivityExternalId) {
+        try {
+          salesActivityLink = await linkSalesActivityReference({
+            pool,
+            storage,
+            userId,
+            externalActivityId: salesActivityExternalId,
+            activitySource: typeof proposalMetadata.salesActivitySource === 'string'
+              ? proposalMetadata.salesActivitySource
+              : 'codex_followup',
+            prospectId: prospect.id,
+          });
+        } catch (salesActivityError) {
+          console.warn('Map proposal was approved but its sales activity could not be linked:', salesActivityError);
+        }
+      }
       res.json({
         id: req.params.id,
         action: 'approve',
         prospectId: prospect.id,
         created,
         prospect,
+        salesActivityLink,
         entityResolution: {
           decision: resolution.decision,
           linkedCandidateId: created ? null : prospect.id,
@@ -4347,6 +4374,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error reviewing market record proposal:', error);
       res.status(500).json({ message: 'Failed to review market record proposal' });
+    }
+  });
+
+  app.post('/api/agent/sales-prospect-maps/batch', requireSalesActivityAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) await ensureUser(userId, email);
+      const parsed = SalesProspectMapBatchSchema.safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid sales prospect map batch', error: parsed.error.errors });
+      }
+      if (isDemo(req)) {
+        return res.json({
+          processed: 0,
+          created: 0,
+          linkedExisting: 0,
+          needsReview: 0,
+          activityLinked: 0,
+          errors: 0,
+          results: [],
+          skipped: true,
+          reason: 'demo_mode',
+        });
+      }
+      const summary = await processSalesProspectMapBatch({
+        pool,
+        storage,
+        userId,
+        payload: parsed.data,
+      });
+      res.json(summary);
+    } catch (error) {
+      console.error('Error processing sales prospect map batch:', error);
+      res.status(500).json({ message: 'Failed to process sales prospect map batch' });
     }
   });
 

@@ -218,6 +218,17 @@ export async function requireMarketRecordProposalAuth(req: Request, res: Respons
     return next()
   }
 
+  const salesAgentUser = getConfiguredSalesActivityAgent(req)
+  if (salesAgentUser) {
+    ;(req as any).user = {
+      id: salesAgentUser.id,
+      email: salesAgentUser.email,
+      role: 'sales_activity_agent',
+      agentName: salesAgentUser.agentName,
+    }
+    return next()
+  }
+
   return requireAuth(req, res, next)
 }
 

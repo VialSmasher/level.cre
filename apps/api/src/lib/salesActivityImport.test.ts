@@ -175,6 +175,30 @@ test('sales activity normalization retains metadata but drops Outlook message co
   assert.equal(Object.prototype.hasOwnProperty.call(activity.rawPayload, 'attachments'), false);
 });
 
+test('sales activity normalization retains verified map evidence without creating a prospect', () => {
+  const activity = normalizeSalesActivityInput({
+    externalActivityId: 'outlook-message-map-1',
+    status: 'sent',
+    company: 'Norquest Industries',
+    email: 'doug@example.com',
+    propertyAddress: '3911 74 Avenue NW, Edmonton, AB',
+    latitude: '53.5101',
+    longitude: '-113.4012',
+    placeId: 'google-place-1',
+    websiteUrl: 'https://example.com',
+    addressSource: 'company_website',
+    addressConfidence: 95,
+    addressVerified: true,
+  });
+
+  assert.equal(activity.propertyAddress, '3911 74 Avenue NW, Edmonton, AB');
+  assert.equal(activity.latitude, 53.5101);
+  assert.equal(activity.longitude, -113.4012);
+  assert.equal(activity.addressVerified, true);
+  assert.equal(activity.rawPayload.propertyAddress, activity.propertyAddress);
+  assert.equal(activity.rawPayload.addressSource, 'company_website');
+});
+
 function salesActivityPersistenceHarness(initialFollowUpDueDate: string | null = null) {
   const state = {
     importRow: null as null | {

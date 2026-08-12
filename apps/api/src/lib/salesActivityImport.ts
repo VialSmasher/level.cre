@@ -32,6 +32,14 @@ export type NormalizedSalesActivity = {
   activityAt: Date | null;
   prospectId: string | null;
   listingId: string | null;
+  propertyAddress: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  placeId: string | null;
+  websiteUrl: string | null;
+  addressSource: string | null;
+  addressConfidence: number | null;
+  addressVerified: boolean;
   rawPayload: Record<string, unknown>;
 };
 
@@ -104,6 +112,18 @@ function normalizeString(value: unknown): string | null {
 function normalizeShortNote(value: unknown): string | null {
   const normalized = normalizeString(value);
   return normalized ? normalized.slice(0, MAX_SALES_ACTIVITY_NOTE_LENGTH) : null;
+}
+
+function normalizeNumber(value: unknown, min: number, max: number): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : null;
+}
+
+function normalizeBoolean(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  const normalized = normalizeString(value)?.toLowerCase();
+  return normalized === 'true' || normalized === '1' || normalized === 'yes';
 }
 
 function getAlias(record: Record<string, unknown>, aliases: string[]): unknown {
@@ -219,6 +239,14 @@ export function normalizeSalesActivityInput(
     activityAt: parseActivityAt(getAlias(input, ['activityAt', 'activity_at', 'timestamp_mdt', 'timestampMdt', 'date', 'Date'])),
     prospectId: normalizeString(getAlias(input, ['prospectId', 'prospect_id'])),
     listingId: normalizeString(getAlias(input, ['listingId', 'listing_id'])),
+    propertyAddress: normalizeString(getAlias(input, ['propertyAddress', 'property_address', 'address', 'Address'])),
+    latitude: normalizeNumber(getAlias(input, ['latitude', 'lat', 'locationLat', 'location_lat']), -90, 90),
+    longitude: normalizeNumber(getAlias(input, ['longitude', 'lng', 'locationLng', 'location_lng']), -180, 180),
+    placeId: normalizeString(getAlias(input, ['placeId', 'place_id', 'googlePlaceId', 'google_place_id'])),
+    websiteUrl: normalizeString(getAlias(input, ['websiteUrl', 'website_url', 'website', 'Website'])),
+    addressSource: normalizeString(getAlias(input, ['addressSource', 'address_source'])),
+    addressConfidence: normalizeNumber(getAlias(input, ['addressConfidence', 'address_confidence']), 0, 100),
+    addressVerified: normalizeBoolean(getAlias(input, ['addressVerified', 'address_verified'])),
     rawPayload: {},
   };
 
@@ -253,6 +281,14 @@ export function normalizeSalesActivityInput(
       activityAt: partial.activityAt?.toISOString() ?? null,
       prospectId: partial.prospectId,
       listingId: partial.listingId,
+      propertyAddress: partial.propertyAddress,
+      latitude: partial.latitude,
+      longitude: partial.longitude,
+      placeId: partial.placeId,
+      websiteUrl: partial.websiteUrl,
+      addressSource: partial.addressSource,
+      addressConfidence: partial.addressConfidence,
+      addressVerified: partial.addressVerified,
     },
   };
 }
