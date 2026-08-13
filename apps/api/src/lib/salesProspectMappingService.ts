@@ -7,21 +7,26 @@ import { submitMarketRecordProposal } from './marketRecordProposalService';
 import { resolveMarketEntitiesForUser } from './marketEntityResolver';
 import { reviewSalesActivityImport } from './salesActivityImportService';
 
+const optionalUrlSchema = z.preprocess(
+  (value) => typeof value === 'string' && value.trim() === '' ? null : value,
+  z.string().trim().url().max(2000).nullable().optional(),
+);
+
 export const SalesProspectMapCandidateSchema = z.object({
   externalActivityId: z.string().trim().min(1).max(240),
   activitySource: z.string().trim().min(1).max(80).optional().default('codex_followup'),
-  observedAt: z.string().datetime().optional(),
+  observedAt: z.string().datetime({ offset: true }).optional(),
   company: z.string().trim().min(1).max(240),
   contactName: z.string().trim().max(240).nullable().optional(),
   contactEmail: z.string().trim().email().max(320).toLowerCase().nullable().optional(),
   contactPhone: z.string().trim().max(80).nullable().optional(),
-  websiteUrl: z.string().trim().url().max(2000).nullable().optional(),
+  websiteUrl: optionalUrlSchema,
   address: z.string().trim().min(3).max(1000),
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
   placeId: z.string().trim().max(240).nullable().optional(),
-  googleMapsUrl: z.string().trim().url().max(2000).nullable().optional(),
-  evidenceUrl: z.string().trim().url().max(2000).nullable().optional(),
+  googleMapsUrl: optionalUrlSchema,
+  evidenceUrl: optionalUrlSchema,
   addressSource: z.enum(['company_website', 'google_maps', 'municipal', 'outlook', 'manual', 'other']),
   confidence: z.number().int().min(80).max(100),
   verified: z.literal(true),

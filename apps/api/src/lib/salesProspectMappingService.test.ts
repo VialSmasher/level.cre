@@ -27,6 +27,23 @@ test('verified sales prospect map batches require source-backed map-ready eviden
   assert.equal(parsed.candidates[0].activitySource, 'codex_followup');
 });
 
+test('accepts the PowerShell recorder wire format without rewriting queued candidates', () => {
+  const parsed = SalesProspectMapBatchSchema.parse({
+    candidates: [{
+      ...verifiedCandidate,
+      observedAt: '2026-08-13T09:15:20.1234567-06:00',
+      websiteUrl: '',
+      googleMapsUrl: '',
+      evidenceUrl: '',
+    }],
+  });
+
+  assert.equal(parsed.candidates[0].observedAt, '2026-08-13T09:15:20.1234567-06:00');
+  assert.equal(parsed.candidates[0].websiteUrl, null);
+  assert.equal(parsed.candidates[0].googleMapsUrl, null);
+  assert.equal(parsed.candidates[0].evidenceUrl, null);
+});
+
 test('unverified or low-confidence locations cannot enter automatic map processing', () => {
   assert.equal(SalesProspectMapBatchSchema.safeParse({
     candidates: [{ ...verifiedCandidate, verified: false }],
