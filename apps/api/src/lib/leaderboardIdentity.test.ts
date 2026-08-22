@@ -26,3 +26,16 @@ test('consolidates Patrick\'s known work and sign-in email identities without me
   assert.equal(board[0].xp_total, 175)
   assert.equal(board[0].identity_count, 2)
 })
+
+test('consolidates the known orphan Pat Livingston row that has no account email', () => {
+  const board = buildLeaderboardIdentities([
+    { userId: 'legacy', userEmail: null, displayName: 'Pat Livingston', prospectingXp: 50 },
+    { userId: 'current', userEmail: 'livingstonpatrick1@gmail.com', displayName: 'Pat L', prospectingXp: 100, followUpXp: 25 },
+  ], 'current')
+
+  assert.equal(board.length, 1)
+  assert.equal(board[0].user_id, 'current')
+  assert.equal(board[0].display_name, 'Pat L')
+  assert.equal(board[0].xp_total, 175)
+  assert.equal(board[0].identity_count, 2)
+})

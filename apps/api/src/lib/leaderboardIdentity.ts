@@ -17,9 +17,18 @@ const KNOWN_EMAIL_ALIASES = new Map([
   ['patrick.livingston@cwedm.com', 'livingstonpatrick1@gmail.com'],
 ])
 
+const KNOWN_ORPHAN_NAME_ALIASES = new Map([
+  ['pat livingston', 'livingstonpatrick1@gmail.com'],
+])
+
 function identityEmail(value?: string | null) {
   const email = cleanEmail(value)
   return email ? KNOWN_EMAIL_ALIASES.get(email) || email : null
+}
+
+function identityName(value?: string | null) {
+  const name = String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
+  return KNOWN_ORPHAN_NAME_ALIASES.get(name) || null
 }
 
 function readableEmailName(value?: string | null) {
@@ -40,8 +49,8 @@ function getLevel(total: number) {
 export function buildLeaderboardIdentities(rows: LeaderboardSkillRow[], currentUserId: string) {
   const groups = new Map<string, LeaderboardSkillRow[]>()
   rows.forEach((row) => {
-    const email = identityEmail(row.userEmail)
-    const key = email ? `email:${email}` : `user:${row.userId}`
+    const identity = identityEmail(row.userEmail) || identityName(row.displayName)
+    const key = identity ? `identity:${identity}` : `user:${row.userId}`
     groups.set(key, [...(groups.get(key) || []), row])
   })
 
