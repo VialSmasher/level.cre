@@ -226,6 +226,17 @@ export default function PublicPursuit() {
     () => new Map((data?.prospects || []).map((prospect) => [prospect.id, prospect])),
     [data?.prospects],
   );
+  const visibleActivities = useMemo(
+    () => selectedProspectId
+      ? (data?.activities || []).filter((activity) => activity.prospectId === selectedProspectId)
+      : (data?.activities || []),
+    [data?.activities, selectedProspectId],
+  );
+  const visibleActivityByType = useMemo(() => visibleActivities.reduce<Record<string, number>>((counts, activity) => {
+    const type = activity.type || 'activity';
+    counts[type] = (counts[type] || 0) + 1;
+    return counts;
+  }, {}), [visibleActivities]);
 
   if (isLoading) {
     return <div className="min-h-screen animate-pulse bg-slate-100" aria-label="Loading client activity view" />;
@@ -278,7 +289,7 @@ export default function PublicPursuit() {
         <section className="grid gap-4 md:grid-cols-3" aria-label="Pursuit activity summary">
           <SummaryCard label="Prospects" value={data.summary.prospectCount} detail="Mapped to this pursuit" icon={<Users className="h-5 w-5" />} />
           <SummaryCard label="Sales activity" value={data.summary.activityCount} detail="Calls, emails, meetings and notes" icon={<Activity className="h-5 w-5" />} />
-          <SummaryCard label="Latest activity" value={formatDate(data.summary.lastActivityAt, false)} detail={data.summary.lastActivityAt ? formatDate(data.summary.lastActivityAt) : 'No recorded activity'} icon={<CalendarDays className="h-5 w-5" />} />
+          <SummaryCard label="Latest activity" value={formatDate(data.summary.lastActivityAt, false)} detail={data.summary.lastActivityAt ? 'Most recent recorded touch' : 'No recorded activity'} icon={<CalendarDays className="h-5 w-5" />} />
         </section>
 
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -310,7 +321,7 @@ export default function PublicPursuit() {
                   <button
                     key={prospect.id || prospect.label}
                     type="button"
-                    onClick={() => prospect.id && setSelectedProspectId(prospect.id)}
+                    onClick={() => prospect.id && setSelectedProspectId((current) => current === prospect.id ? null : prospect.id)}
                     className={`flex w-full items-start gap-3 border-b border-slate-100 px-5 py-4 text-left transition-colors last:border-b-0 hover:bg-slate-50 ${selectedProspectId === prospect.id ? 'bg-blue-50/70' : ''}`}
                   >
                     <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: statusColor(prospect.status) }} />
@@ -329,19 +340,24 @@ export default function PublicPursuit() {
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-col justify-between gap-2 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:px-6">
             <div>
-              <h2 className="font-semibold text-slate-950">Recent activity</h2>
-              <p className="mt-1 text-sm text-slate-600">A read-only trail of prospecting work tied to this pursuit.</p>
+              <h2 className="font-semibold text-slate-950">{selectedProspect ? `${selectedProspect.label} activity` : 'Recent activity'}</h2>
+              <p className="mt-1 text-sm text-slate-600">{selectedProspect ? 'Showing recorded work for the selected prospect.' : 'A read-only trail of prospecting work tied to this pursuit.'}</p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(data.summary.activityByType).map(([type, count]) => (
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedProspect ? (
+                <button type="button" className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50" onClick={() => setSelectedProspectId(null)}>
+                  Show all activity
+                </button>
+              ) : null}
+              {Object.entries(visibleActivityByType).map(([type, count]) => (
                 <span key={type} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">{count} {cleanLabel(type)}</span>
               ))}
             </div>
           </div>
           <div className="divide-y divide-slate-100">
-            {data.activities.length === 0 ? (
-              <div className="px-6 py-12 text-center text-sm text-slate-600">No recorded activity yet.</div>
-            ) : data.activities.slice(0, 50).map((activity, index) => {
+            {visibleActivities.length === 0 ? (
+              <div className="px-6 py-12 text-center text-sm text-slate-600">{selectedProspect ? 'No recorded activity for this prospect yet.' : 'No recorded activity yet.'}</div>
+            ) : visibleActivities.slice(0, 50).map((activity, index) => {
               const prospect = prospectById.get(activity.prospectId) || null;
               return (
                 <div key={activity.id || `${activity.date}-${index}`} className="grid gap-3 px-5 py-4 sm:grid-cols-[130px_130px_minmax(0,1fr)_160px] sm:items-center sm:px-6">
