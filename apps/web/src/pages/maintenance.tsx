@@ -1,12 +1,9 @@
-import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, DatabaseZap, RefreshCcw, ShieldCheck } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { PageHeader } from '@/components/ui/page-header'
-import { apiRequest } from '@/lib/queryClient'
-import { useToast } from '@/hooks/use-toast'
 
 type DuplicatePair = {
   canonicalProspectId: string
@@ -52,15 +49,6 @@ type MemoryPlan = {
   }>
 }
 
-type MaintenanceResult = {
-  attempted: number
-  merged?: number
-  approved?: number
-  failed?: number
-  skipped?: number
-  heldExceptions?: number
-}
-
 function Metric({ label, value, tone = 'text-slate-950' }: { label: string; value: number; tone?: string }) {
   return (
     <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
@@ -81,10 +69,6 @@ function StatusMessage({ error }: { error: unknown }) {
 }
 
 export default function MaintenancePage() {
-  const queryClient = useQueryClient()
-  const { toast } = useToast()
-  const [armedAction, setArmedAction] = useState<'duplicates' | 'memory' | null>(null)
-  const [lastResult, setLastResult] = useState<MaintenanceResult | null>(null)
   const duplicatePlan = useQuery<DuplicatePlan>({
     queryKey: ['/api/prospects/duplicate-merges/maintenance-plan?limit=50'],
     staleTime: 0,
@@ -95,51 +79,8 @@ export default function MaintenancePage() {
   })
 
   const refreshPlans = async () => {
-    setArmedAction(null)
     await Promise.all([duplicatePlan.refetch(), memoryPlan.refetch()])
   }
-
-  const duplicateMutation = useMutation<MaintenanceResult>({
-    mutationFn: async () => {
-      if (!duplicatePlan.data) throw new Error('Generate the duplicate plan first.')
-      const response = await apiRequest('POST', '/api/prospects/duplicate-merges/maintenance', {
-        planHash: duplicatePlan.data.planHash,
-        runKey: `legacy-cleanup-${new Date().toISOString()}`,
-        limit: 50,
-        maxMerges: 10,
-        confirmation: 'apply_safe_merges',
-      })
-      return response.json()
-    },
-    onSuccess: async (result) => {
-      setLastResult(result)
-      setArmedAction(null)
-      toast({ title: 'Safe duplicate batch complete', description: `${result.merged || 0} record pair${result.merged === 1 ? '' : 's'} consolidated.` })
-      await queryClient.invalidateQueries({ queryKey: ['/api/prospects'] })
-      await refreshPlans()
-    },
-  })
-
-  const memoryMutation = useMutation<MaintenanceResult>({
-    mutationFn: async () => {
-      if (!memoryPlan.data) throw new Error('Generate the property-memory plan first.')
-      const response = await apiRequest('POST', '/api/intel/brokerage-memory/maintenance', {
-        planHash: memoryPlan.data.planHash,
-        runKey: `property-memory-cleanup-${new Date().toISOString()}`,
-        limit: 250,
-        maxItems: 25,
-        confirmation: 'approve_map_ready_memory',
-      })
-      return response.json()
-    },
-    onSuccess: async (result) => {
-      setLastResult(result)
-      setArmedAction(null)
-      toast({ title: 'Background enrichment complete', description: `${result.approved || 0} map-ready record${result.approved === 1 ? '' : 's'} approved.` })
-      await queryClient.invalidateQueries({ queryKey: ['/api/intel/brokerage-memory/map'] })
-      await refreshPlans()
-    },
-  })
 
   const isRefreshing = duplicatePlan.isFetching || memoryPlan.isFetching
   const duplicateSafePairs = duplicatePlan.data?.summary.safePairs || 0
@@ -172,7 +113,7 @@ export default function MaintenancePage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <StatusMessage error={duplicatePlan.error || duplicateMutation.error} />
+            <StatusMessage error={duplicatePlan.error} />
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Metric label="Groups" value={duplicatePlan.data?.summary.candidateGroups || 0} />
               <Metric label="Safe groups" value={duplicatePlan.data?.summary.safeGroups || 0} tone="text-emerald-700" />
@@ -197,20 +138,9 @@ export default function MaintenancePage() {
               {duplicatePlan.data && duplicatePlan.data.groups.length === 0 ? <p className="text-sm text-slate-500">No duplicate groups detected.</p> : null}
             </div>
 
-            {armedAction === 'duplicates' ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
-                <p className="text-sm font-medium text-amber-950">Apply up to 10 high-confidence merges from this exact plan?</p>
-                <p className="mt-1 text-xs text-amber-800">Each merge creates an individual undo event. Held groups are untouched.</p>
-                <div className="mt-3 flex gap-2">
-                  <Button onClick={() => duplicateMutation.mutate()} disabled={duplicateMutation.isPending}>Apply safe batch</Button>
-                  <Button variant="outline" onClick={() => setArmedAction(null)}>Cancel</Button>
-                </div>
-              </div>
-            ) : (
-              <Button onClick={() => setArmedAction('duplicates')} disabled={!duplicateSafePairs || duplicatePlan.isLoading}>
-                Prepare safe merge batch
-              </Button>
-            )}
+            <p className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              Read-only plan. No prospect records can be changed from this screen.
+            </p>
           </CardContent>
         </Card>
 
@@ -225,7 +155,7 @@ export default function MaintenancePage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <StatusMessage error={memoryPlan.error || memoryMutation.error} />
+            <StatusMessage error={memoryPlan.error} />
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Metric label="Pending" value={memoryPlan.data?.summary.pendingItems || 0} />
               <Metric label="Map ready" value={memoryReady} tone="text-emerald-700" />
@@ -248,29 +178,13 @@ export default function MaintenancePage() {
               {memoryPlan.data && memoryPlan.data.items.length === 0 ? <p className="text-sm text-slate-500">No pending property-memory maintenance.</p> : null}
             </div>
 
-            {armedAction === 'memory' ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 p-4">
-                <p className="text-sm font-medium text-amber-950">Approve up to 25 map-ready records from this exact plan?</p>
-                <p className="mt-1 text-xs text-amber-800">This is additive map enrichment. Unplaceable records remain untouched.</p>
-                <div className="mt-3 flex gap-2">
-                  <Button onClick={() => memoryMutation.mutate()} disabled={memoryMutation.isPending}>Apply background batch</Button>
-                  <Button variant="outline" onClick={() => setArmedAction(null)}>Cancel</Button>
-                </div>
-              </div>
-            ) : (
-              <Button onClick={() => setArmedAction('memory')} disabled={!memoryReady || memoryPlan.isLoading}>
-                Prepare background batch
-              </Button>
-            )}
+            <p className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              Read-only plan. No property-memory records can be changed from this screen.
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      {lastResult ? (
-        <section className="mt-5 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700" aria-live="polite">
-          Last batch: {lastResult.attempted} attempted, {lastResult.merged || lastResult.approved || 0} applied, {lastResult.failed || 0} failed, {lastResult.skipped || lastResult.heldExceptions || 0} held.
-        </section>
-      ) : null}
     </div>
   )
 }
