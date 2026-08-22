@@ -74,6 +74,7 @@ export interface IStorage {
   deleteListing(id: string, userId: string): Promise<boolean>;
   getListingProspects(listingId: string, userId: string): Promise<Prospect[]>;
   linkProspectToListing(params: { listingId: string; prospectId: string; userId: string }): Promise<{ ok: true }>;
+  linkProspectToListingAny(params: { listingId: string; prospectId: string; userId: string }): Promise<{ ok: true }>;
   unlinkProspectFromListing(params: { listingId: string; prospectId: string; userId: string }): Promise<boolean>;
 
   // Prospects operations with user filtering

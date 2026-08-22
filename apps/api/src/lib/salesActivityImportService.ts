@@ -15,6 +15,11 @@ type Queryable = Pick<Pool | PoolClient, 'query'>;
 
 type ContactInteractionStorage = {
   createContactInteraction(interaction: any, options?: any): Promise<{ id: string }>;
+  linkProspectToListingAny?(params: {
+    listingId: string;
+    prospectId: string;
+    userId: string;
+  }): Promise<{ ok: true }>;
 };
 
 const DEFAULT_OUTBOUND_EMAIL_FOLLOW_UP_DAYS = 14;
@@ -561,6 +566,14 @@ export async function importSalesActivityBatch(params: {
       const finalMatchStatus = interactionId ? 'matched' : importRow.match_status;
       const effectiveProspectId = resolved.prospectId || importRow.prospect_id || null;
 
+      if (activity.listingId && effectiveProspectId && params.storage.linkProspectToListingAny) {
+        await params.storage.linkProspectToListingAny({
+          listingId: activity.listingId,
+          prospectId: effectiveProspectId,
+          userId: params.userId,
+        });
+      }
+
       if (params.reconcileEmailEvidence) {
         try {
           await params.reconcileEmailEvidence(activity);
@@ -826,6 +839,7 @@ export async function reviewSalesActivityImport(params: {
   }
 
   const client = await params.pool.connect();
+  let linkedRow: Record<string, unknown> | null = null;
   try {
     await client.query('BEGIN');
     await requireActiveOwnedProspect({
@@ -848,12 +862,20 @@ export async function reviewSalesActivityImport(params: {
       `,
       [params.importId, params.userId, prospect.id, interactionId],
     );
+    linkedRow = linked.rows[0] || null;
     await client.query('COMMIT');
-    return linked.rows[0];
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
   } finally {
     client.release();
   }
+  if (row.listing_id && params.storage.linkProspectToListingAny) {
+    await params.storage.linkProspectToListingAny({
+      listingId: row.listing_id,
+      prospectId: prospect.id,
+      userId: params.userId,
+    });
+  }
+  return linkedRow || {};
 }

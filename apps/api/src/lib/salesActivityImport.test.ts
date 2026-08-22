@@ -831,3 +831,45 @@ test('a confirmed sales send is handed to the canonical event ledger after match
   assert.equal(recorded[0].interactionId, 'interaction-1');
   assert.equal(recorded[0].matchStatus, 'matched');
 });
+
+test('a matched activity with pursuit context automatically links the prospect to that pursuit', async () => {
+  const pool = transactionalPool(async (sql: string) => {
+    if (sql.includes('FROM public.prospects') && sql.includes('LIMIT 1')) return { rows: [{ id: 'prospect-1' }] };
+    if (sql.includes('SELECT id, interaction_id') && sql.includes('sales_activity_imports')) return { rows: [] };
+    if (sql.includes('INSERT INTO public.sales_activity_imports')) {
+      return { rows: [{ id: 'import-1', interaction_id: null, match_status: 'matched', prospect_id: 'prospect-1' }] };
+    }
+    if (sql.includes('FROM public.contact_interactions')) return { rows: [{ id: 'interaction-1' }] };
+    return { rows: [], rowCount: 0 };
+  });
+  const pursuitLinks: Array<Record<string, string>> = [];
+
+  const result = await importSalesActivityBatch({
+    pool,
+    storage: {
+      createContactInteraction: async () => ({ id: 'unused' }),
+      linkProspectToListingAny: async (params) => {
+        pursuitLinks.push(params);
+        return { ok: true };
+      },
+    },
+    userId: 'user-1',
+    payload: SalesActivityBatchSchema.parse({
+      activities: [{
+        externalActivityId: 'provider-message-pursuit-1',
+        status: 'sent',
+        activityType: 'email',
+        prospectId: 'prospect-1',
+        listingId: 'pursuit-2959-parsons',
+        subject: '2959 Parsons Road prospecting',
+      }],
+    }),
+  });
+
+  assert.equal(result.errors, 0);
+  assert.deepEqual(pursuitLinks, [{
+    listingId: 'pursuit-2959-parsons',
+    prospectId: 'prospect-1',
+    userId: 'user-1',
+  }]);
+});
