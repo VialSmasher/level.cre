@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, CheckCircle2, DatabaseZap, History, RefreshCcw, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, DatabaseZap, History, RefreshCcw, ShieldCheck, Trophy } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -68,6 +68,16 @@ type PursuitHistoryPlan = {
   }>
 }
 
+type LeaderboardAudit = {
+  data: Array<{
+    user_id: string
+    user_email: string
+    display_name: string
+    xp_total: number
+    identity_count?: number
+  }>
+}
+
 function Metric({ label, value, tone = 'text-slate-950' }: { label: string; value: number; tone?: string }) {
   return (
     <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
@@ -100,12 +110,16 @@ export default function MaintenancePage() {
     queryKey: ['/api/pursuits/history-backfill/plan?limit=250'],
     staleTime: 0,
   })
+  const leaderboardAudit = useQuery<LeaderboardAudit>({
+    queryKey: ['/api/leaderboard'],
+    staleTime: 0,
+  })
 
   const refreshPlans = async () => {
-    await Promise.all([duplicatePlan.refetch(), memoryPlan.refetch(), pursuitHistoryPlan.refetch()])
+    await Promise.all([duplicatePlan.refetch(), memoryPlan.refetch(), pursuitHistoryPlan.refetch(), leaderboardAudit.refetch()])
   }
 
-  const isRefreshing = duplicatePlan.isFetching || memoryPlan.isFetching || pursuitHistoryPlan.isFetching
+  const isRefreshing = duplicatePlan.isFetching || memoryPlan.isFetching || pursuitHistoryPlan.isFetching || leaderboardAudit.isFetching
   const duplicateSafePairs = duplicatePlan.data?.summary.safePairs || 0
   const memoryReady = memoryPlan.data?.summary.backgroundApprovals || 0
 
@@ -124,7 +138,7 @@ export default function MaintenancePage() {
         )}
       />
 
-      <div className="mt-6 grid gap-5 xl:grid-cols-3">
+      <div className="mt-6 grid gap-5 lg:grid-cols-2 2xl:grid-cols-4">
         <Card>
           <CardHeader>
             <div className="flex items-start justify-between gap-4">
@@ -240,6 +254,31 @@ export default function MaintenancePage() {
 
             <p className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
               Read-only plan. Only exact historical references are eligible for background linking.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Trophy className="h-5 w-5 text-amber-600" />Standings identity audit</CardTitle>
+            <CardDescription>Read-only account identities currently contributing production XP.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <StatusMessage error={leaderboardAudit.error} />
+            <div className="space-y-2">
+              {(leaderboardAudit.data?.data || []).map((entry) => (
+                <div key={entry.user_id} className="rounded-md border border-slate-200 px-3 py-2 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium text-slate-900">{entry.display_name}</span>
+                    <span className="tabular-nums text-slate-600">{Number(entry.xp_total || 0).toLocaleString()} XP</span>
+                  </div>
+                  <p className="mt-1 truncate text-xs text-slate-500">{entry.user_email || 'No account email'}</p>
+                  {Number(entry.identity_count || 1) > 1 ? <p className="mt-1 text-xs font-medium text-emerald-700">{entry.identity_count} identities consolidated</p> : null}
+                </div>
+              ))}
+            </div>
+            <p className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              Read only. This view never merges authentication accounts.
             </p>
           </CardContent>
         </Card>
