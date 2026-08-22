@@ -15,7 +15,7 @@
 - Made pursuit exports inherit global interactions from every prospect linked to the pursuit, even when the original activity was not explicitly tagged to that pursuit.
 - Restored Standings through the stable `/app/standings` route while retaining the old `/leaderboard` redirect.
 
-The private landlord share link, a controlled legacy-record merge campaign, and richer pursuit analytics remain follow-on work. They are intentionally not prerequisites for the hands-off capture and momentum repairs above.
+The private landlord share link and richer pursuit analytics remain follow-on work. The controlled legacy-record merge and property-memory maintenance layer is now implemented as a dry-run-first follow-up wave; production execution remains gated by its generated plan hashes.
 
 ## Product north star
 

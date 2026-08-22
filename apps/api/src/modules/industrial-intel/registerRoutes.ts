@@ -39,6 +39,20 @@ import {
   PropertyMemorySearchQuerySchema,
   searchPropertyMemory,
 } from "../../lib/propertyMemorySearchService";
+import {
+  LegacyProspectCleanupApplySchema,
+  LegacyProspectCleanupError,
+  LegacyProspectCleanupPlanQuerySchema,
+  applyLegacyProspectCleanupPlan,
+  buildLegacyProspectCleanupPlan,
+} from "../../lib/legacyProspectCleanupService";
+import {
+  BrokerageMemoryMaintenanceApplySchema,
+  BrokerageMemoryMaintenanceError,
+  BrokerageMemoryMaintenancePlanQuerySchema,
+  applyBrokerageMemoryMaintenancePlan,
+  buildBrokerageMemoryMaintenancePlan,
+} from "../../lib/brokerageMemoryMaintenanceService";
 
 const intelRequirementSchema = z.object({
   title: z.string().trim().min(1),
@@ -1141,6 +1155,56 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/intel/brokerage-memory/maintenance/plan", requireBrokerAuth, async (req, res) => {
+    try {
+      const parsed = BrokerageMemoryMaintenancePlanQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid brokerage-memory maintenance query", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const result = await buildBrokerageMemoryMaintenancePlan({
+        pool,
+        userId: getUserId(req),
+        limit: parsed.data.limit,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof BrokerageMemoryMaintenanceError) {
+        return res.status(error.status).json({ message: error.message, code: error.code });
+      }
+      console.error("Error building brokerage-memory maintenance plan:", error);
+      res.status(500).json({ message: "Failed to build brokerage-memory maintenance plan" });
+    }
+  });
+
+  app.post("/api/intel/brokerage-memory/maintenance", requireBrokerAuth, async (req, res) => {
+    try {
+      const parsed = BrokerageMemoryMaintenanceApplySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid brokerage-memory maintenance request", issues: parsed.error.flatten() });
+      }
+      if (req.headers["x-demo-mode"] === "true") {
+        return res.status(409).json({ message: "Background maintenance is available only against the durable database." });
+      }
+      await ensureIntelActor(req);
+      const result = await applyBrokerageMemoryMaintenancePlan({
+        pool,
+        userId: getUserId(req),
+        planHash: parsed.data.planHash,
+        runKey: parsed.data.runKey,
+        limit: parsed.data.limit,
+        maxItems: parsed.data.maxItems,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof BrokerageMemoryMaintenanceError) {
+        return res.status(error.status).json({ message: error.message, code: error.code });
+      }
+      console.error("Error applying brokerage-memory maintenance:", error);
+      res.status(500).json({ message: "Failed to apply brokerage-memory maintenance" });
+    }
+  });
+
   app.get("/api/prospects/duplicate-merges/candidates", requireMarketRecordProposalAuth, async (req, res) => {
     try {
       const parsed = ProspectMergeCandidateQuerySchema.safeParse(req.query);
@@ -1162,6 +1226,56 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       }
       console.error("Error loading duplicate prospect candidates:", error);
       res.status(500).json({ message: "Failed to load duplicate prospect candidates" });
+    }
+  });
+
+  app.get("/api/prospects/duplicate-merges/maintenance-plan", requireBrokerAuth, async (req, res) => {
+    try {
+      const parsed = LegacyProspectCleanupPlanQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid legacy cleanup query", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const result = await buildLegacyProspectCleanupPlan({
+        pool,
+        userId: getUserId(req),
+        limit: parsed.data.limit,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof LegacyProspectCleanupError || error instanceof ProspectMergeServiceError) {
+        return res.status(error.status).json({ message: error.message, code: error.code });
+      }
+      console.error("Error building legacy duplicate cleanup plan:", error);
+      res.status(500).json({ message: "Failed to build legacy duplicate cleanup plan" });
+    }
+  });
+
+  app.post("/api/prospects/duplicate-merges/maintenance", requireBrokerAuth, async (req, res) => {
+    try {
+      const parsed = LegacyProspectCleanupApplySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid legacy cleanup request", issues: parsed.error.flatten() });
+      }
+      if (req.headers["x-demo-mode"] === "true") {
+        return res.status(409).json({ message: "Legacy cleanup is available only against the durable database." });
+      }
+      await ensureIntelActor(req);
+      const result = await applyLegacyProspectCleanupPlan({
+        pool,
+        userId: getUserId(req),
+        planHash: parsed.data.planHash,
+        runKey: parsed.data.runKey,
+        limit: parsed.data.limit,
+        maxMerges: parsed.data.maxMerges,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof LegacyProspectCleanupError || error instanceof ProspectMergeServiceError) {
+        return res.status(error.status).json({ message: error.message, code: error.code });
+      }
+      console.error("Error applying legacy duplicate cleanup:", error);
+      res.status(500).json({ message: "Failed to apply legacy duplicate cleanup" });
     }
   });
 
