@@ -16,11 +16,11 @@ test('buildActivityPulse creates a user-friendly 28-day activity series and stre
   })
 
   assert.equal(pulse.series.length, 28)
-  assert.equal(pulse.total, 4)
-  assert.equal(pulse.activeDays, 3)
-  assert.equal(pulse.streakDays, 3)
+  assert.equal(pulse.total, 3)
+  assert.equal(pulse.activeDays, 2)
+  assert.equal(pulse.streakDays, 2)
   assert.equal(pulse.automated, 2)
-  assert.equal(pulse.manual, 2)
+  assert.equal(pulse.manual, 1)
   assert.equal(pulse.series.at(-1)?.email, 1)
   assert.equal(pulse.series.at(-1)?.call, 1)
   assert.equal(pulse.series.at(-2)?.meeting, 1)
@@ -85,4 +85,29 @@ test('keeps received email as an outcome signal instead of production credit', (
   assert.equal(pulse.series.at(-1)?.email, 1)
   assert.equal(pulse.series.at(-1)?.inboundEmail, 1)
   assert.equal(pulse.series.at(-1)?.total, 1)
+})
+
+test('excludes internal notes and non-production activity from outbound totals', () => {
+  const pulse = buildActivityPulse([
+    {
+      date: '2026-07-10T16:00:00.000Z',
+      type: 'note',
+      direction: 'internal',
+      sourceProvider: 'codex',
+    },
+    {
+      date: '2026-07-10T17:00:00.000Z',
+      type: 'email',
+      direction: 'outbound',
+      sourceProvider: 'codex',
+    },
+  ], {
+    days: 14,
+    now: new Date('2026-07-10T18:00:00.000Z'),
+    timeZone: 'America/Edmonton',
+  })
+
+  assert.equal(pulse.total, 1)
+  assert.equal(pulse.series.at(-1)?.email, 1)
+  assert.equal(pulse.series.at(-1)?.other, 0)
 })
