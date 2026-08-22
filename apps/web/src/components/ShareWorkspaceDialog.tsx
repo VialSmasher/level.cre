@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { apiRequest } from '@/lib/queryClient';
-import { CheckCircle2, Clock3, Copy, Link2, Mail, RotateCcw, ShieldCheck, Trash2, Users, X } from 'lucide-react';
+import { CheckCircle2, Clock3, Copy, ExternalLink, Link2, Mail, RotateCcw, ShieldCheck, Trash2, Users, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { Modal, ModalContent, ModalHeader, ModalTitle, ModalClose } from '@/components/primitives/Modal';
@@ -238,9 +238,14 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
               </div>
               {publicShare?.enabled && clientShareUrl ? (
                 <div className="mt-4 space-y-3">
-                  <div className="flex gap-2">
-                    <Input aria-label="Client activity link" readOnly value={clientShareUrl} className="bg-white font-mono text-xs" onFocus={(event) => event.currentTarget.select()} />
-                    <Button type="button" onClick={() => void copyClientShareUrl()} disabled={publicShareMutation.isPending || disablePublicShareMutation.isPending}>
+                   <div className="flex gap-2">
+                     <Input aria-label="Client activity link" readOnly value={clientShareUrl} className="bg-white font-mono text-xs" onFocus={(event) => event.currentTarget.select()} />
+                     <Button type="button" variant="outline" asChild>
+                       <a href={clientShareUrl} target="_blank" rel="noreferrer">
+                         <ExternalLink className="h-4 w-4" />Preview
+                       </a>
+                     </Button>
+                     <Button type="button" onClick={() => void copyClientShareUrl()} disabled={publicShareMutation.isPending || disablePublicShareMutation.isPending}>
                       <Copy className="h-4 w-4" />Copy
                     </Button>
                   </div>

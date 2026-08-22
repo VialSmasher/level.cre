@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, CheckCircle2, DatabaseZap, RefreshCcw, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, DatabaseZap, History, RefreshCcw, ShieldCheck } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -49,6 +49,25 @@ type MemoryPlan = {
   }>
 }
 
+type PursuitHistoryPlan = {
+  planHash: string
+  generatedAt: string
+  summary: {
+    exactLinks: number
+    pursuitsAffected: number
+    evidenceRecords: number
+  }
+  items: Array<{
+    listingId: string
+    listingTitle: string
+    prospectId: string
+    prospectLabel: string
+    sourceKinds: string[]
+    evidenceCount: number
+    lastActivityAt: string | null
+  }>
+}
+
 function Metric({ label, value, tone = 'text-slate-950' }: { label: string; value: number; tone?: string }) {
   return (
     <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
@@ -77,12 +96,16 @@ export default function MaintenancePage() {
     queryKey: ['/api/intel/brokerage-memory/maintenance/plan?limit=250'],
     staleTime: 0,
   })
+  const pursuitHistoryPlan = useQuery<PursuitHistoryPlan>({
+    queryKey: ['/api/pursuits/history-backfill/plan?limit=250'],
+    staleTime: 0,
+  })
 
   const refreshPlans = async () => {
-    await Promise.all([duplicatePlan.refetch(), memoryPlan.refetch()])
+    await Promise.all([duplicatePlan.refetch(), memoryPlan.refetch(), pursuitHistoryPlan.refetch()])
   }
 
-  const isRefreshing = duplicatePlan.isFetching || memoryPlan.isFetching
+  const isRefreshing = duplicatePlan.isFetching || memoryPlan.isFetching || pursuitHistoryPlan.isFetching
   const duplicateSafePairs = duplicatePlan.data?.summary.safePairs || 0
   const memoryReady = memoryPlan.data?.summary.backgroundApprovals || 0
 
@@ -101,7 +124,7 @@ export default function MaintenancePage() {
         )}
       />
 
-      <div className="mt-6 grid gap-5 lg:grid-cols-2">
+      <div className="mt-6 grid gap-5 xl:grid-cols-3">
         <Card>
           <CardHeader>
             <div className="flex items-start justify-between gap-4">
@@ -180,6 +203,43 @@ export default function MaintenancePage() {
 
             <p className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
               Read-only plan. No property-memory records can be changed from this screen.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2"><History className="h-5 w-5 text-violet-600" />Pursuit history plan</CardTitle>
+                <CardDescription className="mt-1">Finds exact listing-and-prospect references that predate automatic pursuit linking. No fuzzy matching.</CardDescription>
+              </div>
+              {pursuitHistoryPlan.data ? <span className="text-xs text-slate-500">{new Date(pursuitHistoryPlan.data.generatedAt).toLocaleTimeString()}</span> : null}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <StatusMessage error={pursuitHistoryPlan.error} />
+            <div className="grid grid-cols-3 gap-3">
+              <Metric label="Exact links" value={pursuitHistoryPlan.data?.summary.exactLinks || 0} tone="text-violet-700" />
+              <Metric label="Pursuits" value={pursuitHistoryPlan.data?.summary.pursuitsAffected || 0} />
+              <Metric label="Evidence" value={pursuitHistoryPlan.data?.summary.evidenceRecords || 0} tone="text-blue-700" />
+            </div>
+
+            <div className="space-y-2">
+              {(pursuitHistoryPlan.data?.items || []).slice(0, 10).map((item) => (
+                <div key={`${item.listingId}:${item.prospectId}`} className="rounded-md border border-slate-200 px-3 py-2 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium text-slate-900">{item.prospectLabel}</span>
+                    <span className="text-violet-700">{item.evidenceCount} {item.evidenceCount === 1 ? 'record' : 'records'}</span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">{item.listingTitle}</p>
+                </div>
+              ))}
+              {pursuitHistoryPlan.data && pursuitHistoryPlan.data.items.length === 0 ? <p className="text-sm text-slate-500">Historical pursuit links are already current.</p> : null}
+            </div>
+
+            <p className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              Read-only plan. Only exact historical references are eligible for background linking.
             </p>
           </CardContent>
         </Card>

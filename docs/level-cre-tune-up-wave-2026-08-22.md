@@ -223,3 +223,13 @@ It should remain a slim calling tool rather than becoming a full mobile CRM.
 - Today encourages more calls and emails without creating a second task system.
 - Pursuits automatically reflect activity performed for their listing or campaign.
 - The map becomes more informative as prospecting continues, with little or no manual CRM maintenance.
+
+## Post-wave polish â€” approved August 22
+
+The next polish pass keeps the same hands-off product rule:
+
+1. **Historical pursuit recovery:** plan and apply only exact historical `listing_id + prospect_id` links already present in confirmed activity evidence. Do not use fuzzy name or address matching.
+2. **Standings identity cleanup:** remove zero-activity placeholder accounts and consolidate exact duplicate email identities in the display layer without merging authentication users.
+3. **Pursuit organization:** sort live work first and collapse older empty pursuits into a dormant section without deleting or auto-archiving them.
+4. **Quiet capture health:** reconcile captured outbound email against the canonical production ledger over seven days and show a warning only when a real count gap exists.
+5. **Client-link polish:** make enabled client views easy to preview and let clients filter the activity trail by prospect while preserving the client-safe privacy contract.

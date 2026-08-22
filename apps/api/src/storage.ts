@@ -19,6 +19,7 @@ import { eq, and, or, desc, gte, ne, sql, between, isNull } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { XP_VALUES, actionForInteractionType, inferInteractionTypeFromNote, xpForInteractionType } from "./lib/gamification";
 import { ProspectReferenceError } from "./lib/prospectReferenceService";
+import { buildLeaderboardIdentities } from "./lib/leaderboardIdentity";
 
 type ProspectCreateInput = Omit<
   InsertProspect,
@@ -1535,12 +1536,6 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getLeaderboard({ userId, orgId, since }: { userId: string, orgId?: string, since?: Date }): Promise<any[]> {
-    // Helper function to calculate level from XP (same as stats page)
-    const getLevel = (xp: number): number => {
-      // Match client logic: Level 0 at 0 XP; Level 1 at 100 XP
-      return Math.min(99, Math.floor(Math.sqrt(xp / 100)));
-    };
-
     try {
       // All-time leaderboard: read from broker_skills only
       const results = await db.select({
@@ -1557,26 +1552,7 @@ export class DatabaseStorage implements IStorage {
       .leftJoin(profiles, eq(users.id, profiles.id))
       .where(ne(users.id, 'demo-user')); // Exclude demo user
 
-      // Calculate levels and sort
-      const leaderboard = results.map(row => {
-        const lPros = getLevel(row.prospectingXp || 0);
-        const lFup = getLevel(row.followUpXp || 0);
-        const lCons = getLevel(row.consistencyXp || 0);
-        const lMk = getLevel(row.marketKnowledgeXp || 0);
-        return {
-          user_id: row.userId,
-          user_email: row.userEmail || '',
-          display_name: row.displayName || row.userEmail?.split('@')[0] || 'Unknown',
-          level_total: lPros + lFup + lCons + lMk,
-          xp_total: (row.prospectingXp || 0) + (row.followUpXp || 0),
-        };
-      });
-
-      // Sort by level_total DESC, then by xp_total DESC
-      return leaderboard.sort((a, b) => {
-        if (a.level_total !== b.level_total) return b.level_total - a.level_total;
-        return b.xp_total - a.xp_total;
-      });
+      return buildLeaderboardIdentities(results, userId);
     } catch (error) {
       console.error('Error fetching leaderboard:', error);
       return [];

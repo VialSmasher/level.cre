@@ -53,6 +53,14 @@ import {
   applyBrokerageMemoryMaintenancePlan,
   buildBrokerageMemoryMaintenancePlan,
 } from "../../lib/brokerageMemoryMaintenanceService";
+import {
+  applyPursuitHistoryBackfillPlan,
+  buildPursuitHistoryBackfillPlan,
+  PursuitHistoryBackfillApplySchema,
+  PursuitHistoryBackfillError,
+  PursuitHistoryBackfillPlanQuerySchema,
+} from "../../lib/pursuitHistoryBackfillService";
+import { getCaptureHealth } from "../../lib/captureHealthService";
 
 const intelRequirementSchema = z.object({
   title: z.string().trim().min(1),
@@ -1202,6 +1210,71 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       }
       console.error("Error applying brokerage-memory maintenance:", error);
       res.status(500).json({ message: "Failed to apply brokerage-memory maintenance" });
+    }
+  });
+
+  app.get("/api/automation/capture-health", requireBrokerAuth, async (req, res) => {
+    try {
+      await ensureIntelActor(req);
+      const days = Math.min(Math.max(Math.trunc(Number(req.query.days) || 7), 1), 30);
+      const result = await getCaptureHealth({
+        pool,
+        userId: getUserId(req),
+        days,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error("Error reconciling capture health:", error);
+      res.status(500).json({ message: "Failed to reconcile capture health" });
+    }
+  });
+
+  app.get("/api/pursuits/history-backfill/plan", requireBrokerAuth, async (req, res) => {
+    try {
+      const parsed = PursuitHistoryBackfillPlanQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid pursuit-history backfill query", issues: parsed.error.flatten() });
+      }
+      await ensureIntelActor(req);
+      const result = await buildPursuitHistoryBackfillPlan({
+        pool,
+        userId: getUserId(req),
+        limit: parsed.data.limit,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof PursuitHistoryBackfillError) {
+        return res.status(error.status).json({ message: error.message, code: error.code });
+      }
+      console.error("Error building pursuit-history backfill plan:", error);
+      res.status(500).json({ message: "Failed to build pursuit-history backfill plan" });
+    }
+  });
+
+  app.post("/api/pursuits/history-backfill", requireBrokerAuth, async (req, res) => {
+    try {
+      const parsed = PursuitHistoryBackfillApplySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid pursuit-history backfill request", issues: parsed.error.flatten() });
+      }
+      if (req.headers["x-demo-mode"] === "true") {
+        return res.status(409).json({ message: "Pursuit-history backfill is available only against the durable database." });
+      }
+      await ensureIntelActor(req);
+      const result = await applyPursuitHistoryBackfillPlan({
+        pool,
+        userId: getUserId(req),
+        planHash: parsed.data.planHash,
+        limit: parsed.data.limit,
+        maxLinks: parsed.data.maxLinks,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof PursuitHistoryBackfillError) {
+        return res.status(error.status).json({ message: error.message, code: error.code });
+      }
+      console.error("Error applying pursuit-history backfill plan:", error);
+      res.status(500).json({ message: "Failed to apply pursuit-history backfill plan" });
     }
   });
 

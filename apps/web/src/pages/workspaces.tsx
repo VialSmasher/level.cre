@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -14,8 +14,9 @@ import { prospectLabel } from '@/lib/copy';
 import { useAuth } from '@/contexts/AuthContext';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 import { ShareWorkspaceDialog } from '@/components/ShareWorkspaceDialog';
-import { Activity, ArrowRight, Briefcase, CalendarDays, MoreHorizontal, Plus, Share2, Sparkles, Trash2, Users } from 'lucide-react';
+import { Activity, Archive, ArrowRight, Briefcase, CalendarDays, ChevronDown, ChevronUp, MoreHorizontal, Plus, Share2, Sparkles, Trash2, Users } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { organizePursuits } from '@/lib/pursuitLifecycle';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -277,6 +278,7 @@ export default function WorkspacesIndex() {
   const { user, isDemoMode } = useAuth();
   const [open, setOpen] = useState(false);
   const [shareWorkspaceId, setShareWorkspaceId] = useState<string | null>(null);
+  const [showDormant, setShowDormant] = useState(false);
   const { data: listingsResponse = [], isLoading } = useQuery<ListingRow[]>({ queryKey: ['/api/listings'] });
   const { data: sharedResponse = [], isLoading: isLoadingShared } = useQuery<ListingRow[]>({ queryKey: ['/api/listings', 'shared'], queryFn: async () => {
     const res = await apiRequest('GET', '/api/listings?scope=shared');
@@ -287,6 +289,7 @@ export default function WorkspacesIndex() {
   }});
   const listings = Array.isArray(listingsResponse) ? listingsResponse : [];
   const shared = Array.isArray(sharedResponse) ? sharedResponse : [];
+  const organizedListings = useMemo(() => organizePursuits(listings), [listings]);
   const totalOwnedProspects = listings.reduce((sum, item) => sum + Number(item.prospectCount || 0), 0);
   const totalSharedProspects = shared.reduce((sum, item) => sum + Number(item.prospectCount || 0), 0);
   const openWorkspace = (workspace: ListingRow) => {
@@ -406,8 +409,8 @@ export default function WorkspacesIndex() {
         <div className="border-b border-r border-slate-200 sm:border-b-0">
           <div className="flex items-center justify-between p-4">
             <div>
-              <p className="text-xs font-medium text-slate-500">My pursuits</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-950">{listings.length}</p>
+              <p className="text-xs font-medium text-slate-500">Active pursuits</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-950">{organizedListings.active.length}</p>
             </div>
             <div className="rounded-md bg-blue-50 p-2 text-blue-600">
               <Briefcase className="h-5 w-5" />
@@ -449,16 +452,16 @@ export default function WorkspacesIndex() {
           <section className="space-y-3">
           <div className="flex items-end justify-between">
             <div>
-              <h2 className="text-base font-semibold text-slate-950">My pursuits</h2>
-              <p className="text-sm text-slate-600">Listing farms, target areas, and client searches ready to work.</p>
-            </div>
-            <Badge variant="outline" className="bg-white">{listings.length}</Badge>
+               <h2 className="text-base font-semibold text-slate-950">Active pursuits</h2>
+               <p className="text-sm text-slate-600">Pursuits with prospects, recorded activity, or a recent start.</p>
+             </div>
+             <Badge variant="outline" className="bg-white">{organizedListings.active.length}</Badge>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {listings.length === 0 && (
+          {organizedListings.active.length === 0 && (
             <Card className="col-span-full border-dashed border-slate-300 bg-white">
               <CardHeader>
-                <CardTitle>No pursuits yet</CardTitle>
+                 <CardTitle>No active pursuits yet</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-slate-600">Start with a listing assignment, owner target, territory, or client requirement.</p>
@@ -466,7 +469,7 @@ export default function WorkspacesIndex() {
             </Card>
           )}
 
-          {listings.map((l) => (
+          {organizedListings.active.map((l) => (
             <WorkspaceCard
               key={l.id}
               workspace={l}
@@ -479,8 +482,48 @@ export default function WorkspacesIndex() {
               deleteDisabled={deleteMutation.isPending}
             />
           ))}
-          </div>
-          </section>
+           </div>
+           </section>
+
+          {organizedListings.dormant.length > 0 ? (
+            <section className="space-y-3">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between rounded-md border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-slate-300"
+                onClick={() => setShowDormant((current) => !current)}
+                aria-expanded={showDormant}
+              >
+                <span className="flex items-center gap-2">
+                  <Archive className="h-4 w-4 text-slate-500" />
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-900">Dormant pursuits</span>
+                    <span className="block text-xs text-slate-500">Older empty workspaces, kept available without crowding the active list.</span>
+                  </span>
+                </span>
+                <span className="flex items-center gap-2 text-sm text-slate-600">
+                  {organizedListings.dormant.length}
+                  {showDormant ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </span>
+              </button>
+              {showDormant ? (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {organizedListings.dormant.map((l) => (
+                    <WorkspaceCard
+                      key={l.id}
+                      workspace={l}
+                      kind="owned"
+                      onOpen={() => openWorkspace(l)}
+                      onShare={() => setShareWorkspaceId(l.id)}
+                      onDelete={() => {
+                        if (confirm('Delete this pursuit? This cannot be undone.')) deleteMutation.mutate(l.id);
+                      }}
+                      deleteDisabled={deleteMutation.isPending}
+                    />
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
         {/* Shared Section */}
         <section className="space-y-3">

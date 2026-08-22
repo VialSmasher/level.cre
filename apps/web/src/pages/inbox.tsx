@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
-import { Archive, CheckCircle2, ExternalLink, Inbox as InboxIcon, Mail, RefreshCcw, Search, Settings, ShieldCheck, Sparkles } from 'lucide-react'
+import { AlertTriangle, Archive, CheckCircle2, ExternalLink, Inbox as InboxIcon, Mail, RefreshCcw, Search, Settings, ShieldCheck, Sparkles } from 'lucide-react'
 import { Link } from 'wouter'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -89,6 +89,18 @@ type InboundEmailConfig = {
   webhookSecretRequired?: boolean
   webhookAuthMethods?: string[]
   webhookUrlTemplate?: string
+}
+
+type CaptureHealth = {
+  generatedAt: string
+  status: 'healthy' | 'attention'
+  windowDays: number
+  capturedOutboundEmails: number
+  canonicalOutboundEmails: number
+  unreconciledCount: number
+  lastCapturedAt: string | null
+  lastCanonicalAt: string | null
+  message: string
 }
 
 type EmailOutcome = 'contacted' | 'scheduled_meeting' | 'not_interested' | 'follow_up_later'
@@ -197,6 +209,11 @@ export default function InboxPage() {
     queryKey: ['/api/email/inbound/config'],
   })
 
+  const { data: captureHealth, error: captureHealthError } = useQuery<CaptureHealth>({
+    queryKey: ['/api/automation/capture-health?days=7'],
+    staleTime: 60_000,
+  })
+
   const { data: prospects = [] } = useQuery<Prospect[]>({
     queryKey: ['/api/prospects'],
   })
@@ -271,6 +288,7 @@ export default function InboxPage() {
 
   const refreshInbox = () => {
     invalidate()
+    queryClient.invalidateQueries({ queryKey: ['/api/automation/capture-health?days=7'] })
   }
 
   const prospectOptions = useMemo(() => {
@@ -329,9 +347,12 @@ export default function InboxPage() {
           icon={InboxIcon}
           actions={(
             <>
-            <Badge variant="outline" className="h-8 gap-1.5 bg-white px-3 text-emerald-700">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              Postmark fallback {inboundConfig?.configured ? 'ready' : 'needs setup'}
+            <Badge
+              variant="outline"
+              className={`h-8 gap-1.5 px-3 ${captureHealth?.status === 'attention' || captureHealthError ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-white text-emerald-700'}`}
+            >
+              {captureHealth?.status === 'attention' || captureHealthError ? <AlertTriangle className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+              {captureHealthError ? 'Capture check unavailable' : captureHealth?.status === 'attention' ? 'Capture check needed' : captureHealth ? 'Capture healthy' : 'Checking capture'}
             </Badge>
             <Button variant="outline" size="sm" asChild>
               <Link href="/app/profile">
@@ -342,6 +363,18 @@ export default function InboxPage() {
             </>
           )}
         />
+
+        {captureHealth?.status === 'attention' ? (
+          <div role="status" className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
+            <div>
+              <p className="font-semibold">Automatic capture needs a check</p>
+              <p className="mt-0.5 text-amber-900">
+                {captureHealth.message} Captured {captureHealth.capturedOutboundEmails}; production ledger {captureHealth.canonicalOutboundEmails} over {captureHealth.windowDays} days.
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         <section className="grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white lg:grid-cols-4" aria-label="Activity totals">
           {dashboardCards.map((card, index) => (
