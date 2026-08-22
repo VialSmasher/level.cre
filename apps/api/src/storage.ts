@@ -158,27 +158,21 @@ export class DatabaseStorage implements IStorage {
         activityCount: sql<number>`COALESCE((
           SELECT COUNT(*)::int
           FROM ${contactInteractions} ci
-          WHERE ci.user_id = ${listings.userId}
-            AND (
-              ci.listing_id = ${listings.id}
-              OR EXISTS (
-                SELECT 1 FROM ${listingProspects} lp_activity
-                WHERE lp_activity.listing_id = ${listings.id}
-                  AND lp_activity.prospect_id = ci.prospect_id
-              )
+          WHERE ci.listing_id = ${listings.id}
+            OR EXISTS (
+              SELECT 1 FROM ${listingProspects} lp_activity
+              WHERE lp_activity.listing_id = ${listings.id}
+                AND lp_activity.prospect_id = ci.prospect_id
             )
         ), 0)`,
         lastActivityAt: sql<string | null>`(
           SELECT MAX(ci.date)
           FROM ${contactInteractions} ci
-          WHERE ci.user_id = ${listings.userId}
-            AND (
-              ci.listing_id = ${listings.id}
-              OR EXISTS (
-                SELECT 1 FROM ${listingProspects} lp_activity
-                WHERE lp_activity.listing_id = ${listings.id}
-                  AND lp_activity.prospect_id = ci.prospect_id
-              )
+          WHERE ci.listing_id = ${listings.id}
+            OR EXISTS (
+              SELECT 1 FROM ${listingProspects} lp_activity
+              WHERE lp_activity.listing_id = ${listings.id}
+                AND lp_activity.prospect_id = ci.prospect_id
             )
         )`,
       })
