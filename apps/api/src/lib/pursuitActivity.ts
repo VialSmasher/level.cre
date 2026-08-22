@@ -22,3 +22,14 @@ export function filterPursuitActivity<T extends PursuitActivityLike>(params: {
     return true;
   });
 }
+
+export function summarizePursuitActivity(rows: PursuitActivityLike[]) {
+  const dated = rows
+    .map((row) => row.date instanceof Date ? row.date.toISOString() : String(row.date || ''))
+    .filter(Boolean)
+    .sort((left, right) => right.localeCompare(left));
+  return {
+    activityCount: rows.length,
+    lastActivityAt: dated[0] || null,
+  };
+}

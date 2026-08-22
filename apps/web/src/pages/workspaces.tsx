@@ -14,7 +14,7 @@ import { prospectLabel } from '@/lib/copy';
 import { useAuth } from '@/contexts/AuthContext';
 import { nsKey, readJSON, writeJSON } from '@/lib/storage';
 import { ShareWorkspaceDialog } from '@/components/ShareWorkspaceDialog';
-import { ArrowRight, Briefcase, CalendarDays, MoreHorizontal, Plus, Share2, Sparkles, Trash2, Users } from 'lucide-react';
+import { Activity, ArrowRight, Briefcase, CalendarDays, MoreHorizontal, Plus, Share2, Sparkles, Trash2, Users } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
@@ -37,6 +37,8 @@ type ListingRow = {
   createdAt?: string | Date | null;
   archivedAt?: string | Date | null;
   prospectCount: number;
+  activityCount?: number;
+  lastActivityAt?: string | Date | null;
   ownerName?: string | null;
   ownerEmail?: string | null;
   memberRole?: 'owner' | 'editor' | 'viewer' | null;
@@ -65,6 +67,7 @@ function WorkspaceCard({
   deleteDisabled?: boolean;
 }) {
   const count = workspace.prospectCount ?? 0;
+  const activityCount = workspace.activityCount ?? 0;
   const name = workspace.title || workspace.address || 'Untitled pursuit';
   const ownerLabel = workspace.ownerName || workspace.ownerEmail || 'Team member';
   const memberRole = workspace.memberRole || 'viewer';
@@ -131,7 +134,14 @@ function WorkspaceCard({
       </CardHeader>
       <CardContent className="pointer-events-none relative z-10 p-4 pt-0">
         <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-          <p className="text-sm text-slate-600"><span className="font-semibold text-slate-950">{count}</span> {prospectLabel(count)}</p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-600">
+            <span>{count > 0 ? <><strong className="font-semibold text-slate-950">{count}</strong> {prospectLabel(count)}</> : 'No linked prospects yet'}</span>
+            <span className="inline-flex items-center gap-1">
+              <Activity className="h-3.5 w-3.5" />
+              <strong className="font-semibold text-slate-950">{activityCount}</strong> {activityCount === 1 ? 'activity' : 'activities'}
+            </span>
+            {workspace.lastActivityAt ? <span className="text-xs text-slate-500">Last {formatDate(workspace.lastActivityAt)}</span> : null}
+          </div>
           <div className="inline-flex items-center gap-1 text-sm font-medium text-blue-700">
             Open
             <ArrowRight className="h-4 w-4" />
