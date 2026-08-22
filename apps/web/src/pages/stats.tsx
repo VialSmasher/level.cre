@@ -2,18 +2,8 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import {
-  Activity,
   AlertCircle,
   ArrowRight,
-  CalendarDays,
-  Database,
-  Mail,
-  MapPinned,
-  Medal,
-  Phone,
-  Trophy,
-  Users,
-  Zap,
 } from 'lucide-react';
 
 import { apiRequest } from '@/lib/queryClient';
@@ -53,46 +43,24 @@ type MetricCardProps = {
   label: string;
   value: React.ReactNode;
   detail: string;
-  icon: React.ComponentType<{ className?: string }>;
-  tone: 'blue' | 'emerald' | 'violet' | 'orange';
 };
 
-const METRIC_TONES = {
-  blue: { box: 'bg-blue-50', icon: 'text-blue-600', value: 'text-blue-700' },
-  emerald: { box: 'bg-emerald-50', icon: 'text-emerald-600', value: 'text-emerald-700' },
-  violet: { box: 'bg-violet-50', icon: 'text-violet-600', value: 'text-violet-700' },
-  orange: { box: 'bg-orange-50', icon: 'text-orange-600', value: 'text-orange-700' },
-} as const;
-
-function MetricCard({ label, value, detail, icon: Icon, tone }: MetricCardProps) {
-  const palette = METRIC_TONES[tone];
+function MetricCard({ label, value, detail }: MetricCardProps) {
   return (
     <div className="border-b border-slate-200 p-4 last:border-b-0 sm:[&:nth-child(odd)]:border-r sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0 xl:border-r xl:last:border-r-0">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold text-slate-500">{label}</p>
-          <p className={`mt-1 text-3xl font-semibold leading-none tabular-nums ${palette.value}`}>{value}</p>
-          <p className="mt-2 text-xs text-slate-500">{detail}</p>
-        </div>
-        <div className={`rounded-md p-2 ${palette.box}`} aria-hidden="true">
-          <Icon className={`h-5 w-5 ${palette.icon}`} />
-        </div>
-      </div>
+      <p className="text-xs font-semibold text-slate-500">{label}</p>
+      <p className="mt-1 text-3xl font-semibold leading-none tabular-nums text-slate-950">{value}</p>
+      <p className="mt-2 text-xs text-slate-500">{detail}</p>
     </div>
   );
 }
 
-function ContextMetric({ label, value, detail, icon: Icon }: Omit<MetricCardProps, 'tone'>) {
+function ContextMetric({ label, value, detail }: MetricCardProps) {
   return (
-    <div className="flex items-start gap-3 px-4 py-4">
-      <span className="rounded-md bg-slate-100 p-2 text-slate-600" aria-hidden="true">
-        <Icon className="h-4 w-4" />
-      </span>
-      <div>
-        <p className="text-xs font-medium text-slate-500">{label}</p>
-        <p className="mt-0.5 text-xl font-semibold tabular-nums text-slate-950">{value}</p>
-        <p className="mt-0.5 text-xs leading-5 text-slate-500">{detail}</p>
-      </div>
+    <div className="px-4 py-4">
+      <p className="text-xs font-medium text-slate-500">{label}</p>
+      <p className="mt-0.5 text-xl font-semibold tabular-nums text-slate-950">{value}</p>
+      <p className="mt-0.5 text-xs leading-5 text-slate-500">{detail}</p>
     </div>
   );
 }
@@ -144,6 +112,7 @@ export default function StatsPage() {
   const productionFailed = pulseQuery.isError;
   const metric = (value: number) => isProductionLoading ? '—' : value.toLocaleString();
   const comparison = weekly.thisWeek.total - weekly.lastWeek.total;
+  const benchmarkLabel = weekly.lastWeek.total > 0 ? 'last week' : 'recent baseline';
   const paceMultiple = weekly.target > 0 ? weekly.thisWeek.total / weekly.target : null;
   const automaticShare = pulseQuery.data?.total
     ? Math.round((pulseQuery.data.automated / pulseQuery.data.total) * 100)
@@ -151,10 +120,17 @@ export default function StatsPage() {
   const momentumMessage = weekly.target === 0
     ? 'Every useful call, outbound email, or meeting builds the baseline.'
     : weekly.remaining > 0
-      ? `${weekly.remaining} more outbound action${weekly.remaining === 1 ? '' : 's'} to match the current weekly target.`
+      ? `${weekly.remaining} more outbound action${weekly.remaining === 1 ? '' : 's'} to match the ${benchmarkLabel}.`
       : comparison > 0
         ? `You are ${comparison} outbound action${comparison === 1 ? '' : 's'} ahead of last week.`
         : 'Last week’s production is matched. Keep going if the conversations are there.';
+  const paceLabel = weekly.target === 0
+    ? null
+    : weekly.remaining > 0
+      ? `${weekly.remaining} to match ${benchmarkLabel}`
+      : comparison > 0 && paceMultiple !== null
+        ? `${paceMultiple.toFixed(paceMultiple >= 2 ? 1 : 2)}x ${benchmarkLabel}`
+        : `${benchmarkLabel} matched`;
 
   return (
     <div className="min-h-full bg-slate-50">
@@ -163,29 +139,25 @@ export default function StatsPage() {
           label="Performance"
           title="Scorecard"
           description="Outbound calls, emails, meetings, and map coverage—captured automatically."
-          icon={Trophy}
           actions={(
             <nav aria-label="Scorecard views" className="flex w-fit items-center rounded-md border border-slate-200 bg-white p-0.5">
               <Link
                 href="/broker-stats"
                 aria-current="page"
-                className="inline-flex h-8 items-center gap-2 rounded-sm bg-slate-950 px-3 text-sm font-medium text-white"
+                className="inline-flex h-8 items-center rounded-sm bg-slate-950 px-3 text-sm font-medium text-white"
               >
-                <Trophy className="h-4 w-4" />
                 Overview
               </Link>
               <Link
                 href="/badges"
-                className="inline-flex h-8 items-center gap-2 rounded-sm px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+                className="inline-flex h-8 items-center rounded-sm px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
               >
-                <Medal className="h-4 w-4" />
                 Badges
               </Link>
               <Link
                 href="/app/standings"
-                className="inline-flex h-8 items-center gap-2 rounded-sm px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
+                className="inline-flex h-8 items-center rounded-sm px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
               >
-                <Trophy className="h-4 w-4" />
                 Standings
               </Link>
             </nav>
@@ -204,29 +176,21 @@ export default function StatsPage() {
             label="Outbound this week"
             value={metric(weekly.thisWeek.total)}
             detail={`Across ${weekly.activeDaysThisWeek} active day${weekly.activeDaysThisWeek === 1 ? '' : 's'}`}
-            icon={Activity}
-            tone="blue"
           />
           <MetricCard
             label="Calls"
             value={metric(weekly.thisWeek.call)}
             detail="Confirmed outbound calls"
-            icon={Phone}
-            tone="emerald"
           />
           <MetricCard
             label="Emails sent"
             value={metric(weekly.thisWeek.email)}
             detail="Inbound replies excluded"
-            icon={Mail}
-            tone="violet"
           />
           <MetricCard
             label="Meetings"
             value={metric(weekly.thisWeek.meeting)}
             detail="Meetings, tours, and showings"
-            icon={Users}
-            tone="orange"
           />
         </section>
 
@@ -239,9 +203,9 @@ export default function StatsPage() {
                   <CardTitle className="mt-1 text-lg text-slate-950">Keep creating conversations</CardTitle>
                   <p className="mt-1 text-sm text-slate-600">Last week sets the starting line. This page measures production, not inbox chores.</p>
                 </div>
-                {paceMultiple !== null ? (
+                {paceLabel ? (
                   <Badge variant="outline" className="w-fit border-blue-200 bg-blue-50 text-blue-700">
-                    {paceMultiple.toFixed(paceMultiple >= 2 ? 1 : 2)}× weekly pace
+                    {paceLabel}
                   </Badge>
                 ) : null}
               </div>
@@ -269,15 +233,17 @@ export default function StatsPage() {
               <div className="p-5">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <p className="text-sm font-medium text-slate-900">{momentumMessage}</p>
-                  {weekly.target > 0 ? (
-                    <span className="shrink-0 text-xs tabular-nums text-slate-500">{weekly.thisWeek.total}/{weekly.target} target</span>
+                  {weekly.target > 0 && weekly.remaining > 0 ? (
+                    <span className="shrink-0 text-xs tabular-nums text-slate-500">{weekly.thisWeek.total}/{weekly.target} {benchmarkLabel}</span>
                   ) : null}
                 </div>
-                <Progress
-                  value={weekly.progressPercent}
-                  aria-label="Weekly outbound production progress"
-                  className="mt-3 h-2 bg-slate-100 [&>div]:bg-blue-600"
-                />
+                {weekly.target > 0 && weekly.remaining > 0 ? (
+                  <Progress
+                    value={weekly.progressPercent}
+                    aria-label={`Progress toward ${benchmarkLabel}`}
+                    className="mt-3 h-2 bg-slate-100 [&>div]:bg-blue-600"
+                  />
+                ) : null}
                 <p className="mt-3 text-xs leading-5 text-slate-500">
                   Calls, outbound emails, and meetings count. Inbound email and internal notes do not receive production credit.
                 </p>
@@ -287,15 +253,8 @@ export default function StatsPage() {
 
           <Card className="overflow-hidden border-slate-200 bg-white">
             <CardHeader className="border-b border-slate-100 p-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Map signal</p>
-                  <CardTitle className="mt-1 text-lg text-slate-950">Activity coverage</CardTitle>
-                </div>
-                <span className="rounded-md bg-emerald-50 p-2 text-emerald-600" aria-hidden="true">
-                  <MapPinned className="h-5 w-5" />
-                </span>
-              </div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Map signal</p>
+              <CardTitle className="mt-1 text-lg text-slate-950">Activity coverage</CardTitle>
             </CardHeader>
             <CardContent className="p-5">
               <p className="text-4xl font-bold tabular-nums text-slate-950">
@@ -347,25 +306,21 @@ export default function StatsPage() {
               label="Broker level"
               value={headerQuery.isLoading ? '—' : (headerQuery.data?.totalLevel ?? 0)}
               detail="Milestone layer"
-              icon={Trophy}
             />
             <ContextMetric
               label="28-day outbound"
               value={pulseQuery.isLoading ? '—' : (pulseQuery.data?.total ?? 0)}
               detail={`Across ${pulseQuery.data?.activeDays ?? 0} active days`}
-              icon={CalendarDays}
             />
             <ContextMetric
               label="Production rhythm"
               value={pulseQuery.isLoading ? '—' : `${pulseQuery.data?.streakDays ?? 0}d`}
               detail="Current active-day streak"
-              icon={Zap}
             />
             <ContextMetric
               label="CRM map base"
               value={headerQuery.isLoading ? '—' : (headerQuery.data?.assetsTracked ?? 0)}
               detail={`${automaticShare}% of 28-day production auto-captured`}
-              icon={Database}
             />
           </CardContent>
         </Card>
