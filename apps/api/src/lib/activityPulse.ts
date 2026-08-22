@@ -130,11 +130,15 @@ export function buildActivityPulse(
     const day = byDate.get(key)
     if (!day) continue
     const category = activityCategory(row.type)
-    if (category === 'email' && activityDirection(row) === 'inbound') {
-      day.inboundEmail += 1
-      inboundEmail += 1
+    const direction = activityDirection(row)
+    if (direction === 'inbound') {
+      if (category === 'email') {
+        day.inboundEmail += 1
+        inboundEmail += 1
+      }
       continue
     }
+    if (direction === 'internal' || category === 'other') continue
     day[category] += 1
     day.total += 1
     const provider = String(row.sourceProvider || '').trim().toLowerCase()
