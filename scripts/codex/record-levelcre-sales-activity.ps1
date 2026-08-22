@@ -132,6 +132,48 @@ function Send-MapCandidates {
         -TimeoutSec 30
 }
 
+function Get-FailedBatchItems {
+    param(
+        [object[]] $Items,
+        [object] $Result
+    )
+
+    if ($Items.Count -eq 0) { return @() }
+    if ($null -eq $Result) { return @($Items) }
+    $errorCount = if ($Result.PSObject.Properties.Name -contains "errors") { [int]$Result.errors } else { 0 }
+    if ($errorCount -le 0) { return @() }
+    $rows = @(if ($Result.PSObject.Properties.Name -contains "results") { $Result.results })
+    if ($rows.Count -ne $Items.Count) { return @($Items) }
+
+    $failed = @()
+    for ($index = 0; $index -lt $Items.Count; $index += 1) {
+        $row = $rows[$index]
+        if ($null -eq $row -or ($row.PSObject.Properties.Name -contains "error" -and -not [string]::IsNullOrWhiteSpace([string]$row.error))) {
+            $failed += $Items[$index]
+        }
+    }
+    if ($failed.Count -eq 0 -and $errorCount -gt 0) { return @($Items) }
+    return @($failed)
+}
+
+function Set-OutboxItems {
+    param(
+        [string] $Path,
+        [object[]] $Items
+    )
+
+    if ($Items.Count -eq 0) {
+        if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }
+        return
+    }
+    $directory = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $directory)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+    $lines = @($Items | ForEach-Object { $_ | ConvertTo-Json -Depth 8 -Compress })
+    Set-Content -LiteralPath $Path -Value $lines -Encoding UTF8
+}
+
 $config = $null
 if (Test-Path -LiteralPath $ConfigPath) {
     $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
@@ -230,13 +272,20 @@ if ([string]::IsNullOrWhiteSpace($apiKey)) {
 }
 
 $flushed = 0
+$activityOutboxRemaining = 0
+$activityOutboxWarning = $null
 if (Test-Path -LiteralPath $OutboxPath) {
     try {
         $queued = @(Get-Content -LiteralPath $OutboxPath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
         if ($queued.Count -gt 0) {
-            $null = Send-Activities -Activities $queued -ApiKey $apiKey -BatchRunId "outbox-flush"
-            $flushed = $queued.Count
-            Remove-Item -LiteralPath $OutboxPath -Force
+            $flushResult = Send-Activities -Activities $queued -ApiKey $apiKey -BatchRunId "outbox-flush"
+            $failedQueued = @(Get-FailedBatchItems -Items $queued -Result $flushResult)
+            $flushed = $queued.Count - $failedQueued.Count
+            $activityOutboxRemaining = $failedQueued.Count
+            if ($failedQueued.Count -gt 0) {
+                $activityOutboxWarning = "$($failedQueued.Count) activity outbox item(s) were rejected and retained for retry."
+            }
+            Set-OutboxItems -Path $OutboxPath -Items $failedQueued
         }
     } catch {
         if ($null -ne $activity) { Add-ToOutbox -Activity $activity }
@@ -254,15 +303,21 @@ if ($FlushOnly.IsPresent) {
     $mapFlushed = 0
     $mapResult = $null
     $mapStatus = "empty"
+    $mapOutboxRemaining = 0
     if (Test-Path -LiteralPath $MapOutboxPath) {
         try {
             $queuedMapCandidates = @(Get-Content -LiteralPath $MapOutboxPath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_ | ConvertFrom-Json })
             if ($queuedMapCandidates.Count -gt 0) {
                 $deduplicatedMapCandidates = @($queuedMapCandidates | Group-Object -Property externalActivityId | ForEach-Object { $_.Group[-1] })
                 $mapResult = Send-MapCandidates -Candidates $deduplicatedMapCandidates -ApiKey $apiKey -BatchRunId $(if ([string]::IsNullOrWhiteSpace($RunId)) { "map-outbox-flush" } else { $RunId })
-                $mapFlushed = $deduplicatedMapCandidates.Count
-                $mapStatus = "processed"
-                Remove-Item -LiteralPath $MapOutboxPath -Force
+                $failedMapCandidates = @(Get-FailedBatchItems -Items $deduplicatedMapCandidates -Result $mapResult)
+                $mapFlushed = $deduplicatedMapCandidates.Count - $failedMapCandidates.Count
+                $mapOutboxRemaining = $failedMapCandidates.Count
+                $mapStatus = if ($failedMapCandidates.Count -gt 0) { "queued_local" } else { "processed" }
+                if ($failedMapCandidates.Count -gt 0) {
+                    $mapQueueWarning = "$($failedMapCandidates.Count) map candidate(s) were rejected and retained for retry."
+                }
+                Set-OutboxItems -Path $MapOutboxPath -Items $failedMapCandidates
             }
         } catch {
             $mapStatus = "queued_local"
@@ -270,10 +325,13 @@ if ($FlushOnly.IsPresent) {
         }
     }
     [pscustomobject]@{
-        status = "flushed"
+        status = if ($activityOutboxRemaining -gt 0 -or $mapOutboxRemaining -gt 0) { "queued_local" } else { "flushed" }
         flushed = $flushed
+        activityOutboxRemaining = $activityOutboxRemaining
+        activityMessage = $activityOutboxWarning
         mapStatus = $mapStatus
         mapFlushed = $mapFlushed
+        mapOutboxRemaining = $mapOutboxRemaining
         mapCreated = if ($null -ne $mapResult) { [int]$mapResult.created } else { 0 }
         mapLinkedExisting = if ($null -ne $mapResult) { [int]$mapResult.linkedExisting } else { 0 }
         mapNeedsReview = if ($null -ne $mapResult) { [int]$mapResult.needsReview } else { 0 }
@@ -285,13 +343,40 @@ if ($FlushOnly.IsPresent) {
 
 try {
     $result = Send-Activities -Activities @($activity) -ApiKey $apiKey -BatchRunId $RunId
+    $failedCurrent = @(Get-FailedBatchItems -Items @($activity) -Result $result)
+    if ($failedCurrent.Count -gt 0) {
+        Add-ToOutbox -Activity $activity
+        $rejectionMessage = "Level CRE rejected the activity; it was retained for retry."
+        if ($result.PSObject.Properties.Name -contains "results") {
+            $resultRows = @($result.results)
+            if ($resultRows.Count -gt 0 -and $null -ne $resultRows[0] -and $resultRows[0].PSObject.Properties.Name -contains "error") {
+                $candidateMessage = [string]$resultRows[0].error
+                if (-not [string]::IsNullOrWhiteSpace($candidateMessage)) { $rejectionMessage = $candidateMessage }
+            }
+        }
+        [pscustomobject]@{
+            status = "queued_local"
+            reason = "api_rejected"
+            message = $rejectionMessage
+            errors = [int]$result.errors
+            flushed = $flushed
+            activityOutboxRemaining = $activityOutboxRemaining + 1
+            outbox = $OutboxPath
+            mapCandidateQueued = $null -ne $mapCandidate
+            mapOutbox = $MapOutboxPath
+        } | ConvertTo-Json -Compress
+        exit 0
+    }
     [pscustomobject]@{
         status = "recorded"
         flushed = $flushed
+        activityOutboxRemaining = $activityOutboxRemaining
+        activityMessage = $activityOutboxWarning
         imported = [int]$result.imported
         matched = [int]$result.matched
         needsReview = [int]$result.needsReview
         duplicates = [int]$result.duplicates
+        errors = [int]$result.errors
         mapCandidateQueued = $null -ne $mapCandidate
         mapMessage = $mapQueueWarning
     } | ConvertTo-Json -Compress

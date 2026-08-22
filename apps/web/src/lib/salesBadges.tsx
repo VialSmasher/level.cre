@@ -87,6 +87,20 @@ export function activityKind(actionValue: unknown): SalesActivityKind | null {
   return null;
 }
 
+function isInboundActivity(row: Record<string, any>): boolean {
+  const metadata = row.sourceMetadata && typeof row.sourceMetadata === 'object'
+    ? row.sourceMetadata as Record<string, unknown>
+    : {};
+  const direction = String(
+    row.direction
+    || metadata.direction
+    || metadata.captureDirection
+    || metadata.emailDirection
+    || '',
+  ).trim().toLowerCase();
+  return direction === 'received' || direction === 'inbound';
+}
+
 export function buildSalesBadgeSummary(activities: unknown[], timeZone: string) {
   const dailyBuckets = new Map<string, Record<SalesActivityKind, number>>();
   const bestDayCounts: Record<SalesActivityKind, number> = { call: 0, email: 0, meeting: 0, note: 0, touch: 0 };
@@ -94,7 +108,8 @@ export function buildSalesBadgeSummary(activities: unknown[], timeZone: string) 
 
   for (const activity of activities || []) {
     const row = activity as any;
-    const kind = activityKind(row.action);
+    if (isInboundActivity(row)) continue;
+    const kind = activityKind(row.action || row.type);
     if (!kind) continue;
     const activityDate = new Date(row.timestamp || row.date || row.createdAt || Date.now());
     trackedCounts[kind] += 1;
@@ -106,7 +121,7 @@ export function buildSalesBadgeSummary(activities: unknown[], timeZone: string) 
     dailyBuckets.set(dayKey, dayCounts);
   }
 
-  for (const dayCounts of dailyBuckets.values()) {
+  for (const dayCounts of Array.from(dailyBuckets.values())) {
     bestDayCounts.call = Math.max(bestDayCounts.call, dayCounts.call);
     bestDayCounts.email = Math.max(bestDayCounts.email, dayCounts.email);
     bestDayCounts.meeting = Math.max(bestDayCounts.meeting, dayCounts.meeting);

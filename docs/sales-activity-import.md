@@ -12,9 +12,10 @@ This is the Level CRE bridge for Codex-led sales work. It is intentionally conse
 4. Do not create fake prospects or map pins from email-only contacts.
 5. Unmatched sent or received activity stays in `needs_review`.
 6. `hold`, `low_priority`, and `skipped` rows stay in the ledger as `ignored`.
-7. Idempotency is by `(user_id, source, external_activity_id)`.
-8. Existing interactions are detected by `source_provider = 'codex'` and `source_message_id = external_activity_id`.
-9. A confirmed operating address may travel with the activity as metadata, but map creation is handled by the separate verified sales-prospect map batch.
+7. Exact idempotency is by `(user_id, source, external_activity_id)`. The import service also reconciles connector and Outlook desktop identities when direction, status, normalized email, normalized subject, and a 15-minute timestamp window all agree.
+8. Prefer the RFC `internetMessageId` as `external_activity_id`. Outlook desktop scans should read MAPI `PR_INTERNET_MESSAGE_ID`; use the provider's stable message ID only when the RFC ID is unavailable.
+9. Existing interactions are detected by `source_provider = 'codex'` and the canonical `source_message_id` selected during reconciliation.
+10. A confirmed operating address may travel with the activity as metadata, but map creation is handled by the separate verified sales-prospect map batch.
 
 ## Endpoints
 
@@ -88,7 +89,7 @@ The batch performs inexpensive duplicate checks first: the activity's existing p
 - places ambiguous or conflicting candidates in Daily Desk Review;
 - links the confirmed email interaction and canonical activity event to the resulting prospect.
 
-The Codex recorder keeps verified candidates in a separate durable local outbox and submits them only on `-FlushOnly`, allowing drafting and sending to continue without waiting for map work between prospects.
+The Codex recorder keeps verified candidates in a separate durable local outbox and submits them only on `-FlushOnly`, allowing drafting and sending to continue without waiting for map work between prospects. Batch flushes remove only rows the API accepted; rejected or failed rows remain queued for a later retry.
 
 ### `GET /api/agent/sales-activity/imports`
 
@@ -139,6 +140,8 @@ The page keeps `/app` as the map and links matched prospects back to `/app?prosp
 
 ## Follow-Up Work
 
-The `outlook-sales-followup` Codex skill records confirmed sends and scheduled Outlook reconciliation records eligible received messages through this endpoint. It keeps a local JSONL outbox when credentials or the API are unavailable and flushes that outbox on a later successful run. Postmark remains a fallback capture path. New mapped prospects should still be created only when a real address/property is known.
+The `outlook-sales-followup` Codex skill records confirmed sends and scheduled Outlook reconciliation records eligible received messages through this endpoint. A scheduled run uses one mailbox access path for its whole scan: the connector when it covers the requested window, otherwise Outlook desktop. It does not merge both paths in one run. The profile-page Outlook action is a manual historical backfill, not part of ordinary inbox refresh.
+
+The recorder keeps a local JSONL outbox when credentials or the API are unavailable and flushes that outbox on a later successful run. A partial flush retains only the failed rows. Postmark remains a fallback capture path for messages sent outside Codex or when explicitly requested; it is not the primary proof of a Codex-assisted send. New mapped prospects should still be created only when a real address/property is known.
 
 The repository copy of the recorder is `scripts/codex/record-levelcre-sales-activity.ps1`, so the workflow travels with the project across Patrick's Codex computers.

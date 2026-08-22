@@ -320,6 +320,62 @@ test('a matched Outlook email never overwrites an existing prospect follow-up', 
   assert.equal(harness.state.followUpWrites, 0);
 });
 
+test('connector and desktop identities update one unmatched import instead of creating two review rows', async () => {
+  const canonical = {
+    id: 'import-canonical',
+    interaction_id: null,
+    match_status: 'needs_review',
+    prospect_id: null,
+  };
+  let insertedIdentity: { source: unknown; externalActivityId: unknown } | null = null;
+  const pool = transactionalPool(async (sql: string, params: unknown[] = []) => {
+    if (sql.includes('FROM public.prospects') && sql.includes('SELECT')) return { rows: [] };
+    if (sql.includes('SELECT id, interaction_id') && sql.includes('sales_activity_imports')) {
+      return params[1] === 'outlook_sync' && params[2] === 'desktop-entry-id'
+        ? { rows: [{ id: canonical.id, interaction_id: null }] }
+        : { rows: [] };
+    }
+    if (sql.includes('INSERT INTO public.sales_activity_imports')) {
+      insertedIdentity = { source: params[2], externalActivityId: params[4] };
+      return { rows: [{ ...canonical }] };
+    }
+    return { rows: [], rowCount: 0 };
+  });
+
+  const result = await importSalesActivityBatch({
+    pool,
+    storage: { createContactInteraction: async () => ({ id: 'unused' }) },
+    userId: 'user-1',
+    payload: SalesActivityBatchSchema.parse({
+      source: 'outlook_sync',
+      createInteractions: false,
+      activities: [{
+        externalActivityId: 'connector-message-id',
+        status: 'sent',
+        activityType: 'email',
+        email: 'buyer@example.com',
+        subject: 'Border Business Park',
+        activityAt: '2026-08-20T15:00:00.000Z',
+      }],
+    }),
+    findDuplicateSalesActivityImport: async () => ({
+      source: 'outlook_sync',
+      externalActivityId: 'desktop-entry-id',
+      interactionId: null,
+      prospectId: null,
+      matchStatus: 'needs_review',
+    }),
+  });
+
+  assert.deepEqual(insertedIdentity, {
+    source: 'outlook_sync',
+    externalActivityId: 'desktop-entry-id',
+  });
+  assert.equal(result.duplicates, 1);
+  assert.equal(result.needsReview, 1);
+  assert.equal(result.results[0].importId, canonical.id);
+});
+
 test('an exact-email received Outlook activity logs one inbound interaction without XP or outbound follow-up', async () => {
   const queries: string[] = [];
   const pool = transactionalPool(async (sql: string, params: unknown[] = []) => {

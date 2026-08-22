@@ -171,7 +171,13 @@ function Router() {
         return null; 
       }} />
 
-      <Route path="/leaderboard">
+      <Route path="/leaderboard" component={() => {
+        const [, setLocation] = useLocation();
+        setLocation('/app/standings');
+        return null;
+      }} />
+
+      <Route path="/app/standings">
         <ProtectedRoute>
           <OnboardingCheck>
             <AppLayout>

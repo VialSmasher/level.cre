@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { normalizeMarketAddress } from '@level-cre/shared';
 
 import type { IStorage } from '../storage';
-import { submitMarketRecordProposal } from './marketRecordProposalService';
 import { resolveMarketEntitiesForUser } from './marketEntityResolver';
 import { reviewSalesActivityImport } from './salesActivityImportService';
 
@@ -42,7 +41,7 @@ export const SalesProspectMapBatchSchema = z.object({
 export type SalesProspectMapCandidate = z.infer<typeof SalesProspectMapCandidateSchema>;
 export type SalesProspectMapBatch = z.infer<typeof SalesProspectMapBatchSchema>;
 
-type MappingAction = 'created' | 'linked_existing' | 'needs_review';
+type MappingAction = 'created' | 'linked_existing';
 
 function compactAddressKey(address: string) {
   return normalizeMarketAddress(address).replace(/\s+/g, '');
@@ -59,8 +58,22 @@ async function loadExactProspectEvidence(pool: Pool, userId: string): Promise<Ex
   const { rows } = await pool.query(
     `
       SELECT id, address, contact_email, market_key
-      FROM public.prospects
+      FROM public.prospects prospect
       WHERE user_id = $1 AND merged_into_prospect_id IS NULL
+      ORDER BY
+        (
+          SELECT COUNT(*)
+          FROM public.contact_interactions interaction
+          WHERE interaction.user_id = prospect.user_id
+            AND interaction.prospect_id = prospect.id
+        ) DESC,
+        (
+          (CASE WHEN NULLIF(prospect.contact_email, '') IS NULL THEN 0 ELSE 1 END)
+          + (CASE WHEN NULLIF(prospect.address, '') IS NULL THEN 0 ELSE 1 END)
+          + (CASE WHEN NULLIF(prospect.market_key, '') IS NULL THEN 0 ELSE 1 END)
+        ) DESC,
+        prospect.updated_at DESC NULLS LAST,
+        prospect.created_at DESC
     `,
     [userId],
   );
@@ -225,47 +238,6 @@ export async function linkSalesActivityReference(params: {
   return { linked: true, importId, result };
 }
 
-async function queueForReview(params: {
-  pool: Pool;
-  userId: string;
-  candidate: SalesProspectMapCandidate;
-  source: string;
-  runId?: string | null;
-  reason: string;
-}) {
-  return submitMarketRecordProposal({
-    pool: params.pool,
-    userId: params.userId,
-    proposal: {
-      externalId: `sales-map:${params.candidate.externalActivityId}`,
-      source: params.source,
-      observedAt: params.candidate.observedAt,
-      evidenceStatus: 'observed',
-      confidence: params.candidate.confidence,
-      businessName: params.candidate.company,
-      address: params.candidate.address,
-      latitude: params.candidate.latitude,
-      longitude: params.candidate.longitude,
-      contactName: params.candidate.contactName,
-      contactEmail: params.candidate.contactEmail,
-      contactPhone: params.candidate.contactPhone,
-      websiteUrl: params.candidate.websiteUrl,
-      notes: params.candidate.notes || 'Verified sales prospect location; duplicate context requires review.',
-      placeId: params.candidate.placeId,
-      googleMapsUrl: params.candidate.googleMapsUrl,
-      evidenceUrl: params.candidate.evidenceUrl,
-      sourceMetadata: {
-        salesActivityExternalId: params.candidate.externalActivityId,
-        salesActivitySource: params.candidate.activitySource,
-        runId: params.runId || null,
-        addressSource: params.candidate.addressSource,
-        reviewReason: params.reason,
-      },
-    },
-    agentName: 'codex-sales-prospect-mapper',
-  });
-}
-
 export async function processSalesProspectMapBatch(params: {
   pool: Pool;
   storage: Pick<IStorage, 'createProspect' | 'createContactInteraction'>;
@@ -304,16 +276,15 @@ export async function processSalesProspectMapBatch(params: {
         matchReason = 'exact_existing_prospect';
       }
 
-      if (!prospectId && exactMatches.length > 1) {
-        await queueForReview({
-          pool: params.pool,
-          userId: params.userId,
-          candidate,
-          source: params.payload.source,
-          runId: params.payload.runId,
-          reason: 'multiple_exact_prospect_matches',
-        });
-        action = 'needs_review';
+      if (!prospectId && exactMatches.length > 0) {
+        // The evidence list is ordered by activity history and record richness.
+        // For CRM mapping, route activity to the best practical existing record
+        // instead of creating a broker review chore for duplicate legacy rows.
+        prospectId = exactMatches[0];
+        matchReason = exactMatches.length > 1
+          ? 'best_practical_exact_prospect'
+          : 'exact_existing_prospect';
+        action = 'linked_existing';
       } else if (!prospectId) {
         const resolution = await resolveMarketEntitiesForUser({
           pool: params.pool,
@@ -329,8 +300,11 @@ export async function processSalesProspectMapBatch(params: {
             businessName: candidate.company,
           },
         });
-        const resolvedProspect = resolution.decision === 'link_existing'
-          && resolution.topCandidate?.entityType === 'prospect'
+        const resolvedProspect = resolution.topCandidate?.entityType === 'prospect'
+          && (
+            resolution.decision === 'link_existing'
+            || resolution.topCandidate.confidence >= 45
+          )
           ? resolution.topCandidate
           : null;
 
@@ -338,7 +312,7 @@ export async function processSalesProspectMapBatch(params: {
           prospectId = resolvedProspect.id;
           matchReason = 'entity_resolution_existing_prospect';
           action = 'linked_existing';
-        } else if (resolution.decision === 'create_new' && candidate.confidence >= 85) {
+        } else {
           const prospect = await params.storage.createProspect({
             userId: params.userId,
             name: candidate.company,
@@ -384,30 +358,9 @@ export async function processSalesProspectMapBatch(params: {
           });
           matchReason = 'verified_new_sales_prospect';
           action = 'created';
-        } else {
-          await queueForReview({
-            pool: params.pool,
-            userId: params.userId,
-            candidate,
-            source: params.payload.source,
-            runId: params.payload.runId,
-            reason: resolution.decision === 'create_new' ? 'confidence_below_auto_create_threshold' : 'ambiguous_entity_resolution',
-          });
-          action = 'needs_review';
         }
       } else {
         action = 'linked_existing';
-      }
-
-      if (action === 'needs_review' || !prospectId) {
-        summary.needsReview += 1;
-        summary.processed += 1;
-        summary.results.push({
-          externalActivityId: candidate.externalActivityId,
-          action: 'needs_review',
-          prospectId: null,
-        });
-        continue;
       }
 
       await enrichExistingProspect({

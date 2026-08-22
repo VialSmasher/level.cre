@@ -3,10 +3,27 @@ import assert from 'node:assert/strict';
 
 import {
   buildDailyActivityPace,
+  buildWeeklyActivityMomentum,
   buildDailyDeskQueues,
   describeSalesActivityDirection,
   type DailyDeskAction,
 } from './dailyDeskQueues';
+
+test('weekly momentum compares the current calendar week with the prior week', () => {
+  const momentum = buildWeeklyActivityMomentum([
+    { date: '2026-08-10', email: 3, call: 2, meeting: 0, other: 0, total: 5 },
+    { date: '2026-08-11', email: 2, call: 1, meeting: 0, other: 0, total: 3 },
+    { date: '2026-08-17', email: 2, call: 0, meeting: 0, other: 0, total: 2 },
+    { date: '2026-08-21', email: 4, call: 1, meeting: 1, other: 0, total: 6 },
+    { date: '2026-08-22', email: 1, call: 0, meeting: 0, other: 0, total: 1 },
+  ]);
+
+  assert.deepEqual(momentum.lastWeek, { email: 5, call: 3, meeting: 0, other: 0, total: 8 });
+  assert.deepEqual(momentum.thisWeek, { email: 7, call: 1, meeting: 1, other: 0, total: 9 });
+  assert.equal(momentum.target, 8);
+  assert.equal(momentum.remaining, 0);
+  assert.equal(momentum.progressPercent, 100);
+});
 
 function action(id: string, type: string, priorityScore: number, stage?: string): DailyDeskAction {
   return {

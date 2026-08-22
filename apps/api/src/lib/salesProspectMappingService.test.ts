@@ -126,3 +126,47 @@ test('an exact normalized civic address reuses the existing prospect across the 
   assert.equal(result.linkedExisting, 1);
   assert.equal(result.results[0].prospectId, 'prospect-existing-1');
 });
+
+test('multiple legacy duplicates route activity to the richest existing prospect without review', async () => {
+  const pool = {
+    query: async (sql: string) => {
+      if (sql.includes('FROM public.prospects') && sql.includes('SELECT id, address, contact_email, market_key')) {
+        return { rows: [
+          {
+            id: 'prospect-canonical',
+            address: verifiedCandidate.address,
+            contact_email: verifiedCandidate.contactEmail,
+            market_key: null,
+          },
+          {
+            id: 'prospect-legacy-duplicate',
+            address: verifiedCandidate.address,
+            contact_email: null,
+            market_key: null,
+          },
+        ] };
+      }
+      if (sql.includes('FROM public.sales_activity_imports')) return { rows: [] };
+      return { rows: [], rowCount: 0 };
+    },
+  } as any;
+  let created = false;
+  const result = await processSalesProspectMapBatch({
+    pool,
+    storage: {
+      createProspect: async () => {
+        created = true;
+        return { id: 'unexpected' };
+      },
+      createContactInteraction: async () => ({ id: 'unused' }),
+    } as any,
+    userId: 'user-1',
+    payload: SalesProspectMapBatchSchema.parse({ candidates: [verifiedCandidate] }),
+  });
+
+  assert.equal(created, false);
+  assert.equal(result.linkedExisting, 1);
+  assert.equal(result.needsReview, 0);
+  assert.equal(result.results[0].prospectId, 'prospect-canonical');
+  assert.equal(result.results[0].matchReason, 'best_practical_exact_prospect');
+});

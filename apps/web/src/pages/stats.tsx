@@ -187,13 +187,46 @@ export default function StatsPage() {
     staleTime: 30000,
   });
 
-  const { data: recentActivities = [] } = useQuery<SkillActivityRow[]>({
+  const { data: legacyActivities = [] } = useQuery<SkillActivityRow[]>({
     queryKey: ['/api/skill-activities', 'weekly'],
     queryFn: async () => {
       const res = await apiRequest('GET', '/api/skill-activities?limit=1000');
       return res.json();
     }
   });
+
+  const { data: productionActivities = [] } = useQuery<any[]>({
+    queryKey: ['/api/automation/production-activities', 'weekly'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/automation/production-activities?limit=5000');
+      const payload = await res.json();
+      return payload.rows || [];
+    },
+  });
+
+  const recentActivities = React.useMemo(() => {
+    const nonProductionLegacy = (legacyActivities || []).filter((activity) => (
+      activity.skillType !== 'followUp'
+      || !FOLLOW_UP_COUNT_ACTIONS.has(String(activity.action || '').toLowerCase())
+    ));
+    const canonicalProduction = (productionActivities || []).map((activity: any) => {
+      const action = String(activity.action || '').toLowerCase();
+      const xpGained = action === 'phone_call'
+        ? 15
+        : action === 'email_sent'
+          ? 10
+          : action === 'meeting_held'
+            ? 25
+            : 5;
+      return {
+        ...activity,
+        skillType: 'followUp',
+        xpGained,
+        relatedId: activity.interactionId || activity.id,
+      };
+    });
+    return [...nonProductionLegacy, ...canonicalProduction];
+  }, [legacyActivities, productionActivities]);
 
   const { data: requirements = [] } = useQuery<Requirement[]>({
     queryKey: ['/api/requirements'],
@@ -316,7 +349,7 @@ export default function StatsPage() {
                 Badges
               </Link>
               <Link
-                href="/leaderboard"
+                href="/app/standings"
                 className="inline-flex h-8 items-center gap-2 rounded-sm px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
               >
                 <Trophy className="h-4 w-4" />
