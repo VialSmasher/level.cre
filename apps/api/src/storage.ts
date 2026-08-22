@@ -67,7 +67,7 @@ type ProspectUpdateInput = Omit<
 // Updated interface with user-specific CRUD methods
 export interface IStorage {
   // Listings (workspace)
-  getListings(userId: string): Promise<(Listing & { prospectCount: number })[]>;
+  getListings(userId: string): Promise<(Listing & { prospectCount: number; activityCount: number; lastActivityAt: string | null })[]>;
   getListing(id: string, userId: string): Promise<Listing | undefined>;
   createListing(listing: InsertListing & { userId: string }): Promise<Listing>;
   archiveListing(id: string, userId: string): Promise<boolean>;
@@ -141,7 +141,7 @@ export interface IStorage {
 
 export class DatabaseStorage implements IStorage {
   // Listings (workspace)
-  async getListings(userId: string): Promise<(Listing & { prospectCount: number })[]> {
+  async getListings(userId: string): Promise<(Listing & { prospectCount: number; activityCount: number; lastActivityAt: string | null })[]> {
     // Fetch listings and counts of linked prospects
     const rows = await db
       .select({
@@ -155,6 +155,32 @@ export class DatabaseStorage implements IStorage {
         createdAt: listings.createdAt,
         archivedAt: listings.archivedAt,
         prospectCount: sql<number>`COALESCE((SELECT COUNT(*)::int FROM ${listingProspects} lp WHERE lp.listing_id = ${listings.id}), 0)`,
+        activityCount: sql<number>`COALESCE((
+          SELECT COUNT(*)::int
+          FROM ${contactInteractions} ci
+          WHERE ci.user_id = ${listings.userId}
+            AND (
+              ci.listing_id = ${listings.id}
+              OR EXISTS (
+                SELECT 1 FROM ${listingProspects} lp_activity
+                WHERE lp_activity.listing_id = ${listings.id}
+                  AND lp_activity.prospect_id = ci.prospect_id
+              )
+            )
+        ), 0)`,
+        lastActivityAt: sql<string | null>`(
+          SELECT MAX(ci.date)
+          FROM ${contactInteractions} ci
+          WHERE ci.user_id = ${listings.userId}
+            AND (
+              ci.listing_id = ${listings.id}
+              OR EXISTS (
+                SELECT 1 FROM ${listingProspects} lp_activity
+                WHERE lp_activity.listing_id = ${listings.id}
+                  AND lp_activity.prospect_id = ci.prospect_id
+              )
+            )
+        )`,
       })
       .from(listings)
       .where(and(eq(listings.userId, userId), eq(sql`COALESCE(${listings.archivedAt} IS NULL, TRUE)`, true))) as any;
@@ -170,6 +196,8 @@ export class DatabaseStorage implements IStorage {
       createdAt: r.createdAt,
       archivedAt: r.archivedAt,
       prospectCount: r.prospectCount ?? 0,
+      activityCount: r.activityCount ?? 0,
+      lastActivityAt: r.lastActivityAt ?? null,
     }));
   }
 

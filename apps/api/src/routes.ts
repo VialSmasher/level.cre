@@ -86,7 +86,7 @@ import {
 import { buildPipelineHealth } from './lib/pipelineHealth';
 import { buildActivityPulse } from './lib/activityPulse';
 import { listProductionActivities } from './lib/productionActivityService';
-import { filterPursuitActivity } from './lib/pursuitActivity';
+import { filterPursuitActivity, summarizePursuitActivity } from './lib/pursuitActivity';
 import { buildAutomationReconciliation } from './lib/automationReconciliation';
 import { rankEmailCleanup, rankFollowUpReminder } from './lib/salesBriefRanking';
 import { findSupabaseAuthUserByEmail } from './lib/supabaseAuthUsers';
@@ -1476,16 +1476,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const listingIds = listingRows.map((row: any) => row.id);
     const countByListingId = new Map<string, number>();
+    let linkedRows: any[] = [];
     if (listingIds.length > 0) {
-      const { data: linkedRows, error: linkedError } = await admin
+      const { data, error: linkedError } = await admin
         .from('listing_prospects')
-        .select('listing_id')
+        .select('listing_id,prospect_id')
         .in('listing_id', listingIds);
       if (linkedError) throw linkedError;
-      for (const row of linkedRows || []) {
+      linkedRows = data || [];
+      for (const row of linkedRows) {
         countByListingId.set(row.listing_id, (countByListingId.get(row.listing_id) || 0) + 1);
       }
     }
+
+    const prospectIdsByListingId = new Map<string, Set<string>>();
+    for (const row of linkedRows) {
+      const ids = prospectIdsByListingId.get(row.listing_id) || new Set<string>();
+      if (row.prospect_id) ids.add(row.prospect_id);
+      prospectIdsByListingId.set(row.listing_id, ids);
+    }
+    const linkedProspectIds = Array.from(new Set(linkedRows.map((row: any) => row.prospect_id).filter(Boolean)));
+    const [directInteractionResult, linkedInteractionResult] = await Promise.all([
+      listingIds.length > 0
+        ? admin
+            .from('contact_interactions')
+            .select('id,listing_id,prospect_id,date')
+            .in('listing_id', listingIds)
+        : Promise.resolve({ data: [], error: null }),
+      linkedProspectIds.length > 0
+        ? admin
+            .from('contact_interactions')
+            .select('id,listing_id,prospect_id,date')
+            .in('prospect_id', linkedProspectIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (directInteractionResult.error) throw directInteractionResult.error;
+    if (linkedInteractionResult.error) throw linkedInteractionResult.error;
+    const interactionById = new Map<string, any>();
+    for (const interaction of [...(directInteractionResult.data || []), ...(linkedInteractionResult.data || [])]) {
+      interactionById.set(interaction.id, interaction);
+    }
+    const interactions = Array.from(interactionById.values());
 
     const ownerIds = Array.from(new Set(listingRows.map((row: any) => row.user_id).filter(Boolean)));
     const ownerProfileById = new Map<string, any>();
@@ -1506,6 +1537,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return {
         ...mapListingRow(row),
         prospectCount: countByListingId.get(row.id) || 0,
+        ...summarizePursuitActivity(interactions.filter((interaction) => (
+          interaction.listing_id === row.id
+          || Boolean(interaction.prospect_id && prospectIdsByListingId.get(row.id)?.has(interaction.prospect_id))
+        )).map((interaction) => ({ date: interaction.date }))),
         ownerName,
         ownerEmail: ownerProfile?.email || null,
         memberRole: scope === 'shared' ? membershipRoleByListingId.get(row.id) || 'viewer' : 'owner',
@@ -2617,6 +2652,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
               ownerLastName: users.lastName,
               memberRole: listingMembers.role,
               prospectCount: sql<number>`COALESCE((SELECT COUNT(*)::int FROM ${listingProspects} lp WHERE lp.listing_id = ${listings.id}), 0)`,
+              activityCount: sql<number>`COALESCE((
+                SELECT COUNT(*)::int
+                FROM ${contactInteractions} ci
+                WHERE ci.user_id = ${listings.userId}
+                  AND (
+                    ci.listing_id = ${listings.id}
+                    OR EXISTS (
+                      SELECT 1 FROM ${listingProspects} lp_activity
+                      WHERE lp_activity.listing_id = ${listings.id}
+                        AND lp_activity.prospect_id = ci.prospect_id
+                    )
+                  )
+              ), 0)`,
+              lastActivityAt: sql<string | null>`(
+                SELECT MAX(ci.date)
+                FROM ${contactInteractions} ci
+                WHERE ci.user_id = ${listings.userId}
+                  AND (
+                    ci.listing_id = ${listings.id}
+                    OR EXISTS (
+                      SELECT 1 FROM ${listingProspects} lp_activity
+                      WHERE lp_activity.listing_id = ${listings.id}
+                        AND lp_activity.prospect_id = ci.prospect_id
+                    )
+                  )
+              )`,
             })
             .from(listings)
             .innerJoin(listingMembers, and(eq(listingMembers.listingId, listings.id), eq(listingMembers.userId, userId)))
@@ -2640,7 +2701,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Enrich with prospect counts
         const links = await Promise.all(active.map(async (l: any) => {
           const linked = await demo.getListingLinks(userId, l.id);
-          return { ...l, prospectCount: linked.length };
+          return { ...l, prospectCount: linked.length, activityCount: 0, lastActivityAt: null };
         }));
         return res.json(links);
       }
