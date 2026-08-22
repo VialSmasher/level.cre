@@ -191,7 +191,7 @@ async function enrichExistingProspect(params: {
 
 export async function linkSalesActivityReference(params: {
   pool: Pool;
-  storage: Pick<IStorage, 'createContactInteraction'>;
+  storage: Pick<IStorage, 'createContactInteraction' | 'linkProspectToListingAny'>;
   userId: string;
   externalActivityId: string;
   activitySource?: string | null;
@@ -240,7 +240,7 @@ export async function linkSalesActivityReference(params: {
 
 export async function processSalesProspectMapBatch(params: {
   pool: Pool;
-  storage: Pick<IStorage, 'createProspect' | 'createContactInteraction'>;
+  storage: Pick<IStorage, 'createProspect' | 'createContactInteraction' | 'linkProspectToListingAny'>;
   userId: string;
   payload: SalesProspectMapBatch;
 }) {
