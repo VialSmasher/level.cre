@@ -835,6 +835,7 @@ export async function decideBrokerageMemoryItem(params: {
   userId: string
   itemId: string
   decision: z.infer<typeof BrokerageMemoryDecisionSchema>
+  decisionContext?: Record<string, unknown>
 }) {
   await assertBrokerageMemorySchema(params.pool)
   let preflightProspectId: string | null = null
@@ -984,6 +985,7 @@ export async function decideBrokerageMemoryItem(params: {
       approvedAt: new Date().toISOString(),
       fieldDecisions: params.decision.fieldDecisions,
       coordinateDecision: params.decision.coordinateDecision,
+      ...(params.decisionContext ? { decisionContext: params.decisionContext } : {}),
     }
     const canonicalPayload = buildApprovedBrokerageMemoryPayload(
       beforeDossier?.memory_payload,
