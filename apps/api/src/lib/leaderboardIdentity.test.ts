@@ -14,10 +14,10 @@ test('removes zero-activity placeholder accounts but keeps a new current user vi
   assert.equal(board[1].display_name, 'New Broker')
 })
 
-test('consolidates exact duplicate email identities without merging auth users', () => {
+test('consolidates Patrick\'s known work and sign-in email identities without merging auth users', () => {
   const board = buildLeaderboardIdentities([
-    { userId: 'legacy', userEmail: 'patrick@example.com', displayName: 'Pat Livingston', prospectingXp: 50 },
-    { userId: 'current', userEmail: 'PATRICK@example.com', displayName: 'Pat L', prospectingXp: 100, followUpXp: 25 },
+    { userId: 'legacy', userEmail: 'patrick.livingston@cwedm.com', displayName: 'Pat Livingston', prospectingXp: 50 },
+    { userId: 'current', userEmail: 'livingstonpatrick1@gmail.com', displayName: 'Pat L', prospectingXp: 100, followUpXp: 25 },
   ], 'current')
 
   assert.equal(board.length, 1)

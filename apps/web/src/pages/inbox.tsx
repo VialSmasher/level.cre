@@ -93,7 +93,7 @@ type InboundEmailConfig = {
 
 type CaptureHealth = {
   generatedAt: string
-  status: 'healthy' | 'attention'
+  status: 'healthy' | 'attention' | 'idle'
   windowDays: number
   capturedOutboundEmails: number
   canonicalOutboundEmails: number
@@ -352,7 +352,7 @@ export default function InboxPage() {
               className={`h-8 gap-1.5 px-3 ${captureHealth?.status === 'attention' || captureHealthError ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-white text-emerald-700'}`}
             >
               {captureHealth?.status === 'attention' || captureHealthError ? <AlertTriangle className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5" />}
-              {captureHealthError ? 'Capture check unavailable' : captureHealth?.status === 'attention' ? 'Capture check needed' : captureHealth ? 'Capture healthy' : 'Checking capture'}
+              {captureHealthError ? 'Capture check unavailable' : captureHealth?.status === 'attention' ? 'Capture check needed' : captureHealth?.status === 'healthy' ? 'Capture healthy' : captureHealth?.status === 'idle' ? 'Capture ready' : 'Checking capture'}
             </Badge>
             <Button variant="outline" size="sm" asChild>
               <Link href="/app/profile">
