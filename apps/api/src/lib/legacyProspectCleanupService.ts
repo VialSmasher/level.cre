@@ -37,6 +37,27 @@ export type LegacyDuplicatePairAssessment = {
   blockers: string[]
 }
 
+export function resolveRecommendedMergeDirection(
+  pair: Pick<LegacyDuplicatePairAssessment, 'canonicalProspectId' | 'duplicateProspectId'>,
+  recommendedProspectId: string,
+) {
+  if (recommendedProspectId === pair.canonicalProspectId) {
+    return {
+      canonicalProspectId: pair.canonicalProspectId,
+      duplicateProspectId: pair.duplicateProspectId,
+      swapped: false,
+    }
+  }
+  if (recommendedProspectId === pair.duplicateProspectId) {
+    return {
+      canonicalProspectId: pair.duplicateProspectId,
+      duplicateProspectId: pair.canonicalProspectId,
+      swapped: true,
+    }
+  }
+  return null
+}
+
 function normalizedJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalizedJson)
   if (value && typeof value === 'object') {
@@ -291,13 +312,38 @@ export async function applyLegacyProspectCleanupPlan(params: {
   const results: Array<Record<string, unknown>> = []
   for (const pair of pairs) {
     try {
-      const preview = await previewProspectMerge({
+      let preview = await previewProspectMerge({
         pool: params.pool,
         userId: params.userId,
         canonicalProspectId: pair.canonicalProspectId,
         duplicateProspectId: pair.duplicateProspectId,
       })
-      if (!preview.canApply || preview.recommendation.prospectId !== pair.canonicalProspectId) {
+      if (!preview.canApply) {
+        results.push({
+          ...pair,
+          status: 'skipped',
+          reason: 'merge_blocked',
+        })
+        continue
+      }
+      const direction = resolveRecommendedMergeDirection(pair, preview.recommendation.prospectId)
+      if (!direction) {
+        results.push({
+          ...pair,
+          status: 'skipped',
+          reason: 'canonical_recommendation_changed',
+        })
+        continue
+      }
+      if (direction.swapped) {
+        preview = await previewProspectMerge({
+          pool: params.pool,
+          userId: params.userId,
+          canonicalProspectId: direction.canonicalProspectId,
+          duplicateProspectId: direction.duplicateProspectId,
+        })
+      }
+      if (!preview.canApply || preview.recommendation.prospectId !== direction.canonicalProspectId) {
         results.push({
           ...pair,
           status: 'skipped',
@@ -308,14 +354,21 @@ export async function applyLegacyProspectCleanupPlan(params: {
       const result = await applyProspectMerge({
         pool: params.pool,
         userId: params.userId,
-        canonicalProspectId: pair.canonicalProspectId,
-        duplicateProspectId: pair.duplicateProspectId,
+        canonicalProspectId: direction.canonicalProspectId,
+        duplicateProspectId: direction.duplicateProspectId,
         previewHash: preview.previewHash,
-        idempotencyKey: `${params.runKey}:${pair.duplicateProspectId}`.slice(0, 160),
+        idempotencyKey: `${params.runKey}:${direction.duplicateProspectId}`.slice(0, 160),
         confirmConflicts: true,
         fieldChoices: preview.defaultFieldChoices,
       })
-      results.push({ ...pair, ...result, status: result.alreadyApplied ? 'already_applied' : 'merged' })
+      results.push({
+        ...pair,
+        effectiveCanonicalProspectId: direction.canonicalProspectId,
+        effectiveDuplicateProspectId: direction.duplicateProspectId,
+        directionSwapped: direction.swapped,
+        ...result,
+        status: result.alreadyApplied ? 'already_applied' : 'merged',
+      })
     } catch (error) {
       results.push({
         ...pair,

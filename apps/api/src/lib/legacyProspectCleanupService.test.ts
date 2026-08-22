@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { assessLegacyDuplicatePair } from './legacyProspectCleanupService'
+import {
+  assessLegacyDuplicatePair,
+  resolveRecommendedMergeDirection,
+} from './legacyProspectCleanupService'
 
 function prospect(id: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -117,4 +120,26 @@ test('identity agreement without a shared place is not enough for a map-pin merg
 
   assert.equal(assessment.eligible, false)
   assert.ok(assessment.blockers.includes('the records do not have a corroborated shared place'))
+})
+
+test('the executor follows the lower-level recommendation when the richer record is the planned duplicate', () => {
+  const direction = resolveRecommendedMergeDirection({
+    canonicalProspectId: 'planned-canonical',
+    duplicateProspectId: 'richer-record',
+  }, 'richer-record')
+
+  assert.deepEqual(direction, {
+    canonicalProspectId: 'richer-record',
+    duplicateProspectId: 'planned-canonical',
+    swapped: true,
+  })
+})
+
+test('an unrelated recommendation cannot redirect a cleanup merge', () => {
+  const direction = resolveRecommendedMergeDirection({
+    canonicalProspectId: 'first',
+    duplicateProspectId: 'second',
+  }, 'third')
+
+  assert.equal(direction, null)
 })
