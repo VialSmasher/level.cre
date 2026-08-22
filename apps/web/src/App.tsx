@@ -16,6 +16,7 @@ const Home = lazy(() => import("./pages/home"));
 const DailyDesk = lazy(() => import("./pages/daily-desk"));
 const Knowledge = lazy(() => import("./pages/knowledge"));
 const FollowUp = lazy(() => import("./pages/followup"));
+const Maintenance = lazy(() => import("./pages/maintenance"));
 const Inbox = lazy(() => import("./pages/inbox"));
 const Stats = lazy(() => import("./pages/stats"));
 const Requirements = lazy(() => import("./pages/requirements"));
@@ -232,6 +233,18 @@ function Router() {
             <AppLayout>
               <Suspense fallback={<Spinner />}>
                 <DailyDesk />
+              </Suspense>
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/app/maintenance">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <Suspense fallback={<Spinner />}>
+                <Maintenance />
               </Suspense>
             </AppLayout>
           </OnboardingCheck>
