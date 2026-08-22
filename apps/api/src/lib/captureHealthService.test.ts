@@ -64,3 +64,14 @@ test('deduplicates the same captured message arriving through two providers', ()
   assert.equal(health.capturedOutboundEmails, 1)
   assert.equal(health.canonicalOutboundEmails, 1)
 })
+
+test('reports an idle capture window as ready instead of claiming reconciliation', () => {
+  const health = summarizeCaptureHealth({
+    capturedRows: [],
+    canonicalRows: [],
+    now: new Date('2026-08-22T12:00:00.000Z'),
+  })
+
+  assert.equal(health.status, 'idle')
+  assert.equal(health.unreconciledCount, 0)
+})

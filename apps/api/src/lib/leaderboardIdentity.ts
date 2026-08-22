@@ -13,6 +13,15 @@ function cleanEmail(value?: string | null) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : null
 }
 
+const KNOWN_EMAIL_ALIASES = new Map([
+  ['patrick.livingston@cwedm.com', 'livingstonpatrick1@gmail.com'],
+])
+
+function identityEmail(value?: string | null) {
+  const email = cleanEmail(value)
+  return email ? KNOWN_EMAIL_ALIASES.get(email) || email : null
+}
+
 function readableEmailName(value?: string | null) {
   const local = String(value || '').split('@')[0] || ''
   const words = local.replace(/[._-]+/g, ' ').trim().split(/\s+/).filter(Boolean)
@@ -31,7 +40,7 @@ function getLevel(total: number) {
 export function buildLeaderboardIdentities(rows: LeaderboardSkillRow[], currentUserId: string) {
   const groups = new Map<string, LeaderboardSkillRow[]>()
   rows.forEach((row) => {
-    const email = cleanEmail(row.userEmail)
+    const email = identityEmail(row.userEmail)
     const key = email ? `email:${email}` : `user:${row.userId}`
     groups.set(key, [...(groups.get(key) || []), row])
   })

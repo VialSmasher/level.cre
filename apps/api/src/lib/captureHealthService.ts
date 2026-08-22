@@ -57,18 +57,25 @@ export function summarizeCaptureHealth(params: {
     .map((row) => parsedDate(row.timestamp))
     .filter((value): value is Date => Boolean(value))
     .sort((left, right) => right.getTime() - left.getTime())[0]?.toISOString() || null
+  const status = unreconciledCount > 0
+    ? 'attention' as const
+    : capturedCount === 0 && canonicalCount === 0
+      ? 'idle' as const
+      : 'healthy' as const
 
   return {
-    status: unreconciledCount > 0 ? 'attention' as const : 'healthy' as const,
+    status,
     windowDays: days,
     capturedOutboundEmails: capturedCount,
     canonicalOutboundEmails: canonicalCount,
     unreconciledCount,
     lastCapturedAt,
     lastCanonicalAt,
-    message: unreconciledCount > 0
+    message: status === 'attention'
       ? `${unreconciledCount} captured outbound ${unreconciledCount === 1 ? 'email has' : 'emails have'} not reached the production ledger.`
-      : 'Captured outbound email and production credit are reconciled.',
+      : status === 'idle'
+        ? 'Capture is ready; there is no recent outbound email to reconcile.'
+        : 'Captured outbound email and production credit are reconciled.',
   }
 }
 
