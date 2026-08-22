@@ -236,6 +236,98 @@ function plannedGroups(candidateGroups: CandidateGroup[]) {
   })
 }
 
+type ExecutableMerge = {
+  canApply: true
+  direction: NonNullable<ReturnType<typeof resolveRecommendedMergeDirection>>
+  preview: Awaited<ReturnType<typeof previewProspectMerge>>
+} | {
+  canApply: false
+  reason: string
+}
+
+async function prepareExecutableMerge(params: {
+  pool: Pool
+  userId: string
+  pair: LegacyDuplicatePairAssessment
+}): Promise<ExecutableMerge> {
+  let preview = await previewProspectMerge({
+    pool: params.pool,
+    userId: params.userId,
+    canonicalProspectId: params.pair.canonicalProspectId,
+    duplicateProspectId: params.pair.duplicateProspectId,
+  })
+  if (!preview.canApply) {
+    return { canApply: false, reason: 'relationship conflicts block automatic consolidation' }
+  }
+  const direction = resolveRecommendedMergeDirection(params.pair, preview.recommendation.prospectId)
+  if (!direction) {
+    return { canApply: false, reason: 'the merge preview recommended a record outside this pair' }
+  }
+  if (direction.swapped) {
+    preview = await previewProspectMerge({
+      pool: params.pool,
+      userId: params.userId,
+      canonicalProspectId: direction.canonicalProspectId,
+      duplicateProspectId: direction.duplicateProspectId,
+    })
+  }
+  if (!preview.canApply) {
+    return { canApply: false, reason: 'relationship conflicts block automatic consolidation' }
+  }
+  if (preview.recommendation.prospectId !== direction.canonicalProspectId) {
+    return { canApply: false, reason: 'the preferred canonical record is not stable across previews' }
+  }
+  return { canApply: true, direction, preview }
+}
+
+async function validateGroupsAgainstMergePreview(params: {
+  pool: Pool
+  userId: string
+  groups: ReturnType<typeof plannedGroups>
+}) {
+  return Promise.all(params.groups.map(async (group) => {
+    if (group.disposition !== 'safe_to_merge') return group
+    const checkedPairs = await Promise.all(group.pairs.map(async (pair) => {
+      try {
+        const executable = await prepareExecutableMerge({
+          pool: params.pool,
+          userId: params.userId,
+          pair,
+        })
+        if (executable.canApply) return pair
+        return {
+          ...pair,
+          eligible: false as const,
+          confidence: 'review' as const,
+          blockers: Array.from(new Set([...pair.blockers, executable.reason])),
+        }
+      } catch {
+        return {
+          ...pair,
+          eligible: false as const,
+          confidence: 'review' as const,
+          blockers: Array.from(new Set([...pair.blockers, 'the merge preview could not be confirmed'])),
+        }
+      }
+    }))
+    const safe = checkedPairs.length > 0 && checkedPairs.every((pair) => pair.eligible)
+    return {
+      ...group,
+      disposition: safe ? 'safe_to_merge' as const : 'leave_separate' as const,
+      pairs: safe
+        ? checkedPairs
+        : checkedPairs.map((pair) => pair.eligible
+          ? {
+              ...pair,
+              eligible: false as const,
+              confidence: 'review' as const,
+              blockers: ['another record in this duplicate group is not safe to consolidate automatically'],
+            }
+          : pair),
+    }
+  }))
+}
+
 export async function buildLegacyProspectCleanupPlan(params: {
   pool: Pool
   userId: string
@@ -246,7 +338,11 @@ export async function buildLegacyProspectCleanupPlan(params: {
     userId: params.userId,
     limit: params.limit || 25,
   })
-  const groups = plannedGroups(candidates.groups)
+  const groups = await validateGroupsAgainstMergePreview({
+    pool: params.pool,
+    userId: params.userId,
+    groups: plannedGroups(candidates.groups),
+  })
   const hashInput = groups.map((group) => ({
     groupId: group.groupId,
     recommendedCanonicalId: group.recommendedCanonicalId,
@@ -312,60 +408,34 @@ export async function applyLegacyProspectCleanupPlan(params: {
   const results: Array<Record<string, unknown>> = []
   for (const pair of pairs) {
     try {
-      let preview = await previewProspectMerge({
+      const executable = await prepareExecutableMerge({
         pool: params.pool,
         userId: params.userId,
-        canonicalProspectId: pair.canonicalProspectId,
-        duplicateProspectId: pair.duplicateProspectId,
+        pair,
       })
-      if (!preview.canApply) {
+      if (!executable.canApply) {
         results.push({
           ...pair,
           status: 'skipped',
-          reason: 'merge_blocked',
-        })
-        continue
-      }
-      const direction = resolveRecommendedMergeDirection(pair, preview.recommendation.prospectId)
-      if (!direction) {
-        results.push({
-          ...pair,
-          status: 'skipped',
-          reason: 'canonical_recommendation_changed',
-        })
-        continue
-      }
-      if (direction.swapped) {
-        preview = await previewProspectMerge({
-          pool: params.pool,
-          userId: params.userId,
-          canonicalProspectId: direction.canonicalProspectId,
-          duplicateProspectId: direction.duplicateProspectId,
-        })
-      }
-      if (!preview.canApply || preview.recommendation.prospectId !== direction.canonicalProspectId) {
-        results.push({
-          ...pair,
-          status: 'skipped',
-          reason: !preview.canApply ? 'merge_blocked' : 'canonical_recommendation_changed',
+          reason: executable.reason,
         })
         continue
       }
       const result = await applyProspectMerge({
         pool: params.pool,
         userId: params.userId,
-        canonicalProspectId: direction.canonicalProspectId,
-        duplicateProspectId: direction.duplicateProspectId,
-        previewHash: preview.previewHash,
-        idempotencyKey: `${params.runKey}:${direction.duplicateProspectId}`.slice(0, 160),
+        canonicalProspectId: executable.direction.canonicalProspectId,
+        duplicateProspectId: executable.direction.duplicateProspectId,
+        previewHash: executable.preview.previewHash,
+        idempotencyKey: `${params.runKey}:${executable.direction.duplicateProspectId}`.slice(0, 160),
         confirmConflicts: true,
-        fieldChoices: preview.defaultFieldChoices,
+        fieldChoices: executable.preview.defaultFieldChoices,
       })
       results.push({
         ...pair,
-        effectiveCanonicalProspectId: direction.canonicalProspectId,
-        effectiveDuplicateProspectId: direction.duplicateProspectId,
-        directionSwapped: direction.swapped,
+        effectiveCanonicalProspectId: executable.direction.canonicalProspectId,
+        effectiveDuplicateProspectId: executable.direction.duplicateProspectId,
+        directionSwapped: executable.direction.swapped,
         ...result,
         status: result.alreadyApplied ? 'already_applied' : 'merged',
       })
