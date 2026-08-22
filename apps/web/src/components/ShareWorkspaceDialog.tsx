@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { apiRequest } from '@/lib/queryClient';
-import { CheckCircle2, Clock3, Mail, Trash2, Users, X } from 'lucide-react';
+import { CheckCircle2, Clock3, Copy, Link2, Mail, RotateCcw, ShieldCheck, Trash2, Users, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { Modal, ModalContent, ModalHeader, ModalTitle, ModalClose } from '@/components/primitives/Modal';
@@ -18,6 +18,13 @@ type ShareEntry = {
   status?: 'pending'|'accepted'|'revoked';
   kind?: 'member'|'invite';
   emailDelivery?: 'sent'|'not_configured'|'failed';
+};
+
+type PublicShare = {
+  enabled: boolean;
+  token: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 };
 
 function errorMessage(err: any): string {
@@ -45,13 +52,68 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
   const { toast } = useToast();
   const { data: membersResponse = [], refetch: refetchMembers } = useQuery<ShareEntry[]>({ queryKey: ['/api/listings', listingId, 'members'], enabled: open && !!listingId });
   const members = Array.isArray(membersResponse) ? membersResponse : [];
+  const { data: publicShare, refetch: refetchPublicShare } = useQuery<PublicShare>({
+    queryKey: ['/api/listings', listingId, 'public-share'],
+    enabled: open && canManage && !isDemoMode && !!listingId,
+  });
 
   useEffect(() => {
-    if (open && listingId) void refetchMembers();
-  }, [listingId, open, refetchMembers]);
+    if (open && listingId) {
+      void refetchMembers();
+      if (canManage && !isDemoMode) void refetchPublicShare();
+    }
+  }, [canManage, isDemoMode, listingId, open, refetchMembers, refetchPublicShare]);
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'viewer'|'editor'>('viewer');
+  const clientShareUrl = publicShare?.enabled && publicShare.token && typeof window !== 'undefined'
+    ? `${window.location.origin}/pursuits/share/${publicShare.token}`
+    : '';
+
+  const publicShareMutation = useMutation({
+    mutationFn: async (rotate: boolean) => {
+      const res = await apiRequest('POST', `/api/listings/${listingId}/public-share`, { rotate });
+      return res.json() as Promise<PublicShare>;
+    },
+    onSuccess: (share) => {
+      qc.setQueryData(['/api/listings', listingId, 'public-share'], share);
+      toast({
+        title: publicShare?.enabled ? 'Client link replaced' : 'Client link ready',
+        description: 'The read-only map and activity view is ready to share.',
+      });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Client link failed', description: errorMessage(error), variant: 'destructive' });
+    },
+  });
+
+  const disablePublicShareMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest('DELETE', `/api/listings/${listingId}/public-share`);
+    },
+    onSuccess: () => {
+      qc.setQueryData<PublicShare>(['/api/listings', listingId, 'public-share'], {
+        enabled: false,
+        token: null,
+        createdAt: publicShare?.createdAt || null,
+        updatedAt: new Date().toISOString(),
+      });
+      toast({ title: 'Client link turned off', description: 'The previous link no longer opens the pursuit.' });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Could not turn off link', description: errorMessage(error), variant: 'destructive' });
+    },
+  });
+
+  const copyClientShareUrl = async () => {
+    if (!clientShareUrl) return;
+    try {
+      await navigator.clipboard.writeText(clientShareUrl);
+      toast({ title: 'Client link copied', description: 'Paste it into an email or message to the landlord or client.' });
+    } catch {
+      toast({ title: 'Copy failed', description: 'Select the link and copy it manually.', variant: 'destructive' });
+    }
+  };
 
   const addMutation = useMutation({
     mutationFn: async () => {
@@ -156,6 +218,71 @@ export function ShareWorkspaceDialog({ listingId, open, onOpenChange, canManage 
               Sharing is unavailable in the demo. Sign in to invite your team.
             </div>
           )}
+          {canManage && !isDemoMode ? (
+            <section className="rounded-lg border border-blue-200 bg-blue-50/60 p-4" aria-labelledby="client-activity-link-title">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white text-blue-700 shadow-sm">
+                    <Link2 className="h-4.5 w-4.5" aria-hidden />
+                  </span>
+                  <div>
+                    <h3 id="client-activity-link-title" className="text-sm font-semibold text-slate-950">Client activity link</h3>
+                    <p className="mt-1 text-xs leading-5 text-slate-600">
+                      Share a polished read-only map and activity summary. Contact details, private notes and follow-ups stay hidden.
+                    </p>
+                  </div>
+                </div>
+                <span className="hidden shrink-0 items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-emerald-700 sm:inline-flex">
+                  <ShieldCheck className="h-3.5 w-3.5" />Read only
+                </span>
+              </div>
+              {publicShare?.enabled && clientShareUrl ? (
+                <div className="mt-4 space-y-3">
+                  <div className="flex gap-2">
+                    <Input aria-label="Client activity link" readOnly value={clientShareUrl} className="bg-white font-mono text-xs" onFocus={(event) => event.currentTarget.select()} />
+                    <Button type="button" onClick={() => void copyClientShareUrl()} disabled={publicShareMutation.isPending || disablePublicShareMutation.isPending}>
+                      <Copy className="h-4 w-4" />Copy
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-slate-500">Anyone with this link can view the client-safe activity report.</p>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (window.confirm('Replace this client link? The current link will stop working.')) publicShareMutation.mutate(true);
+                        }}
+                        disabled={publicShareMutation.isPending || disablePublicShareMutation.isPending}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />Replace link
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-700 hover:bg-red-50 hover:text-red-800"
+                        onClick={() => {
+                          if (window.confirm('Turn off this client link? Anyone using it will lose access.')) disablePublicShareMutation.mutate();
+                        }}
+                        disabled={publicShareMutation.isPending || disablePublicShareMutation.isPending}
+                      >
+                        Turn off
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 flex flex-col items-start justify-between gap-3 rounded-md border border-dashed border-blue-200 bg-white/70 px-3 py-3 sm:flex-row sm:items-center">
+                  <p className="text-xs leading-5 text-slate-600">Create the link when you are ready to give a landlord or client a live view.</p>
+                  <Button type="button" size="sm" onClick={() => publicShareMutation.mutate(false)} disabled={publicShareMutation.isPending}>
+                    <Link2 className="h-4 w-4" />{publicShareMutation.isPending ? 'Creating...' : 'Create client link'}
+                  </Button>
+                </div>
+              )}
+            </section>
+          ) : null}
           {/* Invite */}
           <form
             className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px_auto] sm:items-end"

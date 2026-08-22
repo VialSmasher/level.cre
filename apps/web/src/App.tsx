@@ -40,6 +40,7 @@ const BrokerStats = lazy(() => import("./pages/broker-stats"));
 const Leaderboard = lazy(() => import("./pages/leaderboard"));
 const Badges = lazy(() => import("./pages/badges"));
 const TrackRecord = lazy(() => import("./pages/track-record"));
+const PublicPursuit = lazy(() => import("./pages/public-pursuit"));
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useLocation, useRoute } from "wouter";
@@ -100,6 +101,11 @@ function Router() {
       <Route path="/debug" component={() => (
         <Suspense fallback={<Spinner />}> 
           <Debug />
+        </Suspense>
+      )} />
+      <Route path="/pursuits/share/:token" component={() => (
+        <Suspense fallback={<Spinner />}>
+          <PublicPursuit />
         </Suspense>
       )} />
       <Route path="/" component={() => (

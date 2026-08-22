@@ -87,6 +87,11 @@ import { buildPipelineHealth } from './lib/pipelineHealth';
 import { buildActivityPulse } from './lib/activityPulse';
 import { listProductionActivities } from './lib/productionActivityService';
 import { filterPursuitActivity, summarizePursuitActivity } from './lib/pursuitActivity';
+import {
+  buildPublicPursuitSnapshot,
+  createPursuitShareToken,
+  isValidPursuitShareToken,
+} from './lib/pursuitPublicShareService';
 import { buildAutomationReconciliation } from './lib/automationReconciliation';
 import { rankEmailCleanup, rankFollowUpReminder } from './lib/salesBriefRanking';
 import { findSupabaseAuthUserByEmail } from './lib/supabaseAuthUsers';
@@ -332,6 +337,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   await ensureListingInvitesTable();
+
+  async function ensureListingPublicSharesTable(): Promise<void> {
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS public.listing_public_shares (
+          listing_id varchar PRIMARY KEY REFERENCES public.listings(id) ON DELETE CASCADE,
+          token varchar NOT NULL UNIQUE,
+          enabled boolean NOT NULL DEFAULT true,
+          created_by varchar NOT NULL REFERENCES public.users(id),
+          created_at timestamp with time zone NOT NULL DEFAULT now(),
+          updated_at timestamp with time zone NOT NULL DEFAULT now()
+        );
+      `);
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS "UQ_listing_public_shares_token"
+          ON public.listing_public_shares(token);
+      `);
+    } catch (error: any) {
+      console.error('Failed to ensure listing_public_shares table:', error?.message || error);
+    }
+  }
+
+  await ensureListingPublicSharesTable();
 
   async function ensureEmailIntegrationTables(): Promise<void> {
     try {
@@ -3152,6 +3180,165 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error exporting listing CSV:', error);
       res.status(500).json({ message: 'Failed to export CSV' });
+    }
+  });
+
+  app.get('/api/listings/:id/public-share', requireAuth, async (req, res) => {
+    try {
+      await requireOwnerAccess(req, req.params.id);
+      if (isDemo(req)) {
+        return res.json({ enabled: false, token: null, createdAt: null, updatedAt: null });
+      }
+      const result = await pool.query(`
+        SELECT token, enabled, created_at, updated_at
+        FROM public.listing_public_shares
+        WHERE listing_id = $1
+        LIMIT 1
+      `, [req.params.id]);
+      const row = result.rows[0];
+      res.json({
+        enabled: Boolean(row?.enabled),
+        token: row?.enabled ? row.token : null,
+        createdAt: row?.created_at || null,
+        updatedAt: row?.updated_at || null,
+      });
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && error.status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
+      console.error('Error fetching pursuit public share:', error);
+      res.status(500).json({ message: 'Failed to fetch client activity link' });
+    }
+  });
+
+  app.post('/api/listings/:id/public-share', requireAuth, async (req, res) => {
+    try {
+      await requireOwnerAccess(req, req.params.id);
+      if (isDemo(req)) {
+        return res.status(400).json({ message: 'Client activity links are unavailable in demo mode.' });
+      }
+      const existing = await pool.query(`
+        SELECT token, enabled
+        FROM public.listing_public_shares
+        WHERE listing_id = $1
+        LIMIT 1
+      `, [req.params.id]);
+      const existingRow = existing.rows[0];
+      const shouldRotate = req.body?.rotate === true || !existingRow?.enabled;
+      const token = shouldRotate || !existingRow?.token
+        ? createPursuitShareToken()
+        : existingRow.token;
+      const result = await pool.query(`
+        INSERT INTO public.listing_public_shares (
+          listing_id, token, enabled, created_by, created_at, updated_at
+        ) VALUES ($1, $2, true, $3, now(), now())
+        ON CONFLICT (listing_id) DO UPDATE SET
+          token = EXCLUDED.token,
+          enabled = true,
+          updated_at = now()
+        RETURNING token, enabled, created_at, updated_at
+      `, [req.params.id, token, getUserId(req)]);
+      const row = result.rows[0];
+      res.status(existingRow ? 200 : 201).json({
+        enabled: true,
+        token: row.token,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      });
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && error.status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
+      console.error('Error creating pursuit public share:', error);
+      res.status(500).json({ message: 'Failed to create client activity link' });
+    }
+  });
+
+  app.delete('/api/listings/:id/public-share', requireAuth, async (req, res) => {
+    try {
+      await requireOwnerAccess(req, req.params.id);
+      if (isDemo(req)) return res.status(204).send();
+      await pool.query(`
+        UPDATE public.listing_public_shares
+        SET enabled = false, token = $2, updated_at = now()
+        WHERE listing_id = $1
+      `, [req.params.id, createPursuitShareToken()]);
+      res.status(204).send();
+    } catch (error: any) {
+      const status = (error && typeof error === 'object' && error.status) || 500;
+      if (status !== 500) return res.status(status).json({ message: 'Forbidden' });
+      console.error('Error revoking pursuit public share:', error);
+      res.status(500).json({ message: 'Failed to turn off client activity link' });
+    }
+  });
+
+  app.get('/api/public/pursuits/:token', async (req, res) => {
+    try {
+      if (!isValidPursuitShareToken(req.params.token)) {
+        return res.status(404).json({ message: 'Activity link not found' });
+      }
+      const listingResult = await pool.query(`
+        SELECT
+          l.id,
+          l.title,
+          l.address,
+          l.submarket,
+          l.lat,
+          l.lng,
+          l.created_at,
+          owner.first_name AS owner_first_name,
+          owner.last_name AS owner_last_name
+        FROM public.listing_public_shares share
+        INNER JOIN public.listings l ON l.id = share.listing_id
+        LEFT JOIN public.users owner ON owner.id = l.user_id
+        WHERE share.token = $1
+          AND share.enabled = true
+          AND l.archived_at IS NULL
+        LIMIT 1
+      `, [req.params.token]);
+      const listing = listingResult.rows[0];
+      if (!listing) return res.status(404).json({ message: 'Activity link not found' });
+
+      const [prospectResult, activityResult] = await Promise.all([
+        pool.query(`
+          SELECT
+            p.id,
+            p.name,
+            p.business_name,
+            p.contact_company,
+            p.address,
+            p.status,
+            COALESCE(p.location_lat, ST_Y(ST_PointOnSurface(p.geometry))) AS location_lat,
+            COALESCE(p.location_lng, ST_X(ST_PointOnSurface(p.geometry))) AS location_lng
+          FROM public.listing_prospects lp
+          INNER JOIN public.prospects p ON p.id = lp.prospect_id
+          WHERE lp.listing_id = $1
+            AND p.merged_into_prospect_id IS NULL
+          ORDER BY COALESCE(NULLIF(p.business_name, ''), NULLIF(p.contact_company, ''), p.name)
+        `, [listing.id]),
+        pool.query(`
+          SELECT ci.id, ci.prospect_id, ci.date, ci.type, ci.outcome
+          FROM public.contact_interactions ci
+          WHERE ci.listing_id = $1
+            OR EXISTS (
+              SELECT 1
+              FROM public.listing_prospects lp
+              WHERE lp.listing_id = $1
+                AND lp.prospect_id = ci.prospect_id
+            )
+          ORDER BY ci.date DESC, ci.created_at DESC
+          LIMIT 500
+        `, [listing.id]),
+      ]);
+
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+      res.json(buildPublicPursuitSnapshot({
+        listing,
+        prospects: prospectResult.rows,
+        interactions: activityResult.rows,
+      }));
+    } catch (error) {
+      console.error('Error fetching public pursuit activity:', error);
+      res.status(500).json({ message: 'Failed to load pursuit activity' });
     }
   });
 
