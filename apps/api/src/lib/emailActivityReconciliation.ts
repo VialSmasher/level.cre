@@ -318,6 +318,81 @@ export async function findMatchingSalesActivityInteraction(params: {
     : null;
 }
 
+export async function findMatchingSalesActivityImport(params: {
+  pool: Pool;
+  userId: string;
+  activity: NormalizedSalesActivity;
+}): Promise<{
+  source: string;
+  externalActivityId: string;
+  interactionId: string | null;
+  prospectId: string | null;
+  matchStatus: string;
+} | null> {
+  const { activity } = params;
+  const occurredAt = parseDate(activity.activityAt);
+  const subject = normalizeEmailActivitySubject(activity.subject);
+  if (
+    !isReconcilableSalesActivitySource(activity.source)
+    || !['sent', 'received'].includes(activity.activityStatus)
+    || activity.activityType !== 'email'
+    || !activity.email
+    || !occurredAt
+    || !subject
+  ) return null;
+
+  const { rows } = await params.pool.query(
+    `
+      SELECT
+        id,
+        source,
+        external_activity_id,
+        interaction_id,
+        prospect_id,
+        match_status,
+        subject,
+        email,
+        activity_at
+      FROM public.sales_activity_imports
+      WHERE user_id = $1
+        AND source = ANY($2::varchar[])
+        AND activity_status = $3
+        AND activity_type = 'email'
+        AND lower(email) = lower($4)
+        AND activity_at
+          BETWEEN $5::timestamp - interval '${RECONCILIATION_WINDOW_MINUTES} minutes'
+              AND $5::timestamp + interval '${RECONCILIATION_WINDOW_MINUTES} minutes'
+        AND NOT (source = $6 AND external_activity_id = $7)
+      ORDER BY
+        (interaction_id IS NOT NULL) DESC,
+        ABS(EXTRACT(EPOCH FROM (activity_at - $5::timestamp))) ASC,
+        created_at ASC
+      LIMIT 20
+    `,
+    [
+      params.userId,
+      [...RECONCILABLE_SALES_ACTIVITY_SOURCES],
+      activity.activityStatus,
+      activity.email,
+      occurredAt,
+      activity.source,
+      activity.externalActivityId,
+    ],
+  );
+
+  const matching = rows.find((row) => isSameEmailActivity(
+    { subject: activity.subject, counterpartyEmails: [activity.email], occurredAt },
+    { subject: row.subject, counterpartyEmails: [row.email], occurredAt: row.activity_at },
+  ));
+  return matching ? {
+    source: matching.source,
+    externalActivityId: matching.external_activity_id,
+    interactionId: matching.interaction_id || null,
+    prospectId: matching.prospect_id || null,
+    matchStatus: matching.match_status,
+  } : null;
+}
+
 export async function hasMatchingCapturedEmailEvidence(params: {
   pool: Pool;
   userId: string;

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -39,6 +39,7 @@ export default function ProfilePage() {
   const { user } = useAuth();
   const { profile, updateSubmarkets, isUpdating } = useProfile();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   // Fetch data from database
   const { data: prospects = [] } = useQuery<Prospect[]>({
@@ -71,6 +72,10 @@ export default function ProfilePage() {
     mutationFn: async () => {
       const response = await apiRequest('POST', '/api/email/outlook/sync', { days: 30 });
       return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/email/outlook/config'] });
+      toast({ title: 'Outlook backfill complete', description: 'Recent mailbox metadata was reconciled with Level CRE.' });
     },
   });
 
@@ -257,7 +262,7 @@ export default function ProfilePage() {
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <div className="text-sm font-semibold text-slate-950">Outlook sync</div>
+                  <div className="text-sm font-semibold text-slate-950">Outlook history backfill</div>
                   <p className="mt-1 text-sm text-slate-600">
                     {outlookConfig?.connected
                       ? outlookConfig.connection?.emailAddress || outlookConfig.connection?.displayName || 'Microsoft 365 connected'
@@ -285,7 +290,7 @@ export default function ProfilePage() {
                 ) : (
                   <Button variant="outline" disabled={syncOutlookMutation.isPending} onClick={() => syncOutlookMutation.mutate()}>
                     <RefreshCcw className="mr-2 h-4 w-4" />
-                    {syncOutlookMutation.isPending ? 'Syncing...' : 'Sync 30 days'}
+                    {syncOutlookMutation.isPending ? 'Backfilling...' : 'Backfill 30 days'}
                   </Button>
                 )}
               </div>

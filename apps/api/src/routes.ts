@@ -70,6 +70,7 @@ import {
   findMatchingCodexEmailImport,
   findMatchingCapturedEmailMessage,
   findMatchingCapturedEmailInteraction,
+  findMatchingSalesActivityImport,
   findMatchingSalesActivityInteraction,
   hasMatchingCapturedEmailEvidence,
   shouldSuppressDuplicateCapture,
@@ -84,6 +85,8 @@ import {
 } from './lib/emailProspectMatching';
 import { buildPipelineHealth } from './lib/pipelineHealth';
 import { buildActivityPulse } from './lib/activityPulse';
+import { listProductionActivities } from './lib/productionActivityService';
+import { filterPursuitActivity } from './lib/pursuitActivity';
 import { buildAutomationReconciliation } from './lib/automationReconciliation';
 import { rankEmailCleanup, rankFollowUpReminder } from './lib/salesBriefRanking';
 import { findSupabaseAuthUserByEmail } from './lib/supabaseAuthUsers';
@@ -519,10 +522,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   async function graphGet(accessToken: string, url: string) {
-    const response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Prefer: 'IdType="ImmutableId"',
+      },
+    });
     const json = await response.json();
     if (!response.ok) throw new Error(json.error?.message || json.error_description || 'Microsoft Graph request failed');
     return json;
+  }
+
+  function stableOutlookMessageId(message: any): string {
+    const internetMessageId = String(message?.internetMessageId || '').trim();
+    return internetMessageId ? `internet-message:${internetMessageId}` : String(message?.id || '').trim();
   }
 
   async function reconcileCapturedEmailWithCodex(
@@ -869,13 +882,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
     }
 
-    const xpAwarded = String(params.messageData.direction || '').toLowerCase() === 'sent'
-      ? await awardCapturedEmailActivity(
-          params.userId,
-          params.emailMessageId,
-          params.isNewMessage,
-        )
-      : false;
+    let xpAwarded = false;
     const prospects = params.prospects || await loadEmailProspectCandidates(params.userId);
     const decision = resolveEmailProspectMatch(capturedEmailEvidence(params.messageData), prospects);
     const summary = capturedEmailSummary(params.messageData);
@@ -894,6 +901,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         matchStatus: decision.status,
         matchConfidence: decision.confidence,
       };
+    }
+
+    if (String(params.messageData.direction || '').toLowerCase() === 'sent') {
+      xpAwarded = await awardCapturedEmailActivity(
+        params.userId,
+        params.emailMessageId,
+        params.isNewMessage,
+      );
     }
 
     const duplicateInteraction = await pool.query(`
@@ -3013,9 +3028,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { start, end } = req.query as any;
       if (isDemo(req)) {
         const interactionsAll = await demo.getInteractions(userId);
-        const interactions = (interactionsAll || []).filter((i: any) => i.listingId === req.params.id)
-          .filter((i: any) => (!start || i.date >= start) && (!end || i.date <= end));
         const links = await demo.getListingLinksAll(req.params.id);
+        const interactions = filterPursuitActivity({
+          rows: interactionsAll || [],
+          listingId: req.params.id,
+          linkedProspectIds: links.map((link: any) => link.prospectId),
+          start,
+          end,
+        });
         const allProspects = await demo.getProspectsAll();
         const prospectMap = new Map(allProspects.map((p: any) => [p.id, p]));
         const byType: Record<string, number> = {};
@@ -3042,8 +3062,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const listing = await storage.getListing(req.params.id, userId);
       if (!listing) return res.status(404).json({ message: 'Listing not found' });
-      const interactions = await storage.getContactInteractions(userId, undefined, req.params.id, start, end);
       const lp = await storage.getListingProspects(req.params.id, userId);
+      const interactions = filterPursuitActivity({
+        rows: await storage.getContactInteractions(userId, undefined, undefined, start, end),
+        listingId: req.params.id,
+        linkedProspectIds: lp.map((prospect) => prospect.id),
+        start,
+        end,
+      });
       const prospectMap = new Map(lp.map(p => [p.id, p]));
       const byType: Record<string, number> = {};
       interactions.forEach(i => { byType[i.type] = (byType[i.type] || 0) + 1; });
@@ -3493,9 +3519,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { start, end } = req.query as any;
       if (isDemo(req)) {
         const interactionsAll = await demo.getInteractions(userId);
-        const interactions = (interactionsAll || []).filter((i: any) => i.listingId === req.params.id)
-          .filter((i: any) => (!start || i.date >= start) && (!end || i.date <= end));
         const links = await demo.getListingLinksAll(req.params.id);
+        const interactions = filterPursuitActivity({
+          rows: interactionsAll || [],
+          listingId: req.params.id,
+          linkedProspectIds: links.map((link: any) => link.prospectId),
+          start,
+          end,
+        });
         const allProspects = await demo.getProspectsAll();
         const prospectMap = new Map(allProspects.map((p: any) => [p.id, p]));
         const byType: Record<string, number> = {};
@@ -3522,8 +3553,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const listing = await storage.getListingAny(req.params.id);
       if (!listing) return res.status(404).json({ message: 'Workspace not found' });
-      const interactions = await storage.getContactInteractions(userId, undefined, req.params.id, start, end);
       const lp = await storage.getListingProspectsAny(req.params.id);
+      const interactions = filterPursuitActivity({
+        rows: await storage.getContactInteractions(userId, undefined, undefined, start, end),
+        listingId: req.params.id,
+        linkedProspectIds: lp.map((prospect) => prospect.id),
+        start,
+        end,
+      });
       const prospectMap = new Map(lp.map(p => [p.id, p]));
       const byType: Record<string, number> = {};
       interactions.forEach(i => { byType[i.type] = (byType[i.type] || 0) + 1; });
@@ -4410,6 +4447,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('Error processing sales prospect map batch:', error);
       res.status(500).json({ message: 'Failed to process sales prospect map batch' });
     }
+
   });
 
   app.post('/api/agent/opportunity-proposals', requireSalesActivityAuth, async (req, res) => {
@@ -4553,6 +4591,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         findCapturedEmailInteraction: async (activity) => (
           await findMatchingSalesActivityInteraction({ pool, userId, activity })
           || findMatchingCapturedEmailInteraction({ pool, userId, activity })
+        ),
+        findDuplicateSalesActivityImport: async (activity) => (
+          findMatchingSalesActivityImport({ pool, userId, activity })
         ),
         reconcileEmailEvidence: async (activity) => suppressEmailReviewsMatchingSalesActivity({
           pool,
@@ -5017,6 +5058,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       url.searchParams.set('$filter', `${folder.dateField} ge ${cutoff}`);
       url.searchParams.set('$select', [
         'id',
+        'internetMessageId',
         'conversationId',
         'subject',
         'from',
@@ -5025,7 +5067,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         'bccRecipients',
         'sentDateTime',
         'receivedDateTime',
-        'bodyPreview',
         'webLink',
         'hasAttachments',
       ].join(','));
@@ -5041,7 +5082,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const bccRecipients = parseGraphRecipientEmails(message.bccRecipients);
           const messageData = {
             provider: 'outlook',
-            providerMessageId: message.id,
+            providerMessageId: stableOutlookMessageId(message),
             providerThreadId: message.conversationId || null,
             mailbox: folder.mailbox,
             direction: folder.direction,
@@ -5052,7 +5093,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             ccEmails: ccRecipients,
             sentAt: message.sentDateTime ? new Date(message.sentDateTime) : null,
             receivedAt: message.receivedDateTime ? new Date(message.receivedDateTime) : null,
-            snippet: message.bodyPreview || '',
+            snippet: '',
             attachmentNames: [],
             sourceUrl: message.webLink || '',
           };
@@ -5098,7 +5139,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             messageData.snippet,
             messageData.attachmentNames,
             messageData.sourceUrl,
-            JSON.stringify({ hasAttachments: Boolean(message.hasAttachments), folder: folder.mailbox, bccRecipients }),
+            JSON.stringify({
+              hasAttachments: Boolean(message.hasAttachments),
+              folder: folder.mailbox,
+              bccRecipients,
+              graphMessageId: message.id,
+              internetMessageId: message.internetMessageId || null,
+            }),
           ]);
           const emailMessageId = inserted.rows[0].id;
           const isNewMessage = Boolean(inserted.rows[0].inserted);
@@ -5142,6 +5189,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     url.searchParams.set('$filter', `sentDateTime ge ${cutoff}`);
     url.searchParams.set('$select', [
       'id',
+      'internetMessageId',
       'conversationId',
       'subject',
       'from',
@@ -5150,7 +5198,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       'bccRecipients',
       'sentDateTime',
       'receivedDateTime',
-      'bodyPreview',
       'webLink',
       'hasAttachments',
     ].join(','));
@@ -5195,7 +5242,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `, [
           userId,
           connectionId,
-          message.id,
+          stableOutlookMessageId(message),
           message.conversationId || null,
           message.subject || '',
           sender.address || '',
@@ -5204,7 +5251,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ccRecipients,
           message.sentDateTime ? new Date(message.sentDateTime) : null,
           message.receivedDateTime ? new Date(message.receivedDateTime) : null,
-          message.bodyPreview || '',
+          '',
           [],
           message.webLink || '',
           JSON.stringify({
@@ -5212,6 +5259,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             folder: 'sent',
             bccRecipients,
             captureSource: 'outlook-bcc-fallback',
+            graphMessageId: message.id,
+            internetMessageId: message.internetMessageId || null,
           }),
         ]);
         const emailMessageId = inserted.rows[0].id;
@@ -5219,7 +5268,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (isNewMessage) messagesStored += 1;
         const messageData = {
           provider: 'outlook',
-          providerMessageId: message.id,
+          providerMessageId: stableOutlookMessageId(message),
           providerThreadId: message.conversationId || null,
           mailbox: 'sent',
           direction: 'sent',
@@ -5230,7 +5279,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ccEmails: ccRecipients,
           sentAt: message.sentDateTime ? new Date(message.sentDateTime) : null,
           receivedAt: message.receivedDateTime ? new Date(message.receivedDateTime) : null,
-          snippet: message.bodyPreview || '',
+          snippet: '',
           attachmentNames: [],
           sourceUrl: message.webLink || '',
         };
@@ -5441,20 +5490,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       if (isDemo(req)) return res.json([]);
-      try {
-        const connectionResult = await pool.query(`
-          SELECT id FROM public.email_connections
-          WHERE user_id = $1 AND provider = 'outlook' AND status = 'connected'
-          ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
-          LIMIT 1
-        `, [userId]);
-        const connectionId = connectionResult.rows[0]?.id;
-        if (connectionId) {
-          await syncOutlookBccCapturesForConnection(userId, connectionId, 14);
-        }
-      } catch (syncError: any) {
-        console.warn('Skipping Outlook BCC recovery before email review fetch:', syncError?.message || syncError);
-      }
       const status = typeof req.query.status === 'string' ? req.query.status : 'pending_review';
       const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 250);
       const params: any[] = [userId, limit];
@@ -6189,16 +6224,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = getUserId(req);
       const days = Math.min(Math.max(Math.trunc(Number(req.query.days) || 28), 14), 90);
-      const rangeStart = new Date(Date.now() - (days + 2) * 24 * 60 * 60 * 1000).toISOString();
-      const rangeEnd = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-      const interactions = isDemo(req)
+      const activities = isDemo(req)
         ? await demo.getInteractions(userId)
-        : await storage.getContactInteractions(userId, undefined, undefined, rangeStart, rangeEnd);
-      const pulse = buildActivityPulse(interactions || [], { days });
+        : await listProductionActivities({ pool, userId, limit: 5000 });
+      const pulse = buildActivityPulse(activities || [], { days });
       res.json({ generatedAt: new Date().toISOString(), ...pulse });
     } catch (error) {
       console.error('Error building activity pulse:', error);
       res.status(500).json({ message: 'Failed to build activity pulse' });
+    }
+  });
+
+  app.get('/api/automation/production-activities', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const limit = Math.min(Math.max(Math.trunc(Number(req.query.limit) || 1500), 1), 5000);
+      if (isDemo(req)) {
+        const interactions = await demo.getInteractions(userId);
+        return res.json({ generatedAt: new Date().toISOString(), rows: interactions || [] });
+      }
+      const rows = await listProductionActivities({ pool, userId, limit });
+      res.json({ generatedAt: new Date().toISOString(), rows });
+    } catch (error) {
+      console.error('Error listing canonical production activity:', error);
+      res.status(500).json({ message: 'Failed to list production activity' });
     }
   });
 

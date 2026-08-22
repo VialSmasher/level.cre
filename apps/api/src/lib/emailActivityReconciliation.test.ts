@@ -5,6 +5,7 @@ import {
   findMatchingCodexEmailImport,
   findMatchingCapturedEmailMessage,
   findMatchingCapturedEmailInteraction,
+  findMatchingSalesActivityImport,
   findMatchingSalesActivityInteraction,
   hasMatchingCapturedEmailEvidence,
   isSameEmailActivity,
@@ -187,6 +188,73 @@ test('does not collapse a different cross-channel email with the same recipient 
     await findMatchingSalesActivityInteraction({ pool, userId: 'user-1', activity }),
     null,
   );
+});
+
+test('reuses one review item when connector and desktop IDs describe the same Outlook email', async () => {
+  const queries: Array<{ sql: string; params: unknown[] }> = [];
+  const pool = {
+    query: async (sql: string, params: unknown[]) => {
+      queries.push({ sql, params });
+      return { rows: [{
+        id: 'import-1',
+        source: 'outlook_sync',
+        external_activity_id: 'desktop-entry-id',
+        interaction_id: null,
+        prospect_id: null,
+        match_status: 'needs_review',
+        subject: 'RE: Border Business Park',
+        email: 'buyer@example.com',
+        activity_at: new Date('2026-08-20T15:04:00.000Z'),
+      }] };
+    },
+  } as any;
+  const activity = normalizeSalesActivityInput({
+    source: 'outlook_sync',
+    status: 'sent',
+    activityType: 'email',
+    externalActivityId: 'connector-message-id',
+    email: 'buyer@example.com',
+    subject: 'Border Business Park',
+    activityAt: '2026-08-20T15:00:00.000Z',
+  });
+
+  assert.deepEqual(
+    await findMatchingSalesActivityImport({ pool, userId: 'user-1', activity }),
+    {
+      source: 'outlook_sync',
+      externalActivityId: 'desktop-entry-id',
+      interactionId: null,
+      prospectId: null,
+      matchStatus: 'needs_review',
+    },
+  );
+  assert.deepEqual(queries[0].params.slice(-2), ['outlook_sync', 'connector-message-id']);
+});
+
+test('does not merge a nearby email when its normalized subject differs', async () => {
+  const pool = {
+    query: async () => ({ rows: [{
+      source: 'codex_followup',
+      external_activity_id: 'codex-1',
+      interaction_id: null,
+      prospect_id: null,
+      match_status: 'needs_review',
+      subject: 'Different property',
+      email: 'buyer@example.com',
+      activity_at: new Date('2026-08-20T15:04:00.000Z'),
+    }] }),
+  } as any;
+  const activity = normalizeSalesActivityInput({
+    source: 'outlook_sync',
+    status: 'sent',
+    activityType: 'email',
+    externalActivityId: 'outlook-1',
+    email: 'buyer@example.com',
+    subject: 'Border Business Park',
+    activityAt: '2026-08-20T15:00:00.000Z',
+  });
+
+  assert.equal(await findMatchingSalesActivityImport({ pool, userId: 'user-1', activity }), null);
 });
 
 test('finds the same captured email across providers without weakening the evidence', async () => {

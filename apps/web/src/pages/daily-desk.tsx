@@ -47,7 +47,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { apiRequest } from '@/lib/queryClient'
-import { buildDailyActivityPace, buildDailyDeskQueues, describeSalesActivityDirection } from '@/lib/dailyDeskQueues'
+import { buildDailyActivityPace, buildDailyDeskQueues, buildWeeklyActivityMomentum, describeSalesActivityDirection } from '@/lib/dailyDeskQueues'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useProfile } from '@/hooks/useProfile'
@@ -543,15 +543,87 @@ function ActivityMomentum({ data, maxDailyActivity }: { data: ActivityPulseRespo
   )
 }
 
+function WeeklyMomentum({ data }: { data: ActivityPulseResponse }) {
+  const momentum = buildWeeklyActivityMomentum(data.series)
+  const comparison = momentum.lastWeek.total > 0
+    ? momentum.thisWeek.total - momentum.lastWeek.total
+    : null
+
+  return (
+    <section className="overflow-hidden rounded-md border border-slate-200 bg-white" aria-label="Weekly activity momentum">
+      <div className="border-b border-slate-200 px-5 py-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Weekly momentum</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-950">Keep creating conversations</h2>
+            <p className="mt-1 max-w-xl text-sm leading-6 text-slate-600">
+              Level CRE tracks the production. Codex can handle inbox and deal prioritization separately.
+            </p>
+          </div>
+          <Button asChild size="sm">
+            <Link href="/app/followup">
+              Open call queue
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid border-b border-slate-200 sm:grid-cols-3">
+        <div className="border-b border-slate-200 px-5 py-5 sm:border-b-0 sm:border-r">
+          <p className="text-xs font-medium text-slate-500">This week</p>
+          <p className="mt-1 text-3xl font-bold tabular-nums text-slate-950">{momentum.thisWeek.total}</p>
+          <p className="mt-1 text-xs text-slate-500">outbound actions across {momentum.activeDaysThisWeek} active day{momentum.activeDaysThisWeek === 1 ? '' : 's'}</p>
+        </div>
+        <div className="border-b border-slate-200 px-5 py-5 sm:border-b-0 sm:border-r">
+          <p className="text-xs font-medium text-slate-500">Last week</p>
+          <p className="mt-1 text-3xl font-bold tabular-nums text-slate-950">{momentum.lastWeek.total}</p>
+          <p className="mt-1 text-xs text-slate-500">outbound actions across {momentum.activeDaysLastWeek} active day{momentum.activeDaysLastWeek === 1 ? '' : 's'}</p>
+        </div>
+        <div className="px-5 py-5">
+          <p className="text-xs font-medium text-slate-500">Current pace</p>
+          <p className={cn(
+            'mt-1 text-3xl font-bold tabular-nums',
+            comparison !== null && comparison >= 0 ? 'text-emerald-700' : 'text-slate-950',
+          )}>
+            {comparison === null ? '—' : `${comparison >= 0 ? '+' : ''}${comparison}`}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            {comparison === null ? 'Build a baseline this week' : 'actions versus last week'}
+          </p>
+        </div>
+      </div>
+
+      <div className="px-5 py-5">
+        <div className="flex items-center justify-between gap-4 text-sm">
+          <p className="font-medium text-slate-900">
+            {momentum.target === 0
+              ? 'Every useful call or email builds the baseline.'
+              : momentum.remaining > 0
+                ? `${momentum.remaining} more outbound action${momentum.remaining === 1 ? '' : 's'} to match last week.`
+                : 'Last week’s production is matched. Keep going if the conversations are there.'}
+          </p>
+          {momentum.target > 0 ? <span className="shrink-0 text-xs tabular-nums text-slate-500">{momentum.thisWeek.total}/{momentum.target}</span> : null}
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+          <div className="h-full rounded-full bg-blue-600" style={{ width: `${momentum.progressPercent}%` }} />
+        </div>
+        <dl className="mt-5 grid grid-cols-4 gap-2 border-t border-slate-100 pt-4 text-center">
+          <div><dt className="text-[10px] uppercase text-slate-500">Calls</dt><dd className="mt-1 text-lg font-semibold tabular-nums text-slate-950">{momentum.thisWeek.call}</dd></div>
+          <div><dt className="text-[10px] uppercase text-slate-500">Emails</dt><dd className="mt-1 text-lg font-semibold tabular-nums text-slate-950">{momentum.thisWeek.email}</dd></div>
+          <div><dt className="text-[10px] uppercase text-slate-500">Meetings</dt><dd className="mt-1 text-lg font-semibold tabular-nums text-slate-950">{momentum.thisWeek.meeting}</dd></div>
+          <div><dt className="text-[10px] uppercase text-slate-500">Other</dt><dd className="mt-1 text-lg font-semibold tabular-nums text-slate-950">{momentum.thisWeek.other}</dd></div>
+        </dl>
+      </div>
+    </section>
+  )
+}
+
 export default function DailyDeskPage() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { profile } = useProfile()
-  const [activeTab, setActiveTab] = useState<DeskTab>(() => {
-    if (typeof window === 'undefined') return 'today'
-    const requested = new URLSearchParams(window.location.search).get('tab')
-    return requested === 'review' || requested === 'waiting' || requested === 'develop' ? requested : 'today'
-  })
+  const [activeTab, setActiveTab] = useState<DeskTab>('today')
   const [prospectDrafts, setProspectDrafts] = useState<Record<string, string>>({})
   const [isEvidenceImportOpen, setIsEvidenceImportOpen] = useState(false)
   const [isMemoryImportOpen, setIsMemoryImportOpen] = useState(false)
@@ -568,14 +640,17 @@ export default function DailyDeskPage() {
   })
   const marketProposalsQuery = useQuery<{ rows: MarketRecordProposalRow[] }>({
     queryKey: ['/api/activity-events?eventType=market_record_proposed&matchStatus=needs_review&limit=50'],
+    enabled: false,
   })
   const opportunityProposalsQuery = useQuery<{ rows: OpportunityProposalRow[] }>({
     queryKey: ['/api/activity-events?eventType=opportunity_promotion_proposed&matchStatus=needs_review&limit=50'],
+    enabled: false,
   })
   const propertyEvidenceQuery = useQuery<{ rows: PropertyEvidenceRow[] }>({
     queryKey: ['/api/activity-events?source=codex_property_title_audit&matchStatus=needs_review&limit=250'],
+    enabled: false,
   })
-  const propertyMemoryReviewQuery = usePropertyMemoryReview({ limit: 250 })
+  const propertyMemoryReviewQuery = usePropertyMemoryReview({ enabled: false, limit: 250 })
   const watchlistQuery = useQuery<IntelWatchlistResponse>({
     queryKey: ['/api/intel/watchlist?days=30&limit=12'],
   })
@@ -793,12 +868,16 @@ export default function DailyDeskPage() {
     review: queues.review.length + propertyMemoryItems.length + imports.length + marketProposals.length + opportunityProposals.length + propertyEvidence.length,
     develop: queues.develop.length,
   }
-  const isLoading = salesBriefQuery.isLoading || importsQuery.isLoading || marketProposalsQuery.isLoading || opportunityProposalsQuery.isLoading || propertyEvidenceQuery.isLoading
-  const hasError = salesBriefQuery.isError || importsQuery.isError || marketProposalsQuery.isError || opportunityProposalsQuery.isError || propertyEvidenceQuery.isError || propertyMemoryReviewQuery.isError
-  const generatedAt = formatWhen(salesBriefQuery.data?.generatedAt)
+  const isLoading = activityPulseQuery.isLoading
+  const hasError = activityPulseQuery.isError
+  const generatedAt = formatWhen(activityPulseQuery.data?.generatedAt)
   const activityPace = useMemo(
     () => buildDailyActivityPace(activityPulseQuery.data?.series || [], profile?.goals?.callsPerDay),
     [activityPulseQuery.data?.series, profile?.goals?.callsPerDay],
+  )
+  const weeklyMomentum = useMemo(
+    () => buildWeeklyActivityMomentum(activityPulseQuery.data?.series || []),
+    [activityPulseQuery.data?.series],
   )
   const pulseMetrics = [
     {
@@ -810,8 +889,8 @@ export default function DailyDeskPage() {
       icon: Activity,
       tone: 'text-blue-700 bg-blue-50',
     },
-    { group: 'Momentum', label: 'Active-day streak', value: `${activityPulseQuery.data?.streakDays ?? statsQuery.data?.streakDays ?? 0}d`, icon: Flame, tone: 'text-orange-700 bg-orange-50' },
-    { group: 'Pipeline', label: 'With a next move', value: `${salesBriefQuery.data?.pipelineHealth?.nextActionCoveragePercent ?? 0}%`, icon: Target, tone: 'text-violet-700 bg-violet-50' },
+    { group: 'This week', label: 'Outbound actions', value: weeklyMomentum.thisWeek.total, icon: Flame, tone: 'text-orange-700 bg-orange-50' },
+    { group: 'Last week', label: 'Outbound actions', value: weeklyMomentum.lastWeek.total, icon: Target, tone: 'text-violet-700 bg-violet-50' },
     { group: 'Response', label: 'Inbound emails (28d)', value: activityPulseQuery.data?.inboundEmail ?? 0, icon: Mail, tone: 'text-emerald-700 bg-emerald-50' },
   ]
   const maxDailyActivity = Math.max(1, ...(activityPulseQuery.data?.series.map((day) => day.total) || [1]))
@@ -822,7 +901,7 @@ export default function DailyDeskPage() {
         <PageHeader
           label="Broker desk"
           title="Today"
-          description="Make the moves, keep every follow-up visible, and let Level CRE capture the trail."
+          description="Track momentum, keep prospecting, and let Level CRE capture the trail."
           icon={ListTodo}
           actions={(
             <>
@@ -867,29 +946,6 @@ export default function DailyDeskPage() {
           })}
         </section>
 
-        <nav className="mt-5 grid grid-cols-2 gap-1 rounded-md border border-slate-200 bg-slate-200/70 p-1 sm:grid-cols-4" aria-label="Daily desk queues">
-          {([
-            ['today', 'Do now'],
-            ['waiting', 'Waiting'],
-            ['review', 'Review'],
-            ['develop', 'Develop'],
-          ] as Array<[DeskTab, string]>).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setActiveTab(id)}
-              aria-pressed={activeTab === id}
-              className={cn(
-                'flex min-h-11 items-center justify-between rounded-sm px-3 text-left text-sm font-semibold transition-colors',
-                activeTab === id ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:bg-white/60 hover:text-slate-950',
-              )}
-            >
-              {label}
-              <span className={cn('rounded-sm px-1.5 py-0.5 text-xs tabular-nums', activeTab === id ? 'bg-blue-50 text-blue-700' : 'bg-white/60 text-slate-700')}>{tabCounts[id]}</span>
-            </button>
-          ))}
-        </nav>
-
         {hasError ? (
           <div role="alert" className="mt-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
             The Daily Desk could not load all of its sources. Refresh once; if it persists, check capture and API health in Settings.
@@ -897,7 +953,11 @@ export default function DailyDeskPage() {
         ) : null}
 
         <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <section className="overflow-hidden rounded-md border border-slate-200 bg-white" aria-live="polite">
+          {activityPulseQuery.data ? <WeeklyMomentum data={activityPulseQuery.data} /> : (
+            <section className="min-h-[360px] animate-pulse rounded-md border border-slate-200 bg-white" aria-label="Loading weekly momentum" />
+          )}
+
+          <section className="hidden" aria-hidden="true">
             <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div>
                 <h2 className="text-sm font-semibold text-slate-950">
@@ -1281,7 +1341,7 @@ export default function DailyDeskPage() {
               </Button>
             </section>
 
-            <section className="rounded-md border border-slate-200 bg-white p-5">
+            <section className="hidden">
               <div className="flex items-center gap-2">
                 <Building2 className="h-4 w-4 text-slate-600" />
                 <h2 className="text-sm font-semibold text-slate-950">Pipeline health</h2>
@@ -1310,7 +1370,7 @@ export default function DailyDeskPage() {
               </dl>
             </section>
 
-            <section className="rounded-md border border-slate-200 bg-white p-5">
+            <section className="hidden">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className={cn(

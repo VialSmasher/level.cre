@@ -327,6 +327,13 @@ export async function importSalesActivityBatch(params: {
     interactionId: string;
     prospectId: string;
   } | null>;
+  findDuplicateSalesActivityImport?: (activity: NormalizedSalesActivity) => Promise<{
+    source: string;
+    externalActivityId: string;
+    interactionId: string | null;
+    prospectId: string | null;
+    matchStatus: string;
+  } | null>;
   reconcileEmailEvidence?: (activity: NormalizedSalesActivity) => Promise<number>;
   recordActivityEvent?: (input: {
     activity: NormalizedSalesActivity;
@@ -352,10 +359,32 @@ export async function importSalesActivityBatch(params: {
 
   for (const rawActivity of params.payload.activities) {
     try {
-      const activity = normalizeSalesActivityInput(rawActivity, {
+      let activity = normalizeSalesActivityInput(rawActivity, {
         source: params.payload.source,
         runId: params.payload.runId,
       });
+      if (params.findDuplicateSalesActivityImport) {
+        try {
+          const duplicateImport = await params.findDuplicateSalesActivityImport(activity);
+          if (duplicateImport) {
+            const incomingIdentity = {
+              source: activity.source,
+              externalActivityId: activity.externalActivityId,
+            };
+            activity = {
+              ...activity,
+              source: duplicateImport.source,
+              externalActivityId: duplicateImport.externalActivityId,
+              rawPayload: {
+                ...activity.rawPayload,
+                reconciledIdentity: incomingIdentity,
+              },
+            };
+          }
+        } catch (error) {
+          console.warn('Failed to reconcile a duplicate sales activity identity:', error);
+        }
+      }
       if (activity.listingId && params.requireEditAccess) {
         await params.requireEditAccess(activity.listingId);
       }

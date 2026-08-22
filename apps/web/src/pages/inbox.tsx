@@ -95,13 +95,13 @@ type EmailOutcome = 'contacted' | 'scheduled_meeting' | 'not_interested' | 'foll
 type FollowUpChoice = 'tomorrow' | '3d' | '1w' | '2w' | '1m' | 'none' | 'custom'
 
 const statusLabels: Record<EmailReviewStatus, string> = {
-  needs_context: 'Needs Context',
-  pending_review: 'Ready to Log',
-  auto_logged: 'Logged',
-  approved: 'Approved',
-  ignored: 'Archived',
+  needs_context: 'Unlinked',
+  pending_review: 'Matched, not logged',
+  auto_logged: 'Captured & linked',
+  approved: 'Logged manually',
+  ignored: 'Archived history',
   rejected: 'Rejected',
-  all: 'All',
+  all: 'All history',
 }
 
 const outcomeLabels: Record<EmailOutcome, string> = {
@@ -175,7 +175,7 @@ function prospectDisplayName(prospect: EmailReviewItem['prospect']) {
 
 export default function InboxPage() {
   const queryClient = useQueryClient()
-  const [status, setStatus] = useState<EmailReviewStatus>('all')
+  const [status, setStatus] = useState<EmailReviewStatus>('auto_logged')
   const [search, setSearch] = useState('')
   const [prospectDrafts, setProspectDrafts] = useState<Record<string, string>>({})
   const [logItem, setLogItem] = useState<EmailReviewItem | null>(null)
@@ -231,10 +231,10 @@ export default function InboxPage() {
     (counts?.rejected ?? 0)
   )
   const dashboardCards = [
-    { label: 'Captured', value: capturedCount, helper: 'Inbox and sent evidence', tone: 'text-slate-950' },
-    { label: 'Needs Context', value: counts?.needsContext ?? 0, helper: 'Optional cleanup', tone: 'text-amber-700' },
-    { label: 'Logged', value: counts?.autoLogged ?? 0, helper: 'Prospect interactions', tone: 'text-emerald-700' },
-    { label: 'Production credit', value: 'Outbound only', helper: 'Inbound emails are outcomes', tone: 'text-blue-700' },
+    { label: 'Captured', value: capturedCount, helper: 'Automatic email evidence', tone: 'text-slate-950' },
+    { label: 'Linked', value: (counts?.autoLogged ?? 0) + (counts?.approved ?? 0), helper: 'Attached to CRM activity', tone: 'text-emerald-700' },
+    { label: 'Unlinked', value: counts?.needsContext ?? 0, helper: 'Still counted; map context optional', tone: 'text-amber-700' },
+    { label: 'Production credit', value: 'Outbound only', helper: 'Inbound email is an outcome', tone: 'text-blue-700' },
   ]
 
   const invalidate = () => {
@@ -269,19 +269,7 @@ export default function InboxPage() {
     onSuccess: invalidate,
   })
 
-  const syncBccMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest('POST', '/api/email/outlook/sync-bcc', { days: 14 })
-      return response.json()
-    },
-    onSettled: invalidate,
-  })
-
   const refreshInbox = () => {
-    if (outlookConfig?.connected) {
-      syncBccMutation.mutate()
-      return
-    }
     invalidate()
   }
 
@@ -335,9 +323,9 @@ export default function InboxPage() {
     <div className="min-h-0 flex-1 bg-[#f3f5f7]">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
         <PageHeader
-          label="Business development ledger"
+          label="Automatic capture"
           title="Activity"
-          description="Captured outbound actions and inbound responses waiting for context, logging, or archive."
+          description="A quiet audit trail for captured sales activity. Routine emails should not require any work here."
           icon={InboxIcon}
           actions={(
             <>
@@ -386,20 +374,19 @@ export default function InboxPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="needs_context">Needs Context</SelectItem>
-                  <SelectItem value="pending_review">Ready to Log</SelectItem>
-                  <SelectItem value="auto_logged">Logged</SelectItem>
-                  <SelectItem value="ignored">Archived</SelectItem>
+                  <SelectItem value="auto_logged">Captured & linked</SelectItem>
+                  <SelectItem value="needs_context">Unlinked</SelectItem>
+                  <SelectItem value="pending_review">Matched, not logged</SelectItem>
+                  <SelectItem value="all">All history</SelectItem>
+                  <SelectItem value="ignored">Archived history</SelectItem>
                 </SelectContent>
               </Select>
               <Button
                 variant="outline"
                 size="icon"
                 onClick={refreshInbox}
-                disabled={syncBccMutation.isPending}
                 aria-label="Refresh"
-                title={outlookConfig?.connected ? 'Refresh captured activity and recover recent fallback copies' : 'Refresh captured activity'}
+                title="Refresh captured activity"
               >
                 <RefreshCcw className="h-4 w-4" />
               </Button>
@@ -516,7 +503,7 @@ export default function InboxPage() {
                           variant="outline"
                           className={item.prospect ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-600 border-slate-200'}
                         >
-                          {item.prospect ? 'Context attached' : 'Unattached'}
+                          {item.prospect ? 'Map context attached' : 'No map context'}
                         </Badge>
                         {item.matchStatus === 'needs_context' && isOutboundEmail(item) ? (
                           <Badge variant="outline" className="bg-blue-50 text-blue-700">
@@ -543,26 +530,30 @@ export default function InboxPage() {
                           </a>
                         </Button>
                       ) : null}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8"
-                        disabled={updateStatusMutation.isPending}
-                        onClick={() => updateStatusMutation.mutate({ id: item.id, matchStatus: 'ignored' })}
-                      >
-                        <Archive className="mr-2 h-4 w-4" />
-                        Archive
-                      </Button>
-                      <Button
-                        size="sm"
-                        className="h-8"
-                        disabled={!item.prospect || logInteractionMutation.isPending}
-                        onClick={() => openLogDialog(item)}
-                      >
-                        <CheckCircle2 className="mr-2 h-4 w-4" />
-                        Log
-                      </Button>
-                      {item.prospect ? (
+                      {item.matchStatus === 'needs_context' || item.matchStatus === 'pending_review' ? (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8"
+                            disabled={updateStatusMutation.isPending}
+                            onClick={() => updateStatusMutation.mutate({ id: item.id, matchStatus: 'ignored' })}
+                          >
+                            <Archive className="mr-2 h-4 w-4" />
+                            Archive
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="h-8"
+                            disabled={!item.prospect || logInteractionMutation.isPending}
+                            onClick={() => openLogDialog(item)}
+                          >
+                            <CheckCircle2 className="mr-2 h-4 w-4" />
+                            Log manually
+                          </Button>
+                        </>
+                      ) : null}
+                      {item.prospect && (item.matchStatus === 'needs_context' || item.matchStatus === 'pending_review') ? (
                         <Button
                           variant="outline"
                           size="sm"
@@ -570,7 +561,7 @@ export default function InboxPage() {
                           disabled={updateStatusMutation.isPending}
                           onClick={() => updateStatusMutation.mutate({ id: item.id, prospectId: null, listingId: null, matchStatus: 'needs_context' })}
                         >
-                          Clear Context
+                          Clear map context
                         </Button>
                       ) : null}
                     </div>
@@ -600,9 +591,9 @@ export default function InboxPage() {
                       <div className="mt-2 space-y-2">
                         <p className="text-sm text-slate-500">
                           {isInboundEmail(item)
-                            ? 'Captured as a response signal, not production credit. Attach context if it changes the next move.'
+                              ? 'Captured as a response signal, not production credit. Map context is optional.'
                             : isOutboundEmail(item)
-                              ? 'Captured as an outbound action. Attach context only if it is worth it.'
+                              ? 'Captured as an outbound action and counted. Attach map context only if it improves the map.'
                               : 'Confirm the direction before treating this as production. Attach context only if it is useful.'}
                         </p>
                         <Select
@@ -610,7 +601,7 @@ export default function InboxPage() {
                           onValueChange={(value) => setProspectDrafts((prev) => ({ ...prev, [item.id]: value }))}
                         >
                           <SelectTrigger className="bg-white" aria-label="Attach activity to company or prospect">
-                            <SelectValue placeholder="Choose company or prospect" />
+                            <SelectValue placeholder="Choose map company or prospect" />
                           </SelectTrigger>
                           <SelectContent>
                             {prospectOptions.map((prospect) => (
@@ -626,7 +617,7 @@ export default function InboxPage() {
                           disabled={!prospectDrafts[item.id] || updateStatusMutation.isPending}
                           onClick={() => updateStatusMutation.mutate({ id: item.id, prospectId: prospectDrafts[item.id], matchStatus: 'pending_review' })}
                         >
-                          Attach Context
+                          Attach map context
                         </Button>
                       </div>
                     )}

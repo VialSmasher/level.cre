@@ -7,6 +7,7 @@ export type DailyDeskAction = {
 };
 
 export type DailyActivityDay = {
+  date?: string;
   email: number;
   call: number;
   meeting: number;
@@ -38,6 +39,69 @@ export function describeSalesActivityDirection(activityStatus: unknown) {
     label: 'Direction unconfirmed',
     countsTowardProduction: false,
     linkLabel: 'Link activity',
+  };
+}
+
+function emptyActivityTotals() {
+  return { email: 0, call: 0, meeting: 0, other: 0, total: 0 };
+}
+
+function sumActivityDays(days: DailyActivityDay[]) {
+  return days.reduce((totals, day) => ({
+    email: totals.email + day.email,
+    call: totals.call + day.call,
+    meeting: totals.meeting + day.meeting,
+    other: totals.other + day.other,
+    total: totals.total + day.total,
+  }), emptyActivityTotals());
+}
+
+export function buildWeeklyActivityMomentum(series: DailyActivityDay[]) {
+  const datedDays = series.filter((day): day is DailyActivityDay & { date: string } => Boolean(day.date));
+  if (!datedDays.length) {
+    return {
+      thisWeek: emptyActivityTotals(),
+      lastWeek: emptyActivityTotals(),
+      target: 0,
+      remaining: 0,
+      progressPercent: 0,
+      activeDaysThisWeek: 0,
+      activeDaysLastWeek: 0,
+    };
+  }
+
+  const latestDate = new Date(`${datedDays.at(-1)!.date}T12:00:00Z`);
+  const dayFromMonday = (latestDate.getUTCDay() + 6) % 7;
+  const currentWeekStart = new Date(latestDate);
+  currentWeekStart.setUTCDate(latestDate.getUTCDate() - dayFromMonday);
+  const previousWeekStart = new Date(currentWeekStart);
+  previousWeekStart.setUTCDate(currentWeekStart.getUTCDate() - 7);
+  const toKey = (date: Date) => date.toISOString().slice(0, 10);
+  const currentStartKey = toKey(currentWeekStart);
+  const previousStartKey = toKey(previousWeekStart);
+
+  const thisWeekDays = datedDays.filter((day) => day.date >= currentStartKey);
+  const lastWeekDays = datedDays.filter((day) => day.date >= previousStartKey && day.date < currentStartKey);
+  const thisWeek = sumActivityDays(thisWeekDays);
+  const lastWeek = sumActivityDays(lastWeekDays);
+  const earlierActiveDays = datedDays.filter((day) => day.date < previousStartKey && day.total > 0);
+  const baseline = earlierActiveDays.length
+    ? Math.round((earlierActiveDays.reduce((sum, day) => sum + day.total, 0) / earlierActiveDays.length) * 5)
+    : 0;
+  const target = lastWeek.total || baseline;
+  const remaining = Math.max(0, target - thisWeek.total);
+  const progressPercent = target > 0
+    ? Math.min(100, Math.round((thisWeek.total / target) * 100))
+    : (thisWeek.total > 0 ? 100 : 0);
+
+  return {
+    thisWeek,
+    lastWeek,
+    target,
+    remaining,
+    progressPercent,
+    activeDaysThisWeek: thisWeekDays.filter((day) => day.total > 0).length,
+    activeDaysLastWeek: lastWeekDays.filter((day) => day.total > 0).length,
   };
 }
 

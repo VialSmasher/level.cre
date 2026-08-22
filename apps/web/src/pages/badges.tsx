@@ -5,17 +5,17 @@ import { Flame, Medal, Phone, Trophy, Zap } from 'lucide-react';
 import { apiRequest } from '@/lib/queryClient';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { SkillActivityRow } from '@level-cre/shared/schema';
 import { BADGE_TONES, buildSalesBadgeSummary, SalesBadgeCard } from '@/lib/salesBadges';
 
 const EDMONTON_TZ = 'America/Edmonton';
 
 export default function BadgesPage() {
-  const { data: recentActivities = [] } = useQuery<SkillActivityRow[]>({
-    queryKey: ['/api/skill-activities', 'badges'],
+  const { data: recentActivities = [] } = useQuery<any[]>({
+    queryKey: ['/api/automation/production-activities', 'badges'],
     queryFn: async () => {
-      const res = await apiRequest('GET', '/api/skill-activities?limit=1000');
-      return res.json();
+      const res = await apiRequest('GET', '/api/automation/production-activities?limit=5000');
+      const payload = await res.json();
+      return payload.rows || [];
     },
   });
 
@@ -50,7 +50,7 @@ export default function BadgesPage() {
               Badges
             </span>
             <Link
-              href="/leaderboard"
+              href="/app/standings"
               className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
             >
               <Trophy className="h-4 w-4" />
