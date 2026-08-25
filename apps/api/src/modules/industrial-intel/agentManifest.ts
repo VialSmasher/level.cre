@@ -1,6 +1,6 @@
 export const industrialIntelAgentManifest = {
   name: "Level CRE Industrial Intel",
-  version: "2026-08-08",
+  version: "2026-08-25",
   purpose:
     "Agent-facing contract for SurveySync and Industrial Intel inventory, dossiers, source assets, facts, requirements, and client survey maps.",
   auth: {
@@ -17,6 +17,12 @@ export const industrialIntelAgentManifest = {
         requiredEnvironment: ["INTEL_AGENT_API_KEY", "INTEL_AGENT_USER_ID"],
       },
       {
+        type: "account_intelligence_agent_api_key",
+        header: "Authorization: Bearer <ACCOUNT_INTELLIGENCE_AGENT_API_KEY>",
+        alternateHeader: "X-LevelCRE-Account-Intelligence-Key: <ACCOUNT_INTELLIGENCE_AGENT_API_KEY>",
+        requiredEnvironment: ["ACCOUNT_INTELLIGENCE_AGENT_API_KEY", "ACCOUNT_INTELLIGENCE_AGENT_USER_ID"],
+      },
+      {
         type: "local_demo",
         header: "X-Demo-Mode: true",
         environment: "development only",
@@ -30,9 +36,22 @@ export const industrialIntelAgentManifest = {
     "Prefer exact parcel identity (memory key, municipal account, LINC/title, or legal identity) before creating a dossier; address-only matches require broker review.",
     "Resolve map identity before proposing a canonical record; ambiguous matches remain in Daily Desk Review.",
     "Agents may propose map records and opportunities but may not approve them or infer won/lost stages.",
+    "Account-intelligence evidence is append-only; biography disclosures do not prove current control, and current or inferred relationship claims require broker review.",
+    "Never infer an account experience asset class, geography, exclusivity, or Canadian coverage from a broker's general specialty or an unrelated transaction.",
     "When extraction confidence is low or the property is an intersection/land parcel, keep address nullable and store location_description as a fact.",
   ],
   capabilities: {
+    accountIntelligence: {
+      description: "Search and maintain source-backed U.S. broker, corporate-account, firm, asset-class, and relationship experience intelligence.",
+      endpoints: [
+        { method: "GET", path: "/api/intel/account-intelligence/search", description: "Search people, corporate accounts, firms, overlaps, and evidence-backed asset-class experience." },
+        { method: "GET", path: "/api/intel/account-intelligence/accounts/:id/brief", description: "Read one account with broker, firm, experience, status, and evidence context." },
+        { method: "GET", path: "/api/intel/account-intelligence/people/:id/brief", description: "Read one broker or corporate contact with every account experience and its evidence." },
+        { method: "POST", path: "/api/intel/agent/account-intelligence/batches", description: "Idempotently match or create people/accounts and append evidence-backed experience. Current or inferred claims route to broker Review." },
+        { method: "GET", path: "/api/intel/account-intelligence/review", description: "Read ambiguous identities and consequential current-account claims awaiting broker review." },
+        { method: "PATCH", path: "/api/intel/account-intelligence/experiences/:id/review", description: "Broker JWT only. Approve or reject a proposed account experience without deleting its evidence." },
+      ],
+    },
     brokerageMemory: {
       endpoints: [
         { method: "POST", path: "/api/intel/brokerage-memory/preview", description: "Parse and resolve an enrichment document with no database writes." },

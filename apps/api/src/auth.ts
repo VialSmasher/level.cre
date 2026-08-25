@@ -68,6 +68,26 @@ function getConfiguredMarketRecordAgent(req: Request): { id: string; email?: str
   }
 }
 
+function getConfiguredAccountIntelligenceAgent(req: Request): { id: string; email?: string; agentName?: string } | null {
+  const expectedToken = process.env.ACCOUNT_INTELLIGENCE_AGENT_API_KEY
+  const userId = process.env.ACCOUNT_INTELLIGENCE_AGENT_USER_ID || process.env.INTEL_AGENT_USER_ID
+  if (!expectedToken || !userId) return null
+
+  const authHeader = req.headers.authorization
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
+  const headerToken = typeof req.headers['x-levelcre-account-intelligence-key'] === 'string'
+    ? req.headers['x-levelcre-account-intelligence-key']
+    : null
+  const suppliedTokens = [bearerToken, headerToken].filter((token): token is string => Boolean(token))
+  if (!suppliedTokens.some((token) => safeTokenEquals(token, expectedToken))) return null
+
+  return {
+    id: userId,
+    email: process.env.ACCOUNT_INTELLIGENCE_AGENT_EMAIL || process.env.INTEL_AGENT_EMAIL || undefined,
+    agentName: process.env.ACCOUNT_INTELLIGENCE_AGENT_NAME || 'codex-account-intelligence',
+  }
+}
+
 // Verify JWT using Supabase shared secret (HS256)
 async function verifyBearerJWT(token: string): Promise<JWTPayload | null> {
   try {
@@ -232,8 +252,25 @@ export async function requireMarketRecordProposalAuth(req: Request, res: Respons
   return requireAuth(req, res, next)
 }
 
+export async function requireAccountIntelligenceAuth(req: Request, res: Response, next: NextFunction) {
+  const accountAgentUser = getConfiguredAccountIntelligenceAgent(req)
+    || getConfiguredMarketRecordAgent(req)
+  if (accountAgentUser) {
+    ;(req as any).user = {
+      id: accountAgentUser.id,
+      email: accountAgentUser.email,
+      role: 'account_intelligence_agent',
+      agentName: accountAgentUser.agentName,
+    }
+    return next()
+  }
+
+  return requireAuth(req, res, next)
+}
+
 export async function requireBrokerAuth(req: Request, res: Response, next: NextFunction) {
-  const scopedAgent = getConfiguredMarketRecordAgent(req)
+  const scopedAgent = getConfiguredAccountIntelligenceAgent(req)
+    || getConfiguredMarketRecordAgent(req)
     || getConfiguredSalesActivityAgent(req)
     || getConfiguredAgentUser(req)
   if (scopedAgent) {
@@ -242,7 +279,7 @@ export async function requireBrokerAuth(req: Request, res: Response, next: NextF
 
   return requireAuth(req, res, () => {
     const role = String((req as any).user?.role || '')
-    if (role === 'agent' || role === 'market_record_agent' || role === 'sales_activity_agent') {
+    if (role === 'agent' || role === 'account_intelligence_agent' || role === 'market_record_agent' || role === 'sales_activity_agent') {
       return res.status(403).json({ message: 'Broker approval is required for this action.' })
     }
     return next()

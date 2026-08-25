@@ -51,6 +51,7 @@ import path from 'path';
 import { XP_VALUES, actionForInteractionType, xpForInteractionType } from './lib/gamification';
 import { ProspectReferenceError, requireActiveOwnedProspect } from './lib/prospectReferenceService';
 import { registerIndustrialIntelRoutes } from './modules/industrial-intel/registerRoutes';
+import { registerAccountIntelligenceRoutes } from './modules/account-intelligence/registerRoutes';
 import {
   buildDataQualityReview,
   buildFollowUpReview,
@@ -7432,6 +7433,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   registerIndustrialIntelRoutes(app);
+  registerAccountIntelligenceRoutes(app);
 
   const httpServer = createServer(app);
 

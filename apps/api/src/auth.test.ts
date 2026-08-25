@@ -1,11 +1,24 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { requireAuth, requireBrokerAuth, requireMarketRecordProposalAuth, requireSalesActivityAuth } from './auth'
+import {
+  requireAccountIntelligenceAuth,
+  requireAuth,
+  requireBrokerAuth,
+  requireMarketRecordProposalAuth,
+  requireSalesActivityAuth,
+} from './auth'
 
 function requestWithSalesKey(token: string) {
   return {
     headers: { 'x-levelcre-sales-key': token },
+    app: { get: () => 'production' },
+  } as any
+}
+
+function requestWithAccountIntelligenceKey(token: string) {
+  return {
+    headers: { 'x-levelcre-account-intelligence-key': token },
     app: { get: () => 'production' },
   } as any
 }
@@ -174,5 +187,72 @@ test('scoped market-record credentials cannot cross the broker approval gate', a
     else process.env.MARKET_RECORD_AGENT_API_KEY = previousKey
     if (previousUserId === undefined) delete process.env.MARKET_RECORD_AGENT_USER_ID
     else process.env.MARKET_RECORD_AGENT_USER_ID = previousUserId
+  }
+})
+
+test('account-intelligence credentials can ingest findings but cannot approve their own conclusions', async () => {
+  const previousKey = process.env.ACCOUNT_INTELLIGENCE_AGENT_API_KEY
+  const previousUserId = process.env.ACCOUNT_INTELLIGENCE_AGENT_USER_ID
+  process.env.ACCOUNT_INTELLIGENCE_AGENT_API_KEY = 'account-intelligence-key'
+  process.env.ACCOUNT_INTELLIGENCE_AGENT_USER_ID = 'patrick-user-id'
+
+  try {
+    const request = requestWithAccountIntelligenceKey('account-intelligence-key')
+    const response = responseRecorder()
+    let nextCalled = false
+    await requireAccountIntelligenceAuth(request, response, () => {
+      nextCalled = true
+    })
+
+    assert.equal(nextCalled, true)
+    assert.equal(request.user.id, 'patrick-user-id')
+    assert.equal(request.user.role, 'account_intelligence_agent')
+
+    const brokerRequest = requestWithAccountIntelligenceKey('account-intelligence-key')
+    const brokerResponse = responseRecorder()
+    let brokerNextCalled = false
+    await requireBrokerAuth(brokerRequest, brokerResponse, () => {
+      brokerNextCalled = true
+    })
+
+    assert.equal(brokerNextCalled, false)
+    assert.equal(brokerResponse.statusCode, 403)
+  } finally {
+    if (previousKey === undefined) delete process.env.ACCOUNT_INTELLIGENCE_AGENT_API_KEY
+    else process.env.ACCOUNT_INTELLIGENCE_AGENT_API_KEY = previousKey
+    if (previousUserId === undefined) delete process.env.ACCOUNT_INTELLIGENCE_AGENT_USER_ID
+    else process.env.ACCOUNT_INTELLIGENCE_AGENT_USER_ID = previousUserId
+  }
+})
+
+test('sales-activity credentials do not gain account-intelligence access', async () => {
+  const previousSalesKey = process.env.SALES_ACTIVITY_AGENT_API_KEY
+  const previousSalesUserId = process.env.SALES_ACTIVITY_AGENT_USER_ID
+  const previousIntelKey = process.env.INTEL_AGENT_API_KEY
+  const previousJwtSecret = process.env.SUPABASE_JWT_SECRET
+  process.env.SALES_ACTIVITY_AGENT_API_KEY = 'sales-only-key'
+  process.env.SALES_ACTIVITY_AGENT_USER_ID = 'patrick-user-id'
+  delete process.env.INTEL_AGENT_API_KEY
+  delete process.env.SUPABASE_JWT_SECRET
+
+  try {
+    const request = requestWithSalesKey('sales-only-key')
+    const response = responseRecorder()
+    let nextCalled = false
+    await requireAccountIntelligenceAuth(request, response, () => {
+      nextCalled = true
+    })
+
+    assert.equal(nextCalled, false)
+    assert.equal(response.statusCode, 401)
+  } finally {
+    if (previousSalesKey === undefined) delete process.env.SALES_ACTIVITY_AGENT_API_KEY
+    else process.env.SALES_ACTIVITY_AGENT_API_KEY = previousSalesKey
+    if (previousSalesUserId === undefined) delete process.env.SALES_ACTIVITY_AGENT_USER_ID
+    else process.env.SALES_ACTIVITY_AGENT_USER_ID = previousSalesUserId
+    if (previousIntelKey === undefined) delete process.env.INTEL_AGENT_API_KEY
+    else process.env.INTEL_AGENT_API_KEY = previousIntelKey
+    if (previousJwtSecret === undefined) delete process.env.SUPABASE_JWT_SECRET
+    else process.env.SUPABASE_JWT_SECRET = previousJwtSecret
   }
 })

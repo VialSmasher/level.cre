@@ -308,7 +308,7 @@ export function registerIndustrialIntelRoutes(app: Express): void {
     res.setHeader("X-Request-Id", requestId);
     res.on("finish", () => {
       const user = (req as any)?.user;
-      if (user?.role !== "agent") return;
+      if (!["agent", "market_record_agent", "sales_activity_agent", "account_intelligence_agent"].includes(String(user?.role || ""))) return;
       const path = String(req.originalUrl || req.url || "").split("?")[0] || "/api/intel";
       void (async () => {
         await ensureUser(user.id, user.email || null);
