@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
-import { AlertTriangle, Archive, CheckCircle2, ExternalLink, Inbox as InboxIcon, Mail, RefreshCcw, Search, Settings, ShieldCheck, Sparkles } from 'lucide-react'
+import { AlertTriangle, Archive, CheckCircle2, ExternalLink, Mail, RefreshCcw, Search, Settings, ShieldCheck, Sparkles } from 'lucide-react'
 import { Link } from 'wouter'
+import { ActivityFootprint } from '@/features/activity/ActivityFootprint'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,6 +14,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { apiRequest } from '@/lib/queryClient'
+import { cn } from '@/lib/utils'
+import { useAuth } from '@/contexts/AuthContext'
 import type { Prospect } from '@level-cre/shared/schema'
 
 type EmailReviewStatus = 'needs_context' | 'pending_review' | 'auto_logged' | 'approved' | 'ignored' | 'rejected' | 'all'
@@ -187,7 +190,9 @@ function prospectDisplayName(prospect: EmailReviewItem['prospect']) {
 
 export default function InboxPage() {
   const queryClient = useQueryClient()
-  const [status, setStatus] = useState<EmailReviewStatus>('auto_logged')
+  const { isDemoMode } = useAuth()
+  const [view, setView] = useState<'map' | 'audit'>('map')
+  const [status, setStatus] = useState<EmailReviewStatus>('needs_context')
   const [search, setSearch] = useState('')
   const [prospectDrafts, setProspectDrafts] = useState<Record<string, string>>({})
   const [logItem, setLogItem] = useState<EmailReviewItem | null>(null)
@@ -203,10 +208,12 @@ export default function InboxPage() {
 
   const { data: outlookConfig } = useQuery<OutlookConfig>({
     queryKey: ['/api/email/outlook/config'],
+    enabled: view === 'audit',
   })
 
   const { data: inboundConfig } = useQuery<InboundEmailConfig>({
     queryKey: ['/api/email/inbound/config'],
+    enabled: view === 'audit',
   })
 
   const { data: captureHealth, error: captureHealthError } = useQuery<CaptureHealth>({
@@ -220,6 +227,7 @@ export default function InboxPage() {
 
   const { data: items = [], isLoading } = useQuery<EmailReviewItem[]>({
     queryKey: [`/api/email/review?status=${status}`],
+    enabled: view === 'audit',
   })
 
   const filteredItems = useMemo(() => {
@@ -247,6 +255,7 @@ export default function InboxPage() {
     (counts?.ignored ?? 0) +
     (counts?.rejected ?? 0)
   )
+  const reviewCount = (counts?.needsContext ?? 0) + (counts?.pendingReview ?? 0)
   const dashboardCards = [
     { label: 'Captured', value: capturedCount, helper: 'Automatic email evidence', tone: 'text-slate-950' },
     { label: 'Linked', value: (counts?.autoLogged ?? 0) + (counts?.approved ?? 0), helper: 'Attached to CRM activity', tone: 'text-emerald-700' },
@@ -338,13 +347,12 @@ export default function InboxPage() {
   }
 
   return (
-    <div className="min-h-0 flex-1 bg-[#f3f5f7]">
+    <div className="min-h-0 flex-1 bg-[#f6f8fb]">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
         <PageHeader
-          label="Automatic capture"
+          label="Activity history"
           title="Activity"
-          description="A quiet audit trail for captured sales activity. Routine emails should not require any work here."
-          icon={InboxIcon}
+          description="See where outbound effort is landing over time. Capture review stays available when something needs attention."
           actions={(
             <>
             <Badge
@@ -375,6 +383,53 @@ export default function InboxPage() {
             </div>
           </div>
         ) : null}
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex w-fit rounded-lg border border-slate-200 bg-white p-1 shadow-sm" role="tablist" aria-label="Activity views">
+            <button
+              type="button"
+              role="tab"
+              id="activity-map-tab"
+              aria-selected={view === 'map'}
+              aria-controls="activity-map-panel"
+              onClick={() => setView('map')}
+              className={cn(
+                'h-9 rounded-md px-4 text-sm font-semibold transition',
+                view === 'map' ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
+              )}
+            >
+              Effort map
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="activity-audit-tab"
+              aria-selected={view === 'audit'}
+              aria-controls="activity-audit-panel"
+              onClick={() => setView('audit')}
+              className={cn(
+                'inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-semibold transition',
+                view === 'audit' ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
+              )}
+            >
+              Audit & exceptions
+              {reviewCount > 0 ? (
+                <span className={cn(
+                  'rounded-full px-1.5 py-0.5 text-[10px] leading-none',
+                  view === 'audit' ? 'bg-white text-slate-950' : 'bg-amber-100 text-amber-800',
+                )}>{reviewCount}</span>
+              ) : null}
+            </button>
+          </div>
+          <p className="max-w-xl text-xs leading-5 text-slate-500">The map shows confirmed production. Audit keeps the evidence and reconciliation tools available without making them the main event.</p>
+        </div>
+
+        {view === 'map' ? (
+          <div id="activity-map-panel" role="tabpanel" aria-labelledby="activity-map-tab">
+            <ActivityFootprint prospects={prospects} isDemoMode={isDemoMode} />
+          </div>
+        ) : (
+          <div id="activity-audit-panel" role="tabpanel" aria-labelledby="activity-audit-tab" className="flex flex-col gap-5">
 
         <section className="grid grid-cols-2 overflow-hidden rounded-md border border-slate-200 bg-white lg:grid-cols-4" aria-label="Activity totals">
           {dashboardCards.map((card, index) => (
@@ -506,8 +561,17 @@ export default function InboxPage() {
           ) : filteredItems.length === 0 ? (
             <Card className="rounded-none border-0 shadow-none">
               <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
-                <Mail className="h-8 w-8 text-slate-300" />
-                <p className="text-sm font-medium text-slate-700">No {statusLabels[status].toLowerCase()} emails</p>
+                {status === 'needs_context' ? (
+                  <ShieldCheck className="h-8 w-8 text-emerald-500" />
+                ) : (
+                  <Mail className="h-8 w-8 text-slate-300" />
+                )}
+                <p className="text-sm font-medium text-slate-700">
+                  {status === 'needs_context'
+                    ? 'Everything captured here is reconciled'
+                    : `No ${statusLabels[status].toLowerCase()} emails`}
+                </p>
+                {status === 'needs_context' ? <p className="text-xs text-slate-500">There are no email records waiting for map context.</p> : null}
               </CardContent>
             </Card>
           ) : (
@@ -660,6 +724,8 @@ export default function InboxPage() {
             ))
           )}
         </div>
+          </div>
+        )}
       </div>
       <Dialog open={Boolean(logItem)} onOpenChange={(open) => !open && setLogItem(null)}>
         <DialogContent className="max-w-2xl">

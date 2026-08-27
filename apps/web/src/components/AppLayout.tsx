@@ -57,7 +57,13 @@ export function AppLayout({ children }: AppLayoutProps) {
   const isActive = (path: string) => {
     if (path === '/app') return location === '/app' || location === '/app/'
     if (path === '/app/workspaces') return location === path || location.startsWith(`${path}/`)
-    if (path === '/broker-stats') return location === path || location === '/leaderboard' || location === '/badges'
+    if (path === '/broker-stats') {
+      return location === path
+        || location === '/leaderboard'
+        || location === '/badges'
+        || location === '/app/standings'
+        || location.startsWith('/app/standings/')
+    }
     return location === path
   }
 

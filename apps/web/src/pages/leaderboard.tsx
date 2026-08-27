@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowUpRight, Crown, Medal, ShieldCheck, Sparkles, Target, Trophy, Users } from 'lucide-react';
+import { ArrowUpRight, Crown, Medal, ShieldCheck, Sparkles, Target, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { ScorecardPageHeader, ScorecardPageShell } from '@/components/scorecard/ScorecardPageHeader';
 import { useAuth } from '@/contexts/AuthContext';
-import { Link } from 'wouter';
 
 type LeaderboardEntry = {
   user_id: string;
@@ -59,35 +59,12 @@ export default function LeaderboardPage() {
   const topThree = leaderboard.slice(0, 3);
 
   return (
-    <div className="min-h-screen bg-[#f6f8fb] p-4 md:p-6">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Scorecard</p>
-            <h1 className="text-2xl font-black tracking-tight text-slate-950 md:text-3xl">Market Standings</h1>
-            <p className="mt-1 text-sm text-slate-600">See where you stand, who is leading, and the XP gap to climb.</p>
-          </div>
-          <div className="flex w-fit items-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-            <Link
-              href="/broker-stats"
-              className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
-            >
-              <Trophy className="h-4 w-4" />
-              Overview
-            </Link>
-            <Link
-              href="/badges"
-              className="inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-950"
-            >
-              <Medal className="h-4 w-4" />
-              Badges
-            </Link>
-            <span className="inline-flex h-9 items-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white">
-              <Trophy className="h-4 w-4" />
-              Standings
-            </span>
-          </div>
-        </div>
+    <ScorecardPageShell>
+      <ScorecardPageHeader
+        activeView="standings"
+        title="Market Standings"
+        description="See where you stand, who is leading, and the XP gap to climb."
+      />
 
         <div className="grid gap-4 md:grid-cols-4">
           <Card className="border-slate-200 bg-white shadow-sm">
@@ -195,11 +172,9 @@ export default function LeaderboardPage() {
                 </CardTitle>
                 <p className="mt-1 text-sm text-slate-600">All-time level and XP rankings for the workspace.</p>
               </div>
-              <div className="flex w-full max-w-md rounded-full border border-slate-200 bg-slate-50 p-1 text-xs font-semibold text-slate-600 md:w-auto">
-                <span className="rounded-full bg-white px-4 py-2 text-blue-700 shadow-sm">All time</span>
-                <span className="px-4 py-2 text-slate-400">This week</span>
-                <span className="px-4 py-2 text-slate-400">This month</span>
-              </div>
+              <span className="w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">
+                All-time standings
+              </span>
             </div>
           </CardHeader>
           <CardContent>
@@ -275,7 +250,6 @@ export default function LeaderboardPage() {
             )}
           </CardContent>
         </Card>
-      </div>
-    </div>
+    </ScorecardPageShell>
   );
 }
