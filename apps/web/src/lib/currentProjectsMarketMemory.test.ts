@@ -102,6 +102,39 @@ test('collapses multiple title identities at one coordinate into one anchor', ()
   assert.match(preview.anchors[0]?.reviewReasons.join(' ') || '', /2 title identities share this coordinate/)
 })
 
+test('designates listing-prospect records explicitly and from the legacy listing-pursuit folder contract', () => {
+  const base = record({})
+  const explicit = record({
+    titleIdentity: 'linc:explicit-listing',
+    sourceTitle: { ...base.sourceTitle, linc: '010', source_sha256: 'hash-explicit-listing' },
+    derived: { ...base.derived, prospectTypes: ['listing_prospect'] },
+  })
+  const legacy = record({
+    titleIdentity: 'linc:legacy-listing',
+    sourceTitle: {
+      ...base.sourceTitle,
+      folder_name: 'PL - Listing Prospects',
+      linc: '011',
+      source_sha256: 'hash-legacy-listing',
+    },
+    coordinate: { ...base.coordinate, latitude: 53.6, longitude: -113.6, accountNumber: '2000' },
+    derived: { ...base.derived, suggestedUse: 'listing_pursuit' },
+  })
+  const preview = parseCurrentProjectsMarketMemory(JSON.stringify({
+    schemaVersion: 1,
+    generatedAt: '2026-08-30T12:00:00.000Z',
+    levelCreWriteAuthorized: false,
+    counts: { identities: 2, lookups: 2 },
+    records: [explicit, legacy],
+  }))
+
+  assert.equal(preview.anchors.length, 2)
+  assert.deepEqual(preview.anchors.map((anchor) => anchor.prospectTypes), [
+    ['listing_prospect'],
+    ['listing_prospect'],
+  ])
+})
+
 test('resolves an exact existing map record without creating another anchor identity', () => {
   const preview = parseCurrentProjectsMarketMemory(JSON.stringify(filePayload()))
   const prospects = [{

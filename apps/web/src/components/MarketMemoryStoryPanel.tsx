@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { MarketMemoryAnchor, MarketMemoryLegalIdentity } from '@/lib/currentProjectsMarketMemory'
+import { PROSPECT_TYPE_META } from '@level-cre/shared/schema'
 
 type Props = {
   anchor: MarketMemoryAnchor
@@ -114,10 +115,21 @@ export function MarketMemoryStoryPanel({
       <div className="border-b border-slate-200 px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <Badge variant="outline" className={meta.className}>
-              <meta.Icon className="mr-1 h-3 w-3" aria-hidden />
-              {meta.label}
-            </Badge>
+            <div className="flex flex-wrap gap-1.5">
+              <Badge variant="outline" className={meta.className}>
+                <meta.Icon className="mr-1 h-3 w-3" aria-hidden />
+                {meta.label}
+              </Badge>
+              {(anchor.prospectTypes || []).map((prospectType) => (
+                <Badge
+                  key={prospectType}
+                  variant="outline"
+                  className="border-teal-200 bg-teal-50 text-teal-800"
+                >
+                  {PROSPECT_TYPE_META[prospectType].label}
+                </Badge>
+              ))}
+            </div>
             <h2 ref={titleRef} id={titleId} tabIndex={-1} className="mt-2 text-base font-semibold leading-5 text-slate-950 outline-none">{anchor.address}</h2>
           </div>
           <Button type="button" variant="ghost" size="sm" className="h-11 w-11 shrink-0 p-0" onClick={onClose} aria-label="Close property story">

@@ -3,7 +3,10 @@ import type { Pool, PoolClient } from 'pg'
 import { z } from 'zod'
 
 import {
+  getMarketMemoryProspectTypes,
+  inferProspectTypes,
   normalizeMarketAddress,
+  normalizeMarketMemoryProspectTypes,
   parseCurrentProjectsMarketMemoryValue,
   resolveMarketMemoryAgainstEntities,
   type CurrentProjectsMarketMemoryPreview,
@@ -117,7 +120,7 @@ function numberOrNull(value: unknown) {
 }
 
 function itemToAnchor(row: BrokerageMemoryItemRow): MarketMemoryAnchor {
-  const anchor = row.anchor_payload
+  const anchor = normalizeMarketMemoryProspectTypes(row.anchor_payload)
   return {
     ...anchor,
     resolution: (row.resolution_json || undefined) as MarketMemoryAnchor['resolution'],
@@ -175,7 +178,7 @@ function safeResolution(resolution: MarketMemoryAnchor['resolution']) {
 
 function stagingAnchorPayload(anchor: MarketMemoryAnchor): MarketMemoryAnchor {
   const { resolution: _resolution, persistence: _persistence, previewLayer: _previewLayer, ...canonical } = anchor
-  return canonical
+  return normalizeMarketMemoryProspectTypes(canonical)
 }
 
 function uniqueStrings(values: Array<string | null | undefined>) {
@@ -191,6 +194,11 @@ export function buildApprovedBrokerageMemoryPayload(
     ? previousValue
     : {}) as Partial<MarketMemoryAnchor>
   const previousIdentities = Array.isArray(previous.legalIdentities) ? previous.legalIdentities : []
+  const previousProspectTypes = getMarketMemoryProspectTypes({
+    projects: previous.projects || [],
+    suggestedUses: previous.suggestedUses || [],
+    prospectTypes: previous.prospectTypes,
+  })
   const identityKey = (identity: MarketMemoryAnchor['legalIdentities'][number]) => (
     identity.sourceHash || identity.titleIdentity || identity.sourcePath
   )
@@ -260,6 +268,13 @@ export function buildApprovedBrokerageMemoryPayload(
     suggestedUses: decisions.context
       ? uniqueStrings([...(previous.suggestedUses || []), ...anchor.suggestedUses])
       : previous.suggestedUses || [],
+    prospectTypes: decisions.context
+      ? inferProspectTypes({
+          explicit: [...previousProspectTypes, ...anchor.prospectTypes],
+          suggestedUses: [...(previous.suggestedUses || []), ...anchor.suggestedUses],
+          projects: [...(previous.projects || []), ...anchor.projects],
+        })
+      : previousProspectTypes,
     confidence: anchor.confidence,
     baseLayer: anchor.baseLayer,
   }
@@ -1219,7 +1234,7 @@ export async function getBrokerageMemoryMap(params: { pool: Pool; userId: string
       const payload = row.memory_payload || ({} as MarketMemoryAnchor)
       const displayLat = numberOrNull(row.prospect_lat) ?? numberOrNull(row.lat) ?? payload.latitude
       const displayLng = numberOrNull(row.prospect_lng) ?? numberOrNull(row.lng) ?? payload.longitude
-      return {
+      return normalizeMarketMemoryProspectTypes({
         ...payload,
         id: payload.id || `dossier:${row.id}`,
         address: payload.address || row.address || row.title,
@@ -1234,7 +1249,7 @@ export async function getBrokerageMemoryMap(params: { pool: Pool; userId: string
           sourceFileName: row.source_file_name,
           savedAt: iso(row.approved_at),
         },
-      }
+      })
     })
   const pendingAnchors = pendingRows.rows.map(itemToAnchor)
   const latest = latestImport.rows[0]

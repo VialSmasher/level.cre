@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
 import { z } from "zod";
+import { ProspectType } from "@level-cre/shared/schema";
 import { ActivityEventBatchSchema, importActivityEventBatch } from "./activityEventService";
 import { resolveMarketEntitiesForUser } from "./marketEntityResolver";
 
@@ -27,6 +28,7 @@ export const MarketRecordProposalInputSchema = z.object({
   contactPhone: z.string().trim().max(80).nullable().optional(),
   websiteUrl: z.string().trim().url().max(2000).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
+  prospectTypes: z.array(ProspectType).max(3).default([]),
   placeId: z.string().trim().max(240).nullable().optional(),
   googleMapsUrl: z.string().trim().url().max(2000).nullable().optional(),
   evidenceUrl: z.string().trim().url().max(2000).nullable().optional(),

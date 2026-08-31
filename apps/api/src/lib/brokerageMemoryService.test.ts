@@ -50,6 +50,7 @@ function anchor(): MarketMemoryAnchor {
     reviewReasons: [],
     reviewStatuses: ['Verified'],
     suggestedUses: ['Master enrichment'],
+    prospectTypes: [],
     confidence: 'high',
     baseLayer: 'market_memory',
   }

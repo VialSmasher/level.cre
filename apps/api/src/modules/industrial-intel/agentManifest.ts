@@ -1,6 +1,6 @@
 export const industrialIntelAgentManifest = {
   name: "Level CRE Industrial Intel",
-  version: "2026-08-08",
+  version: "2026-08-30",
   purpose:
     "Agent-facing contract for SurveySync and Industrial Intel inventory, dossiers, source assets, facts, requirements, and client survey maps.",
   auth: {
@@ -30,10 +30,16 @@ export const industrialIntelAgentManifest = {
     "Prefer exact parcel identity (memory key, municipal account, LINC/title, or legal identity) before creating a dossier; address-only matches require broker review.",
     "Resolve map identity before proposing a canonical record; ambiguous matches remain in Daily Desk Review.",
     "Agents may propose map records and opportunities but may not approve them or infer won/lost stages.",
+    "Prospect type is independent from lifecycle status. Use listing_prospect, tenant_prospect, or buyer_prospect without changing prospect/contacted/listing/client/no_go/development.",
     "When extraction confidence is low or the property is an intersection/land parcel, keep address nullable and store location_description as a fact.",
   ],
   capabilities: {
     brokerageMemory: {
+      prospectTypeContract: {
+        field: "records[].derived.prospectTypes",
+        values: ["listing_prospect", "tenant_prospect", "buyer_prospect"],
+        legacyInference: "listing_pursuit and PL - Listing Prospects imply listing_prospect; tenant_requirement and PL- Tenant Prospects imply tenant_prospect.",
+      },
       endpoints: [
         { method: "POST", path: "/api/intel/brokerage-memory/preview", description: "Parse and resolve an enrichment document with no database writes." },
         { method: "POST", path: "/api/intel/brokerage-memory/imports", description: "Stage one proposal per canonical property in broker Review; never creates a prospect or awards XP." },
@@ -46,6 +52,7 @@ export const industrialIntelAgentManifest = {
       endpoints: [
         { method: "GET", path: "/api/intel/agent-manifest", description: "Read the active agent contract." },
         { method: "GET", path: "/api/intel/agent-events", description: "Read recent agent audit events for the authenticated actor." },
+        { method: "POST", path: "/api/agent/market-record-proposals", description: "Propose a map record with optional prospectTypes; broker approval remains required." },
         {
           method: "POST",
           path: "/api/intel/agent/surveysync-jobs",

@@ -32,6 +32,15 @@ export const ProspectStatus = z.enum([
   'development',
 ]);
 
+// Prospect type describes the brokerage pursuit, independently from lifecycle
+// status. A listing prospect can move from prospect -> contacted -> listing
+// without losing the original business-development classification.
+export const ProspectType = z.enum([
+  'listing_prospect',
+  'tenant_prospect',
+  'buyer_prospect',
+]);
+
 // Follow-up timeframe enum
 export const FollowUpTimeframe = z.enum([
   '1_month',
@@ -109,6 +118,7 @@ export const InsertProspectSchema = ProspectSchema.omit({
 export type Prospect = z.infer<typeof ProspectSchema>;
 export type InsertProspect = z.infer<typeof InsertProspectSchema>;
 export type ProspectStatusType = z.infer<typeof ProspectStatus>;
+export type ProspectTypeType = z.infer<typeof ProspectType>;
 
 // Unified status metadata: labels + colors used across app
 export const STATUS_META: Record<ProspectStatusType, { label: string; color: string }> = {
@@ -118,6 +128,12 @@ export const STATUS_META: Record<ProspectStatusType, { label: string; color: str
   client:      { label: 'Client',      color: '#8B5CF6' },
   no_go:       { label: 'No Go',       color: '#EF4444' },
   development: { label: 'Development', color: '#FB923C' },
+} as const;
+
+export const PROSPECT_TYPE_META: Record<ProspectTypeType, { label: string; color: string }> = {
+  listing_prospect: { label: 'Listing prospect', color: '#0F766E' },
+  tenant_prospect: { label: 'Tenant prospect', color: '#7C3AED' },
+  buyer_prospect: { label: 'Buyer prospect', color: '#0369A1' },
 } as const;
 export type FollowUpTimeframeType = z.infer<typeof FollowUpTimeframe>;
 

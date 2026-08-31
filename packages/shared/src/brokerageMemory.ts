@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { ProspectType, type ProspectTypeType } from './schema'
+
 import {
   scoreMarketEntityCandidate,
   type MarketEntityResolutionCandidate,
@@ -73,6 +75,8 @@ const enrichedRecordSchema = z.object({
     systemPriority: z.string().default(''),
     reviewStatus: z.string().default(''),
     suggestedUse: z.string().default(''),
+    prospectType: ProspectType.optional(),
+    prospectTypes: z.array(ProspectType).default([]),
     archiveOrHistoricalContext: z.boolean().default(false),
     titleAgeBucket: z.string().default(''),
     municipalAcresCalculated: z.number().nullable().default(null),
@@ -146,6 +150,7 @@ export type MarketMemoryAnchor = {
   reviewReasons: string[]
   reviewStatuses: string[]
   suggestedUses: string[]
+  prospectTypes: ProspectTypeType[]
   confidence: 'high' | 'medium'
   baseLayer: 'market_memory' | 'review'
   resolution?: MarketMemoryResolution
@@ -164,6 +169,45 @@ export type CurrentProjectsMarketMemoryPreview = {
 
 function unique(values: Array<string | null | undefined>) {
   return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)))
+}
+
+const LISTING_PROSPECT_SIGNAL = /(?:^|[^a-z])listing(?:[_\s-]+(?:prospect|pursuit)s?)(?:$|[^a-z])/i
+const TENANT_PROSPECT_SIGNAL = /(?:^|[^a-z])tenant(?:[_\s-]+(?:prospect|requirement)s?)(?:$|[^a-z])/i
+const BUYER_PROSPECT_SIGNAL = /(?:^|[^a-z])(?:buyer(?:[_\s-]+prospect)s?|acquisition(?:[_\s-]+(?:prospect|pursuit)))(?:$|[^a-z])/i
+
+export function inferProspectTypes(input: {
+  explicit?: unknown
+  suggestedUses?: Array<string | null | undefined>
+  projects?: Array<string | null | undefined>
+}): ProspectTypeType[] {
+  const result = new Set<ProspectTypeType>()
+  const explicitValues = Array.isArray(input.explicit) ? input.explicit : [input.explicit]
+  for (const value of explicitValues) {
+    const parsed = ProspectType.safeParse(value)
+    if (parsed.success) result.add(parsed.data)
+  }
+
+  const signals = unique([...(input.suggestedUses || []), ...(input.projects || [])])
+  for (const signal of signals) {
+    if (LISTING_PROSPECT_SIGNAL.test(signal)) result.add('listing_prospect')
+    if (TENANT_PROSPECT_SIGNAL.test(signal)) result.add('tenant_prospect')
+    if (BUYER_PROSPECT_SIGNAL.test(signal)) result.add('buyer_prospect')
+  }
+  return ProspectType.options.filter((type) => result.has(type))
+}
+
+export function getMarketMemoryProspectTypes(
+  anchor: Pick<MarketMemoryAnchor, 'projects' | 'suggestedUses'> & { prospectTypes?: unknown },
+): ProspectTypeType[] {
+  return inferProspectTypes({
+    explicit: anchor.prospectTypes,
+    suggestedUses: anchor.suggestedUses,
+    projects: anchor.projects,
+  })
+}
+
+export function normalizeMarketMemoryProspectTypes<T extends MarketMemoryAnchor>(anchor: T): T {
+  return { ...anchor, prospectTypes: getMarketMemoryProspectTypes(anchor) }
 }
 
 function firstNumber(values: Array<number | null | undefined>) {
@@ -246,13 +290,21 @@ function buildAnchor(key: string, records: EnrichedRecord[]): MarketMemoryAnchor
   const latitude = records[0]?.coordinate.latitude ?? 0
   const longitude = records[0]?.coordinate.longitude ?? 0
 
+  const projects = unique(records.map((record) => record.sourceTitle.folder_name))
+  const suggestedUses = unique(records.map((record) => record.derived.suggestedUse))
+  const prospectTypes = inferProspectTypes({
+    explicit: records.flatMap((record) => [record.derived.prospectType, ...record.derived.prospectTypes]),
+    suggestedUses,
+    projects,
+  })
+
   return {
     id: canonicalAnchorId(records, key),
     address: addresses[0] || `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
     alternateAddresses: addresses.slice(1),
     latitude,
     longitude,
-    projects: unique(records.map((record) => record.sourceTitle.folder_name)),
+    projects,
     municipality: unique(records.map((record) => record.sourceTitle.municipality))[0] || null,
     neighbourhood: unique(records.flatMap((record) => [record.municipal.neighbourhood, record.coordinate.propertyInformationNeighbourhood]))[0] || null,
     zoning: unique(records.flatMap((record) => [record.municipal.currentZone, record.coordinate.propertyInformationZoning])),
@@ -279,7 +331,8 @@ function buildAnchor(key: string, records: EnrichedRecord[]): MarketMemoryAnchor
     capturedAt: unique(records.flatMap((record) => [record.municipal.capturedAt, record.coordinate.capturedAt]))[0] || null,
     reviewReasons: dedupedReviewReasons,
     reviewStatuses: unique(records.map((record) => record.derived.reviewStatus)),
-    suggestedUses: unique(records.map((record) => record.derived.suggestedUse)),
+    suggestedUses,
+    prospectTypes,
     confidence: dedupedReviewReasons.length === 0 ? 'high' : 'medium',
     baseLayer: dedupedReviewReasons.length === 0 ? 'market_memory' : 'review',
     persistence: { state: 'local_preview' },

@@ -63,6 +63,7 @@ function reviewItem(overrides: Partial<PropertyMemoryReviewItem> = {}): Property
       reviewReasons: [],
       reviewStatuses: [],
       suggestedUses: [],
+      prospectTypes: [],
       confidence: 'high',
       baseLayer: 'market_memory',
     },

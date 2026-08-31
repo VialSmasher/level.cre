@@ -39,6 +39,7 @@ function anchor(overrides: Partial<MarketMemoryAnchor> = {}): MarketMemoryAnchor
     reviewReasons: [],
     reviewStatuses: [],
     suggestedUses: [],
+    prospectTypes: [],
     confidence: 'high',
     baseLayer: 'market_memory',
     previewLayer: 'market_memory',

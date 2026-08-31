@@ -14,7 +14,7 @@ export const STATUS_FILTER_PRESETS: StatusFilterPreset[] = [
   { id: 'all', label: 'All', statuses: MAP_STATUS_KEYS },
   { id: 'active', label: 'Active', statuses: ['prospect', 'contacted', 'listing', 'development'] },
   { id: 'follow_up', label: 'Needs Follow-Up', statuses: ['prospect', 'contacted'] },
-  { id: 'listings', label: 'Listings', statuses: ['listing'] },
+  { id: 'listings', label: 'Active listings', statuses: ['listing'] },
   { id: 'development', label: 'Development', statuses: ['development'] },
   { id: 'hide_no_go', label: 'Hide No Go', statuses: MAP_STATUS_KEYS.filter((status) => status !== 'no_go') },
 ];

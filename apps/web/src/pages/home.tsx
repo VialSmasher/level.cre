@@ -64,6 +64,13 @@ import {
 import { SearchResultCard } from '@/features/map/SearchResultCard';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
 import { createStatusFilterSet, getStatusCounts } from '@/features/map/statusFilters';
+import {
+  createProspectTypeFilterSet,
+  getComposedPropertyProspectTypes,
+  getProspectTypeCounts,
+  matchesProspectTypeFilters,
+  type ProspectTypeFilterKey,
+} from '@/features/map/prospectTypeFilters';
 import type { CurrentProjectsMarketMemoryPreview, MarketMemoryAnchor } from '@/lib/currentProjectsMarketMemory';
 
 // Import all necessary types and data
@@ -309,9 +316,14 @@ export default function HomePage() {
   
   // Filter state
   const statusFilterStorageKey = nsKey(currentUser?.id, 'mapStatusFilters');
+  const prospectTypeFilterStorageKey = nsKey(currentUser?.id, 'mapProspectTypeFilters:v1');
   const skipNextStatusFilterPersistRef = useRef(false);
+  const skipNextProspectTypeFilterPersistRef = useRef(false);
   const [statusFilters, setStatusFilters] = useState<Set<ProspectStatusType>>(() => {
     return createStatusFilterSet(readJSON<unknown>(statusFilterStorageKey, null));
+  });
+  const [prospectTypeFilters, setProspectTypeFilters] = useState<Set<ProspectTypeFilterKey>>(() => {
+    return createProspectTypeFilterSet(readJSON<unknown>(prospectTypeFilterStorageKey, null));
   });
   
   // Add submarket filter state
@@ -638,6 +650,19 @@ export default function HomePage() {
     writeJSON(statusFilterStorageKey, Array.from(statusFilters));
   }, [statusFilters, statusFilterStorageKey]);
 
+  useEffect(() => {
+    skipNextProspectTypeFilterPersistRef.current = true;
+    setProspectTypeFilters(createProspectTypeFilterSet(readJSON<unknown>(prospectTypeFilterStorageKey, null)));
+  }, [prospectTypeFilterStorageKey]);
+
+  useEffect(() => {
+    if (skipNextProspectTypeFilterPersistRef.current) {
+      skipNextProspectTypeFilterPersistRef.current = false;
+      return;
+    }
+    writeJSON(prospectTypeFilterStorageKey, Array.from(prospectTypeFilters));
+  }, [prospectTypeFilterStorageKey, prospectTypeFilters]);
+
   // No longer persisting legend open state
   
   // Save submarket filter state
@@ -721,20 +746,32 @@ export default function HomePage() {
     };
   }, [contextMenu, closeContextMenu]);
 
-  // Filter prospects based on status and submarket
+  const composedMapItems = useMemo(
+    () => composePropertyMapItems(prospects, marketMemoryAnchors),
+    [marketMemoryAnchors, prospects],
+  );
+  const composedMapItemByProspectId = useMemo(() => {
+    const result = new Map<string, (typeof composedMapItems)[number]>();
+    for (const item of composedMapItems) {
+      if (item.kind === 'prospect' && item.prospect) result.set(item.prospect.id, item);
+    }
+    return result;
+  }, [composedMapItems]);
+
+  // Lifecycle status, pursuit type, and geography are independent map filters.
   const filteredProspects = useMemo(() => {
     return prospects.filter(prospect => {
       const passesStatus = statusFilters.has(prospect.status);
       const passesSubmarket = selectedSubmarkets.size === 0 ||
                               (prospect.submarketId && selectedSubmarkets.has(prospect.submarketId));
-      return passesStatus && passesSubmarket;
+      const composedItem = composedMapItemByProspectId.get(prospect.id);
+      const passesProspectType = composedItem
+        ? matchesProspectTypeFilters(prospectTypeFilters, getComposedPropertyProspectTypes(composedItem))
+        : matchesProspectTypeFilters(prospectTypeFilters, []);
+      return passesStatus && passesSubmarket && passesProspectType;
     });
-  }, [prospects, statusFilters, selectedSubmarkets]);
+  }, [composedMapItemByProspectId, prospectTypeFilters, prospects, selectedSubmarkets, statusFilters]);
 
-  const composedMapItems = useMemo(
-    () => composePropertyMapItems(prospects, marketMemoryAnchors),
-    [marketMemoryAnchors, prospects],
-  );
   const linkedMemoryByProspectId = useMemo(() => {
     const result = new Map<string, MarketMemoryAnchor>();
     for (const item of composedMapItems) {
@@ -746,12 +783,17 @@ export default function HomePage() {
   }, [composedMapItems]);
   const standaloneMarketMemoryAnchors = useMemo(
     () => composedMapItems
-      .filter((item) => item.kind === 'memory' && item.primaryMemoryAnchor)
+      .filter((item) => (
+        item.kind === 'memory'
+        && item.primaryMemoryAnchor
+        && matchesProspectTypeFilters(prospectTypeFilters, getComposedPropertyProspectTypes(item))
+      ))
       .map((item) => item.primaryMemoryAnchor as MarketMemoryAnchor),
-    [composedMapItems],
+    [composedMapItems, prospectTypeFilters],
   );
 
   const statusCounts = useMemo(() => getStatusCounts(prospects), [prospects]);
+  const prospectTypeCounts = useMemo(() => getProspectTypeCounts(composedMapItems), [composedMapItems]);
 
   const renderableProspects = useMemo(() => {
     return filteredProspects.map((prospect) => {
@@ -2716,6 +2758,14 @@ export default function HomePage() {
             const next = new Set(statusFilters);
             if (next.has(key)) next.delete(key); else next.add(key);
             setStatusFilters(next);
+          }}
+          selectedProspectTypes={prospectTypeFilters}
+          prospectTypeCounts={prospectTypeCounts}
+          onProspectTypesChange={setProspectTypeFilters}
+          onProspectTypeToggle={(key) => {
+            const next = new Set(prospectTypeFilters);
+            if (next.has(key)) next.delete(key); else next.add(key);
+            setProspectTypeFilters(next);
           }}
         />
       </div>

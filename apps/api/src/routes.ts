@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { ensureUser } from './ensureUser';
 import { getUserId, requireAuth, requireMarketRecordProposalAuth, requireSalesActivityAuth, getUserFromBearerAuthHeader } from "./auth";
 import { z } from 'zod';
-import { ProspectGeometry, ProspectStatus, FollowUpTimeframe } from '@level-cre/shared/schema';
+import { ProspectGeometry, ProspectStatus, ProspectType, FollowUpTimeframe } from '@level-cre/shared/schema';
 import { createCipheriv, createDecipheriv, createHmac, createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import * as demo from './demoStore';
 
@@ -4562,6 +4562,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? await storage.getProspect(existingProspectId, userId)
         : undefined;
       const created = !prospect;
+      const prospectTypeProvenance = proposal.prospectTypes.length ? {
+        source: proposal.source,
+        externalId: proposal.externalId,
+        eventId: event.id,
+        observedAt: proposal.observedAt || null,
+      } : null;
       if (!prospect) {
         prospect = await storage.createProspect({
           userId,
@@ -4584,6 +4590,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           marketContextSource: proposal.source,
           marketContextStatus: proposal.evidenceStatus,
           aiMetadata: {
+            ...(proposal.prospectTypes.length ? {
+              prospectTypes: proposal.prospectTypes,
+              prospectTypeProvenance,
+            } : {}),
             marketProposal: {
               eventId: event.id,
               source: proposal.source,
@@ -4599,6 +4609,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
             } : {}),
           },
         });
+      } else if (proposal.prospectTypes.length) {
+        const currentMetadata = prospect.aiMetadata && typeof prospect.aiMetadata === 'object'
+          ? prospect.aiMetadata
+          : {};
+        const currentTypes = Array.isArray(currentMetadata.prospectTypes)
+          ? currentMetadata.prospectTypes.filter((value: unknown) => ProspectType.safeParse(value).success)
+          : [];
+        const mergedTypes = ProspectType.options.filter((value) => (
+          currentTypes.includes(value) || proposal.prospectTypes.includes(value)
+        ));
+        const updated = await storage.updateProspect(prospect.id, userId, {
+          aiMetadata: {
+            ...currentMetadata,
+            prospectTypes: mergedTypes,
+            prospectTypeProvenance,
+          },
+        }, { skipXp: true });
+        prospect = updated?.prospect || prospect;
       }
 
       await pool.query(
