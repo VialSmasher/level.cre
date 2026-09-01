@@ -17,7 +17,7 @@ type ScorecardPageShellProps = {
 
 const SCORECARD_VIEWS: Array<{ id: ScorecardView; href: string; label: string }> = [
   { id: 'overview', href: '/broker-stats', label: 'Overview' },
-  { id: 'badges', href: '/badges', label: 'Badges' },
+  { id: 'badges', href: '/badges', label: 'Achievements' },
   { id: 'standings', href: '/app/standings', label: 'Standings' },
 ];
 

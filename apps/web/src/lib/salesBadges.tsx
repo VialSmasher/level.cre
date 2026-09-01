@@ -33,7 +33,8 @@ export type SalesBadgeDefinition = {
   threshold: number;
   window: 'day' | 'tracked';
   icon: React.ComponentType<any>;
-  tone: 'blue' | 'emerald' | 'orange' | 'violet' | 'slate';
+  tone: 'blue' | 'emerald' | 'orange' | 'violet' | 'slate' | 'red';
+  series?: '10x';
 };
 
 export type SalesBadgeView = SalesBadgeDefinition & {
@@ -75,6 +76,12 @@ export const SALES_BADGE_DEFINITIONS: SalesBadgeDefinition[] = [
   { id: 'tracked_25_notes', title: 'Memory Bank', description: 'Add 25 notes in tracked history', metric: 'note', threshold: 25, window: 'tracked', icon: NotebookPen, tone: 'slate' },
   { id: 'tracked_50_notes', title: 'Intel Keeper', description: 'Add 50 notes in tracked history', metric: 'note', threshold: 50, window: 'tracked', icon: Brain, tone: 'slate' },
   { id: 'tracked_100_notes', title: 'Market Historian', description: 'Add 100 notes in tracked history', metric: 'note', threshold: 100, window: 'tracked', icon: Trophy, tone: 'slate' },
+  { id: 'tenx_daily_100_calls', title: '10X Dial Day', description: 'Make 100 calls in a day', metric: 'call', threshold: 100, window: 'day', icon: Phone, tone: 'red', series: '10x' },
+  { id: 'tenx_daily_10_meetings', title: 'Calendar Takeover', description: 'Log 10 meetings in a day', metric: 'meeting', threshold: 10, window: 'day', icon: CalendarCheck, tone: 'red', series: '10x' },
+  { id: 'tenx_daily_100_touches', title: 'Massive Action Day', description: 'Log 100 calls, emails, meetings, or notes in a day', metric: 'touch', threshold: 100, window: 'day', icon: Zap, tone: 'red', series: '10x' },
+  { id: 'tenx_tracked_1000_calls', title: 'Relentless Caller', description: 'Log 1,000 calls in tracked history', metric: 'call', threshold: 1000, window: 'tracked', icon: Flame, tone: 'red', series: '10x' },
+  { id: 'tenx_tracked_1000_emails', title: 'Be Everywhere', description: 'Log 1,000 emails in tracked history', metric: 'email', threshold: 1000, window: 'tracked', icon: Rocket, tone: 'red', series: '10x' },
+  { id: 'tenx_tracked_2500_touches', title: 'Unreasonable Volume', description: 'Log 2,500 total touches in tracked history', metric: 'touch', threshold: 2500, window: 'tracked', icon: Crown, tone: 'red', series: '10x' },
 ];
 
 export const BADGE_TONES = {
@@ -102,6 +109,11 @@ export const BADGE_TONES = {
     unlocked: 'border-slate-200 bg-slate-50 text-slate-800',
     icon: 'bg-slate-800 text-white',
     progress: 'bg-slate-500',
+  },
+  red: {
+    unlocked: 'border-red-200 bg-red-50 text-red-900',
+    icon: 'bg-red-600 text-white',
+    progress: 'bg-red-500',
   },
 } as const;
 
