@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSalesBadgeSummary } from './salesBadges';
+import { buildSalesBadgeSummary, SALES_BADGE_DEFINITIONS } from './salesBadges';
+
+test('badge collection contains 33 unique, data-backed milestones', () => {
+  assert.equal(SALES_BADGE_DEFINITIONS.length, 33);
+  assert.equal(new Set(SALES_BADGE_DEFINITIONS.map((badge) => badge.id)).size, 33);
+  assert.ok(SALES_BADGE_DEFINITIONS.every((badge) => badge.threshold > 0));
+});
 
 test('badges count canonical unmatched outbound activity and exclude inbound responses', () => {
   const rows = [
@@ -41,4 +47,21 @@ test('badges accept canonical activity types when no legacy XP action is present
   }], 'America/Edmonton');
 
   assert.equal(summary.bestDayCounts.call, 1);
+});
+
+test('new daily and tracked badge tiers unlock from activity history', () => {
+  const rows = Array.from({ length: 10 }, (_, index) => ({
+    id: `call-${index}`,
+    type: 'call',
+    timestamp: `2026-08-21T${String(16 + Math.floor(index / 4)).padStart(2, '0')}:${String((index % 4) * 10).padStart(2, '0')}:00.000Z`,
+    direction: 'outbound',
+  }));
+
+  const summary = buildSalesBadgeSummary(rows, 'America/Edmonton');
+  const byId = new Map(summary.badges.map((badge) => [badge.id, badge]));
+
+  assert.equal(byId.get('daily_10_calls')?.unlocked, true);
+  assert.equal(byId.get('daily_15_calls')?.unlocked, false);
+  assert.equal(byId.get('daily_10_touches')?.unlocked, true);
+  assert.equal(byId.get('tracked_50_calls')?.unlocked, false);
 });

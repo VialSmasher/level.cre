@@ -1,5 +1,26 @@
 import React from 'react';
-import { Brain, Flame, Mail, Medal, Phone, Trophy, Users, Zap } from 'lucide-react';
+import {
+  Award,
+  Brain,
+  CalendarCheck,
+  ClipboardList,
+  Crown,
+  Flame,
+  Gauge,
+  Handshake,
+  Mail,
+  Medal,
+  MessageCircle,
+  NotebookPen,
+  Phone,
+  Rocket,
+  Send,
+  Star,
+  Target,
+  Trophy,
+  Users,
+  Zap,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
 export type SalesActivityKind = 'call' | 'email' | 'meeting' | 'note' | 'touch';
@@ -22,16 +43,38 @@ export type SalesBadgeView = SalesBadgeDefinition & {
 
 export const SALES_BADGE_DEFINITIONS: SalesBadgeDefinition[] = [
   { id: 'daily_5_calls', title: 'Warm Line', description: 'Make 5 calls in a day', metric: 'call', threshold: 5, window: 'day', icon: Phone, tone: 'emerald' },
+  { id: 'daily_10_calls', title: 'Call Flow', description: 'Make 10 calls in a day', metric: 'call', threshold: 10, window: 'day', icon: Gauge, tone: 'emerald' },
   { id: 'daily_15_calls', title: 'Power Dialer', description: 'Make 15 calls in a day', metric: 'call', threshold: 15, window: 'day', icon: Phone, tone: 'emerald' },
   { id: 'daily_30_calls', title: 'Call Blitz', description: 'Make 30 calls in a day', metric: 'call', threshold: 30, window: 'day', icon: Flame, tone: 'orange' },
+  { id: 'daily_50_calls', title: 'Dialing Machine', description: 'Make 50 calls in a day', metric: 'call', threshold: 50, window: 'day', icon: Rocket, tone: 'orange' },
+  { id: 'daily_5_emails', title: 'Quick Send', description: 'Send 5 emails in a day', metric: 'email', threshold: 5, window: 'day', icon: Send, tone: 'blue' },
   { id: 'daily_10_emails', title: 'Inbox Push', description: 'Send 10 emails in a day', metric: 'email', threshold: 10, window: 'day', icon: Mail, tone: 'blue' },
   { id: 'daily_25_emails', title: 'Campaign Day', description: 'Send 25 emails in a day', metric: 'email', threshold: 25, window: 'day', icon: Mail, tone: 'blue' },
+  { id: 'daily_50_emails', title: 'Outreach Wave', description: 'Send 50 emails in a day', metric: 'email', threshold: 50, window: 'day', icon: Rocket, tone: 'blue' },
+  { id: 'daily_1_meeting', title: 'In the Room', description: 'Log 1 meeting in a day', metric: 'meeting', threshold: 1, window: 'day', icon: Handshake, tone: 'violet' },
+  { id: 'daily_3_meetings', title: 'Meeting Streak', description: 'Log 3 meetings in a day', metric: 'meeting', threshold: 3, window: 'day', icon: CalendarCheck, tone: 'violet' },
+  { id: 'daily_5_meetings', title: 'Calendar Commander', description: 'Log 5 meetings in a day', metric: 'meeting', threshold: 5, window: 'day', icon: Crown, tone: 'violet' },
+  { id: 'daily_5_notes', title: 'Field Notes', description: 'Add 5 notes in a day', metric: 'note', threshold: 5, window: 'day', icon: NotebookPen, tone: 'slate' },
+  { id: 'daily_10_notes', title: 'Intel Drop', description: 'Add 10 notes in a day', metric: 'note', threshold: 10, window: 'day', icon: Brain, tone: 'slate' },
+  { id: 'daily_20_notes', title: 'Deal Scribe', description: 'Add 20 notes in a day', metric: 'note', threshold: 20, window: 'day', icon: ClipboardList, tone: 'slate' },
+  { id: 'daily_10_touches', title: 'On the Board', description: 'Log 10 calls, emails, meetings, or notes in a day', metric: 'touch', threshold: 10, window: 'day', icon: Target, tone: 'orange' },
   { id: 'daily_20_touches', title: 'Touchpoint Sprint', description: 'Log 20 calls, emails, meetings, or notes in a day', metric: 'touch', threshold: 20, window: 'day', icon: Zap, tone: 'orange' },
+  { id: 'daily_40_touches', title: 'Full-Court Press', description: 'Log 40 calls, emails, meetings, or notes in a day', metric: 'touch', threshold: 40, window: 'day', icon: Flame, tone: 'orange' },
+  { id: 'daily_75_touches', title: 'Market Marathon', description: 'Log 75 calls, emails, meetings, or notes in a day', metric: 'touch', threshold: 75, window: 'day', icon: Trophy, tone: 'orange' },
+  { id: 'tracked_50_calls', title: 'Phone Habit', description: 'Log 50 calls in tracked history', metric: 'call', threshold: 50, window: 'tracked', icon: Star, tone: 'emerald' },
   { id: 'tracked_100_calls', title: 'Century Caller', description: 'Log 100 calls in tracked history', metric: 'call', threshold: 100, window: 'tracked', icon: Medal, tone: 'emerald' },
   { id: 'tracked_250_calls', title: 'Rainmaker Rhythm', description: 'Log 250 calls in tracked history', metric: 'call', threshold: 250, window: 'tracked', icon: Trophy, tone: 'orange' },
+  { id: 'tracked_500_calls', title: 'Call Authority', description: 'Log 500 calls in tracked history', metric: 'call', threshold: 500, window: 'tracked', icon: Crown, tone: 'orange' },
+  { id: 'tracked_50_emails', title: 'Message Builder', description: 'Log 50 emails in tracked history', metric: 'email', threshold: 50, window: 'tracked', icon: MessageCircle, tone: 'blue' },
   { id: 'tracked_100_emails', title: 'Email Engine', description: 'Log 100 emails in tracked history', metric: 'email', threshold: 100, window: 'tracked', icon: Medal, tone: 'blue' },
+  { id: 'tracked_250_emails', title: 'Outreach Operator', description: 'Log 250 emails in tracked history', metric: 'email', threshold: 250, window: 'tracked', icon: Award, tone: 'blue' },
+  { id: 'tracked_500_emails', title: 'Inbox Veteran', description: 'Log 500 emails in tracked history', metric: 'email', threshold: 500, window: 'tracked', icon: Crown, tone: 'blue' },
+  { id: 'tracked_10_meetings', title: 'Face Time', description: 'Log 10 meetings in tracked history', metric: 'meeting', threshold: 10, window: 'tracked', icon: Handshake, tone: 'violet' },
   { id: 'tracked_25_meetings', title: 'Meeting Maker', description: 'Log 25 meetings in tracked history', metric: 'meeting', threshold: 25, window: 'tracked', icon: Users, tone: 'violet' },
+  { id: 'tracked_50_meetings', title: 'Relationship Builder', description: 'Log 50 meetings in tracked history', metric: 'meeting', threshold: 50, window: 'tracked', icon: Award, tone: 'violet' },
+  { id: 'tracked_25_notes', title: 'Memory Bank', description: 'Add 25 notes in tracked history', metric: 'note', threshold: 25, window: 'tracked', icon: NotebookPen, tone: 'slate' },
   { id: 'tracked_50_notes', title: 'Intel Keeper', description: 'Add 50 notes in tracked history', metric: 'note', threshold: 50, window: 'tracked', icon: Brain, tone: 'slate' },
+  { id: 'tracked_100_notes', title: 'Market Historian', description: 'Add 100 notes in tracked history', metric: 'note', threshold: 100, window: 'tracked', icon: Trophy, tone: 'slate' },
 ];
 
 export const BADGE_TONES = {
