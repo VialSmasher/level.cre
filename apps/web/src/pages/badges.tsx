@@ -46,7 +46,7 @@ export default function BadgesPage() {
                     {salesBadgeSummary.unlocked.length}
                     <span className="text-base text-slate-400"> / {salesBadgeSummary.badges.length}</span>
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">Fitbit-style sales milestones</p>
+                  <p className="mt-1 text-xs text-slate-500">Sales activity milestones</p>
                 </div>
                 <div className="rounded-lg bg-orange-50 p-2 text-orange-600">
                   <Trophy className="h-5 w-5" />
