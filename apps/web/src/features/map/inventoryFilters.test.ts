@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { inventoryAddressKey, type PropertyInventory } from '@level-cre/shared'
-import { defaultInventoryFilters, inventorySignals, matchesInventoryFilters, readInventoryFilters } from './inventoryFilters'
+import { defaultInventoryFilters, inventorySignals, matchesInventoryFilters, readInventoryFilters, inventoryMapExtent } from './inventoryFilters'
 const inventory={classification:'multi_tenant',confidence:'low',subFilters:['owner_occupied','costar_partial'],occupant:'Recorded operator',businessPark:'Nisku Industrial Park',assessment:null,yearBuilt:null,costar:{propertyId:null,notes:'Partial research'},titleRecords:[{lastSaleDate:'2000-01-01'}]} as PropertyInventory
 test('all confidence levels remain visible until explicitly filtered',()=>{
  const filters=defaultInventoryFilters();assert.equal(matchesInventoryFilters(inventory,filters),true)
@@ -26,4 +26,10 @@ test('address identity handles punctuation and ordinals while keeping unit disti
  assert.notEqual(inventoryAddressKey('2106A 7 ST','Nisku'),inventoryAddressKey('2106 7 ST','Nisku'))
  assert.notEqual(inventoryAddressKey('BAY 1-4, 703 11 AVE','Nisku'),inventoryAddressKey('703 11 AVE','Nisku'))
  assert.equal(inventoryAddressKey('','Nisku'),'')
+})
+test('fitting one asset keeps surrounding property context and retains a wider collection extent',()=>{
+ const one=inventoryMapExtent([{lat:53.33,lng:-113.52}])!
+ assert.ok(one.north-one.south>=.0029);assert.ok(one.east-one.west>=.0049)
+ assert.deepEqual(inventoryMapExtent([{lat:53,lng:-114},{lat:54,lng:-113}]),{north:54,south:53,east:-113,west:-114})
+ assert.equal(inventoryMapExtent([]),null)
 })

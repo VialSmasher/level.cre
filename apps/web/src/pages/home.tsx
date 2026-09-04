@@ -1,7 +1,7 @@
 import { polygonIntersectsViewport } from '@/features/map/viewportClustering';
 import { INVENTORY_CLASS_META, getPropertyInventory, type PropertyInventory } from '@level-cre/shared';
 import { InventoryFilterPanel } from '@/features/map/InventoryFilterPanel';
-import { readInventoryFilters, matchesInventoryFilters, type InventoryFilters } from '@/features/map/inventoryFilters';
+import { readInventoryFilters, matchesInventoryFilters, inventoryMapExtent, type InventoryFilters } from '@/features/map/inventoryFilters';
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { GoogleMap, useJsApiLoader, Polygon, InfoWindow } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
@@ -2789,14 +2789,19 @@ export default function HomePage() {
             setStatusFilters(createStatusFilterSet(null));
             setProspectTypeFilters(createProspectTypeFilterSet(null));
             setSelectedSubmarkets(new Set());
-            const inventoryBounds = new google.maps.LatLngBounds();
+            const inventoryPoints: Array<{lat:number;lng:number}> = [];
             for (const prospect of targets) {
               if (prospect.geometry.type === 'Point') {
                 const [lng, lat] = prospect.geometry.coordinates as [number, number];
-                inventoryBounds.extend({lat, lng});
+                inventoryPoints.push({lat, lng});
+              } else {
+                const coordinates = prospect.geometry.coordinates as [number, number][][] | [number, number][];
+                const ring = (Array.isArray(coordinates[0]?.[0]) ? coordinates[0] : coordinates) as [number, number][];
+                for (const [lng, lat] of ring) inventoryPoints.push({lat, lng});
               }
             }
-            if (!inventoryBounds.isEmpty()) map.fitBounds(inventoryBounds, {top:60, right:70, bottom:70, left: window.innerWidth >= 640 ? 340 : 30});
+            const extent = inventoryMapExtent(inventoryPoints);
+            if (extent) map.fitBounds(extent, {top:60, right:70, bottom:70, left: window.innerWidth >= 640 ? 340 : 30});
           }} />}
           selected={statusFilters}
           counts={statusCounts}

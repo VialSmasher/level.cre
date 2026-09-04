@@ -41,3 +41,12 @@ export function matchesInventoryFilters(inventory: PropertyInventory | null, fil
     return !selected.length||selected.some(key=>tags.has(key))
   })
 }
+
+export function inventoryMapExtent(points: Array<{lat:number;lng:number}>) {
+  const usable=points.filter(point=>Number.isFinite(point.lat)&&Number.isFinite(point.lng))
+  if(!usable.length)return null
+  const north=Math.max(...usable.map(point=>point.lat)),south=Math.min(...usable.map(point=>point.lat))
+  const east=Math.max(...usable.map(point=>point.lng)),west=Math.min(...usable.map(point=>point.lng))
+  const latitude=(north+south)/2,longitude=(east+west)/2
+  return {north:Math.max(north,latitude+.0015),south:Math.min(south,latitude-.0015),east:Math.max(east,longitude+.0025),west:Math.min(west,longitude-.0025)}
+}

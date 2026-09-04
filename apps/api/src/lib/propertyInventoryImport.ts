@@ -62,7 +62,8 @@ export async function importPropertyInventory(pool: Pick<Pool, 'connect'>, userI
           await client.query('UPDATE public.prospects SET ai_metadata=$3::jsonb, updated_at=now() WHERE id=$1 AND user_id=$2', [match.id, userId, JSON.stringify(metadata)])
           match.ai_metadata = metadata
         } else {
-          const submarketId = submarkets.find(row => row.name.toLowerCase() === inventory.municipality.toLowerCase())?.id || null
+          // The map/profile selector stores the submarket name in this legacy field.
+          const submarketId = submarkets.find(row => row.name.toLowerCase() === inventory.municipality.toLowerCase())?.name || null
           const created = await client.query<{ id: string }>(`INSERT INTO public.prospects
             (user_id,name,address,status,notes,geometry,submarket_id,building_sf,ai_metadata,location_lat,location_lng,market_key,market_context_source,market_context_status)
             VALUES ($1,$2,$3,'prospect',$4,ST_SetSRID(ST_GeomFromGeoJSON($5::text),4326),$6,$7,$8::jsonb,$9,$10,$11,'property_inventory_import','research') RETURNING id`,

@@ -35,7 +35,7 @@ test('inventory dry run, exact replay, metadata preservation and rollback use re
   assert.equal(saved.status,'listing');assert.equal(saved.notes,'Broker note');assert.equal(saved.ai_metadata.keep,true)
   assert.equal(saved.building_sf,null,'Partial area is retained as source evidence, not copied to the main size field')
   assert.deepEqual(saved.geometry.coordinates,[-113.52,53.33])
-  assert.equal(saved.submarket_id,'nisku')
+  assert.equal(saved.submarket_id,'Nisku')
   assert.equal(saved.ai_metadata.propertyInventory.titleRecords[0].titleNumber,'00123')
   assert.equal((await importPropertyInventory(pool,'other',rows,true)).created,2,'Matching is owner-scoped')
   await assert.rejects(importPropertyInventory(pool,'owner',[rows[0],rows[0]],true),/Combine repeated/)
