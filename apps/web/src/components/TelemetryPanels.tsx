@@ -99,11 +99,24 @@ export function MappingRecovery() {
         <p className="text-xs leading-5 text-slate-600">{coverage?.unmappedActions ?? 0} actions need a prospect match or verified location. Codex can use this recovery list with the existing verified mapping workflow; ambiguous evidence stays reviewable.</p>
         {insights.isError ? <p role="alert" className="mt-2 text-xs text-amber-800">Mapping coverage could not be loaded.</p> : null}
         <ul className="mt-3 divide-y divide-slate-100">
-          {coverage?.groups.slice(0, 12).map(group => <li key={(group.prospectId || group.company) + ':' + group.reason} className="flex items-start justify-between gap-3 py-3">
-            <div className="min-w-0"><p className="truncate text-sm font-medium text-slate-900">{group.company}</p><p className="mt-1 text-xs text-slate-500">{group.actions} actions · {group.reason}</p>
-              {group.events[0]?.subject ? <p className="mt-1 truncate text-xs text-slate-600">{group.events[0].subject}</p> : null}
+          {coverage?.groups.slice(0, 12).map(group => <li key={(group.prospectId || group.company) + ':' + group.reason} className="py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0"><p className="truncate text-sm font-medium text-slate-900">{group.company}</p><p className="mt-1 text-xs text-slate-500">{group.actions} action{group.actions === 1 ? '' : 's'} · {group.reason}</p>
+                {group.events[0]?.subject ? <p className="mt-1 truncate text-xs text-slate-600">{group.events[0].subject}</p> : null}
+              </div>
+              {group.prospectId ? <Link className="shrink-0 rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50" href={'/app?prospectId=' + encodeURIComponent(group.prospectId)}>Open prospect</Link> : null}
             </div>
-            <Link className="shrink-0 rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50" href={group.prospectId ? '/app?prospectId=' + encodeURIComponent(group.prospectId) : '/app/desk#activity-review'}>{group.prospectId ? 'Open prospect' : 'Review match'}</Link>
+            {group.events.length ? <details className="mt-2 text-xs text-slate-600">
+              <summary className="w-fit cursor-pointer py-1 font-medium text-blue-700">View captured activity</summary>
+              <ol className="mt-2 divide-y divide-slate-100 rounded-md bg-slate-50 px-3">
+                {group.events.slice(0, 5).map(event => <li key={event.id} className="py-2">
+                  <p className="break-words font-medium text-slate-800">{event.subject || 'Captured outbound activity'}</p>
+                  {event.email ? <p className="mt-1 break-all">{event.email}</p> : null}
+                  <p className="mt-1 text-slate-500">{when(event.timestamp)}</p>
+                </li>)}
+              </ol>
+              {group.actions > 5 ? <p className="mt-2 text-slate-500">Showing the five most recent captured actions.</p> : null}
+            </details> : null}
           </li>)}
         </ul>
         {coverage && coverage.unmappedActions === 0 ? <p className="flex items-center gap-2 py-2 text-xs text-emerald-700"><CheckCircle2 className="h-4 w-4" />All recorded outbound activity in this window has map coverage.</p> : null}

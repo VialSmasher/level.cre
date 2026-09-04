@@ -161,7 +161,7 @@ function ActivityMap({ markers, markerColor, selectedProspectId, onSelect }: {
       </GoogleMap>
       <div className="absolute bottom-8 left-3 flex max-w-[calc(100%-70px)] flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" className="bg-white shadow-sm" onClick={() => frame(true)}>Fit all activity</Button>
-        {outside > 0 ? <span className="rounded-md bg-white/95 px-2 py-1.5 text-xs text-slate-700 shadow-sm">{outside} prospects outside this view</span> : null}
+        {outside > 0 ? <span className="rounded-md bg-white/95 px-2 py-1.5 text-xs text-slate-700 shadow-sm">{outside} prospect{outside === 1 ? '' : 's'} outside this view</span> : null}
       </div>
     </div>
   )

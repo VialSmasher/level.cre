@@ -1208,7 +1208,6 @@ export default function DailyDeskPage() {
                     </article>
                   )
                 })}
-                <div id="activity-review" className="scroll-mt-20" />
                 {imports.map((item) => {
                   const selectedProspect = prospectDrafts[item.id] || ''
                   const direction = describeSalesActivityDirection(item.activity_status)
