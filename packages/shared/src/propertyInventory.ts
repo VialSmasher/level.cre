@@ -45,6 +45,7 @@ export type PropertyInventoryRecord = z.infer<typeof PropertyInventoryRecordSche
 
 export function getPropertyInventory(prospect: {aiMetadata?: unknown} | null | undefined): PropertyInventory | null {
   const metadata = prospect?.aiMetadata as {propertyInventory?: unknown} | undefined
+  if (!metadata?.propertyInventory) return null
   const result = PropertyInventorySchema.safeParse(metadata?.propertyInventory)
   return result.success ? result.data : null
 }

@@ -8,6 +8,7 @@ import { storage } from "./storage";
 import { ensureUser } from './ensureUser';
 import { getUserId, requireAuth, requireMarketRecordProposalAuth, requireSalesActivityAuth, getUserFromBearerAuthHeader } from "./auth";
 import { z } from 'zod';
+import { PropertyClassificationValue } from '@level-cre/shared';
 import { ProspectGeometry, ProspectStatus, ProspectType, FollowUpTimeframe } from '@level-cre/shared/schema';
 import { createCipheriv, createDecipheriv, createHmac, createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import * as demo from './demoStore';
@@ -4201,6 +4202,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await ensureUser(userId, email);
       }
       const ProspectPatchSchema = z.object({
+        propertyClassification: PropertyClassificationValue.nullable().optional(),
         name: z.string().min(1).optional(),
         status: ProspectStatus.optional(),
         notes: z.string().optional(),
@@ -4232,9 +4234,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!parseResult.success) {
         return res.status(400).json({ message: 'Invalid prospect patch data', error: parseResult.error.errors });
       }
+      if (parseResult.data.propertyClassification !== undefined && parseResult.data.aiMetadata !== undefined) {
+        return res.status(400).json({message: 'Send a classification correction separately from imported metadata.'});
+      }
 
       if (isDemo(req)) {
-        const updated = await demo.updateProspect(userId, req.params.id, parseResult.data);
+        const {propertyClassification, ...patch} = parseResult.data;
+        if (propertyClassification !== undefined) {
+          const existing = await demo.getProspectAny(req.params.id);
+          const metadata = {...(existing?.aiMetadata || {})} as Record<string, unknown>;
+          if (propertyClassification === null) delete metadata.propertyClassification;
+          else metadata.propertyClassification = {classification: propertyClassification, source: 'broker', reviewedAt: new Date().toISOString(), reviewedBy: userId};
+          patch.aiMetadata = metadata;
+        }
+        const updated = await demo.updateProspect(userId, req.params.id, patch);
         if (!updated) return res.status(404).json({ message: 'Prospect not found' });
         return res.json({ ...updated, newXpGained: 0 });
       }

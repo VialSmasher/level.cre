@@ -1,4 +1,4 @@
-import { INVENTORY_CLASSES, INVENTORY_CONFIDENCE, type PropertyInventory } from '@level-cre/shared'
+import { INVENTORY_CLASSES, INVENTORY_CONFIDENCE, getPropertyInventory, getPropertyClassification, registrationHistory, type PropertyInventory } from '@level-cre/shared'
 
 export type InventoryFilters = { classes: string[]; confidence: string[]; tags: string[]; includeOther: boolean }
 export const INVENTORY_SIGNAL_GROUPS = [
@@ -6,7 +6,7 @@ export const INVENTORY_SIGNAL_GROUPS = [
   { label: 'Market activity', tags: [['on_market','On market in source']] },
   { label: 'Covenant / use', tags: [['weaker_covenant','Weaker covenant signal'],['duplex','Duplex'],['retail_fuel','Retail fuel'],['hospitality','Hospitality'],['food_service','Food service']] },
   { label: 'Data completeness', tags: [['has_occupant','Occupant recorded'],['has_costar','CoStar research present'],['costar_partial','CoStar partial'],['costar_no_match','CoStar no match'],['missing_assessment','Missing assessment'],['missing_year_built','Missing year built']] },
-  { label: 'Title / area', tags: [['long_hold','Title registration over 15 years'],['nisku_park','Nisku Industrial Park']] },
+  { label: 'Title / area', tags: [['long_hold','15+ years since registration'],['nisku_park','Nisku Industrial Park']] },
 ] as const
 const knownTags = new Set(INVENTORY_SIGNAL_GROUPS.flatMap(group=>group.tags.map(([key])=>key as string)))
 export const defaultInventoryFilters = (): InventoryFilters => ({classes:[...INVENTORY_CLASSES], confidence:[...INVENTORY_CONFIDENCE], tags:[], includeOther:true})
@@ -28,9 +28,22 @@ export function inventorySignals(inventory: PropertyInventory, now = new Date())
   if(inventory.assessment===null)tags.add('missing_assessment')
   if(inventory.yearBuilt===null)tags.add('missing_year_built')
   if(inventory.businessPark==='Nisku Industrial Park')tags.add('nisku_park')
-  const cutoff=new Date(now);cutoff.setUTCFullYear(cutoff.getUTCFullYear()-15)
-  if(inventory.titleRecords.every(title=>Date.parse(title.lastSaleDate+'T00:00:00Z')<cutoff.getTime()))tags.add('long_hold')
+  if(registrationHistory(inventory.titleRecords.map(title=>title.lastSaleDate),now)?.longHeld)tags.add('long_hold')
   return tags
+}
+
+export function propertyFilterFacts(prospect: {aiMetadata?: unknown}) {
+  const inventory=getPropertyInventory(prospect)
+  return {classification:getPropertyClassification(prospect), confidence:inventory?.confidence||'unrated', signals:inventory?inventorySignals(inventory):new Set<string>()}
+}
+export function matchesPropertyFilters(prospect: {aiMetadata?: unknown}, filters: InventoryFilters): boolean {
+  const facts=propertyFilterFacts(prospect)
+  if(facts.classification==='unknown')return filters.includeOther
+  if(!filters.classes.includes(facts.classification)||!filters.confidence.includes(facts.confidence))return false
+  return INVENTORY_SIGNAL_GROUPS.every(group=>{
+    const selected=group.tags.map(([key])=>key).filter(key=>filters.tags.includes(key))
+    return !selected.length||selected.some(key=>facts.signals.has(key))
+  })
 }
 export function matchesInventoryFilters(inventory: PropertyInventory | null, filters: InventoryFilters, now?: Date): boolean {
   if(!inventory)return filters.includeOther

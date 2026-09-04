@@ -1,7 +1,7 @@
 import { polygonIntersectsViewport } from '@/features/map/viewportClustering';
-import { INVENTORY_CLASS_META, getPropertyInventory, type PropertyInventory } from '@level-cre/shared';
+import { getPropertyInventory } from '@level-cre/shared';
 import { InventoryFilterPanel } from '@/features/map/InventoryFilterPanel';
-import { readInventoryFilters, matchesInventoryFilters, inventoryMapExtent, type InventoryFilters } from '@/features/map/inventoryFilters';
+import { readInventoryFilters, matchesPropertyFilters, inventoryMapExtent, type InventoryFilters } from '@/features/map/inventoryFilters';
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { GoogleMap, useJsApiLoader, Polygon, InfoWindow } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
@@ -68,7 +68,7 @@ import {
 import { SearchResultCard } from '@/features/map/SearchResultCard';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
 import { createStatusFilterSet, readRelationshipFilters, getStatusCounts } from '@/features/map/statusFilters';
-import { UNCLASSIFIED_PROPERTY_META } from '@/features/map/propertyPresentation';
+import { propertyPresentation, UNCLASSIFIED_PROPERTY_META } from '@/features/map/propertyPresentation';
 import {
   createProspectTypeFilterSet,
   getComposedPropertyProspectTypes,
@@ -785,7 +785,6 @@ export default function HomePage() {
 
   // Lifecycle status, pursuit type, and geography are independent map filters.
   const inventoryByProspectId = useMemo(() => new Map(prospects.map(prospect => [prospect.id, getPropertyInventory(prospect)])), [prospects]);
-  const inventoryRecords = useMemo(() => Array.from(inventoryByProspectId.values()).filter((value): value is PropertyInventory => value !== null), [inventoryByProspectId]);
   const filteredProspects = useMemo(() => {
     return prospects.filter(prospect => {
       const passesStatus = statusFilters.has(prospect.status);
@@ -795,7 +794,7 @@ export default function HomePage() {
       const passesProspectType = composedItem
         ? matchesProspectTypeFilters(prospectTypeFilters, getComposedPropertyProspectTypes(composedItem))
         : matchesProspectTypeFilters(prospectTypeFilters, []);
-      return passesStatus && passesSubmarket && passesProspectType && matchesInventoryFilters(inventoryByProspectId.get(prospect.id) || null, inventoryFilters);
+      return passesStatus && passesSubmarket && passesProspectType && matchesPropertyFilters(prospect, inventoryFilters);
     });
   }, [composedMapItemByProspectId, prospectTypeFilters, prospects, selectedSubmarkets, statusFilters, inventoryByProspectId, inventoryFilters]);
 
@@ -824,9 +823,11 @@ export default function HomePage() {
   const prospectTypeCounts = useMemo(() => getProspectTypeCounts(composedMapItems), [composedMapItems]);
 
   const renderableProspects = useMemo(() => {
-    return filteredProspects.map((prospect) => {
-      const inventory = inventoryByProspectId.get(prospect.id);
-      const color = inventory ? INVENTORY_CLASS_META[inventory.classification].color : UNCLASSIFIED_PROPERTY_META.color;
+    // Keep the asset being corrected on screen until selection changes.
+    const selected = prospects.find(p => p.id === selectedProspect?.id);
+    const visible = selected && !filteredProspects.some(p => p.id === selected.id) ? [...filteredProspects, selected] : filteredProspects;
+    return visible.map((prospect) => {
+      const color = propertyPresentation(prospect).color;
       const memory = linkedMemoryByProspectId.get(prospect.id);
       const memoryLayer: MarketMemoryLayer | null = memory ? (memory.previewLayer || memory.baseLayer) : null;
       const showMemoryState = Boolean(memory && memoryLayer && visibleMarketMemoryLayers.has(memoryLayer));
@@ -862,7 +863,7 @@ export default function HomePage() {
       }
       return null;
     }).filter(Boolean) as RenderableProspectEntry[];
-  }, [filteredProspects, linkedMemoryByProspectId, visibleMarketMemoryLayers, inventoryByProspectId]);
+  }, [filteredProspects, linkedMemoryByProspectId, visibleMarketMemoryLayers, inventoryByProspectId, prospects, selectedProspect?.id]);
 
   const clearPolygonPathListeners = useCallback((prospectId?: string) => {
     if (prospectId) {
@@ -2253,6 +2254,7 @@ export default function HomePage() {
     const prospectMarkers = renderableProspects.flatMap((entry) => {
       if (entry.kind !== 'point') return [];
       const inventory = inventoryByProspectId.get(entry.id);
+      const presentation = propertyPresentation(entry.prospect);
       const category = entry.prospect.status === 'listing'
         ? 'listing' as const
         : entry.prospect.status === 'client'
@@ -2262,13 +2264,13 @@ export default function HomePage() {
         id: `prospect:${entry.id}`,
         position: entry.position,
         category,
-        title: inventory ? `${inventory.name} · ${INVENTORY_CLASS_META[inventory.classification].label} · ${inventory.confidence} confidence · ${STATUS_META[entry.prospect.status].label}` : `${entry.markerTitle || getProspectDisplayName(entry.prospect)} · Unclassified property · ${STATUS_META[entry.prospect.status].label}`,
+        title: inventory ? `${inventory.name} · ${presentation.label} · ${inventory.confidence} research confidence · ${STATUS_META[entry.prospect.status].label}` : `${entry.markerTitle || getProspectDisplayName(entry.prospect)} · ${presentation.label} · ${STATUS_META[entry.prospect.status].label}`,
         color: entry.color,
         clusterColor: entry.color,
         borderColor: inventory?.confidence === 'low' || inventory?.confidence === 'unrated' ? '#F59E0B' : entry.memoryBorderColor,
-        label: inventory ? INVENTORY_CLASS_META[inventory.classification].marker : entry.memoryLabel || '?',
-        scale: inventory?.classification === 'multi_tenant' ? 12 : inventory ? 10 : 8,
-        zIndex: inventory?.classification === 'multi_tenant' ? 15 : entry.memoryLabel ? 8 : 2,
+        label: presentation.marker === '?' ? entry.memoryLabel || '?' : presentation.marker,
+        scale: presentation.marker === 'M' ? 12 : presentation.marker !== '?' ? 10 : 8,
+        zIndex: presentation.marker === 'M' ? 15 : entry.memoryLabel ? 8 : 2,
         onClick: () => handleProspectClick(entry.prospect),
       }];
     });
@@ -2659,6 +2661,12 @@ export default function HomePage() {
           onBusinessNameChange={(value) => updateSelectedProspect('businessName', value || null)}
           onWebsiteUrlChange={(value) => updateSelectedProspect('websiteUrl', value || null)}
           onStatusChange={(value) => updateSelectedProspect('status', value)}
+          onClassificationSaved={(saved) => {
+            const merge = (p: Prospect) => p.id === saved.id ? {...p, aiMetadata: saved.aiMetadata} : p;
+            setSelectedProspect(p => p ? merge(p) : p);
+            setProspects(items => items.map(merge));
+            queryClient.setQueryData<Prospect[]>(['/api/prospects'], items => items?.map(merge));
+          }}
           onFollowUpChange={(timeframe, dueDate) => {
             setSelectedProspect((prev) => (
               prev && prev.id === selectedProspect.id
@@ -2783,10 +2791,9 @@ export default function HomePage() {
       {/* Status Legend (bottom-left) with built-in chevron */}
       <div className="absolute bottom-20 left-3 z-40 sm:bottom-4 sm:left-4" style={{ pointerEvents: 'auto' }}>
         <StatusLegend
-          inventoryControls={<InventoryFilterPanel inventories={inventoryRecords} filters={inventoryFilters} onChange={setInventoryFilters} onFocus={(next) => {
+          inventoryControls={<InventoryFilterPanel prospects={prospects} filters={inventoryFilters} onChange={setInventoryFilters} onFocus={(next) => {
             const targets = prospects.filter(prospect => {
-              const inventory = inventoryByProspectId.get(prospect.id);
-              return inventory && matchesInventoryFilters(inventory, next);
+              return propertyPresentation(prospect).marker !== '?' && matchesPropertyFilters(prospect, next);
             });
             if (!map || !targets.length) return;
             setStatusFilters(createStatusFilterSet(null));

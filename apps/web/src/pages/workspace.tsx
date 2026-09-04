@@ -1543,6 +1543,13 @@ function WorkspaceMap() {
           onBusinessNameChange={(value) => updateSelectedProspect('businessName', value || null)}
           onWebsiteUrlChange={(value) => updateSelectedProspect('websiteUrl', value || null)}
           onStatusChange={(value) => updateSelectedProspect('status', value)}
+          onClassificationSaved={(saved) => {
+            const merge = (p: Prospect) => p.id === saved.id ? {...p, aiMetadata: saved.aiMetadata} : p;
+            setSelectedProspect(p => p ? merge(p) : p);
+            setProspectDraft(p => p ? merge(p) : p);
+            queryClient.setQueryData<Prospect[]>(['/api/prospects'], items => items?.map(merge));
+            queryClient.setQueryData<Prospect[]>(['/api/listings', listingId, 'prospects'], items => items?.map(merge));
+          }}
           onFollowUpChange={(timeframe, dueDate) => {
             updateSelectedProspect('followUpTimeframe', timeframe);
             updateSelectedProspect('followUpDueDate', dueDate);

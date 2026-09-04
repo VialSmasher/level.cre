@@ -3,6 +3,7 @@ import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
 import type { Pool } from 'pg'
 import type { PropertyInventoryRecord } from '@level-cre/shared'
+import { getPropertyClassification } from '@level-cre/shared'
 import { importPropertyInventory, matchInventoryRecord } from './propertyInventoryImport'
 
 function fixture(address='100 1 ST', title='00123'): PropertyInventoryRecord {
@@ -29,10 +30,13 @@ test('inventory dry run, exact replay, metadata preservation and rollback use re
   assert.equal((await pg.query('SELECT * FROM prospects')).rows.length,2)
   const id=first.results[0].id
   await pg.query("UPDATE prospects SET status='listing',notes='Broker note',ai_metadata=ai_metadata || '{\"keep\":true}'::jsonb WHERE id=$1",[id])
+  await pg.query('UPDATE prospects SET ai_metadata=ai_metadata || $2::jsonb WHERE id=$1',[id,JSON.stringify({propertyClassification:{classification:'single_tenant',source:'broker',reviewedAt:'2026-09-04T12:00:00Z',reviewedBy:'owner'}})])
   const changed=structuredClone(rows);changed[0].inventory.subFilters.push('vacant')
   assert.equal((await importPropertyInventory(pool,'owner',changed,true)).updated,1)
   const saved=(await pg.query<any>('SELECT * FROM prospects WHERE id=$1',[id])).rows[0]
   assert.equal(saved.status,'listing');assert.equal(saved.notes,'Broker note');assert.equal(saved.ai_metadata.keep,true)
+  assert.equal(saved.ai_metadata.propertyInventory.classification,'multi_tenant','Original source classification is retained')
+  assert.equal(getPropertyClassification({aiMetadata:saved.ai_metadata}),'single_tenant','Re-import preserves the broker correction')
   assert.equal(saved.building_sf,null,'Partial area is retained as source evidence, not copied to the main size field')
   assert.deepEqual(saved.geometry.coordinates,[-113.52,53.33])
   assert.equal(saved.submarket_id,'Nisku')

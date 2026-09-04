@@ -20,6 +20,8 @@ import { randomUUID } from "crypto";
 import { XP_VALUES, actionForInteractionType, inferInteractionTypeFromNote, xpForInteractionType } from "./lib/gamification";
 import { ProspectReferenceError } from "./lib/prospectReferenceService";
 import { buildLeaderboardIdentities } from "./lib/leaderboardIdentity";
+import type { PropertyClassificationType } from '@level-cre/shared';
+import { classificationMetadataPatch } from './lib/propertyClassificationPatch';
 
 type ProspectCreateInput = Omit<
   InsertProspect,
@@ -49,6 +51,7 @@ type ProspectUpdateInput = Omit<
   'address' | 'locationLat' | 'locationLng' | 'geohash' | 'marketKey' | 'marketConfidence' |
   'marketContextSource' | 'marketContextStatus'
 > & {
+  propertyClassification?: PropertyClassificationType | null;
   followUpDueDate?: string | null;
   buildingSf?: number | null;
   lotSizeAcres?: number | null;
@@ -1065,6 +1068,9 @@ export class DatabaseStorage implements IStorage {
         lotSizeAcres: updates.lotSizeAcres === null ? null : String(updates.lotSizeAcres),
       }),
       ...(updates.aiMetadata !== undefined && { aiMetadata: updates.aiMetadata }),
+      ...(updates.propertyClassification !== undefined && {
+        aiMetadata: classificationMetadataPatch(prospects.aiMetadata, updates.propertyClassification, userId),
+      }),
       ...(updates.businessName !== undefined && { businessName: updates.businessName }),
       ...(updates.websiteUrl !== undefined && { websiteUrl: updates.websiteUrl }),
       ...(updates.address !== undefined && { address: updates.address }),

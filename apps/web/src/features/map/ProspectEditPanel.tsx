@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { InventoryDetails } from './InventoryDetails';
+import { PropertyTypePicker } from './PropertyTypePicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PhoneInput } from '@/components/ui/phone-input';
@@ -123,6 +124,7 @@ const formatInteractionDate = (value?: string | null) => {
 const readableInteractionValue = (value: string) => value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 
 type ProspectEditPanelProps = {
+  onClassificationSaved?: (saved: Prospect) => void;
   prospect: Prospect;
   saveStatus?: 'saved' | 'saving' | 'error';
   values: ProspectEditPanelValues;
@@ -164,6 +166,7 @@ type ProspectEditPanelProps = {
 };
 
 export function ProspectEditPanel({
+  onClassificationSaved,
   prospect,
   saveStatus = 'saved',
   values,
@@ -222,8 +225,8 @@ export function ProspectEditPanel({
   const geometryType = prospect.geometry.type as string;
   const isAreaShape = geometryType === 'Polygon' || geometryType === 'Rectangle';
   const shapeButtonLabel = isAreaShape
-    ? isEditingShape ? 'Finish editing' : 'Edit shape'
-    : 'Draw area';
+    ? isEditingShape ? 'Finish boundary editing' : 'Edit boundary'
+    : 'Draw boundary';
   const panelTitle = values.businessName.trim() || values.address.trim() || prospect.name || 'Prospect';
 
   return (
@@ -278,7 +281,8 @@ export function ProspectEditPanel({
           </TabsList>
 
           <TabsContent value="property" className="space-y-4">
-            <InventoryDetails prospect={prospect} />
+            {onClassificationSaved && <PropertyTypePicker key={prospect.id} prospect={prospect} disabled={!canEditShape || saveStatus !== 'saved'} onSaved={onClassificationSaved} />}
+            <InventoryDetails prospect={prospect} onReviewContact={() => setActiveTab('contact')} />
             <div>
               <Label className="text-xs font-medium text-gray-700">Business Name</Label>
               <Input
@@ -452,6 +456,10 @@ export function ProspectEditPanel({
           </TabsContent>
 
           <TabsContent value="contact" className="space-y-4">
+            {values.contactPhone.replace(/\D/g, '').length >= 7 ? <a
+              href={`tel:${values.contactPhone.replace(/[^\d+]/g, '')}`}
+              className="flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-900 px-3 text-sm font-semibold text-white hover:bg-slate-800"
+            ><Phone className="h-4 w-4" aria-hidden />Call {values.contactName || values.contactCompany || 'recorded number'}</a> : <p className="text-xs text-slate-500">Add a verified phone number to call this property contact.</p>}
             <div>
               <Label className="text-xs font-medium text-gray-700">Website</Label>
               <Input
@@ -576,7 +584,7 @@ export function ProspectEditPanel({
       </div>
 
       <div className="sticky bottom-0 z-10 bg-white border-t px-4 py-3 relative">
-        <div className="relative flex items-center justify-center">
+        <div className="relative flex items-center justify-between gap-2">
           {footerOverlay}
           <div className={`flex items-center gap-1 ${savePulse ? 'animate-pulse' : ''}`}>
             {footerLeadingActions}
@@ -600,12 +608,13 @@ export function ProspectEditPanel({
                 <Button
                   onClick={isAreaShape ? onEditShape : onDrawArea}
                   variant="outline"
-                  className="h-8 w-8 p-0"
+                  className="h-8 gap-1 px-2 text-[11px]"
                   disabled={!canEditShape}
                   aria-label={shapeButtonLabel}
                   title={shapeButtonLabel}
                 >
                   <Edit3 className="h-3.5 w-3.5" />
+                  Boundary
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{shapeButtonLabel}</TooltipContent>
@@ -615,7 +624,7 @@ export function ProspectEditPanel({
           <Button
             onClick={onDelete}
             variant="destructive"
-            className="absolute right-0 h-8 px-3 text-xs"
+            className="h-8 shrink-0 px-3 text-xs"
             title="Delete Prospect"
             disabled={deleteDisabled}
             aria-label="Delete prospect"
