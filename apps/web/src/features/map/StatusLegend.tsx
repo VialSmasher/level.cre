@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Check, ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { STATUS_META, type ProspectStatusType } from '@level-cre/shared/schema';
 import {
@@ -16,6 +16,7 @@ import {
 } from './prospectTypeFilters';
 
 interface StatusLegendProps {
+  inventoryControls?: ReactNode;
   selected?: Set<ProspectStatusType>;
   onToggle?: (key: ProspectStatusType) => void;
   onChange?: (next: Set<ProspectStatusType>) => void;
@@ -28,6 +29,7 @@ interface StatusLegendProps {
 }
 
 export function StatusLegend({
+  inventoryControls,
   selected,
   onToggle,
   onChange,
@@ -83,6 +85,7 @@ export function StatusLegend({
       </button>
       {open && (
         <div className="max-h-[calc(72dvh-2.5rem)] overflow-y-auto px-3 pb-3">
+          {inventoryControls}
           <div className="border-t border-slate-200 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
             Lifecycle status
           </div>

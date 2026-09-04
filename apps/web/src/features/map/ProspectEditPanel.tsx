@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { InventoryDetails } from './InventoryDetails';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PhoneInput } from '@/components/ui/phone-input';
@@ -277,6 +278,7 @@ export function ProspectEditPanel({
           </TabsList>
 
           <TabsContent value="property" className="space-y-4">
+            <InventoryDetails prospect={prospect} />
             <div>
               <Label className="text-xs font-medium text-gray-700">Business Name</Label>
               <Input

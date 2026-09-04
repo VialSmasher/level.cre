@@ -1,4 +1,7 @@
 import { polygonIntersectsViewport } from '@/features/map/viewportClustering';
+import { INVENTORY_CLASS_META, getPropertyInventory, type PropertyInventory } from '@level-cre/shared';
+import { InventoryFilterPanel } from '@/features/map/InventoryFilterPanel';
+import { readInventoryFilters, matchesInventoryFilters, type InventoryFilters } from '@/features/map/inventoryFilters';
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { GoogleMap, useJsApiLoader, Polygon, InfoWindow } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
@@ -318,6 +321,9 @@ export default function HomePage() {
   // Filter state
   const statusFilterStorageKey = nsKey(currentUser?.id, 'mapStatusFilters');
   const prospectTypeFilterStorageKey = nsKey(currentUser?.id, 'mapProspectTypeFilters:v1');
+  const inventoryFilterStorageKey = nsKey(currentUser?.id, 'mapInventoryFilters:v1');
+  const skipNextInventoryPersistRef = useRef(false);
+  const [inventoryFilters, setInventoryFilters] = useState<InventoryFilters>(() => readInventoryFilters(readJSON(inventoryFilterStorageKey, null)));
   const skipNextStatusFilterPersistRef = useRef(false);
   const skipNextProspectTypeFilterPersistRef = useRef(false);
   const [statusFilters, setStatusFilters] = useState<Set<ProspectStatusType>>(() => {
@@ -673,6 +679,14 @@ export default function HomePage() {
   }, [prospectTypeFilterStorageKey, prospectTypeFilters]);
 
   // No longer persisting legend open state
+  useEffect(() => {
+    skipNextInventoryPersistRef.current = true;
+    setInventoryFilters(readInventoryFilters(readJSON(inventoryFilterStorageKey, null)));
+  }, [inventoryFilterStorageKey]);
+  useEffect(() => {
+    if (skipNextInventoryPersistRef.current) { skipNextInventoryPersistRef.current = false; return; }
+    writeJSON(inventoryFilterStorageKey, inventoryFilters);
+  }, [inventoryFilterStorageKey, inventoryFilters]);
   
   // Save submarket filter state
   useEffect(() => {
@@ -768,6 +782,8 @@ export default function HomePage() {
   }, [composedMapItems]);
 
   // Lifecycle status, pursuit type, and geography are independent map filters.
+  const inventoryByProspectId = useMemo(() => new Map(prospects.map(prospect => [prospect.id, getPropertyInventory(prospect)])), [prospects]);
+  const inventoryRecords = useMemo(() => Array.from(inventoryByProspectId.values()).filter((value): value is PropertyInventory => value !== null), [inventoryByProspectId]);
   const filteredProspects = useMemo(() => {
     return prospects.filter(prospect => {
       const passesStatus = statusFilters.has(prospect.status);
@@ -777,9 +793,9 @@ export default function HomePage() {
       const passesProspectType = composedItem
         ? matchesProspectTypeFilters(prospectTypeFilters, getComposedPropertyProspectTypes(composedItem))
         : matchesProspectTypeFilters(prospectTypeFilters, []);
-      return passesStatus && passesSubmarket && passesProspectType;
+      return passesStatus && passesSubmarket && passesProspectType && matchesInventoryFilters(inventoryByProspectId.get(prospect.id) || null, inventoryFilters);
     });
-  }, [composedMapItemByProspectId, prospectTypeFilters, prospects, selectedSubmarkets, statusFilters]);
+  }, [composedMapItemByProspectId, prospectTypeFilters, prospects, selectedSubmarkets, statusFilters, inventoryByProspectId, inventoryFilters]);
 
   const linkedMemoryByProspectId = useMemo(() => {
     const result = new Map<string, MarketMemoryAnchor>();
@@ -794,11 +810,12 @@ export default function HomePage() {
     () => composedMapItems
       .filter((item) => (
         item.kind === 'memory'
+        && inventoryFilters.includeOther
         && item.primaryMemoryAnchor
         && matchesProspectTypeFilters(prospectTypeFilters, getComposedPropertyProspectTypes(item))
       ))
       .map((item) => item.primaryMemoryAnchor as MarketMemoryAnchor),
-    [composedMapItems, prospectTypeFilters],
+    [composedMapItems, prospectTypeFilters, inventoryFilters.includeOther],
   );
 
   const statusCounts = useMemo(() => getStatusCounts(prospects), [prospects]);
@@ -806,7 +823,8 @@ export default function HomePage() {
 
   const renderableProspects = useMemo(() => {
     return filteredProspects.map((prospect) => {
-      const color = STATUS_META[prospect.status].color;
+      const inventory = inventoryByProspectId.get(prospect.id);
+      const color = inventory ? INVENTORY_CLASS_META[inventory.classification].color : STATUS_META[prospect.status].color;
       const memory = linkedMemoryByProspectId.get(prospect.id);
       const memoryLayer: MarketMemoryLayer | null = memory ? (memory.previewLayer || memory.baseLayer) : null;
       const showMemoryState = Boolean(memory && memoryLayer && visibleMarketMemoryLayers.has(memoryLayer));
@@ -842,7 +860,7 @@ export default function HomePage() {
       }
       return null;
     }).filter(Boolean) as RenderableProspectEntry[];
-  }, [filteredProspects, linkedMemoryByProspectId, visibleMarketMemoryLayers]);
+  }, [filteredProspects, linkedMemoryByProspectId, visibleMarketMemoryLayers, inventoryByProspectId]);
 
   const clearPolygonPathListeners = useCallback((prospectId?: string) => {
     if (prospectId) {
@@ -2232,6 +2250,7 @@ export default function HomePage() {
   const clusteredMapMarkerEntries = useMemo<ClusteredMapMarkerEntry[]>(() => {
     const prospectMarkers = renderableProspects.flatMap((entry) => {
       if (entry.kind !== 'point') return [];
+      const inventory = inventoryByProspectId.get(entry.id);
       const category = entry.prospect.status === 'listing'
         ? 'listing' as const
         : entry.prospect.status === 'client'
@@ -2241,12 +2260,13 @@ export default function HomePage() {
         id: `prospect:${entry.id}`,
         position: entry.position,
         category,
-        title: entry.markerTitle || getProspectDisplayName(entry.prospect),
+        title: inventory ? `${inventory.name} · ${INVENTORY_CLASS_META[inventory.classification].label} · ${inventory.confidence} confidence` : entry.markerTitle || getProspectDisplayName(entry.prospect),
         color: entry.color,
-        borderColor: entry.memoryBorderColor,
-        label: entry.memoryLabel,
-        scale: 8,
-        zIndex: entry.memoryLabel ? 8 : 2,
+        clusterColor: inventory ? entry.color : undefined,
+        borderColor: inventory?.confidence === 'low' || inventory?.confidence === 'unrated' ? '#F59E0B' : entry.memoryBorderColor,
+        label: inventory ? INVENTORY_CLASS_META[inventory.classification].marker : entry.memoryLabel,
+        scale: inventory?.classification === 'multi_tenant' ? 12 : inventory ? 10 : 8,
+        zIndex: inventory?.classification === 'multi_tenant' ? 15 : entry.memoryLabel ? 8 : 2,
         onClick: () => handleProspectClick(entry.prospect),
       }];
     });
@@ -2271,7 +2291,7 @@ export default function HomePage() {
       }];
     });
     return [...prospectMarkers, ...memoryMarkers];
-  }, [handleMarketMemoryAnchorClick, handleProspectClick, renderableProspects, standaloneMarketMemoryAnchors, visibleMarketMemoryLayers]);
+  }, [handleMarketMemoryAnchorClick, handleProspectClick, renderableProspects, standaloneMarketMemoryAnchors, visibleMarketMemoryLayers, inventoryByProspectId]);
 
   const selectedMapMarkerIds = useMemo(() => {
     const selected = new Set<string>();
@@ -2760,6 +2780,24 @@ export default function HomePage() {
       {/* Status Legend (bottom-left) with built-in chevron */}
       <div className="absolute bottom-20 left-3 z-40 sm:bottom-4 sm:left-4" style={{ pointerEvents: 'auto' }}>
         <StatusLegend
+          inventoryControls={<InventoryFilterPanel inventories={inventoryRecords} filters={inventoryFilters} onChange={setInventoryFilters} onFocus={(next) => {
+            const targets = prospects.filter(prospect => {
+              const inventory = inventoryByProspectId.get(prospect.id);
+              return inventory && matchesInventoryFilters(inventory, next);
+            });
+            if (!map || !targets.length) return;
+            setStatusFilters(createStatusFilterSet(null));
+            setProspectTypeFilters(createProspectTypeFilterSet(null));
+            setSelectedSubmarkets(new Set());
+            const inventoryBounds = new google.maps.LatLngBounds();
+            for (const prospect of targets) {
+              if (prospect.geometry.type === 'Point') {
+                const [lng, lat] = prospect.geometry.coordinates as [number, number];
+                inventoryBounds.extend({lat, lng});
+              }
+            }
+            if (!inventoryBounds.isEmpty()) map.fitBounds(inventoryBounds, {top:60, right:70, bottom:70, left: window.innerWidth >= 640 ? 340 : 30});
+          }} />}
           selected={statusFilters}
           counts={statusCounts}
           onChange={setStatusFilters}
