@@ -2,7 +2,7 @@ import { memo, useMemo } from 'react'
 import { useGoogleMap } from '@react-google-maps/api'
 
 import { AdvancedMapMarker } from './AdvancedMapMarker'
-import { UNCLASSIFIED_PROPERTY_META } from './propertyPresentation'
+import { clusterPresentation } from './clusterPresentation'
 import {
   clusterViewportPoints,
   type MapMarkerCategory,
@@ -19,22 +19,6 @@ export type ClusteredMapMarkerEntry = ViewportMapPoint & {
   scale?: number
   zIndex?: number
   onClick: () => void
-}
-
-const CATEGORY_LABELS: Record<MapMarkerCategory, string> = {
-  prospect: 'prospects',
-  listing: 'listings',
-  client: 'clients',
-  memory: 'market memory',
-  review: 'review items',
-}
-
-function clusterTitle(categories: Partial<Record<MapMarkerCategory, number>>, count: number) {
-  const detail = (Object.entries(categories) as Array<[MapMarkerCategory, number]>)
-    .filter(([, categoryCount]) => categoryCount > 0)
-    .map(([category, categoryCount]) => `${categoryCount} ${CATEGORY_LABELS[category]}`)
-    .join(', ')
-  return `${count} properties${detail ? `: ${detail}` : ''}`
 }
 
 export const ClusteredMapMarkers = memo(function ClusteredMapMarkers({
@@ -83,8 +67,7 @@ export const ClusteredMapMarkers = memo(function ClusteredMapMarkers({
         }
         const categoryKeys = Object.keys(item.categories) as MapMarkerCategory[]
         const sharedCategory = categoryKeys.length === 1 ? categoryKeys[0] : null
-        const inventoryColors = new Set(item.pointIds.map(id => entriesById.get(id)?.clusterColor))
-        const inventoryColor = inventoryColors.size === 1 && !inventoryColors.has(undefined) ? Array.from(inventoryColors)[0] : null
+        const presentation = clusterPresentation(item.pointIds.map(id => entriesById.get(id)?.clusterColor))
         return (
           <AdvancedMapMarker
             key={item.id}
@@ -92,8 +75,8 @@ export const ClusteredMapMarkers = memo(function ClusteredMapMarkers({
             markerKind="cluster"
             markerCategory={sharedCategory || 'mixed'}
             position={item.position}
-            title={clusterTitle(item.categories, item.count)}
-            color={inventoryColor || UNCLASSIFIED_PROPERTY_META.color}
+            title={presentation.title}
+            color={presentation.background}
             borderColor="#ffffff"
             label={item.count > 999 ? `${Math.round(item.count / 1_000)}k` : String(item.count)}
             scale={16}

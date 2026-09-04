@@ -55,7 +55,7 @@ function anchor(overrides: Partial<MarketMemoryAnchor> = {}): MarketMemoryAnchor
 test('combines explicit prospect metadata with linked brokerage-memory types', () => {
   const items = composePropertyMapItems(
     [prospect({ aiMetadata: { prospectTypes: ['tenant_prospect'] } })],
-    [anchor({ prospectTypes: ['listing_prospect'], persistence: { state: 'pending', linkedProspectId: 'prospect-1' } })],
+    [anchor({ prospectTypes: ['listing_prospect'], persistence: { state: 'approved', linkedProspectId: 'prospect-1' } })],
   )
   assert.deepEqual(getComposedPropertyProspectTypes(items[0]), ['listing_prospect', 'tenant_prospect'])
 })

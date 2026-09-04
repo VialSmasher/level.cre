@@ -1,6 +1,11 @@
 import { INVENTORY_CLASSES, INVENTORY_CONFIDENCE, getPropertyInventory, getPropertyClassification, registrationHistory, type PropertyInventory } from '@level-cre/shared'
 
 export type InventoryFilters = { classes: string[]; confidence: string[]; tags: string[]; includeOther: boolean }
+export type PropertyFilterSource = {
+  aiMetadata?: unknown
+  researchConfidence?: typeof INVENTORY_CONFIDENCE[number]
+  researchSignals?: readonly string[]
+}
 export const INVENTORY_SIGNAL_GROUPS = [
   { label: 'Occupancy / tenure signals', tags: [['owner_occupied','Owner-occupied signal'],['likely_tenanted','Likely tenanted'],['vacant','Vacant building']] },
   { label: 'Market activity', tags: [['on_market','On market in source']] },
@@ -32,21 +37,21 @@ export function inventorySignals(inventory: PropertyInventory, now = new Date())
   return tags
 }
 
-export function propertyFilterFacts(prospect: {aiMetadata?: unknown}) {
+export function propertyFilterFacts(prospect: PropertyFilterSource) {
   const inventory=getPropertyInventory(prospect)
-  return {classification:getPropertyClassification(prospect), confidence:inventory?.confidence||'unrated', signals:inventory?inventorySignals(inventory):new Set<string>()}
+  return {classification:getPropertyClassification(prospect), confidence:inventory?.confidence||prospect.researchConfidence||'unrated', signals:inventory?inventorySignals(inventory):new Set(prospect.researchSignals || [])}
 }
-export function matchesPropertyFilters(prospect: {aiMetadata?: unknown}, filters: InventoryFilters): boolean {
+export function matchesPropertyFilters(prospect: PropertyFilterSource, filters: InventoryFilters): boolean {
   const facts=propertyFilterFacts(prospect)
-  if(facts.classification==='unknown')return filters.includeOther
-  if(!filters.classes.includes(facts.classification)||!filters.confidence.includes(facts.confidence))return false
+  if(facts.classification==='unknown' ? !filters.includeOther : !filters.classes.includes(facts.classification))return false
+  if(!filters.confidence.includes(facts.confidence))return false
   return INVENTORY_SIGNAL_GROUPS.every(group=>{
     const selected=group.tags.map(([key])=>key).filter(key=>filters.tags.includes(key))
     return !selected.length||selected.some(key=>facts.signals.has(key))
   })
 }
 export function matchesInventoryFilters(inventory: PropertyInventory | null, filters: InventoryFilters, now?: Date): boolean {
-  if(!inventory)return filters.includeOther
+  if(!inventory)return matchesPropertyFilters({},filters)
   if(!filters.classes.includes(inventory.classification)||!filters.confidence.includes(inventory.confidence))return false
   const tags=inventorySignals(inventory,now)
   return INVENTORY_SIGNAL_GROUPS.every(group=>{

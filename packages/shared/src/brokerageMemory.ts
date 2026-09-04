@@ -132,6 +132,8 @@ export type MarketMemoryPersistence = {
 }
 
 export type MarketMemoryAnchor = {
+  /** User correction, independent of research approval and imported evidence. */
+  propertyClassification?: import('./propertyClassification').BrokerClassification | null
   id: string
   address: string
   alternateAddresses: string[]

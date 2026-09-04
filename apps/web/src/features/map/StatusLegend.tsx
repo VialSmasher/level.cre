@@ -31,7 +31,7 @@ export function StatusLegend({ inventoryControls, selected, onToggle, onChange, 
   };
   const propertyKey = [...INVENTORY_CLASSES.map(key => INVENTORY_CLASS_META[key]), UNCLASSIFIED_PROPERTY_META];
   return <div className={`z-[90] select-none rounded-md border border-slate-300 bg-white text-slate-900 shadow-lg ${open ? 'fixed inset-x-3 bottom-20 max-h-[72dvh] overflow-hidden sm:static sm:inset-auto sm:w-72' : 'w-fit'}`}>
-    <button type="button" onClick={() => setOpen(value => !value)} className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2.5 hover:bg-slate-50" aria-expanded={open}>
+    <button type="button" data-testid="map-filters-toggle" onClick={() => setOpen(value => !value)} className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2.5 hover:bg-slate-50" aria-expanded={open}>
       <span className="flex items-center gap-2 text-sm font-semibold"><SlidersHorizontal className="h-4 w-4" aria-hidden />Map filters<span className="text-xs font-normal text-slate-500">{selectedSet.size}/{MAP_STATUS_KEYS.length} · {typeSet.size}/{MAP_PROSPECT_TYPE_KEYS.length}</span></span>
       <ChevronDown className={`h-4 w-4 ${open ? '' : '-rotate-90'}`} aria-hidden />
     </button>
@@ -39,7 +39,7 @@ export function StatusLegend({ inventoryControls, selected, onToggle, onChange, 
       <section aria-label="Property type color key" className="border-t py-3">
         <p className="text-xs font-semibold">Map colors show property type</p>
         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-2">{propertyKey.map(meta => <span key={meta.label} className="flex items-center gap-1.5 text-[11px]"><span className="flex h-5 w-5 items-center justify-center rounded-full font-bold text-white" style={{backgroundColor:meta.color}}>{meta.marker}</span>{meta.label}</span>)}</div>
-        <p className="mt-2 text-[11px] text-slate-500">Gray clusters mix property types. R marks research.</p></section>
+        <p className="mt-2 text-[11px] text-slate-500">Colored rings show mixed property types. Gray is unclassified. R marks research.</p></section>
       {inventoryControls}
       <details className="border-t border-slate-200 py-3" aria-label="Relationship and pipeline filters">
         <summary className="cursor-pointer text-xs font-semibold">Relationship &amp; pipeline <span className="font-normal text-slate-500">{selectedSet.size}/{MAP_STATUS_KEYS.length}</span></summary>

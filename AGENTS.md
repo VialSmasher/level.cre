@@ -11,4 +11,7 @@
 - Preserve the API's idempotency key by using the provider message ID when available. Otherwise pass the confirmed send timestamp so retries reuse the same activity identity.
 - Canonical activity must retain source, evidence status, confidence, and the provider identity. Inferences stay reviewable and must not enter the map or Do Now queue as confirmed facts.
 - Never mark an opportunity won or lost from inferred evidence. Terminal stages require Patrick-confirmed evidence.
+- Keep map asset profiles consistent: Property, Contact, and Activity tabs plus the shared property classifier remain available for CRM and persisted research records. Preserve accessible labels and stable `data-testid` controls for browser agents.
+- Research spreadsheets normally come through Codex for cleanup and validation before existing import tools are used. Do not add a separate ingestion workflow without Patrick's request. See `docs/asset-research-workflow.md` for exact record identities and classification behavior.
+- A suggested property match is not a confirmed link. Classification corrections must target the exact owned record, retain original research evidence, and never invent contacts, outreach, or relationship changes.
 - Use `scripts/codex/scan-patrick-market-memory.ps1` only as a read-only discovery tool. Its output is a candidate report, not approval to import or create opportunities.

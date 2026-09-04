@@ -1,15 +1,20 @@
-import { useEffect, useId, useMemo, useRef } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Building2, CheckCircle2, ExternalLink, FileCheck2, GitMerge, Link2, LoaderCircle, MapPin, Scale, ShieldCheck, X } from 'lucide-react'
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent } from '@/components/ui/tabs'
+import { AssetProfileTabs } from '@/features/map/AssetProfileTabs'
+import { MemoryClassificationPicker } from '@/features/property-memory/MemoryClassificationPicker'
+import { registrationHistory } from '@level-cre/shared'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { MarketMemoryAnchor, MarketMemoryLegalIdentity } from '@/lib/currentProjectsMarketMemory'
 import { PROSPECT_TYPE_META } from '@level-cre/shared/schema'
 
 type Props = {
   anchor: MarketMemoryAnchor
+  onClassificationSaved: (anchor: MarketMemoryAnchor) => void
   onClose: () => void
   onReview?: () => void
   onQuickApprove?: () => void
@@ -22,7 +27,7 @@ function cleanDate(value: string | null) {
   if (!value) return 'date unavailable'
   const date = new Date(value)
   if (!Number.isFinite(date.getTime())) return value
-  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: 'short', day: 'numeric' }).format(date)
+  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date)
 }
 
 function identityLabel(identity: MarketMemoryLegalIdentity) {
@@ -64,6 +69,7 @@ function actionAriaLabel(label: string, address: string) {
 
 export function MarketMemoryStoryPanel({
   anchor,
+  onClassificationSaved,
   onClose,
   onReview,
   onQuickApprove,
@@ -71,17 +77,13 @@ export function MarketMemoryStoryPanel({
   onWorkProspect,
   isActionPending = false,
 }: Props) {
+  const [activeTab, setActiveTab] = useState('property')
   const titleId = useId()
   const titleRef = useRef<HTMLHeadingElement>(null)
   const meta = storyMeta(anchor)
-  const candidate = anchor.resolution?.topCandidate
-  const prospectCandidates = (anchor.resolution?.candidates || []).filter((item) => item.entityType === 'prospect')
-  const reviewReasons = Array.from(new Set([...anchor.reviewReasons, ...(candidate?.conflicts || [])]))
-  const latestOwnership = useMemo(() => (
-    [...anchor.legalIdentities]
-      .filter((identity) => Boolean(identity.registeredOwner))
-      .sort((left, right) => evidenceTimestamp(right) - evidenceTimestamp(left))[0]
-  ), [anchor.legalIdentities])
+  const assetKind = anchor.persistence?.state === 'pending' ? 'memory_item' : anchor.persistence?.state === 'approved' ? 'dossier' : 'local_preview'
+  const assetId = assetKind === 'memory_item' ? anchor.persistence?.importItemId : assetKind === 'dossier' ? anchor.persistence?.dossierId : anchor.id
+
 
   useEffect(() => {
     titleRef.current?.focus({ preventScroll: true })
@@ -110,7 +112,8 @@ export function MarketMemoryStoryPanel({
   return (
     <aside
       aria-labelledby={titleId}
-      className="absolute bottom-2 left-2 right-2 z-[80] flex max-h-[78dvh] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl md:bottom-auto md:left-auto md:right-0 md:top-0 md:h-full md:max-h-none md:w-[380px] md:rounded-none md:border-y-0 md:border-r-0 md:border-l"
+      data-testid="asset-profile" data-asset-kind={assetKind} data-asset-id={assetId}
+      className="absolute bottom-2 left-2 right-2 z-[80] flex max-h-[74dvh] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl md:bottom-auto md:left-auto md:right-0 md:top-0 md:h-[90vh] md:max-h-[90vh] md:w-80 md:rounded-none md:border-y-0 md:border-r-0 md:border-l"
     >
       <div className="border-b border-slate-200 px-4 py-3">
         <div className="flex items-start justify-between gap-3">
@@ -130,15 +133,80 @@ export function MarketMemoryStoryPanel({
                 </Badge>
               ))}
             </div>
-            <h2 ref={titleRef} id={titleId} tabIndex={-1} className="mt-2 text-base font-semibold leading-5 text-slate-950 outline-none">{anchor.address}</h2>
+            <h2 ref={titleRef} id={titleId} tabIndex={-1} className="mt-2 text-sm font-semibold leading-5 text-slate-950 outline-none">{anchor.address}</h2>
           </div>
-          <Button type="button" variant="ghost" size="sm" className="h-11 w-11 shrink-0 p-0" onClick={onClose} aria-label="Close property story">
+          <Button type="button" variant="ghost" size="sm" className="h-11 w-11 shrink-0 p-0" onClick={onClose} aria-label="Close property profile" data-testid="asset-profile-close">
             <X className="h-4 w-4" aria-hidden />
           </Button>
         </div>
       </div>
 
-      <ScrollArea className="min-h-0 flex-1">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col">
+        <div className="space-y-4 border-b border-slate-100 px-4 py-3">
+          <AssetProfileTabs />
+          <MemoryClassificationPicker key={anchor.persistence?.importItemId || anchor.persistence?.dossierId || anchor.id} anchor={anchor} onSaved={onClassificationSaved} />
+        </div>
+        <ScrollArea className="min-h-0 flex-1">
+          <TabsContent value="property" className="mt-0">
+            <MarketMemoryEvidence anchor={anchor} onReviewContact={() => setActiveTab('contact')} />
+          </TabsContent>
+          <TabsContent value="contact" className="space-y-3 px-4 py-4 text-xs leading-5">
+            <h3 className="font-semibold text-slate-900">Property contacts</h3>
+            <p className="text-slate-600">Link a CRM profile to see its contacts here. A name on a title is ownership evidence, not a verified phone or email.</p>
+            {onWorkProspect ? <Button size="sm" variant="outline" onClick={onWorkProspect}>Open linked contact</Button>
+              : onReview ? <Button size="sm" variant="outline" onClick={onReview} data-testid="asset-contact-link-review">Review a CRM match</Button> : null}
+            <p className="text-slate-500">Keep the asset ID with any contact research you return for this property.</p>
+          </TabsContent>
+          <TabsContent value="activity" className="space-y-3 px-4 py-4 text-xs leading-5">
+            <h3 className="font-semibold text-slate-900">Activity</h3>
+            <p className="text-slate-600">Calls, emails and meetings appear here when a CRM profile is linked.</p>
+            <div className="border-t border-slate-200 pt-3">
+              <h4 className="font-semibold text-slate-700">Research history</h4>
+              <p className="mt-1 text-slate-500">Source captured: {cleanDate(anchor.capturedAt)}</p>
+              {anchor.propertyClassification ? <p className="mt-1 text-slate-500">Property type corrected: {cleanDate(anchor.propertyClassification.reviewedAt)}</p> : null}
+            </div>
+            {onWorkProspect ? <Button size="sm" variant="outline" onClick={onWorkProspect}>Open linked activity</Button> : null}
+          </TabsContent>
+        </ScrollArea>
+      </Tabs>
+
+      {primaryAction ? (
+        <div className={`grid grid-cols-1 gap-2 border-t border-slate-200 bg-white px-4 py-3 ${secondaryAction ? 'sm:grid-cols-2' : ''}`}>
+          <Button type="button" className="min-h-11" onClick={primaryAction.onClick} disabled={isActionPending} aria-label={actionAriaLabel(primaryAction.label, anchor.address)}>
+            {isActionPending ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden /> : <primaryAction.Icon className="h-4 w-4" aria-hidden />}
+            {isActionPending && primaryAction.label === 'Accept' ? 'Saving…' : primaryAction.label}
+          </Button>
+          {secondaryAction ? (
+            <Button type="button" variant="outline" className="min-h-11" onClick={secondaryAction.onClick} disabled={isActionPending} aria-label={actionAriaLabel(secondaryAction.label, anchor.address)}>
+              <secondaryAction.Icon className="h-4 w-4" aria-hidden />
+              {secondaryAction.label}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+    </aside>
+  )
+}
+
+
+export function MarketMemoryEvidence({anchor, onReviewContact}: {anchor: MarketMemoryAnchor; onReviewContact?: () => void}) {
+  const candidate = anchor.resolution?.topCandidate
+  const prospectCandidates = (anchor.resolution?.candidates || []).filter((item) => item.entityType === 'prospect')
+  const reviewReasons = Array.from(new Set([...anchor.reviewReasons, ...(candidate?.conflicts || [])]))
+  const latestOwnership = useMemo(() => (
+    [...anchor.legalIdentities]
+      .filter((identity) => Boolean(identity.registeredOwner))
+      .sort((left, right) => evidenceTimestamp(right) - evidenceTimestamp(left))[0]
+  ), [anchor.legalIdentities])
+  const history = registrationHistory(anchor.legalIdentities.map(identity => identity.transferRegistrationDate || ''))
+  return <div data-testid="asset-research-evidence">
+    {history ? <section className={`mx-4 mt-4 rounded-lg border p-3 ${history.longHeld ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
+      <h3 className="text-xs font-semibold text-slate-700">Last recorded registration</h3>
+      <p className="mt-1 text-xl font-semibold tracking-tight text-slate-950">{cleanDate(history.latest)}</p>
+      <p className="mt-1 text-xs font-medium">{history.years} years ago{history.longHeld ? ' · Long-held signal' : ''}</p>
+      <p className="mt-2 text-[11px] leading-4 text-slate-600">Registration evidence, not a verified sale or proof of unchanged ownership.</p>
+      {onReviewContact && history.longHeld ? <button type="button" className="mt-2 text-xs font-semibold text-blue-700" onClick={onReviewContact}>Review contact before outreach</button> : null}
+    </section> : null}
         <section aria-label="Property summary" className="px-4 py-4">
           <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
             <div className="col-span-2">
@@ -233,22 +301,5 @@ export function MarketMemoryStoryPanel({
             </AccordionContent>
           </AccordionItem>
         </Accordion>
-      </ScrollArea>
-
-      {primaryAction ? (
-        <div className={`grid grid-cols-1 gap-2 border-t border-slate-200 bg-white px-4 py-3 ${secondaryAction ? 'sm:grid-cols-2' : ''}`}>
-          <Button type="button" className="min-h-11" onClick={primaryAction.onClick} disabled={isActionPending} aria-label={actionAriaLabel(primaryAction.label, anchor.address)}>
-            {isActionPending ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden /> : <primaryAction.Icon className="h-4 w-4" aria-hidden />}
-            {isActionPending && primaryAction.label === 'Accept' ? 'Saving…' : primaryAction.label}
-          </Button>
-          {secondaryAction ? (
-            <Button type="button" variant="outline" className="min-h-11" onClick={secondaryAction.onClick} disabled={isActionPending} aria-label={actionAriaLabel(secondaryAction.label, anchor.address)}>
-              <secondaryAction.Icon className="h-4 w-4" aria-hidden />
-              {secondaryAction.label}
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-    </aside>
-  )
+  </div>
 }

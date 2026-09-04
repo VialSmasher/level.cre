@@ -14,7 +14,8 @@ import { SearchComponent } from '@/components/SearchComponent';
 import { CSVUploader } from '@/components/CSVUploader';
 import { MarketMemoryLayerControl, type MarketMemoryLayer } from '@/components/MarketMemoryLayerControl';
 import { MarketMemoryPreviewDialog } from '@/components/MarketMemoryPreviewDialog';
-import { MarketMemoryStoryPanel } from '@/components/MarketMemoryStoryPanel';
+import { MarketMemoryStoryPanel, MarketMemoryEvidence } from '@/components/MarketMemoryStoryPanel';
+import { applyMemoryClassification, memoryClassificationTarget } from '@/features/property-memory/classification';
 import { DeveloperSettings } from '@/components/DeveloperSettings';
 import { GamificationToast } from '@/components/GamificationToast';
 import { useToast } from '@/hooks/use-toast';
@@ -36,11 +37,14 @@ import { STATUS_META } from '@level-cre/shared/schema';
 import { StatusLegend } from '@/features/map/StatusLegend';
 import { ProspectEditPanel, computeFollowUpDue, formatSfWithCommas, getDisplayAddressValue } from '@/features/map/ProspectEditPanel';
 import { ProspectSaveQueue, type ProspectSaveQueueStatus } from '@/features/map/prospectSaveQueue';
+import { mergeProspectClassification, ProspectClassificationResponseGuard } from '@/features/map/prospectSaveResponses';
 import { useTerraDrawGoogleMaps, type MapDrawMode, type TerraDrawFinishPayload } from '@/features/map/useTerraDrawGoogleMaps';
 import { AdvancedMapMarker } from '@/features/map/AdvancedMapMarker';
 import { ClusteredMapMarkers, type ClusteredMapMarkerEntry } from '@/features/map/ClusteredMapMarkers';
 import { padViewportBounds, pointInViewport } from '@/features/map/viewportClustering';
 import { composePropertyMapItems, getLinkedMemoryMarkerTitle } from '@/features/property-memory/composeMapItems';
+import { composedPropertyFilterSource, findMemoryMapItem, findMemoryProspect, propertyMapFitPoints } from '@/features/property-memory/assetMapModel';
+import { findMemoryByPropertyId, mapSelectionUrl, memoryPropertyId } from '@/features/property-memory/mapSelectionUrl';
 import { PropertyMemorySearchPanel } from '@/features/property-memory/PropertyMemorySearchPanel';
 import { PropertyMemoryReviewDialog } from '@/features/property-memory/PropertyMemoryReviewDialog';
 import {
@@ -68,7 +72,7 @@ import {
 import { SearchResultCard } from '@/features/map/SearchResultCard';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
 import { createStatusFilterSet, readRelationshipFilters, getStatusCounts } from '@/features/map/statusFilters';
-import { propertyPresentation, UNCLASSIFIED_PROPERTY_META } from '@/features/map/propertyPresentation';
+import { propertyPresentation } from '@/features/map/propertyPresentation';
 import {
   createProspectTypeFilterSet,
   getComposedPropertyProspectTypes,
@@ -346,8 +350,10 @@ export default function HomePage() {
   });
   // Legend open/close managed inside StatusLegend component
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
+  const [hasAppliedMapSelection, setHasAppliedMapSelection] = useState(false);
   const [isEditPanelOpen, setIsEditPanelOpen] = useState(false);
   const selectedProspectIdRef = useRef<string | null>(null);
+  const classificationResponseGuardRef = useRef(new ProspectClassificationResponseGuard());
   const selectionRequestVersionRef = useRef(0);
   const requestMapSelectionRef = useRef<(target: MapSelectionTarget) => Promise<boolean>>(async () => false);
   const focusedProspectIdRef = useRef<string | null>(null);
@@ -559,6 +565,12 @@ export default function HomePage() {
     if (!propertyMemoryMapQuery.isSuccess || marketMemoryPreview) return;
     setSelectedMarketMemoryAnchor((current) => reconcileSelectedMarketMemoryAnchor(current, marketMemoryAnchors));
   }, [marketMemoryAnchors, marketMemoryPreview, propertyMemoryMapQuery.isSuccess]);
+
+  useEffect(() => {
+    if (!selectedMarketMemoryAnchor || propertyMemoryReviewOpen || prospectMergeGroup) return;
+    const linked = findMemoryProspect(selectedMarketMemoryAnchor, prospects);
+    if (linked) void requestMapSelectionRef.current({kind:'prospect', prospect:linked});
+  }, [selectedMarketMemoryAnchor, prospects, propertyMemoryReviewOpen, prospectMergeGroup]);
 
   useEffect(() => {
     if (clearLegacyDemoMapData()) {
@@ -782,6 +794,10 @@ export default function HomePage() {
     }
     return result;
   }, [composedMapItems]);
+  const inventoryFilterSources = useMemo(() => composedMapItems.map(item => composedPropertyFilterSource(item)), [composedMapItems]);
+  const selectedProspectMemoryAnchors = selectedProspect
+    ? composedMapItemByProspectId.get(selectedProspect.id)?.memoryAnchors || EMPTY_MARKET_MEMORY_ANCHORS
+    : EMPTY_MARKET_MEMORY_ANCHORS;
 
   // Lifecycle status, pursuit type, and geography are independent map filters.
   const inventoryByProspectId = useMemo(() => new Map(prospects.map(prospect => [prospect.id, getPropertyInventory(prospect)])), [prospects]);
@@ -794,7 +810,7 @@ export default function HomePage() {
       const passesProspectType = composedItem
         ? matchesProspectTypeFilters(prospectTypeFilters, getComposedPropertyProspectTypes(composedItem))
         : matchesProspectTypeFilters(prospectTypeFilters, []);
-      return passesStatus && passesSubmarket && passesProspectType && matchesPropertyFilters(prospect, inventoryFilters);
+      return passesStatus && passesSubmarket && passesProspectType && matchesPropertyFilters(composedItem ? composedPropertyFilterSource(composedItem) : prospect, inventoryFilters);
     });
   }, [composedMapItemByProspectId, prospectTypeFilters, prospects, selectedSubmarkets, statusFilters, inventoryByProspectId, inventoryFilters]);
 
@@ -807,17 +823,15 @@ export default function HomePage() {
     }
     return result;
   }, [composedMapItems]);
-  const standaloneMarketMemoryAnchors = useMemo(
-    () => composedMapItems
-      .filter((item) => (
-        item.kind === 'memory'
-        && inventoryFilters.includeOther
-        && item.primaryMemoryAnchor
+  const standaloneMarketMemoryItems = useMemo(() => {
+    const selectedItem = findMemoryMapItem(selectedMarketMemoryAnchor, composedMapItems);
+    return composedMapItems.filter(item => item.kind === 'memory' && item.primaryMemoryAnchor && (
+      item.id === selectedItem?.id || (
+        matchesPropertyFilters(composedPropertyFilterSource(item), inventoryFilters)
         && matchesProspectTypeFilters(prospectTypeFilters, getComposedPropertyProspectTypes(item))
-      ))
-      .map((item) => item.primaryMemoryAnchor as MarketMemoryAnchor),
-    [composedMapItems, prospectTypeFilters, inventoryFilters.includeOther],
-  );
+      )
+    ));
+  }, [composedMapItems, inventoryFilters, prospectTypeFilters, selectedMarketMemoryAnchor]);
 
   const statusCounts = useMemo(() => getStatusCounts(prospects), [prospects]);
   const prospectTypeCounts = useMemo(() => getProspectTypeCounts(composedMapItems), [composedMapItems]);
@@ -1112,24 +1126,10 @@ export default function HomePage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const url = new URL(window.location.href);
-    if (selectedProspect?.id) {
-      url.searchParams.set('prospectId', selectedProspect.id);
-      url.searchParams.delete('propertyId');
-    } else if (selectedMarketMemoryAnchor) {
-      const propertyId = selectedMarketMemoryAnchor
-      ? selectedMarketMemoryAnchor.persistence?.dossierId
-        || selectedMarketMemoryAnchor.persistence?.importItemId
-        || selectedMarketMemoryAnchor.id
-      : null;
-      if (propertyId) url.searchParams.set('propertyId', propertyId);
-      url.searchParams.delete('prospectId');
-    } else {
-      url.searchParams.delete('prospectId');
-      url.searchParams.delete('propertyId');
-    }
-    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
-  }, [selectedMarketMemoryAnchor, selectedProspect?.id]);
+    const propertyId = selectedMarketMemoryAnchor ? memoryPropertyId(selectedMarketMemoryAnchor) : null;
+    const location = mapSelectionUrl(window.location.href, {prospectId:selectedProspect?.id, propertyId}, hasAppliedMapSelection);
+    window.history.replaceState(window.history.state, '', location);
+  }, [hasAppliedMapSelection, selectedMarketMemoryAnchor, selectedProspect?.id]);
 
   useEffect(() => {
     if (!map || prospects.length === 0 || typeof window === 'undefined') return;
@@ -1163,8 +1163,7 @@ export default function HomePage() {
           setCenter(canonicalLatLng);
           setZoom(Math.max(map.getZoom() || 16, 16));
         }
-        setSelectedProspect(canonical);
-        setIsEditPanelOpen(true);
+        void requestMapSelectionRef.current({ kind: 'prospect', prospect: canonical });
         setIsControlPanelOpen(false);
       }).catch(() => {
         // Preserve the unresolved ID in the URL; the map must not guess at identity.
@@ -1185,8 +1184,7 @@ export default function HomePage() {
       setCenter(targetLatLng);
       setZoom(Math.max(map.getZoom() || 16, 16));
     }
-    setSelectedProspect(targetProspect);
-    setIsEditPanelOpen(true);
+    void requestMapSelectionRef.current({ kind: 'prospect', prospect: targetProspect });
     setIsControlPanelOpen(false);
     try {
       window.localStorage.removeItem('levelcre:focusProspectId');
@@ -1197,20 +1195,17 @@ export default function HomePage() {
     if (!map || marketMemoryAnchors.length === 0 || typeof window === 'undefined') return;
     const targetId = new URLSearchParams(window.location.search).get('propertyId');
     if (!targetId || focusedPropertyIdRef.current === targetId) return;
-    const target = marketMemoryAnchors.find((anchor) => (
-      anchor.persistence?.dossierId === targetId
-      || anchor.persistence?.importItemId === targetId
-      || anchor.id === targetId
-    ));
+    const target = findMemoryByPropertyId(marketMemoryAnchors, targetId);
     if (!target) return;
+    if (target.persistence?.state === 'approved' && target.persistence.linkedProspectId && isProspectsLoading) return;
     focusedPropertyIdRef.current = targetId;
-    const position = { lat: target.latitude, lng: target.longitude };
+    const linked = findMemoryProspect(target, prospects);
+    const position = linked ? getProspectLatLng(linked) || { lat: target.latitude, lng: target.longitude }
+      : { lat: target.latitude, lng: target.longitude };
     map.panTo(position);
     map.setZoom(Math.max(map.getZoom() || 15, 16));
-    setSelectedProspect(null);
-    setIsEditPanelOpen(false);
-    setSelectedMarketMemoryAnchor(target);
-  }, [map, marketMemoryAnchors]);
+    void requestMapSelectionRef.current({ kind: 'memory', anchor: target });
+  }, [map, marketMemoryAnchors, prospects, isProspectsLoading, getProspectLatLng]);
 
   // Demo helpers: id generation, building & persisting local prospects
   const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
@@ -1482,9 +1477,11 @@ export default function HomePage() {
           const selected = updated.find((p) => p.id === target.id) || null;
           setSelectedProspect(selected);
         } else {
+          const classificationRevision = classificationResponseGuardRef.current.capture(target.id);
           const response = await apiRequest('PATCH', `/api/prospects/${target.id}`, updateData);
           const payload = await response.json();
-          const { prospect: savedProspect, newXpGained } = parseProspectPatchResponse(payload);
+          const { prospect: responseProspect, newXpGained } = parseProspectPatchResponse(payload);
+          const savedProspect = classificationResponseGuardRef.current.reconcile(responseProspect, classificationRevision);
           setProspects((prev) => prev.map((p) => (p.id === savedProspect.id ? savedProspect : p)));
           setSelectedProspect(savedProspect);
           upsertProspectInCache(savedProspect);
@@ -1705,9 +1702,11 @@ export default function HomePage() {
     }
     
     try {
+      const classificationRevision = classificationResponseGuardRef.current.capture(prospectId);
       const response = await apiRequest('PATCH', `/api/prospects/${prospectId}`, patchPayload);
       const payload = await response.json();
-      const { prospect: savedProspect } = parseProspectPatchResponse(payload);
+      const { prospect: responseProspect } = parseProspectPatchResponse(payload);
+      const savedProspect = classificationResponseGuardRef.current.reconcile(responseProspect, classificationRevision);
       
       // Update local state
       setProspects(prev => prev.map(p => p.id === savedProspect.id ? savedProspect : p));
@@ -1803,9 +1802,11 @@ export default function HomePage() {
         setSelectedProspect(prev => (prev && prev.id === id ? ({ ...prev, ...patch } as Prospect) : prev));
         return;
       }
+      const classificationRevision = classificationResponseGuardRef.current.capture(id);
       const response = await apiRequest('PATCH', `/api/prospects/${id}`, patch);
       const payload = await response.json();
-      const { prospect: savedProspect, newXpGained } = parseProspectPatchResponse(payload);
+      const { prospect: responseProspect, newXpGained } = parseProspectPatchResponse(payload);
+      const savedProspect = classificationResponseGuardRef.current.reconcile(responseProspect, classificationRevision);
       const pendingAfterRequest = prospectSaveQueueRef.current?.pendingPatch(id) || {};
       const currentProspect = { ...savedProspect, ...pendingAfterRequest } as Prospect;
       setProspects(prev => prev.map(p => p.id === savedProspect.id ? currentProspect : p));
@@ -1897,13 +1898,14 @@ export default function HomePage() {
       if (!priorSaveSucceeded) {
         throw new Error('Unsaved prospect changes must be retried before logging activity.');
       }
+      const classificationRevision = classificationResponseGuardRef.current.capture(selectedProspect.id);
       const result = await logBrokerActivity({
         prospect: selectedProspect,
         type,
         notes: spec.note,
         nextFollowUp: due,
       });
-      const saved = result.prospect || optimistic;
+      const saved = classificationResponseGuardRef.current.reconcile(result.prospect || optimistic, classificationRevision);
       const newXpGained = Number(result.newXpGained || 0);
       setProspects(prev => prev.map(p => p.id === saved.id ? saved : p));
       setSelectedProspect(saved);
@@ -1981,6 +1983,8 @@ export default function HomePage() {
   }, [editingProspectId, flushHomeQueuedSave, savePolygonChanges]);
 
   const applyMapSelection = useCallback((target: MapSelectionTarget) => {
+    setHasAppliedMapSelection(true);
+    resolvingProspectIdRef.current = null;
     duplicateLookupRequestRef.current += 1;
     setDuplicateLookupPending(null);
     setPropertyMemoryReviewOpen(false);
@@ -1993,19 +1997,12 @@ export default function HomePage() {
     try { setTerraModeSafe('select'); } catch {}
     try { map?.setOptions({ draggable: true, disableDoubleClickZoom: false, clickableIcons: false } as google.maps.MapOptions); } catch {}
 
-    if (target.kind === 'prospect') {
-      const memory = linkedMemoryByProspectId.get(target.prospect.id);
-      const memoryLayer = memory ? (memory.previewLayer || memory.baseLayer) : null;
-      if (!target.forceEditor && memory && memoryLayer && visibleMarketMemoryLayers.has(memoryLayer)) {
-        selectedProspectIdRef.current = null;
-        setSelectedProspect(null);
-        setIsEditPanelOpen(false);
-        setSelectedMarketMemoryAnchor(memory);
-        return;
-      }
-      selectedProspectIdRef.current = target.prospect.id;
+    const prospect = target.kind === 'prospect' ? target.prospect
+      : target.kind === 'memory' ? findMemoryProspect(target.anchor, prospects) : null;
+    if (prospect) {
+      selectedProspectIdRef.current = prospect.id;
       setSelectedMarketMemoryAnchor(null);
-      setSelectedProspect(target.prospect);
+      setSelectedProspect(prospect);
       setProspectSaveStatus('saved');
       setIsEditPanelOpen(true);
       return;
@@ -2022,7 +2019,7 @@ export default function HomePage() {
     } else {
       setSelectedMarketMemoryAnchor(null);
     }
-  }, [linkedMemoryByProspectId, map, setTerraModeSafe, visibleMarketMemoryLayers]);
+  }, [map, prospects, setTerraModeSafe]);
 
   const requestMapSelection = useCallback(async (target: MapSelectionTarget): Promise<boolean> => {
     if (
@@ -2274,41 +2271,41 @@ export default function HomePage() {
         onClick: () => handleProspectClick(entry.prospect),
       }];
     });
-    const memoryMarkers = standaloneMarketMemoryAnchors.flatMap((anchor) => {
+    const memoryMarkers = standaloneMarketMemoryItems.flatMap((item) => {
+      const anchor = item.primaryMemoryAnchor!;
       const layer = anchor.previewLayer || anchor.baseLayer;
       if (!visibleMarketMemoryLayers.has(layer)) return [];
       const marker = MARKET_MEMORY_MARKER_META[layer];
+      const presentation = propertyPresentation(composedPropertyFilterSource(item));
       const markerTitle = anchor.persistence?.state === 'pending'
         ? layer === 'review' ? 'Conflict review pending' : 'Awaiting broker approval'
         : marker.title;
       return [{
-        id: `memory:${anchor.id}`,
+        id: item.id,
         position: { lat: anchor.latitude, lng: anchor.longitude },
         category: layer === 'review' ? 'review' as const : 'memory' as const,
-        title: `${markerTitle}: ${anchor.address}`,
-        color: UNCLASSIFIED_PROPERTY_META.color,
-        clusterColor: UNCLASSIFIED_PROPERTY_META.color,
+        title: `${anchor.address} · ${presentation.label} · ${markerTitle}`,
+        color: presentation.color,
+        clusterColor: presentation.color,
         borderColor: marker.color,
-        label: layer === 'review' ? '?' : 'R',
+        label: presentation.marker === '?' ? layer === 'review' ? '?' : 'R' : presentation.marker,
         scale: 11,
         zIndex: 5,
         onClick: () => handleMarketMemoryAnchorClick(anchor),
       }];
     });
     return [...prospectMarkers, ...memoryMarkers];
-  }, [handleMarketMemoryAnchorClick, handleProspectClick, renderableProspects, standaloneMarketMemoryAnchors, visibleMarketMemoryLayers, inventoryByProspectId]);
+  }, [handleMarketMemoryAnchorClick, handleProspectClick, renderableProspects, standaloneMarketMemoryItems, visibleMarketMemoryLayers, inventoryByProspectId]);
 
   const selectedMapMarkerIds = useMemo(() => {
     const selected = new Set<string>();
     if (selectedProspect) selected.add(`prospect:${selectedProspect.id}`);
     if (selectedMarketMemoryAnchor) {
-      const linkedProspectId = selectedMarketMemoryAnchor.persistence?.linkedProspectId;
-      selected.add(linkedProspectId
-        ? `prospect:${linkedProspectId}`
-        : `memory:${selectedMarketMemoryAnchor.id}`);
+      const item = findMemoryMapItem(selectedMarketMemoryAnchor, composedMapItems);
+      if (item) selected.add(item.id);
     }
     return selected;
-  }, [selectedMarketMemoryAnchor, selectedProspect]);
+  }, [composedMapItems, selectedMarketMemoryAnchor, selectedProspect]);
 
   const prospectsErrorMessage = prospectsError instanceof Error
     ? prospectsError.message
@@ -2563,6 +2560,10 @@ export default function HomePage() {
       {/* Edit Panel - Content-Sized with Proper Scrolling */}
       {isEditPanelOpen && selectedProspect && !prospectMergeGroup && (
         <ProspectEditPanel
+          evidenceContent={selectedProspectMemoryAnchors.length ? <details className="rounded-lg border border-slate-200 bg-slate-50">
+            <summary className="cursor-pointer p-3 text-xs font-semibold">Linked property evidence ({selectedProspectMemoryAnchors.length})</summary>
+            {selectedProspectMemoryAnchors.map(anchor => <MarketMemoryEvidence key={anchor.persistence?.importItemId || anchor.persistence?.dossierId || anchor.id} anchor={anchor} />)}
+          </details> : undefined}
           prospect={selectedProspect}
           saveStatus={prospectSaveStatus}
           values={{
@@ -2662,7 +2663,8 @@ export default function HomePage() {
           onWebsiteUrlChange={(value) => updateSelectedProspect('websiteUrl', value || null)}
           onStatusChange={(value) => updateSelectedProspect('status', value)}
           onClassificationSaved={(saved) => {
-            const merge = (p: Prospect) => p.id === saved.id ? {...p, aiMetadata: saved.aiMetadata} : p;
+            classificationResponseGuardRef.current.record(saved);
+            const merge = (p: Prospect) => mergeProspectClassification(p, saved);
             setSelectedProspect(p => p ? merge(p) : p);
             setProspects(items => items.map(merge));
             queryClient.setQueryData<Prospect[]>(['/api/prospects'], items => items?.map(merge));
@@ -2703,6 +2705,12 @@ export default function HomePage() {
       {selectedMarketMemoryAnchor && !propertyMemoryReviewOpen && !prospectMergeGroup ? (
         <MarketMemoryStoryPanel
           anchor={selectedMarketMemoryAnchor}
+          onClassificationSaved={(saved) => {
+            const target = memoryClassificationTarget(saved);
+            if (!target) return;
+            setSelectedMarketMemoryAnchor(current => current ? applyMemoryClassification(current, target, saved.propertyClassification || null) : current);
+            setMarketMemoryPreview(current => current ? {...current, anchors:current.anchors.map(anchor => applyMemoryClassification(anchor, target, saved.propertyClassification || null))} : current);
+          }}
           onClose={closeMarketMemoryStory}
           onReview={selectedImportItemId
             ? () => setPropertyMemoryReviewOpen(true)
@@ -2713,7 +2721,7 @@ export default function HomePage() {
           onCompareDuplicates={selectedImportItemId
             ? () => { void checkTargetedDuplicates({ propertyReviewItemId: selectedImportItemId }); }
             : undefined}
-          onWorkProspect={selectedMarketMemoryAnchor.persistence?.linkedProspectId
+          onWorkProspect={selectedMarketMemoryAnchor.persistence?.state === 'approved' && selectedMarketMemoryAnchor.persistence.linkedProspectId
               ? () => {
                 const linked = prospects.find((prospect) => prospect.id === selectedMarketMemoryAnchor.persistence?.linkedProspectId);
                 if (linked) void requestMapSelection({ kind: 'prospect', prospect: linked, forceEditor: true });
@@ -2791,26 +2799,14 @@ export default function HomePage() {
       {/* Status Legend (bottom-left) with built-in chevron */}
       <div className="absolute bottom-20 left-3 z-40 sm:bottom-4 sm:left-4" style={{ pointerEvents: 'auto' }}>
         <StatusLegend
-          inventoryControls={<InventoryFilterPanel prospects={prospects} filters={inventoryFilters} onChange={setInventoryFilters} onFocus={(next) => {
-            const targets = prospects.filter(prospect => {
-              return propertyPresentation(prospect).marker !== '?' && matchesPropertyFilters(prospect, next);
-            });
+          inventoryControls={<InventoryFilterPanel prospects={inventoryFilterSources} filters={inventoryFilters} onChange={setInventoryFilters} onFocus={(next) => {
+            const targets = composedMapItems.filter(item => matchesPropertyFilters(composedPropertyFilterSource(item), next));
             if (!map || !targets.length) return;
             setStatusFilters(createStatusFilterSet(null));
             setProspectTypeFilters(createProspectTypeFilterSet(null));
             setSelectedSubmarkets(new Set());
-            const inventoryPoints: Array<{lat:number;lng:number}> = [];
-            for (const prospect of targets) {
-              if (prospect.geometry.type === 'Point') {
-                const [lng, lat] = prospect.geometry.coordinates as [number, number];
-                inventoryPoints.push({lat, lng});
-              } else {
-                const coordinates = prospect.geometry.coordinates as [number, number][][] | [number, number][];
-                const ring = (Array.isArray(coordinates[0]?.[0]) ? coordinates[0] : coordinates) as [number, number][];
-                for (const [lng, lat] of ring) inventoryPoints.push({lat, lng});
-              }
-            }
-            const extent = inventoryMapExtent(inventoryPoints);
+            setVisibleMarketMemoryLayers(current => new Set([...Array.from(current), ...targets.flatMap(item => item.memoryLayer ? [item.memoryLayer] : [])]));
+            const extent = inventoryMapExtent(propertyMapFitPoints(targets));
             if (extent) map.fitBounds(extent, {top:60, right:70, bottom:70, left: window.innerWidth >= 640 ? 340 : 30});
           }} />}
           selected={statusFilters}

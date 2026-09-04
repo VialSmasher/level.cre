@@ -9,6 +9,7 @@ import {
   findDuplicateProspectGroupForAnchor,
   reconcileSelectedMarketMemoryAnchor,
 } from './mapReviewFlow'
+import { findMemoryByPropertyId, mapSelectionUrl, memoryPropertyId } from './mapSelectionUrl'
 
 function anchor(overrides: Partial<MarketMemoryAnchor> = {}): MarketMemoryAnchor {
   return {
@@ -130,4 +131,24 @@ test('an approved property can surface the authoritative duplicate group for its
   const mergeGroup = group(['prospect-1', 'prospect-2'])
 
   assert.equal(findDuplicateProspectGroupForAnchor(approved, [mergeGroup]), mergeGroup)
+})
+
+test('initial loading and unresolved assets preserve deep links until a selection or close is applied', () => {
+  const initial='https://levelcre.test/app?propertyId=item-one&memorySearch=1#property'
+  assert.equal(mapSelectionUrl(initial,{},false),'/app?propertyId=item-one&memorySearch=1#property')
+  assert.equal(mapSelectionUrl(initial,{prospectId:'confirmed-prospect'},true),'/app?memorySearch=1&prospectId=confirmed-prospect#property')
+  assert.equal(mapSelectionUrl(initial,{},true),'/app?memorySearch=1#property')
+  assert.equal(mapSelectionUrl('https://levelcre.test/app?prospectId=crm-one',{propertyId:'item-two'},true),'/app?propertyId=item-two')
+  assert.equal(mapSelectionUrl('https://levelcre.test/app?prospectId=unresolved',{},false),'/app?prospectId=unresolved')
+})
+
+test('pending asset links address the review item and confirmed dossier links prefer approved evidence', () => {
+  const suggestion=anchor({persistence:{state:'pending',importItemId:'pending-id',dossierId:'dossier-id',linkedProspectId:'candidate-id'}})
+  const approved=anchor({id:'approved-anchor',persistence:{state:'approved',dossierId:'dossier-id',linkedProspectId:'confirmed-id'}})
+  assert.equal(memoryPropertyId(suggestion),'pending-id')
+  assert.equal(memoryPropertyId(approved),'dossier-id')
+  assert.equal(findMemoryByPropertyId([suggestion,approved],'pending-id'),suggestion)
+  assert.equal(findMemoryByPropertyId([suggestion,approved],'dossier-id'),approved)
+  assert.equal(findMemoryByPropertyId([suggestion],'dossier-id'),suggestion)
+  assert.equal(findMemoryByPropertyId([suggestion,approved],'missing-id'),null)
 })

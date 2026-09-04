@@ -9,6 +9,7 @@ export const BrokerClassificationSchema = z.object({
   reviewedAt: z.string().datetime(),
   reviewedBy: z.string().min(1),
 })
+export type BrokerClassification = z.infer<typeof BrokerClassificationSchema>
 export function getBrokerClassification(prospect: {aiMetadata?: unknown}) {
   const metadata = prospect.aiMetadata as Record<string, unknown> | undefined
   if (!metadata?.propertyClassification) return null

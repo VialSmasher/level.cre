@@ -1,13 +1,23 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { inventoryAddressKey, type PropertyInventory } from '@level-cre/shared'
-import { defaultInventoryFilters, inventorySignals, matchesInventoryFilters, readInventoryFilters, inventoryMapExtent } from './inventoryFilters'
+import { defaultInventoryFilters, inventorySignals, matchesInventoryFilters, matchesPropertyFilters, readInventoryFilters, inventoryMapExtent } from './inventoryFilters'
 const inventory={classification:'multi_tenant',confidence:'low',subFilters:['owner_occupied','costar_partial'],occupant:'Recorded operator',businessPark:'Nisku Industrial Park',assessment:null,yearBuilt:null,costar:{propertyId:null,notes:'Partial research'},titleRecords:[{lastSaleDate:'2000-01-01'}]} as PropertyInventory
 test('all confidence levels remain visible until explicitly filtered',()=>{
  const filters=defaultInventoryFilters();assert.equal(matchesInventoryFilters(inventory,filters),true)
  filters.confidence=['high','med'];assert.equal(matchesInventoryFilters(inventory,filters),false)
- assert.equal(matchesInventoryFilters(null,filters),true)
+ assert.equal(matchesInventoryFilters(null,filters),false)
+ filters.confidence.push('unrated');assert.equal(matchesInventoryFilters(null,filters),true)
  filters.includeOther=false;assert.equal(matchesInventoryFilters(null,filters),false)
+})
+
+test('including unclassified assets never bypasses confidence or source signal filters',()=>{
+ const filters=defaultInventoryFilters()
+ assert.equal(matchesPropertyFilters({},filters),true)
+ assert.equal(matchesPropertyFilters({},{...filters,confidence:['high']}),false)
+ assert.equal(matchesPropertyFilters({},{...filters,tags:['long_hold']}),false)
+ assert.equal(matchesPropertyFilters({researchConfidence:'high',researchSignals:['long_hold']},{...filters,confidence:['high'],tags:['long_hold']}),true)
+ assert.equal(matchesPropertyFilters({researchConfidence:'high',researchSignals:['long_hold']},{...filters,includeOther:false}),false)
 })
 test('priority isolates multi-tenant and supports any signal per group, all groups together',()=>{
  const filters={...defaultInventoryFilters(),includeOther:false,classes:['multi_tenant'],tags:['owner_occupied','vacant','costar_partial']}

@@ -25,6 +25,7 @@ export function AdvancedMapMarker({
     marker.zIndex = props.zIndex;
     updateCircleMarkerContent(content, { ...props, scale: Math.max(props.scale, props.onClick ? 12 : 0) });
     content.dataset.mapMarkerId = props.markerId || '';
+    content.dataset.testid = props.markerKind === 'cluster' ? 'map-cluster' : 'map-asset-marker';
     content.dataset.mapMarkerKind = props.markerKind;
     content.dataset.mapMarkerCategory = props.markerCategory || '';
     content.dataset.mapMarkerSelected = props.selected ? 'true' : 'false';

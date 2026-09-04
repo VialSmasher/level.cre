@@ -71,6 +71,13 @@ function preferredAnchor(anchors: MarketMemoryAnchor[]) {
 }
 
 function standaloneKey(anchor: MarketMemoryAnchor) {
+  // A pending import's matched IDs are suggestions. They must not absorb a
+  // real prospect or another proposal before the broker confirms the link.
+  if (anchor.persistence?.state !== 'approved') {
+    return anchor.persistence?.importItemId
+      ? `import-item:${anchor.persistence.importItemId}`
+      : `anchor:${anchor.id}`
+  }
   // This path is reached only when a linked prospect is not in the currently
   // loaded prospect collection. Retain that relationship as the strongest
   // available canonical key, followed by a linked listing, so one property is
@@ -98,7 +105,7 @@ export function composePropertyMapItems(
   const standaloneByKey = new Map<string, MarketMemoryAnchor[]>()
 
   for (const anchor of anchors) {
-    const linkedProspectId = anchor.persistence?.linkedProspectId || null
+    const linkedProspectId = anchor.persistence?.state === 'approved' ? anchor.persistence.linkedProspectId || null : null
     if (linkedProspectId && prospectById.has(linkedProspectId)) {
       const linked = anchorsByProspectId.get(linkedProspectId) || []
       linked.push(anchor)

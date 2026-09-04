@@ -1,14 +1,15 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useId, useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { InventoryDetails } from './InventoryDetails';
 import { PropertyTypePicker } from './PropertyTypePicker';
+import { AssetProfileTabs } from './AssetProfileTabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PhoneInput } from '@/components/ui/phone-input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { VoiceDictationButton } from '@/components/VoiceDictationButton';
 import { AlertTriangle, CalendarDays, CheckCircle2, Clock3, Edit3, Loader2, Mail, MapPin, MessageSquareText, Phone, Save, Trash2, X } from 'lucide-react';
@@ -124,6 +125,7 @@ const formatInteractionDate = (value?: string | null) => {
 const readableInteractionValue = (value: string) => value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 
 type ProspectEditPanelProps = {
+  evidenceContent?: ReactNode;
   onClassificationSaved?: (saved: Prospect) => void;
   prospect: Prospect;
   saveStatus?: 'saved' | 'saving' | 'error';
@@ -166,6 +168,7 @@ type ProspectEditPanelProps = {
 };
 
 export function ProspectEditPanel({
+  evidenceContent,
   onClassificationSaved,
   prospect,
   saveStatus = 'saved',
@@ -206,6 +209,7 @@ export function ProspectEditPanel({
   onContactPhoneChange,
   onContactPhoneBlur,
 }: ProspectEditPanelProps) {
+  const fieldId = useId();
   const [activeTab, setActiveTab] = useState('property');
   const interactionsQuery = useQuery<ContactInteraction[]>({
     queryKey: ['/api/interactions', prospect.id],
@@ -231,6 +235,7 @@ export function ProspectEditPanel({
 
   return (
     <div
+      data-testid="asset-profile" data-asset-kind="prospect" data-asset-id={prospect.id}
       className="absolute bottom-2 left-2 right-2 z-[80] flex max-h-[74dvh] flex-col overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-xl md:left-auto md:right-0 md:top-0 md:bottom-auto md:w-80 md:max-h-[90vh] md:rounded-none md:border-y-0 md:border-r-0 md:border-l"
       style={{ pointerEvents: 'auto' }}
     >
@@ -245,6 +250,7 @@ export function ProspectEditPanel({
                 onClick={onClose}
                 className="h-11 w-11 shrink-0 p-0 text-gray-400 hover:text-gray-600"
                 aria-label="Save and close"
+                data-testid="asset-profile-close"
               >
                 <X className="h-4 w-4" />
               </Button>
@@ -274,18 +280,16 @@ export function ProspectEditPanel({
           )}
         </div>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="property" className="text-xs">Property</TabsTrigger>
-            <TabsTrigger value="contact" className="text-xs">Contact</TabsTrigger>
-            <TabsTrigger value="activity" className="text-xs">Activity</TabsTrigger>
-          </TabsList>
+          <AssetProfileTabs />
+          <PropertyTypePicker key={prospect.id} prospect={prospect} disabled={!onClassificationSaved || !canEditShape || saveStatus !== 'saved'} onSaved={onClassificationSaved || (() => {})} />
 
           <TabsContent value="property" className="space-y-4">
-            {onClassificationSaved && <PropertyTypePicker key={prospect.id} prospect={prospect} disabled={!canEditShape || saveStatus !== 'saved'} onSaved={onClassificationSaved} />}
             <InventoryDetails prospect={prospect} onReviewContact={() => setActiveTab('contact')} />
+            {evidenceContent}
             <div>
-              <Label className="text-xs font-medium text-gray-700">Business Name</Label>
+              <Label htmlFor={`${fieldId}-business-name`} className="text-xs font-medium text-gray-700">Business Name</Label>
               <Input
+                id={`${fieldId}-business-name`} data-testid="asset-business-name"
                 value={values.businessName}
                 onChange={(event) => onBusinessNameChange(event.target.value)}
                 placeholder="Business name"
@@ -294,9 +298,10 @@ export function ProspectEditPanel({
             </div>
 
             <div>
-              <Label className="text-xs font-medium text-gray-700">Address</Label>
+              <Label htmlFor={`${fieldId}-address`} className="text-xs font-medium text-gray-700">Address</Label>
               <div className="flex items-center gap-2">
                 <Input
+                  id={`${fieldId}-address`} data-testid="asset-address"
                   value={values.address}
                   onChange={(event) => onAddressChange(event.target.value)}
                   onBlur={onAddressBlur}
@@ -325,9 +330,9 @@ export function ProspectEditPanel({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs font-medium text-gray-700">Relationship &amp; pipeline</Label>
+                <Label htmlFor={`${fieldId}-relationship`} className="text-xs font-medium text-gray-700">Relationship &amp; pipeline</Label>
                 <Select value={prospect.status} onValueChange={(value: ProspectStatusType) => onStatusChange(value)}>
-                  <SelectTrigger className="h-8 text-sm">
+                  <SelectTrigger id={`${fieldId}-relationship`} data-testid="asset-relationship" className="h-8 text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="z-[120]">
@@ -343,7 +348,7 @@ export function ProspectEditPanel({
               </div>
 
               <div>
-                <Label className="text-xs font-medium text-gray-700">Follow Up</Label>
+                <Label htmlFor={`${fieldId}-follow-up`} className="text-xs font-medium text-gray-700">Follow Up</Label>
                 <Select
                   value={prospect.followUpTimeframe || 'none'}
                   onValueChange={(value: FollowUpTimeframeType | 'none') => {
@@ -353,7 +358,7 @@ export function ProspectEditPanel({
                     onFollowUpChange(timeframe, dueDate);
                   }}
                 >
-                  <SelectTrigger className="h-8 text-sm">
+                  <SelectTrigger id={`${fieldId}-follow-up`} data-testid="asset-follow-up" className="h-8 text-sm">
                     <SelectValue placeholder="None" />
                   </SelectTrigger>
                   <SelectContent className="z-[120]">
@@ -387,8 +392,9 @@ export function ProspectEditPanel({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs font-medium text-gray-700">Building SF</Label>
+                <Label htmlFor={`${fieldId}-building-sf`} className="text-xs font-medium text-gray-700">Building SF</Label>
                 <Input
+                  id={`${fieldId}-building-sf`} data-testid="asset-building-sf"
                   value={values.buildingSf}
                   onChange={(event) => {
                     const parsed = parseSfInput(event.target.value);
@@ -400,8 +406,9 @@ export function ProspectEditPanel({
                 />
               </div>
               <div>
-                <Label className="text-xs font-medium text-gray-700">Lot Size (Acres)</Label>
+                <Label htmlFor={`${fieldId}-lot-acres`} className="text-xs font-medium text-gray-700">Lot Size (Acres)</Label>
                 <Input
+                  id={`${fieldId}-lot-acres`} data-testid="asset-lot-acres"
                   value={values.lotSizeAcres}
                   onChange={(event) => onLotSizeAcresChange(event.target.value, parseAcresInput(event.target.value))}
                   placeholder="Auto or manual"
@@ -412,16 +419,16 @@ export function ProspectEditPanel({
             </div>
 
             <div>
-              <Label className="text-xs font-medium text-gray-700">Submarket</Label>
+              <Label htmlFor={`${fieldId}-submarket`} className="text-xs font-medium text-gray-700">Submarket</Label>
               {submarketOptions.length === 0 ? (
                 <Select disabled>
-                  <SelectTrigger className="h-8 text-sm">
+                  <SelectTrigger id={`${fieldId}-submarket`} data-testid="asset-submarket" className="h-8 text-sm">
                     <SelectValue placeholder="No submarkets defined" />
                   </SelectTrigger>
                 </Select>
               ) : (
                 <Select value={values.submarketId} onValueChange={(value) => onSubmarketChange(value === 'none' ? undefined : value)}>
-                  <SelectTrigger className="h-8 text-sm">
+                  <SelectTrigger id={`${fieldId}-submarket`} data-testid="asset-submarket" className="h-8 text-sm">
                     <SelectValue placeholder="Select submarket" />
                   </SelectTrigger>
                   <SelectContent className="z-[120]">
@@ -438,13 +445,14 @@ export function ProspectEditPanel({
 
             <div>
               <div className="mb-1 flex items-center justify-between gap-2">
-                <Label className="text-xs font-medium text-gray-700">Notes</Label>
+                <Label htmlFor={`${fieldId}-notes`} className="text-xs font-medium text-gray-700">Notes</Label>
                 <VoiceDictationButton
                   className="h-7 w-7 p-0"
                   onTranscript={(text) => onNotesChange(values.notes ? `${values.notes.trimEnd()} ${text}` : text)}
                 />
               </div>
               <Textarea
+                id={`${fieldId}-notes`} data-testid="asset-notes"
                 value={values.notes}
                 onChange={(event) => onNotesChange(event.target.value)}
                 onBlur={onNotesBlur}
@@ -461,8 +469,9 @@ export function ProspectEditPanel({
               className="flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-900 px-3 text-sm font-semibold text-white hover:bg-slate-800"
             ><Phone className="h-4 w-4" aria-hidden />Call {values.contactName || values.contactCompany || 'recorded number'}</a> : <p className="text-xs text-slate-500">Add a verified phone number to call this property contact.</p>}
             <div>
-              <Label className="text-xs font-medium text-gray-700">Website</Label>
+              <Label htmlFor={`${fieldId}-website`} className="text-xs font-medium text-gray-700">Website</Label>
               <Input
+                id={`${fieldId}-website`} data-testid="asset-website"
                 type="url"
                 value={values.websiteUrl}
                 onChange={(event) => onWebsiteUrlChange(event.target.value)}
@@ -473,8 +482,9 @@ export function ProspectEditPanel({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs font-medium text-gray-700">Contact Name</Label>
+                <Label htmlFor={`${fieldId}-contact-name`} className="text-xs font-medium text-gray-700">Contact Name</Label>
                 <Input
+                  id={`${fieldId}-contact-name`} data-testid="asset-contact-name"
                   value={values.contactName}
                   onChange={(event) => onContactNameChange(event.target.value)}
                   onBlur={onContactNameBlur}
@@ -483,8 +493,9 @@ export function ProspectEditPanel({
                 />
               </div>
               <div>
-                <Label className="text-xs font-medium text-gray-700">Company</Label>
+                <Label htmlFor={`${fieldId}-company`} className="text-xs font-medium text-gray-700">Company</Label>
                 <Input
+                  id={`${fieldId}-company`} data-testid="asset-contact-company"
                   value={values.contactCompany}
                   onChange={(event) => onContactCompanyChange(event.target.value)}
                   onBlur={onContactCompanyBlur}
@@ -496,8 +507,9 @@ export function ProspectEditPanel({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs font-medium text-gray-700">Email</Label>
+                <Label htmlFor={`${fieldId}-email`} className="text-xs font-medium text-gray-700">Email</Label>
                 <Input
+                  id={`${fieldId}-email`} data-testid="asset-contact-email"
                   type="email"
                   value={values.contactEmail}
                   onChange={(event) => onContactEmailChange(event.target.value)}
@@ -507,10 +519,11 @@ export function ProspectEditPanel({
                 />
               </div>
               <div>
-                <Label className="text-xs font-medium text-gray-700">Phone</Label>
+                <Label htmlFor={`${fieldId}-phone`} className="text-xs font-medium text-gray-700">Phone</Label>
                 <PhoneInput
+                  id={`${fieldId}-phone`} data-testid="asset-contact-phone"
                   value={values.contactPhone}
-                  onChange={(event) => onContactPhoneChange(event.target.value)}
+                  onValueChange={onContactPhoneChange}
                   onBlur={onContactPhoneBlur}
                   placeholder="(000) 000-0000"
                   className="h-8 text-sm"
@@ -536,7 +549,7 @@ export function ProspectEditPanel({
               </div>
             ) : null}
 
-            {!interactionsQuery.isLoading && recentInteractions.length === 0 ? (
+            {!interactionsQuery.isLoading && !interactionsQuery.isError && recentInteractions.length === 0 ? (
               <div className="border-y border-gray-100 py-8 text-center">
                 <MessageSquareText className="mx-auto h-6 w-6 text-gray-300" />
                 <p className="mt-2 text-xs font-medium text-gray-700">No activity recorded yet</p>

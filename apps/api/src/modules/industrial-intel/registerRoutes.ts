@@ -61,6 +61,11 @@ import {
   PursuitHistoryBackfillPlanQuerySchema,
 } from "../../lib/pursuitHistoryBackfillService";
 import { getCaptureHealth } from "../../lib/captureHealthService";
+import {
+  BrokerageMemoryClassificationError,
+  BrokerageMemoryClassificationInputSchema,
+  patchBrokerageMemoryClassification,
+} from "../../lib/brokerageMemoryClassification";
 
 const intelRequirementSchema = z.object({
   title: z.string().trim().min(1),
@@ -1023,6 +1028,24 @@ export function registerIndustrialIntelRoutes(app: Express): void {
       res.status(500).json({ message: "Failed to create industrial intel requirement" });
     }
   });
+
+  for (const [segment, kind] of [["items", "memory_item"], ["dossiers", "dossier"]] as const) {
+    app.patch(`/api/intel/brokerage-memory/${segment}/:id/classification`, requireBrokerAuth, async (req, res) => {
+      if ((req as any).authType === 'agent' || (req as any).user?.authType === 'agent') return res.status(403).json({ message: 'Broker authentication is required to classify a property.' });
+      const parsed = BrokerageMemoryClassificationInputSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid property classification', issues: parsed.error.flatten() });
+      try {
+        const result = await patchBrokerageMemoryClassification({ pool, userId: getUserId(req), kind, id: req.params.id, ...parsed.data });
+        res.json(result);
+      } catch (error) {
+        if (error instanceof BrokerageMemoryClassificationError) {
+          return res.status(error.status).json({ message: error.message, ...(error.prospectId ? { prospectId: error.prospectId } : {}) });
+        }
+        console.error('Error classifying property memory:', error);
+        res.status(500).json({ message: 'Failed to save property classification' });
+      }
+    });
+  }
 
   app.post("/api/intel/brokerage-memory/preview", requireMarketRecordProposalAuth, async (req, res) => {
     try {

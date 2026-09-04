@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 import type { Pool, PoolClient } from 'pg'
 import { z } from 'zod'
+import { classificationProjection, latestClassificationOverride, loadMemoryClassificationOverride } from './brokerageMemoryClassification'
 
 import {
   getMarketMemoryProspectTypes,
@@ -79,6 +80,7 @@ type BrokerageMemoryItemRow = {
   updated_at: Date | string
   source_file_name?: string | null
   import_generated_at?: Date | string | null
+  classification_source_provenance?: Record<string, unknown> | null
 }
 
 type DossierFactDraft = {
@@ -123,6 +125,7 @@ function itemToAnchor(row: BrokerageMemoryItemRow): MarketMemoryAnchor {
   const anchor = normalizeMarketMemoryProspectTypes(row.anchor_payload)
   return {
     ...anchor,
+    ...classificationProjection(row.decision_metadata, row.classification_source_provenance),
     resolution: (row.resolution_json || undefined) as MarketMemoryAnchor['resolution'],
     latitude: numberOrNull(row.lat) ?? anchor.latitude,
     longitude: numberOrNull(row.lng) ?? anchor.longitude,
@@ -510,7 +513,10 @@ async function loadImportItems(client: Pool | PoolClient, userId: string, import
   const values: unknown[] = [userId]
   const importFilter = importId ? `AND items.import_id = $${values.push(importId)}` : ''
   const result = await client.query<BrokerageMemoryItemRow>(`
-    SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at
+    SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at,
+             (SELECT d.source_provenance FROM public.intel_property_dossiers d
+              WHERE d.created_by_user_id = items.user_id AND d.external_memory_key = items.external_anchor_id
+                AND d.status <> 'archived' LIMIT 1) AS classification_source_provenance
     FROM public.brokerage_memory_items items
     INNER JOIN public.brokerage_memory_imports imports ON imports.id = items.import_id
     WHERE items.user_id = $1
@@ -667,15 +673,16 @@ export async function stageBrokerageMemoryImport(params: {
 
     for (const anchor of anchors) {
       const matches = matchIds(anchor)
+      const propertyClassification = await loadMemoryClassificationOverride(client, params.userId, anchor.id)
       await client.query(`
         INSERT INTO public.brokerage_memory_items (
           import_id, user_id, external_anchor_id, status, base_layer, suggested_layer,
           address, normalized_address, lat, lng,
           matched_dossier_id, matched_prospect_id, matched_listing_id, match_confidence,
-          resolution_json, review_reasons, anchor_payload, updated_at
+          resolution_json, review_reasons, anchor_payload, decision_metadata, updated_at
         ) VALUES (
           $1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9,
-          $10, $11, $12, $13, $14::jsonb, $15::jsonb, $16::jsonb, now()
+          $10, $11, $12, $13, $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb, now()
         )
         ON CONFLICT (import_id, external_anchor_id) DO UPDATE SET
           base_layer = CASE WHEN public.brokerage_memory_items.status = 'pending' THEN EXCLUDED.base_layer ELSE public.brokerage_memory_items.base_layer END,
@@ -691,6 +698,7 @@ export async function stageBrokerageMemoryImport(params: {
           resolution_json = CASE WHEN public.brokerage_memory_items.status = 'pending' THEN EXCLUDED.resolution_json ELSE public.brokerage_memory_items.resolution_json END,
           review_reasons = CASE WHEN public.brokerage_memory_items.status = 'pending' THEN EXCLUDED.review_reasons ELSE public.brokerage_memory_items.review_reasons END,
           anchor_payload = CASE WHEN public.brokerage_memory_items.status = 'pending' THEN EXCLUDED.anchor_payload ELSE public.brokerage_memory_items.anchor_payload END,
+          decision_metadata = CASE WHEN public.brokerage_memory_items.status = 'pending' THEN public.brokerage_memory_items.decision_metadata || EXCLUDED.decision_metadata ELSE public.brokerage_memory_items.decision_metadata END,
           updated_at = now()
       `, [
         importId,
@@ -709,6 +717,7 @@ export async function stageBrokerageMemoryImport(params: {
         JSON.stringify(safeResolution(anchor.resolution) || {}),
         JSON.stringify(buildBrokerageMemoryReviewReasons(anchor)),
         JSON.stringify(stagingAnchorPayload(anchor)),
+        JSON.stringify(propertyClassification ? { propertyClassification } : {}),
       ])
     }
     await client.query('COMMIT')
@@ -745,7 +754,10 @@ export async function listBrokerageMemoryReview(params: { pool: Pool; userId: st
   await assertBrokerageMemorySchema(params.pool)
   const limit = Math.min(Math.max(params.limit || 100, 1), 250)
   const result = await params.pool.query<BrokerageMemoryItemRow>(`
-    SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at
+    SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at,
+             (SELECT d.source_provenance FROM public.intel_property_dossiers d
+              WHERE d.created_by_user_id = items.user_id AND d.external_memory_key = items.external_anchor_id
+                AND d.status <> 'archived' LIMIT 1) AS classification_source_provenance
     FROM public.brokerage_memory_items items
     INNER JOIN public.brokerage_memory_imports imports ON imports.id = items.import_id
     WHERE items.user_id = $1 AND items.status = 'pending' AND imports.status <> 'superseded'
@@ -764,7 +776,10 @@ export async function getBrokerageMemoryReviewItem(params: {
 }) {
   await assertBrokerageMemorySchema(params.pool)
   const result = await params.pool.query<BrokerageMemoryItemRow>(`
-    SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at
+    SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at,
+             (SELECT d.source_provenance FROM public.intel_property_dossiers d
+              WHERE d.created_by_user_id = items.user_id AND d.external_memory_key = items.external_anchor_id
+                AND d.status <> 'archived' LIMIT 1) AS classification_source_provenance
     FROM public.brokerage_memory_items items
     INNER JOIN public.brokerage_memory_imports imports ON imports.id = items.import_id
     WHERE items.id = $1 AND items.user_id = $2 AND imports.status <> 'superseded'
@@ -856,7 +871,10 @@ export async function decideBrokerageMemoryItem(params: {
   let preflightProspectId: string | null = null
   if (params.decision.action === 'approve') {
     const preflight = await params.pool.query<BrokerageMemoryItemRow>(`
-      SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at
+      SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at,
+             (SELECT d.source_provenance FROM public.intel_property_dossiers d
+              WHERE d.created_by_user_id = items.user_id AND d.external_memory_key = items.external_anchor_id
+                AND d.status <> 'archived' LIMIT 1) AS classification_source_provenance
       FROM public.brokerage_memory_items items
       INNER JOIN public.brokerage_memory_imports imports ON imports.id = items.import_id
       WHERE items.id = $1 AND items.user_id = $2
@@ -884,7 +902,10 @@ export async function decideBrokerageMemoryItem(params: {
       }
     }
     const itemResult = await client.query<BrokerageMemoryItemRow>(`
-      SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at
+      SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at,
+             (SELECT d.source_provenance FROM public.intel_property_dossiers d
+              WHERE d.created_by_user_id = items.user_id AND d.external_memory_key = items.external_anchor_id
+                AND d.status <> 'archived' LIMIT 1) AS classification_source_provenance
       FROM public.brokerage_memory_items items
       INNER JOIN public.brokerage_memory_imports imports ON imports.id = items.import_id
       WHERE items.id = $1 AND items.user_id = $2
@@ -903,7 +924,7 @@ export async function decideBrokerageMemoryItem(params: {
         UPDATE public.brokerage_memory_items
         SET status = 'rejected', rejected_at = now(), updated_at = now(),
             decision_action = 'reject', decided_by_user_id = $2,
-            decision_metadata = $3::jsonb
+            decision_metadata = COALESCE(decision_metadata, '{}'::jsonb) || $3::jsonb
         WHERE id = $1 AND user_id = $2
         RETURNING *
       `, [params.itemId, params.userId, JSON.stringify({ action: 'reject', reviewedAt: new Date().toISOString() })])
@@ -981,6 +1002,7 @@ export async function decideBrokerageMemoryItem(params: {
         FROM public.intel_property_dossiers
         WHERE id = $1 AND created_by_user_id = $2 AND status <> 'archived'
         LIMIT 1
+        FOR UPDATE
       `, [dossierId, params.userId])
       beforeDossier = dossier.rows[0] || null
       if (!beforeDossier) throw new BrokerageMemoryServiceError('Selected property dossier was not found or is archived.', 404)
@@ -1007,7 +1029,8 @@ export async function decideBrokerageMemoryItem(params: {
       anchor,
       params.decision.fieldDecisions,
     )
-    const provenanceDocument = { latest: provenance, history: [provenance] }
+    const propertyClassification = latestClassificationOverride(item.decision_metadata, beforeDossier?.source_provenance)
+    const provenanceDocument = { latest: provenance, history: [provenance], ...(propertyClassification ? { propertyClassification } : {}) }
     let createdDossier = false
     if (!dossierId) {
       const insert = buildNewBrokerageMemoryDossierInsert({
@@ -1034,6 +1057,7 @@ export async function decideBrokerageMemoryItem(params: {
           lng = CASE WHEN $8 = 'use_verified' THEN $10 ELSE COALESCE(lng, $10) END,
           memory_payload = $11::jsonb,
           source_provenance = COALESCE(source_provenance, '{}'::jsonb)
+            || $13::jsonb
             || jsonb_build_object(
               'latest', $12::jsonb,
               'history', COALESCE(source_provenance -> 'history', '[]'::jsonb) || jsonb_build_array($12::jsonb)
@@ -1054,6 +1078,7 @@ export async function decideBrokerageMemoryItem(params: {
         anchor.longitude,
         JSON.stringify(canonicalPayload),
         JSON.stringify(provenance),
+        JSON.stringify(propertyClassification ? { propertyClassification } : {}),
       ])
     }
 
@@ -1128,7 +1153,7 @@ export async function decideBrokerageMemoryItem(params: {
           matched_listing_id = $5,
           approved_at = now(), updated_at = now(),
           decision_action = $6, decided_by_user_id = $2,
-          decision_metadata = $7::jsonb
+          decision_metadata = COALESCE(decision_metadata, '{}'::jsonb) || $7::jsonb
       WHERE id = $1 AND user_id = $2
       RETURNING *
     `, [
@@ -1140,6 +1165,7 @@ export async function decideBrokerageMemoryItem(params: {
       decisionAction,
       JSON.stringify({
         ...provenance,
+        ...(propertyClassification ? { propertyClassification } : {}),
         action: 'approve',
         decisionAction,
         createdDossier,
@@ -1170,7 +1196,10 @@ export async function getBrokerageMemoryMap(params: { pool: Pool; userId: string
   await assertBrokerageMemorySchema(params.pool)
   const [pendingRows, dossierRows, latestImport] = await Promise.all([
     params.pool.query<BrokerageMemoryItemRow>(`
-      SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at
+      SELECT items.*, imports.source_file_name, imports.generated_at AS import_generated_at,
+             (SELECT d.source_provenance FROM public.intel_property_dossiers d
+              WHERE d.created_by_user_id = items.user_id AND d.external_memory_key = items.external_anchor_id
+                AND d.status <> 'archived' LIMIT 1) AS classification_source_provenance
       FROM public.brokerage_memory_items items
       INNER JOIN public.brokerage_memory_imports imports ON imports.id = items.import_id
       WHERE items.user_id = $1 AND items.status = 'pending' AND imports.status <> 'superseded'
@@ -1185,6 +1214,7 @@ export async function getBrokerageMemoryMap(params: { pool: Pool; userId: string
       lat: number | string | null
       lng: number | string | null
       memory_payload: MarketMemoryAnchor
+      source_provenance: Record<string, unknown> | null
       approved_at: Date | string | null
       source_file_name: string | null
       prospect_lat: number | string | null
@@ -1192,7 +1222,7 @@ export async function getBrokerageMemoryMap(params: { pool: Pool; userId: string
     }>(`
       SELECT d.id, d.prospect_id, listing_link.entity_id AS linked_listing_id,
              d.title, d.address, d.lat, d.lng,
-             d.memory_payload, d.approved_at,
+             d.memory_payload, d.source_provenance, d.approved_at,
              COALESCE(
                d.source_provenance -> 'latest' ->> 'sourceFileName',
                d.source_provenance ->> 'sourceFileName'
@@ -1227,15 +1257,16 @@ export async function getBrokerageMemoryMap(params: { pool: Pool; userId: string
     `, [params.userId]),
   ])
 
-  const pendingDossierIds = new Set(pendingRows.rows.map((row) => row.matched_dossier_id).filter(Boolean))
+  // A pending match is only a suggestion. Keep the approved source visible until
+  // review confirms the proposal; pending evidence must not replace saved memory.
   const approvedAnchors = dossierRows.rows
-    .filter((row) => !pendingDossierIds.has(row.id))
     .map((row): MarketMemoryAnchor => {
       const payload = row.memory_payload || ({} as MarketMemoryAnchor)
       const displayLat = numberOrNull(row.prospect_lat) ?? numberOrNull(row.lat) ?? payload.latitude
       const displayLng = numberOrNull(row.prospect_lng) ?? numberOrNull(row.lng) ?? payload.longitude
       return normalizeMarketMemoryProspectTypes({
         ...payload,
+        ...classificationProjection(row.source_provenance),
         id: payload.id || `dossier:${row.id}`,
         address: payload.address || row.address || row.title,
         latitude: displayLat,
