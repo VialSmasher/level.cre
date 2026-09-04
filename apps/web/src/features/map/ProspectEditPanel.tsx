@@ -321,7 +321,7 @@ export function ProspectEditPanel({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs font-medium text-gray-700">Status</Label>
+                <Label className="text-xs font-medium text-gray-700">Relationship &amp; pipeline</Label>
                 <Select value={prospect.status} onValueChange={(value: ProspectStatusType) => onStatusChange(value)}>
                   <SelectTrigger className="h-8 text-sm">
                     <SelectValue />
@@ -330,7 +330,6 @@ export function ProspectEditPanel({
                     {Object.entries(STATUS_META).map(([key, meta]) => (
                       <SelectItem key={key} value={key}>
                         <span className="inline-flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: meta.color }} />
                           {meta.label}
                         </span>
                       </SelectItem>

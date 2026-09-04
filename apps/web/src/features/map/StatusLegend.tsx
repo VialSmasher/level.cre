@@ -1,19 +1,10 @@
 import { useState, type ReactNode } from 'react';
 import { Check, ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { INVENTORY_CLASSES, INVENTORY_CLASS_META } from '@level-cre/shared';
 import { STATUS_META, type ProspectStatusType } from '@level-cre/shared/schema';
-import {
-  MAP_STATUS_KEYS,
-  STATUS_FILTER_PRESETS,
-  createAllStatusFilterSet,
-  type StatusCounts,
-} from './statusFilters';
-import {
-  MAP_PROSPECT_TYPE_KEYS,
-  PROSPECT_TYPE_FILTER_META,
-  createAllProspectTypeFilterSet,
-  type ProspectTypeCounts,
-  type ProspectTypeFilterKey,
-} from './prospectTypeFilters';
+import { MAP_STATUS_KEYS, RELATIONSHIP_DESCRIPTIONS, createDefaultStatusFilterSet, type StatusCounts } from './statusFilters';
+import { MAP_PROSPECT_TYPE_KEYS, PROSPECT_TYPE_FILTER_META, createAllProspectTypeFilterSet, type ProspectTypeCounts, type ProspectTypeFilterKey } from './prospectTypeFilters';
+import { UNCLASSIFIED_PROPERTY_META } from './propertyPresentation';
 
 interface StatusLegendProps {
   inventoryControls?: ReactNode;
@@ -28,181 +19,44 @@ interface StatusLegendProps {
   defaultOpen?: boolean;
 }
 
-export function StatusLegend({
-  inventoryControls,
-  selected,
-  onToggle,
-  onChange,
-  counts,
-  selectedProspectTypes,
-  onProspectTypeToggle,
-  onProspectTypesChange,
-  prospectTypeCounts,
-  defaultOpen = false,
-}: StatusLegendProps) {
-  const [open, setOpen] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return defaultOpen;
-    return window.matchMedia('(min-width: 640px)').matches ? defaultOpen : false;
-  });
-
-  const selectedSet = selected ?? createAllStatusFilterSet();
-  const selectedCount = selectedSet.size;
-  const totalCount = MAP_STATUS_KEYS.length;
-  const canSetPreset = Boolean(onChange);
-  const selectedProspectTypeSet = selectedProspectTypes ?? createAllProspectTypeFilterSet();
-  const selectedProspectTypeCount = selectedProspectTypeSet.size;
-
-  const handlePreset = (statuses: ProspectStatusType[]) => {
-    onChange?.(new Set(statuses));
+export function StatusLegend({ inventoryControls, selected, onToggle, onChange, counts, selectedProspectTypes, onProspectTypeToggle, onProspectTypesChange, prospectTypeCounts, defaultOpen = false }: StatusLegendProps) {
+  const [open, setOpen] = useState(defaultOpen);
+  const selectedSet = selected ?? createDefaultStatusFilterSet();
+  const typeSet = selectedProspectTypes ?? createAllProspectTypeFilterSet();
+  const toggleStatus = (key: ProspectStatusType) => {
+    if (onToggle) return onToggle(key);
+    const next = new Set(selectedSet);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    onChange?.(next);
   };
-
-  const handleClear = () => {
-    onChange?.(new Set());
-  };
-
-  return (
-    <div
-      className={`z-[90] select-none rounded-md border border-slate-300 bg-white text-slate-900 shadow-[0_10px_28px_rgba(15,23,42,0.14)] ${
-        open
-          ? 'fixed inset-x-3 bottom-20 max-h-[72dvh] overflow-hidden sm:static sm:inset-auto sm:w-72'
-          : 'w-fit'
-      }`}
-    >
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 hover:bg-slate-50"
-        aria-expanded={open}
-      >
-        <span className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-800">
-          <SlidersHorizontal className="h-4 w-4 text-blue-600" aria-hidden />
-          <span>Map filters</span>
-          <span className="rounded-sm bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-            {selectedCount}/{totalCount} · {selectedProspectTypeCount}/{MAP_PROSPECT_TYPE_KEYS.length}
-          </span>
-        </span>
-        <ChevronDown className={`h-4 w-4 transition-transform ${open ? '' : '-rotate-90'}`} aria-hidden />
-      </button>
-      {open && (
-        <div className="max-h-[calc(72dvh-2.5rem)] overflow-y-auto px-3 pb-3">
-          {inventoryControls}
-          <div className="border-t border-slate-200 pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            Lifecycle status
-          </div>
-          {canSetPreset && (
-            <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-              {STATUS_FILTER_PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => handlePreset(preset.statuses)}
-                  className="min-h-8 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-left text-xs font-medium text-slate-700 hover:border-slate-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="mt-3 space-y-1">
-            {MAP_STATUS_KEYS.map((key) => {
-              const meta = STATUS_META[key];
-              const active = selected ? selected.has(key as ProspectStatusType) : true;
-              const rowClasses = `flex min-h-9 w-full items-center gap-2 rounded-md px-2 py-1 text-left ${
-                onToggle ? 'cursor-pointer' : ''
-              } ${active ? 'bg-blue-50 text-slate-950' : 'text-slate-400 hover:bg-slate-50'}`;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  className={rowClasses}
-                  onClick={onToggle ? () => onToggle(key as ProspectStatusType) : undefined}
-                  aria-pressed={active}
-                >
-                  <span
-                    className="inline-block h-3 w-3 shrink-0 rounded-full border border-black/10"
-                    style={{ backgroundColor: meta.color }}
-                  />
-                  <span className="min-w-0 flex-1 text-sm">{meta.label}</span>
-                  <span className="rounded-sm border border-slate-200 bg-white px-2 py-0.5 text-xs tabular-nums text-slate-600">
-                    {counts?.[key] ?? 0}
-                  </span>
-                  {active && <Check className="h-4 w-4 text-blue-600" aria-hidden />}
-                </button>
-              );
-            })}
-          </div>
-
-          {canSetPreset && (
-            <div className="mt-2 flex justify-between border-t border-slate-200 pt-2">
-              <button
-                type="button"
-                onClick={() => handlePreset(MAP_STATUS_KEYS)}
-                className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
-              >
-                Select all
-              </button>
-              <button
-                type="button"
-                onClick={handleClear}
-                className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
-              >
-                Clear
-              </button>
-            </div>
-          )}
-
-          <div className="mt-3 border-t border-slate-200 pt-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Prospect type</div>
-            <p className="mt-1 text-xs leading-4 text-slate-500">Independent from lifecycle status.</p>
-            <div className="mt-2 space-y-1">
-              {MAP_PROSPECT_TYPE_KEYS.map((key) => {
-                const meta = PROSPECT_TYPE_FILTER_META[key];
-                const active = selectedProspectTypeSet.has(key);
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    className={`flex min-h-9 w-full items-center gap-2 rounded-md px-2 py-1 text-left ${
-                      onProspectTypeToggle ? 'cursor-pointer' : ''
-                    } ${active ? 'bg-teal-50 text-slate-950' : 'text-slate-400 hover:bg-slate-50'}`}
-                    onClick={onProspectTypeToggle ? () => onProspectTypeToggle(key) : undefined}
-                    aria-pressed={active}
-                  >
-                    <span
-                      className="inline-block h-3 w-3 shrink-0 rounded-full border border-black/10"
-                      style={{ backgroundColor: meta.color }}
-                    />
-                    <span className="min-w-0 flex-1 text-sm">{meta.label}</span>
-                    <span className="rounded-sm border border-slate-200 bg-white px-2 py-0.5 text-xs tabular-nums text-slate-600">
-                      {prospectTypeCounts?.[key] ?? 0}
-                    </span>
-                    {active && <Check className="h-4 w-4 text-teal-700" aria-hidden />}
-                  </button>
-                );
-              })}
-            </div>
-            {onProspectTypesChange && (
-              <div className="mt-2 flex justify-between border-t border-slate-200 pt-2">
-                <button
-                  type="button"
-                  onClick={() => onProspectTypesChange(createAllProspectTypeFilterSet())}
-                  className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
-                >
-                  Select all
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onProspectTypesChange(new Set())}
-                  className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
-                >
-                  Clear
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  const propertyKey = [...INVENTORY_CLASSES.map(key => INVENTORY_CLASS_META[key]), UNCLASSIFIED_PROPERTY_META];
+  return <div className={`z-[90] select-none rounded-md border border-slate-300 bg-white text-slate-900 shadow-lg ${open ? 'fixed inset-x-3 bottom-20 max-h-[72dvh] overflow-hidden sm:static sm:inset-auto sm:w-72' : 'w-fit'}`}>
+    <button type="button" onClick={() => setOpen(value => !value)} className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2.5 hover:bg-slate-50" aria-expanded={open}>
+      <span className="flex items-center gap-2 text-sm font-semibold"><SlidersHorizontal className="h-4 w-4" aria-hidden />Map filters<span className="text-xs font-normal text-slate-500">{selectedSet.size}/{MAP_STATUS_KEYS.length} · {typeSet.size}/{MAP_PROSPECT_TYPE_KEYS.length}</span></span>
+      <ChevronDown className={`h-4 w-4 ${open ? '' : '-rotate-90'}`} aria-hidden />
+    </button>
+    {open && <div className="max-h-[calc(72dvh-2.75rem)] overflow-y-auto px-3 pb-3">
+      <section aria-label="Property type color key" className="border-t py-3">
+        <p className="text-xs font-semibold">Map colors show property type</p>
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-2">{propertyKey.map(meta => <span key={meta.label} className="flex items-center gap-1.5 text-[11px]"><span className="flex h-5 w-5 items-center justify-center rounded-full font-bold text-white" style={{backgroundColor:meta.color}}>{meta.marker}</span>{meta.label}</span>)}</div>
+        <p className="mt-2 text-[11px] text-slate-500">Gray clusters mix property types. R marks research.</p></section>
+      {inventoryControls}
+      <details className="border-t border-slate-200 py-3" aria-label="Relationship and pipeline filters">
+        <summary className="cursor-pointer text-xs font-semibold">Relationship &amp; pipeline <span className="font-normal text-slate-500">{selectedSet.size}/{MAP_STATUS_KEYS.length}</span></summary>
+        <p className="mt-2 text-xs leading-4 text-slate-500">Filter brokerage relationships. Due work is in Today.</p>
+        <div className="mt-2 space-y-1">{MAP_STATUS_KEYS.filter(key => key !== 'no_go').map(key => <button key={key} type="button" onClick={() => toggleStatus(key)} aria-pressed={selectedSet.has(key)} title={RELATIONSHIP_DESCRIPTIONS[key]} className={`flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-xs ${selectedSet.has(key) ? 'bg-slate-100 text-slate-950' : 'text-slate-500'}`}>
+          <span className="flex-1">{STATUS_META[key].label}{key === 'development' ? ' · review' : ''}</span><span className="tabular-nums">{counts?.[key] ?? 0}</span>{selectedSet.has(key) && <Check className="h-4 w-4" aria-hidden />}
+        </button>)}</div>
+        <label className="mt-2 flex min-h-11 cursor-pointer items-center gap-2 text-xs"><input type="checkbox" checked={selectedSet.has('no_go')} onChange={() => toggleStatus('no_go')} />Include No Go <span className="ml-auto tabular-nums">{counts?.no_go ?? 0}</span></label>
+        <p className="text-[11px] leading-4 text-slate-500">No Go history is retained. Development remains unchanged pending review.</p>
+        {onChange && <button type="button" onClick={() => onChange(createDefaultStatusFilterSet())} className="mt-2 min-h-9 text-xs font-medium text-blue-700">Reset relationships</button>}
+      </details>
+      {onProspectTypeToggle && <details className="border-t border-slate-200 pt-3" aria-label="Pursuit type filters">
+        <summary className="cursor-pointer text-xs font-semibold">Pursuit type</summary>
+        <div className="mt-2 space-y-1">{MAP_PROSPECT_TYPE_KEYS.map(key => <button key={key} type="button" aria-pressed={typeSet.has(key)} onClick={() => onProspectTypeToggle?.(key)} className={`flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left text-xs ${typeSet.has(key) ? 'bg-slate-100' : 'text-slate-500'}`}><span className="flex-1">{PROSPECT_TYPE_FILTER_META[key].label}</span><span>{prospectTypeCounts?.[key] ?? 0}</span>{typeSet.has(key) && <Check className="h-4 w-4" aria-hidden />}</button>)}</div>
+        {onProspectTypesChange && <button type="button" onClick={() => onProspectTypesChange(createAllProspectTypeFilterSet())} className="mt-2 min-h-9 text-xs font-medium text-blue-700">Show all pursuit types</button>}
+      </details>}
+    </div>}
+  </div>;
 }
+

@@ -2,6 +2,7 @@ import { memo, useMemo } from 'react'
 import { useGoogleMap } from '@react-google-maps/api'
 
 import { AdvancedMapMarker } from './AdvancedMapMarker'
+import { UNCLASSIFIED_PROPERTY_META } from './propertyPresentation'
 import {
   clusterViewportPoints,
   type MapMarkerCategory,
@@ -26,14 +27,6 @@ const CATEGORY_LABELS: Record<MapMarkerCategory, string> = {
   client: 'clients',
   memory: 'market memory',
   review: 'review items',
-}
-
-const CATEGORY_CLUSTER_COLORS: Record<MapMarkerCategory, string> = {
-  prospect: '#2563EB',
-  listing: '#DC2626',
-  client: '#16A34A',
-  memory: '#0F766E',
-  review: '#D97706',
 }
 
 function clusterTitle(categories: Partial<Record<MapMarkerCategory, number>>, count: number) {
@@ -100,7 +93,7 @@ export const ClusteredMapMarkers = memo(function ClusteredMapMarkers({
             markerCategory={sharedCategory || 'mixed'}
             position={item.position}
             title={clusterTitle(item.categories, item.count)}
-            color={inventoryColor || (sharedCategory ? CATEGORY_CLUSTER_COLORS[sharedCategory] : '#334155')}
+            color={inventoryColor || UNCLASSIFIED_PROPERTY_META.color}
             borderColor="#ffffff"
             label={item.count > 999 ? `${Math.round(item.count / 1_000)}k` : String(item.count)}
             scale={16}
@@ -116,3 +109,4 @@ export const ClusteredMapMarkers = memo(function ClusteredMapMarkers({
     </>
   )
 })
+

@@ -67,7 +67,8 @@ import {
 } from '@/features/prospect-merge/api';
 import { SearchResultCard } from '@/features/map/SearchResultCard';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
-import { createStatusFilterSet, getStatusCounts } from '@/features/map/statusFilters';
+import { createStatusFilterSet, readRelationshipFilters, getStatusCounts } from '@/features/map/statusFilters';
+import { UNCLASSIFIED_PROPERTY_META } from '@/features/map/propertyPresentation';
 import {
   createProspectTypeFilterSet,
   getComposedPropertyProspectTypes,
@@ -319,7 +320,8 @@ export default function HomePage() {
   }, [touches]);
   
   // Filter state
-  const statusFilterStorageKey = nsKey(currentUser?.id, 'mapStatusFilters');
+  const statusFilterStorageKey = nsKey(currentUser?.id, 'mapRelationshipFilters:v2');
+  const legacyStatusFilterStorageKey = nsKey(currentUser?.id, 'mapStatusFilters');
   const prospectTypeFilterStorageKey = nsKey(currentUser?.id, 'mapProspectTypeFilters:v1');
   const inventoryFilterStorageKey = nsKey(currentUser?.id, 'mapInventoryFilters:v1');
   const skipNextInventoryPersistRef = useRef(false);
@@ -327,7 +329,7 @@ export default function HomePage() {
   const skipNextStatusFilterPersistRef = useRef(false);
   const skipNextProspectTypeFilterPersistRef = useRef(false);
   const [statusFilters, setStatusFilters] = useState<Set<ProspectStatusType>>(() => {
-    return createStatusFilterSet(readJSON<unknown>(statusFilterStorageKey, null));
+    return readRelationshipFilters(readJSON<unknown>(statusFilterStorageKey, null), readJSON<unknown>(legacyStatusFilterStorageKey, null));
   });
   const [prospectTypeFilters, setProspectTypeFilters] = useState<Set<ProspectTypeFilterKey>>(() => {
     return createProspectTypeFilterSet(readJSON<unknown>(prospectTypeFilterStorageKey, null));
@@ -653,8 +655,8 @@ export default function HomePage() {
 
   useEffect(() => {
     skipNextStatusFilterPersistRef.current = true;
-    setStatusFilters(createStatusFilterSet(readJSON<unknown>(statusFilterStorageKey, null)));
-  }, [statusFilterStorageKey]);
+    setStatusFilters(readRelationshipFilters(readJSON<unknown>(statusFilterStorageKey, null), readJSON<unknown>(legacyStatusFilterStorageKey, null)));
+  }, [statusFilterStorageKey, legacyStatusFilterStorageKey]);
 
   useEffect(() => {
     if (skipNextStatusFilterPersistRef.current) {
@@ -824,7 +826,7 @@ export default function HomePage() {
   const renderableProspects = useMemo(() => {
     return filteredProspects.map((prospect) => {
       const inventory = inventoryByProspectId.get(prospect.id);
-      const color = inventory ? INVENTORY_CLASS_META[inventory.classification].color : STATUS_META[prospect.status].color;
+      const color = inventory ? INVENTORY_CLASS_META[inventory.classification].color : UNCLASSIFIED_PROPERTY_META.color;
       const memory = linkedMemoryByProspectId.get(prospect.id);
       const memoryLayer: MarketMemoryLayer | null = memory ? (memory.previewLayer || memory.baseLayer) : null;
       const showMemoryState = Boolean(memory && memoryLayer && visibleMarketMemoryLayers.has(memoryLayer));
@@ -836,7 +838,7 @@ export default function HomePage() {
           color,
           kind: 'point' as const,
           position: { lat, lng },
-          memoryLabel: showMemoryState ? (memoryLayer === 'review' ? '?' : 'M') : undefined,
+          memoryLabel: showMemoryState ? (memoryLayer === 'review' ? '?' : 'R') : undefined,
           memoryBorderColor: showMemoryState
             ? memoryLayer === 'review' ? '#D97706' : '#0F766E'
             : undefined,
@@ -2260,11 +2262,11 @@ export default function HomePage() {
         id: `prospect:${entry.id}`,
         position: entry.position,
         category,
-        title: inventory ? `${inventory.name} · ${INVENTORY_CLASS_META[inventory.classification].label} · ${inventory.confidence} confidence` : entry.markerTitle || getProspectDisplayName(entry.prospect),
+        title: inventory ? `${inventory.name} · ${INVENTORY_CLASS_META[inventory.classification].label} · ${inventory.confidence} confidence · ${STATUS_META[entry.prospect.status].label}` : `${entry.markerTitle || getProspectDisplayName(entry.prospect)} · Unclassified property · ${STATUS_META[entry.prospect.status].label}`,
         color: entry.color,
-        clusterColor: inventory ? entry.color : undefined,
+        clusterColor: entry.color,
         borderColor: inventory?.confidence === 'low' || inventory?.confidence === 'unrated' ? '#F59E0B' : entry.memoryBorderColor,
-        label: inventory ? INVENTORY_CLASS_META[inventory.classification].marker : entry.memoryLabel,
+        label: inventory ? INVENTORY_CLASS_META[inventory.classification].marker : entry.memoryLabel || '?',
         scale: inventory?.classification === 'multi_tenant' ? 12 : inventory ? 10 : 8,
         zIndex: inventory?.classification === 'multi_tenant' ? 15 : entry.memoryLabel ? 8 : 2,
         onClick: () => handleProspectClick(entry.prospect),
@@ -2282,9 +2284,10 @@ export default function HomePage() {
         position: { lat: anchor.latitude, lng: anchor.longitude },
         category: layer === 'review' ? 'review' as const : 'memory' as const,
         title: `${markerTitle}: ${anchor.address}`,
-        color: marker.color,
-        borderColor: '#ffffff',
-        label: marker.label,
+        color: UNCLASSIFIED_PROPERTY_META.color,
+        clusterColor: UNCLASSIFIED_PROPERTY_META.color,
+        borderColor: marker.color,
+        label: layer === 'review' ? '?' : 'R',
         scale: 11,
         zIndex: 5,
         onClick: () => handleMarketMemoryAnchorClick(anchor),

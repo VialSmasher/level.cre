@@ -1,3 +1,4 @@
+import { propertyPresentation } from '@/features/map/propertyPresentation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useRoute } from 'wouter';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -27,7 +28,7 @@ import { nsKey, readJSON, removeKey, writeJSON } from '@/lib/storage';
 import { clearAdvancedMarker, type AdvancedAssetMarker } from '@/features/map/advancedMarkers';
 import { SearchResultCard } from '@/features/map/SearchResultCard';
 import { searchLocationToProspectDetails, type MapSearchLocation } from '@/features/map/searchTypes';
-import { createAllStatusFilterSet, createStatusFilterSet, getStatusCounts } from '@/features/map/statusFilters';
+import { createDefaultStatusFilterSet, readRelationshipFilters, getStatusCounts } from '@/features/map/statusFilters';
 import { ProspectEditPanel, formatSfWithCommas, getDisplayAddressValue } from '@/features/map/ProspectEditPanel';
 // Note: Avoid importing AlertDialog to prevent a circular-import bundle bug
 
@@ -400,12 +401,12 @@ function WorkspaceMap() {
     }
   }, [searchPin, map]);
   
-  // Status filter UI: default to all statuses visible
+  // Relationship filters hide No Go by default.
   type StatusKey = ProspectStatusType;
   const [statusFilters, setStatusFilters] = useState<Set<StatusKey>>(() => {
-    return createAllStatusFilterSet();
+    return createDefaultStatusFilterSet();
   });
-  const workspaceStatusFilterStorageKey = listingId ? `workspaceStatusFilters:${listingId}` : null;
+  const workspaceStatusFilterStorageKey = listingId ? `workspaceRelationshipFilters:v2:${listingId}` : null;
   const skipNextWorkspaceStatusPersistRef = useRef(false);
   const filteredLinkedProspects = useMemo(() => {
     return linkedProspects.filter((p) => statusFilters.has(p.status as StatusKey));
@@ -427,11 +428,11 @@ function WorkspaceMap() {
         const [lng, lat] = p.geometry.coordinates as [number, number];
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
         try {
-          const color = STATUS_META[p.status as ProspectStatusType]?.color || '#3B82F6';
+          const color = propertyPresentation(p).color;
           const marker = await createCustomAssetMarker(map, {
             lat,
             lng,
-            title: p.name || 'Custom Asset',
+            title: `${p.name || 'Custom Asset'} · ${propertyPresentation(p).label} · ${STATUS_META[p.status as ProspectStatusType]?.label || p.status}`,
             color,
             scale: 8,
           });
@@ -561,9 +562,9 @@ function WorkspaceMap() {
     try {
       skipNextWorkspaceStatusPersistRef.current = true;
       const raw = localStorage.getItem(workspaceStatusFilterStorageKey);
-      setStatusFilters(raw ? createStatusFilterSet(JSON.parse(raw)) : createAllStatusFilterSet());
+      setStatusFilters(readRelationshipFilters(raw ? JSON.parse(raw) : null, JSON.parse(localStorage.getItem(`workspaceStatusFilters:${listingId}`) || 'null')));
     } catch {}
-  }, [workspaceStatusFilterStorageKey]);
+  }, [workspaceStatusFilterStorageKey, listingId]);
   useEffect(() => {
     if (!workspaceStatusFilterStorageKey) return;
     if (skipNextWorkspaceStatusPersistRef.current) {
@@ -1372,7 +1373,7 @@ function WorkspaceMap() {
                 return null;
               }
               const overlaysInteractive = drawMode === 'select';
-              const color = STATUS_META[p.status as ProspectStatusType]?.color || '#3B82F6';
+              const color = propertyPresentation(p).color;
               const coords = p.geometry.coordinates as [number, number][][] | [number, number][];
               const ring = Array.isArray(coords[0]) && Array.isArray((coords as any)[0][0])
                 ? (coords as [number, number][][])[0]
@@ -1611,3 +1612,4 @@ function WorkspaceMap() {
     </div>
   );
 }
+
