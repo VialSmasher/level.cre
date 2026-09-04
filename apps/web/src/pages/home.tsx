@@ -43,7 +43,7 @@ import { AdvancedMapMarker } from '@/features/map/AdvancedMapMarker';
 import { ClusteredMapMarkers, type ClusteredMapMarkerEntry } from '@/features/map/ClusteredMapMarkers';
 import { padViewportBounds, pointInViewport } from '@/features/map/viewportClustering';
 import { composePropertyMapItems, getLinkedMemoryMarkerTitle } from '@/features/property-memory/composeMapItems';
-import { composedPropertyFilterSource, findMemoryMapItem, findMemoryProspect, propertyMapFitPoints } from '@/features/property-memory/assetMapModel';
+import { composedPropertyFilterSource, findMemoryMapItem, findMemoryProspect, propertyMapFitPoints, resolveMemorySearchSelection } from '@/features/property-memory/assetMapModel';
 import { findMemoryByPropertyId, mapSelectionUrl, memoryPropertyId } from '@/features/property-memory/mapSelectionUrl';
 import { PropertyMemorySearchPanel } from '@/features/property-memory/PropertyMemorySearchPanel';
 import { PropertyMemoryReviewDialog } from '@/features/property-memory/PropertyMemoryReviewDialog';
@@ -2169,28 +2169,20 @@ export default function HomePage() {
   }, [quickPropertyMemoryApprovalAvailable, selectedPropertyMemoryReviewItem, submitPropertyMemoryDecision]);
 
   const handlePropertyMemorySearchSelect = useCallback(async (row: PropertyMemorySearchRow) => {
-    const anchor = marketMemoryAnchors.find((candidate) => candidate.id === row.anchor.id)
-      || marketMemoryAnchors.find((candidate) => (
-        (row.dossierId != null && candidate.persistence?.dossierId === row.dossierId)
-        || (row.importItemId != null && candidate.persistence?.importItemId === row.importItemId)
-        || (row.linkedProspectId != null && candidate.persistence?.linkedProspectId === row.linkedProspectId)
-      )) || row.anchor;
+    const { anchor, linkedProspect } = resolveMemorySearchSelection(row, marketMemoryAnchors, prospects);
     setVisibleMarketMemoryLayers((current) => {
       const next = new Set(current);
-      next.add(row.layer);
+      next.add(anchor.previewLayer || anchor.baseLayer);
       return next;
     });
     const selectionApplied = await requestMapSelection({ kind: 'memory', anchor });
     if (!selectionApplied) return;
     if (!map) return;
-    const linkedProspect = row.linkedProspectId
-      ? prospects.find((prospect) => prospect.id === row.linkedProspectId)
-      : null;
     // A broker's manually adjusted prospect pin remains authoritative. The
     // evidence coordinate is used only when no linked prospect position exists.
     const position = linkedProspect
-      ? getProspectLatLng(linkedProspect) || { lat: row.latitude, lng: row.longitude }
-      : { lat: row.latitude, lng: row.longitude };
+      ? getProspectLatLng(linkedProspect) || { lat: anchor.latitude, lng: anchor.longitude }
+      : { lat: anchor.latitude, lng: anchor.longitude };
     map.panTo(position);
     map.setZoom(Math.max(map.getZoom() || 15, 16));
     setCenter(position);

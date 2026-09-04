@@ -9,22 +9,35 @@ export function reconcileSelectedMarketMemoryAnchor(
   if (!current) return null
 
   const currentPersistence = current.persistence
-  const next = (
-    currentPersistence?.importItemId
-      ? refreshed.find((candidate) => candidate.persistence?.importItemId === currentPersistence.importItemId)
+  if (currentPersistence?.state === 'local_preview') return current
+  if (currentPersistence?.state === 'pending') {
+    // Only the same import item can confirm approval. Its suggested dossier,
+    // normalized anchor ID and prospect match do not establish that transition.
+    return currentPersistence.importItemId
+      ? refreshed.find(candidate => (
+        candidate.persistence?.importItemId === currentPersistence.importItemId
+        && (candidate.persistence?.state === 'pending' || candidate.persistence?.state === 'approved')
+      )) || null
       : null
-  ) || (
-    currentPersistence?.dossierId
-      ? refreshed.find((candidate) => candidate.persistence?.dossierId === currentPersistence.dossierId)
-      : null
-  ) || refreshed.find((candidate) => candidate.id === current.id) || (
-    currentPersistence?.linkedProspectId
-      ? refreshed.find((candidate) => candidate.persistence?.linkedProspectId === currentPersistence.linkedProspectId)
-      : null
-  )
-
-  if (next) return next
-  return currentPersistence?.state === 'local_preview' ? current : null
+  }
+  if (currentPersistence?.state === 'approved' && currentPersistence.dossierId) {
+    return refreshed.find(candidate => (
+      candidate.persistence?.state === 'approved'
+      && candidate.persistence.dossierId === currentPersistence.dossierId
+    )) || null
+  }
+  if (currentPersistence?.state === 'approved' && currentPersistence.importItemId) {
+    return refreshed.find(candidate => (
+      candidate.persistence?.state === 'approved'
+      && candidate.persistence.importItemId === currentPersistence.importItemId
+    )) || null
+  }
+  return refreshed.find(candidate => (
+    candidate.id === current.id
+    && candidate.persistence?.state === currentPersistence?.state
+    && candidate.persistence?.importItemId === currentPersistence?.importItemId
+    && candidate.persistence?.dossierId === currentPersistence?.dossierId
+  )) || null
 }
 
 export function findDuplicateProspectGroupForAnchor(

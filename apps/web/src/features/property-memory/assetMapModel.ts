@@ -1,6 +1,7 @@
 import { registrationHistory, type MarketMemoryAnchor } from '@level-cre/shared'
 import type { Prospect } from '@level-cre/shared/schema'
 import type { PropertyFilterSource } from '../map/inventoryFilters'
+import type { PropertyMemorySearchRow } from './api'
 import type { ComposedPropertyMapItem } from './composeMapItems'
 
 function memoryResearchFacts(anchors: MarketMemoryAnchor[], now?: Date) {
@@ -31,6 +32,31 @@ export function findMemoryProspect(anchor: MarketMemoryAnchor, prospects: Prospe
   if (anchor.persistence?.state !== 'approved') return null
   const prospectId = anchor.persistence?.linkedProspectId
   return prospectId ? prospects.find(prospect => prospect.id === prospectId) || null : null
+}
+
+/** Search rows can combine suggested matches; only their anchor owns the selected record. */
+export function resolveMemorySearchSelection(
+  row: Pick<PropertyMemorySearchRow, 'anchor'>,
+  anchors: MarketMemoryAnchor[],
+  prospects: Prospect[],
+) {
+  const persistence = row.anchor.persistence
+  const anchor = anchors.find(candidate => {
+    const current = candidate.persistence
+    if (persistence?.state === 'pending' && persistence.importItemId) {
+      return current?.state === 'pending' && current.importItemId === persistence.importItemId
+    }
+    if (persistence?.state === 'approved' && persistence.dossierId) {
+      return current?.state === 'approved' && current.dossierId === persistence.dossierId
+    }
+    // Legacy/preview anchors have no persisted identity. Keep their state and
+    // any available IDs distinct instead of following a proposed relationship.
+    return candidate.id === row.anchor.id
+      && current?.state === persistence?.state
+      && current?.importItemId === persistence?.importItemId
+      && current?.dossierId === persistence?.dossierId
+  }) || row.anchor
+  return { anchor, linkedProspect: findMemoryProspect(anchor, prospects) }
 }
 
 /** Use the composed canonical identity for both marker selection and refreshes. */

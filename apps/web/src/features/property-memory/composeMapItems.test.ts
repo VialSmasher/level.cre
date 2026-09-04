@@ -5,7 +5,7 @@ import type { MarketMemoryAnchor } from '@level-cre/shared'
 import type { Prospect } from '@level-cre/shared/schema'
 
 import { composePropertyMapItems, getLinkedMemoryMarkerTitle } from './composeMapItems'
-import { composedPropertyFilterSource, findMemoryMapItem, findMemoryProspect, memoryPropertyFilterSource, propertyMapFitPoints } from './assetMapModel'
+import { composedPropertyFilterSource, findMemoryMapItem, findMemoryProspect, memoryPropertyFilterSource, propertyMapFitPoints, resolveMemorySearchSelection } from './assetMapModel'
 import { defaultInventoryFilters, matchesPropertyFilters, propertyFilterFacts } from '../map/inventoryFilters'
 import { propertyPresentation } from '../map/propertyPresentation'
 
@@ -181,6 +181,51 @@ test('pending and preview matches cannot borrow a candidate prospect classificat
     assert.equal(propertyFilterFacts(composedPropertyFilterSource(items[1])).classification,'single_tenant')
     assert.notEqual(items[1].id,`prospect:${crm.id}`)
   }
+})
+
+test('search selects the exact pending import when approved and other pending records share its normalized anchor ID', () => {
+  const crm = prospect()
+  const approved = anchor({ persistence: { state: 'approved', dossierId: 'dossier-1', linkedProspectId: crm.id } })
+  const pending = anchor({
+    previewLayer: 'review',
+    persistence: { state: 'pending', importItemId: 'review-1', dossierId: 'dossier-1', linkedProspectId: crm.id },
+  })
+  const otherPending = { ...pending, persistence: { ...pending.persistence!, importItemId: 'review-2' } }
+  // Search can merge canonical row fields, but the chosen pending story owns
+  // only its import item; the suggested dossier/prospect must not win selection.
+  const row = { anchor: structuredClone(pending), dossierId: 'dossier-1', linkedProspectId: crm.id }
+  const anchors = [approved, otherPending, pending]
+  const selection = resolveMemorySearchSelection(row, anchors, [crm])
+  assert.equal(selection.anchor, pending)
+  assert.equal(selection.linkedProspect, null)
+  assert.equal(findMemoryMapItem(selection.anchor, composePropertyMapItems([crm], anchors))?.id, 'import-item:review-1')
+})
+
+test('search refreshes an approved story by exact dossier and uses its current confirmed CRM link', () => {
+  const oldCrm = prospect({ id: 'old-prospect' })
+  const currentCrm = prospect({ id: 'current-prospect', locationLat: 53.7, locationLng: -113.7 })
+  const snapshot = anchor({ persistence: { state: 'approved', dossierId: 'dossier-1', linkedProspectId: oldCrm.id } })
+  const approved = { ...snapshot, persistence: { ...snapshot.persistence!, linkedProspectId: currentCrm.id } }
+  const otherDossier = { ...snapshot, persistence: { ...snapshot.persistence!, dossierId: 'dossier-2' } }
+  const pending = anchor({ persistence: { state: 'pending', importItemId: 'review-1', dossierId: 'dossier-1', linkedProspectId: oldCrm.id } })
+  const row = { anchor: snapshot, linkedProspectId: oldCrm.id }
+  const selection = resolveMemorySearchSelection(row, [pending, otherDossier, approved], [oldCrm, currentCrm])
+  assert.equal(selection.anchor, approved)
+  assert.equal(selection.linkedProspect, currentCrm)
+})
+
+test('search retains the selected story when its exact persisted record is absent and never promotes a preview', () => {
+  const crm = prospect()
+  const approved = anchor({ persistence: { state: 'approved', dossierId: 'dossier-1', linkedProspectId: crm.id } })
+  const pending = anchor({ persistence: { state: 'pending', importItemId: 'review-1', dossierId: 'dossier-1', linkedProspectId: crm.id } })
+  const preview = anchor({ persistence: { state: 'local_preview', dossierId: 'dossier-1', linkedProspectId: crm.id } })
+  for (const story of [pending, preview]) {
+    const selection = resolveMemorySearchSelection({ anchor: story }, [approved], [crm])
+    assert.equal(selection.anchor, story)
+    assert.equal(selection.linkedProspect, null)
+  }
+  const missingApproved = { ...approved, persistence: { ...approved.persistence!, dossierId: 'not-loaded' } }
+  assert.equal(resolveMemorySearchSelection({ anchor: missingApproved }, [approved, pending], [crm]).anchor, missingApproved)
 })
 
 test('memory registration filtering uses all transfer dates and never substitutes title pull dates', () => {

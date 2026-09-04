@@ -95,6 +95,26 @@ test('refresh reconciliation prioritizes the exact import item over a reused anc
   assert.equal(reconcileSelectedMarketMemoryAnchor(current, [reusedId, exactImport]), exactImport)
 })
 
+test('disappearing pending research clears selection instead of promoting its suggested dossier or prospect', () => {
+  const current = anchor({ persistence: { state: 'pending', importItemId: 'item-one', dossierId: 'dossier-one', linkedProspectId: 'prospect-one' } })
+  const approvedSuggestion = anchor({ persistence: { state: 'approved', dossierId: 'dossier-one', linkedProspectId: 'prospect-one' } })
+  const replacementProposal = anchor({ persistence: { ...current.persistence!, importItemId: 'replacement-item' } })
+  assert.equal(reconcileSelectedMarketMemoryAnchor(current, [approvedSuggestion, replacementProposal]), null)
+  const unrelatedImport = { ...approvedSuggestion, persistence: { ...approvedSuggestion.persistence!, importItemId: 'other-item' } }
+  assert.equal(reconcileSelectedMarketMemoryAnchor(current, [unrelatedImport]), null)
+})
+
+test('approved refreshes require the same approved dossier and previews remain local', () => {
+  const approved = anchor({ persistence: { state: 'approved', dossierId: 'dossier-one', linkedProspectId: 'prospect-one' } })
+  const pendingSuggestion = anchor({ persistence: { state: 'pending', importItemId: 'item-one', dossierId: 'dossier-one', linkedProspectId: 'prospect-one' } })
+  const otherDossier = anchor({ persistence: { state: 'approved', dossierId: 'dossier-two', linkedProspectId: 'prospect-one' } })
+  const refreshed = { ...approved, id: 'updated-canonical-anchor' }
+  assert.equal(reconcileSelectedMarketMemoryAnchor(approved, [pendingSuggestion, otherDossier, refreshed]), refreshed)
+  assert.equal(reconcileSelectedMarketMemoryAnchor(approved, [pendingSuggestion, otherDossier]), null)
+  const preview = anchor({ persistence: { state: 'local_preview' } })
+  assert.equal(reconcileSelectedMarketMemoryAnchor(preview, [approved, pendingSuggestion]), preview)
+})
+
 test('duplicate merge prefers the group with the strongest overlap', () => {
   const property = anchor({
     resolution: {
