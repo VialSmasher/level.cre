@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 
@@ -12,9 +12,12 @@ import {
 import { ProspectReferenceError, requireActiveOwnedProspect } from './prospectReferenceService';
 
 type Queryable = Pick<Pool | PoolClient, 'query'>;
+class DeliveryConflict extends Error {
+  constructor() { super('This producer event ID was already used for different activity. Review the retained event instead of overwriting confirmed evidence.'); }
+}
 
 type ContactInteractionStorage = {
-  createContactInteraction(interaction: any, options?: any): Promise<{ id: string }>;
+  createContactInteraction(interaction: any, options?: any): Promise<{ id: string; duplicate?: boolean }>;
   linkProspectToListingAny?(params: {
     listingId: string;
     prospectId: string;
@@ -74,6 +77,8 @@ export async function protectOutboundEmailFollowUp(params: {
 export const SalesActivityBatchSchema = z.object({
   source: z.string().trim().min(1).max(80).optional(),
   runId: z.string().trim().max(120).nullable().optional(),
+  producerId: z.string().trim().min(1).max(120).optional().default('legacy-recorder'),
+  schemaVersion: z.literal(1).optional().default(1),
   createInteractions: z.boolean().optional().default(true),
   activities: z.array(z.record(z.unknown())).min(1).max(500),
 });
@@ -92,6 +97,9 @@ export type SalesActivityBatchInput = z.infer<typeof SalesActivityBatchSchema>;
 export type SalesActivityReviewAction = z.infer<typeof SalesActivityReviewActionSchema>;
 
 export type SalesActivityImportResult = {
+  source?: string;
+  receiptStatus?: 'applied' | 'rejected';
+  retryable?: boolean;
   importId?: string;
   externalActivityId?: string;
   status?: string;
@@ -230,7 +238,8 @@ async function upsertSalesActivityImport(
         email_domain = EXCLUDED.email_domain,
         subject = EXCLUDED.subject,
         notes = EXCLUDED.notes,
-        activity_at = EXCLUDED.activity_at,
+        activity_at = CASE WHEN public.sales_activity_imports.activity_status IN ('sent', 'received')
+          THEN COALESCE(public.sales_activity_imports.activity_at, EXCLUDED.activity_at) ELSE EXCLUDED.activity_at END,
         prospect_id = COALESCE(public.sales_activity_imports.prospect_id, EXCLUDED.prospect_id),
         listing_id = COALESCE(public.sales_activity_imports.listing_id, EXCLUDED.listing_id),
         match_status = CASE
@@ -363,11 +372,18 @@ export async function importSalesActivityBatch(params: {
   };
 
   for (const rawActivity of params.payload.activities) {
+    let requestedIdentity: { source?: string; externalActivityId?: string } = {
+      source: typeof rawActivity.source === 'string' ? rawActivity.source.trim() : params.payload.source || 'codex_followup',
+      externalActivityId: typeof rawActivity.externalActivityId === 'string' ? rawActivity.externalActivityId.trim() : undefined,
+    };
+    let normalizedSuccessfully = false;
     try {
       let activity = normalizeSalesActivityInput(rawActivity, {
         source: params.payload.source,
         runId: params.payload.runId,
       });
+      normalizedSuccessfully = true;
+      requestedIdentity = { source: activity.source, externalActivityId: activity.externalActivityId };
       if (params.findDuplicateSalesActivityImport) {
         try {
           const duplicateImport = await params.findDuplicateSalesActivityImport(activity);
@@ -387,7 +403,7 @@ export async function importSalesActivityBatch(params: {
             };
           }
         } catch (error) {
-          console.warn('Failed to reconcile a duplicate sales activity identity:', error);
+          throw error;
         }
       }
       if (activity.listingId && params.requireEditAccess) {
@@ -399,7 +415,7 @@ export async function importSalesActivityBatch(params: {
         try {
           capturedEmailInteraction = await params.findCapturedEmailInteraction(activity);
         } catch (error) {
-          console.warn('Failed to find a matching captured email interaction:', error);
+          throw error;
         }
       }
       const client = await params.pool.connect();
@@ -437,6 +453,18 @@ export async function importSalesActivityBatch(params: {
               confidence: 50,
             }
           : decideSalesActivityMatch(activity, resolved.prospectId, resolved.matchReason);
+        if (params.payload.producerId && params.payload.producerId !== 'legacy-recorder' && ['sent', 'received'].includes(activity.activityStatus)) {
+          const fingerprint = createHash('sha256').update(JSON.stringify({
+            type: activity.activityType, status: activity.activityStatus, occurredAt: activity.activityAt?.toISOString() || null, direction: activity.direction, email: activity.email, subject: activity.subject,
+          })).digest('hex');
+          const receipt = await client.query(
+            `INSERT INTO public.automation_event_payloads (user_id, producer_id, source, external_activity_id, fingerprint)
+             VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id, producer_id, source, external_activity_id)
+             DO UPDATE SET fingerprint = automation_event_payloads.fingerprint RETURNING fingerprint`,
+            [params.userId, params.payload.producerId, requestedIdentity.source, requestedIdentity.externalActivityId, fingerprint],
+          );
+          if (receipt.rows[0]?.fingerprint !== fingerprint) throw new DeliveryConflict();
+        }
         const upserted = await upsertSalesActivityImport(
           client,
           params.userId,
@@ -489,7 +517,7 @@ export async function importSalesActivityBatch(params: {
             try {
               capturedEmailAlreadyAwardedXp = await params.hasCapturedEmailEvidence(activity);
             } catch (error) {
-              console.warn('Failed to check captured email evidence before creating interaction:', error);
+              throw error;
             }
           }
           const interactionDate = (activity.activityAt || new Date()).toISOString();
@@ -520,7 +548,8 @@ export async function importSalesActivityBatch(params: {
             },
           }, capturedEmailAlreadyAwardedXp || activity.direction === 'inbound' ? { skipXp: true } : undefined);
           interactionId = interaction.id;
-          summary.createdInteractions += 1;
+          duplicateInteraction = Boolean(interaction.duplicate);
+          if (!interaction.duplicate) summary.createdInteractions += 1;
         }
 
         if (interactionId) {
@@ -535,7 +564,7 @@ export async function importSalesActivityBatch(params: {
           });
         }
 
-        if (!duplicateInteraction) {
+        { // Retry every idempotent projection even when the interaction already exists.
           const interactionDate = (activity.activityAt || new Date()).toISOString();
           await params.pool.query(
             `
@@ -578,7 +607,7 @@ export async function importSalesActivityBatch(params: {
         try {
           await params.reconcileEmailEvidence(activity);
         } catch (error) {
-          console.warn('Failed to reconcile Codex activity with captured email evidence:', error);
+          throw error;
         }
       }
 
@@ -595,9 +624,8 @@ export async function importSalesActivityBatch(params: {
             confidence: match.confidence,
           });
         } catch (error) {
-          // Keep the legacy recorder available during rollout; the canonical event
-          // endpoint can safely replay the same provider identity later.
-          console.warn('Failed to dual-write canonical activity event:', error);
+          // A producer must retain its event until every required projection is durable.
+          throw error;
         }
       }
 
@@ -607,7 +635,8 @@ export async function importSalesActivityBatch(params: {
 
       summary.results.push({
         importId: importRow.id,
-        externalActivityId: activity.externalActivityId,
+        ...requestedIdentity,
+        receiptStatus: 'applied',
         status: activity.activityStatus,
         email: activity.email,
         prospectId: effectiveProspectId,
@@ -619,6 +648,10 @@ export async function importSalesActivityBatch(params: {
     } catch (error: any) {
       summary.errors += 1;
       summary.results.push({
+        ...requestedIdentity,
+        receiptStatus: 'rejected',
+        retryable: !(error instanceof ProspectReferenceError) && !(error instanceof DeliveryConflict) && normalizedSuccessfully,
+        ...(error instanceof DeliveryConflict ? { code: 'event_payload_conflict' } : {}),
         error: error?.message || 'Failed to import sales activity',
         ...(error instanceof ProspectReferenceError ? {
           code: error.code,

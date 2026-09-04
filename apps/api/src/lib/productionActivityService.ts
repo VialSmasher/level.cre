@@ -10,6 +10,7 @@ export type ProductionActivityRow = {
   action: 'email_sent' | 'phone_call' | 'meeting_held' | 'note_added';
   direction: 'outbound' | 'inbound' | 'internal';
   sourceProvider: string;
+  sourceIdentities?: string[];
   sourceMetadata: Record<string, unknown>;
   prospectId: string | null;
   interactionId: string | null;
@@ -216,9 +217,10 @@ function deduplicateCandidates(candidates: ProductionActivityCandidate[]): Produ
 
   return [...grouped.values()].map((group) => {
     const preferred = [...group].sort((left, right) => candidateScore(right) - candidateScore(left))[0];
-    if (group.length === 1) return preferred.activity;
+
     return {
       ...preferred.activity,
+      sourceIdentities: [...new Set(group.flatMap(candidate => candidate.identities))],
       sourceMetadata: {
         ...preferred.activity.sourceMetadata,
         deduplicatedActivityCount: group.length,
@@ -270,7 +272,15 @@ function normalizedRow(params: {
     action: actionForType(type),
     direction,
     sourceProvider: String(params.sourceProvider || params.prefix),
-    sourceMetadata,
+    sourceMetadata: {
+      ...sourceMetadata,
+      externalActivityId: sourceMetadata.externalActivityId || params.row.external_activity_id || params.row.external_event_id || params.row.source_message_id || null,
+      subject: sourceMetadata.subject || params.row.subject || params.row.email_subject || null,
+      email: sourceMetadata.email || params.row.email || params.row.email_sender_email || null,
+      recipientEmails: sourceMetadata.recipientEmails || params.row.email_recipient_emails || [],
+      company: sourceMetadata.company || params.row.company || null,
+      sourceThreadId: sourceMetadata.sourceThreadId || params.row.source_thread_id || null,
+    },
     prospectId: params.prospectId ? String(params.prospectId) : null,
     interactionId: params.interactionId ? String(params.interactionId) : null,
   };

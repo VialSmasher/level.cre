@@ -7,6 +7,7 @@ const { Client } = pg
 const migrationNames = [
   '0018_brokerage_memory.sql',
   '0019_prospect_merge.sql',
+  '0020_telemetry_hardening.sql',
 ]
 
 async function main() {

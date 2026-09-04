@@ -1,3 +1,6 @@
+import { getTelemetryInsights } from './lib/telemetryInsights';
+import { inboundWebhookAuthorized } from './lib/inboundWebhookAuth';
+import { ingestionRateLimit, ingestionTrace, RunReceiptSchema, recordRunReceipt, listRunReceipts } from './lib/automationTelemetry';
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import jwt from "jsonwebtoken";
@@ -186,6 +189,12 @@ function normalizeImportedProspectAddress(value: unknown): string {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  const ingestionLimit = ingestionRateLimit(pool);
+  app.use('/api/agent', ingestionTrace);
+  app.use('/api/email/inbound/webhook', ingestionTrace, (req, res, next) => {
+    if (!isInboundRequestAuthorized(req)) return res.status(getInboundWebhookSecret() ? 401 : 503).json({ message: 'Inbound webhook authentication required' });
+    next();
+  }, ingestionLimit);
   // Initialize Supabase client for server-side OAuth
   const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
   const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
@@ -1104,36 +1113,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   function isInboundRequestAuthorized(req: Request) {
-    const expected = getInboundWebhookSecret();
-    if (!expected) return false;
-    const candidates: string[] = [];
-    const supplied = String(req.headers['x-levelcre-inbound-secret'] || '').trim();
-    if (supplied) candidates.push(supplied);
-    const authorization = String(req.headers.authorization || '').trim();
-    if (/^Bearer\s+/i.test(authorization)) {
-      candidates.push(authorization.replace(/^Bearer\s+/i, '').trim());
-    } else if (/^Basic\s+/i.test(authorization)) {
-      try {
-        const decoded = Buffer.from(authorization.replace(/^Basic\s+/i, '').trim(), 'base64').toString('utf8');
-        const separatorIndex = decoded.indexOf(':');
-        if (decoded) candidates.push(decoded);
-        if (separatorIndex >= 0) {
-          const username = decoded.slice(0, separatorIndex).trim();
-          const password = decoded.slice(separatorIndex + 1).trim();
-          if (username) candidates.push(username);
-          if (password) candidates.push(password);
-        }
-      } catch {
-        // Ignore malformed Basic auth headers and continue checking other auth methods.
-      }
-    }
-    const querySecret = String(req.query.secret || '').trim();
-    if (querySecret) candidates.push(querySecret);
-    const expectedBuffer = Buffer.from(expected);
-    return candidates.some((candidate) => {
-      const actualBuffer = Buffer.from(candidate);
-      return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
-    });
+    return inboundWebhookAuthorized(req, getInboundWebhookSecret(), { allowQuerySecret: process.env.EMAIL_INBOUND_ALLOW_QUERY_SECRET === 'true' });
   }
 
   function isRecipientVerifiedInboundPayload(payload: any) {
@@ -4420,7 +4400,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/agent/market-record-proposals', requireMarketRecordProposalAuth, async (req, res) => {
+  app.post('/api/agent/market-record-proposals', requireMarketRecordProposalAuth, ingestionLimit, async (req, res) => {
     try {
       const userId = getUserId(req);
       const email = (req as any)?.user?.email || null;
@@ -4446,7 +4426,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/agent/entity-resolution', requireMarketRecordProposalAuth, async (req, res) => {
+  app.post('/api/agent/entity-resolution', requireMarketRecordProposalAuth, ingestionLimit, async (req, res) => {
     try {
       const parsed = z.object({
         address: z.string().trim().max(1000).nullable().optional(),
@@ -4684,7 +4664,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/agent/sales-prospect-maps/batch', requireSalesActivityAuth, async (req, res) => {
+  app.post('/api/agent/sales-prospect-maps/batch', requireSalesActivityAuth, ingestionLimit, async (req, res) => {
     try {
       const userId = getUserId(req);
       const email = (req as any)?.user?.email || null;
@@ -4720,7 +4700,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   });
 
-  app.post('/api/agent/opportunity-proposals', requireSalesActivityAuth, async (req, res) => {
+  app.post('/api/agent/opportunity-proposals', requireSalesActivityAuth, ingestionLimit, async (req, res) => {
     try {
       const userId = getUserId(req);
       const parsed = OpportunityPromotionProposalInputSchema.safeParse(req.body || {});
@@ -4819,7 +4799,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/agent/sales-activity/batch', requireSalesActivityAuth, async (req, res) => {
+  app.post('/api/agent/runs', requireSalesActivityAuth, ingestionLimit, async (req, res, next) => {
+    try {
+      const parsed = RunReceiptSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid run receipt', error: parsed.error.errors });
+      if (isDemo(req)) return res.json({ skipped: true, reason: 'demo_mode' });
+      await ensureUser(getUserId(req), (req as any).user?.email || null);
+      const receipt = await recordRunReceipt(pool, getUserId(req), parsed.data);
+      res.json({ receipt, requestId: res.locals.requestId });
+    } catch (error) { next(error); }
+  });
+  app.get('/api/automation/insights', requireAuth, async (req, res, next) => {
+    try {
+      if (isDemo(req)) return res.json({ days: 28, limited: false, coverage: { actions: 0, mappedActions: 0, unmappedActions: 0, groups: [] }, progression: { contacted: 0, attributableConversations: 0, repliedConversations: 0, prospectsWithMeetings: 0, unattributedOutbound: 0, confirmedMilestones: [] } });
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.json(await getTelemetryInsights(pool, getUserId(req)));
+    } catch (error) { next(error); }
+  });
+  app.get('/api/agent/mapping-coverage', requireSalesActivityAuth, ingestionLimit, async (req, res, next) => {
+    try {
+      if (isDemo(req)) return res.json({ groups: [] });
+      const insights = await getTelemetryInsights(pool, getUserId(req));
+      res.json({ ...insights.coverage, limited: insights.limited, days: insights.days, workflow: 'Resolve existing entities first. Submit only verified evidence to /api/agent/sales-prospect-maps/batch. Ambiguous matches stay reviewable.' });
+    } catch (error) { next(error); }
+  });
+  app.get('/api/automation/runs', requireAuth, async (req, res, next) => {
+    try {
+      const rows = isDemo(req) ? [] : await listRunReceipts(pool, getUserId(req));
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.json({ rows, checkedAt: new Date().toISOString() });
+    } catch (error) { next(error); }
+  });
+
+  app.post('/api/agent/sales-activity/batch', requireSalesActivityAuth, ingestionLimit, async (req, res) => {
     try {
       const userId = getUserId(req);
       const email = (req as any)?.user?.email || null;
@@ -4876,7 +4888,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ...input,
         }),
       });
-      res.json(summary);
+      const runId = parsed.data.runId || res.locals.requestId;
+      await recordRunReceipt(pool, userId, {
+        producerId: parsed.data.producerId, runId, schemaVersion: parsed.data.schemaVersion,
+        status: summary.errors ? 'queued_local' : summary.needsReview ? 'needs_review' : 'applied',
+        applied: summary.results.filter(row => row.receiptStatus === 'applied').length,
+        needsReview: summary.needsReview, failed: summary.errors,
+      });
+      res.json({ ...summary, runId, requestId: res.locals.requestId });
     } catch (error) {
       console.error('Error importing sales activity batch:', error);
       res.status(500).json({ message: 'Failed to import sales activity batch' });
@@ -4959,7 +4978,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post('/api/agent/activity-events/batch', requireSalesActivityAuth, async (req, res) => {
+  app.post('/api/agent/activity-events/batch', requireSalesActivityAuth, ingestionLimit, async (req, res) => {
     try {
       const userId = getUserId(req);
       const email = (req as any)?.user?.email || null;
@@ -5665,8 +5684,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         intakeAddress: fixedAddress || (domain ? `levelcre+${userId}@${domain}` : null),
         webhookUrl,
         webhookSecretRequired: Boolean(getInboundWebhookSecret()),
-        webhookAuthMethods: ['query-secret', 'bearer', 'x-levelcre-inbound-secret', 'basic'],
-        webhookUrlTemplate: getInboundWebhookSecret() ? `${webhookUrl}?secret=<inbound-webhook-secret>` : webhookUrl,
+        webhookAuthMethods: ['basic', 'bearer', 'x-levelcre-inbound-secret'],
+        legacyQuerySecretEnabled: process.env.EMAIL_INBOUND_ALLOW_QUERY_SECRET === 'true',
+        webhookUrlTemplate: webhookUrl,
       });
     } catch (error) {
       console.error('Error fetching inbound email config:', error);
@@ -5678,11 +5698,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const payload = req.body || {};
       const authorizedBySecret = isInboundRequestAuthorized(req);
-      const authorizedByRecipient = isRecipientVerifiedInboundPayload(payload);
-      if (!authorizedBySecret && !authorizedByRecipient) {
+      if (req.query.secret) res.setHeader('Deprecation', 'true');
+      if (!authorizedBySecret) {
         return res.status(getInboundWebhookSecret() ? 401 : 503).json({
           message: getInboundWebhookSecret()
-            ? 'Invalid inbound email secret and inbound recipient did not match Level CRE intake address'
+            ? 'Invalid inbound email credentials'
             : 'Inbound email webhook is not configured',
         });
       }
@@ -5701,7 +5721,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const messageData = normalizeInboundPayload(payload, userId);
       messageData.rawMetadata = {
         ...(messageData.rawMetadata || {}),
-        authMode: authorizedBySecret ? 'secret' : 'recipient',
+        authMode: 'secret',
       } as any;
       const result = await storeInboundEmailForReview(userId, messageData);
       res.json({ ok: true, provider: 'inbound', ...result });

@@ -1,3 +1,4 @@
+import { polygonIntersectsViewport } from '@/features/map/viewportClustering';
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { GoogleMap, useJsApiLoader, Polygon, InfoWindow } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
@@ -175,7 +176,7 @@ const MapOverlayLayer = memo(function MapOverlayLayer({
       if (entry.kind !== 'polygon') return false;
       if (entry.id === selectedProspectId || entry.id === editingProspectId) return true;
       if (!paddedBounds) return false;
-      return entry.paths.some((position) => pointInViewport(position, paddedBounds));
+      return polygonIntersectsViewport(entry.paths, paddedBounds);
     });
   }, [bounds, editingProspectId, renderableProspects, selectedProspectId]);
 
@@ -480,6 +481,14 @@ export default function HomePage() {
     enabled: !!currentUser,
     retry: false,
   });
+
+  useEffect(() => {
+    if (editingProspectId || prospectSaveStatus !== 'saved') return;
+    setSelectedProspect(current => {
+      if (!current || Object.keys(prospectSaveQueueRef.current?.pendingPatch(current.id) || {}).length) return current;
+      return prospects.find(prospect => prospect.id === current.id) || current;
+    });
+  }, [prospects, editingProspectId, prospectSaveStatus]);
 
   const propertyMemoryMapQuery = usePropertyMemoryMap({
     enabled: Boolean(currentUser) && !isDemoMode,

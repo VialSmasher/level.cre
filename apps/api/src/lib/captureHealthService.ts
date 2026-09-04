@@ -8,6 +8,7 @@ type CapturedOutboundRow = {
   subject: string | null
   recipient_emails: string[] | null
   sent_at: Date | string | null
+  raw_metadata?: Record<string, unknown> | null
   created_at: Date | string | null
 }
 
@@ -18,13 +19,8 @@ function parsedDate(value: unknown) {
 }
 
 function capturedSignature(row: CapturedOutboundRow) {
-  const occurredAt = parsedDate(row.sent_at || row.created_at)
-  const minute = occurredAt ? Math.floor(occurredAt.getTime() / 60_000) : 0
-  const recipients = (row.recipient_emails || []).map((email) => String(email).trim().toLowerCase()).sort().join(',')
-  const subject = String(row.subject || '').trim().toLowerCase().replace(/\s+/g, ' ')
-  return subject || recipients
-    ? `${minute}|${subject}|${recipients}`
-    : `${String(row.provider).toLowerCase()}|${String(row.provider_message_id).toLowerCase()}`
+  const internetId = row.raw_metadata?.internetMessageId
+  return internetId ? 'internet:' + String(internetId).trim() : row.provider + '|' + row.provider_message_id
 }
 
 export function summarizeCaptureHealth(params: {
@@ -48,7 +44,13 @@ export function summarizeCaptureHealth(params: {
   ))
   const capturedCount = captured.length
   const canonicalCount = canonical.length
-  const unreconciledCount = Math.max(0, capturedCount - canonicalCount)
+  const canonicalIdentities = new Set(canonical.flatMap(row => row.sourceIdentities || []))
+  const identity = (value: unknown) => 'external:' + String(value || '').trim().replace(/^internet-message:/i, '')
+  const unreconciled = captured.filter(row => {
+    const aliases = [row.provider_message_id, row.raw_metadata?.internetMessageId, row.raw_metadata?.graphMessageId].filter(Boolean)
+    return !aliases.some(alias => canonicalIdentities.has(identity(alias)))
+  })
+  const unreconciledCount = unreconciled.length
   const lastCapturedAt = captured
     .map((row) => parsedDate(row.sent_at || row.created_at))
     .filter((value): value is Date => Boolean(value))
@@ -59,7 +61,7 @@ export function summarizeCaptureHealth(params: {
     .sort((left, right) => right.getTime() - left.getTime())[0]?.toISOString() || null
   const status = unreconciledCount > 0
     ? 'attention' as const
-    : capturedCount === 0 && canonicalCount === 0
+    : capturedCount === 0
       ? 'idle' as const
       : 'healthy' as const
 
@@ -69,12 +71,13 @@ export function summarizeCaptureHealth(params: {
     capturedOutboundEmails: capturedCount,
     canonicalOutboundEmails: canonicalCount,
     unreconciledCount,
+    oldestPendingAt: unreconciled.map(row => parsedDate(row.sent_at || row.created_at)?.toISOString()).filter(Boolean).sort()[0] || null,
     lastCapturedAt,
     lastCanonicalAt,
     message: status === 'attention'
       ? `${unreconciledCount} captured outbound ${unreconciledCount === 1 ? 'email has' : 'emails have'} not reached the production ledger.`
       : status === 'idle'
-        ? 'Capture is ready; there is no recent outbound email to reconcile.'
+        ? 'There are no recent inbox captures to reconcile. Direct recorder activity is tracked separately.'
         : 'Captured outbound email and production credit are reconciled.',
   }
 }
@@ -87,7 +90,7 @@ export async function getCaptureHealth(params: {
   const days = Math.min(Math.max(Math.trunc(params.days || 7), 1), 30)
   const [capturedResult, canonicalRows] = await Promise.all([
     params.pool.query<CapturedOutboundRow>(`
-      SELECT provider, provider_message_id, subject, recipient_emails, sent_at, created_at
+      SELECT provider, provider_message_id, subject, recipient_emails, sent_at, created_at, raw_metadata
       FROM public.email_messages
       WHERE user_id = $1
         AND direction = 'sent'

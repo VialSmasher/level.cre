@@ -141,6 +141,7 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
+  constructor(private readonly activityDb: typeof db = db) {}
   // Listings (workspace)
   async getListings(userId: string): Promise<(Listing & { prospectCount: number; activityCount: number; lastActivityAt: string | null })[]> {
     // Fetch listings and counts of linked prospects
@@ -1389,58 +1390,49 @@ export class DatabaseStorage implements IStorage {
     return results;
   }
 
-  async createContactInteraction(interactionData: InsertContactInteraction & { userId: string; listingId?: string | null }, options?: { skipXp?: boolean }): Promise<ContactInteractionRow> {
-    const result = await db.transaction(async (tx) => {
-      const [prospect] = await tx
-        .select({ id: prospects.id, mergedIntoProspectId: prospects.mergedIntoProspectId })
+  async createContactInteraction(interactionData: InsertContactInteraction & { userId: string; listingId?: string | null }, options?: { skipXp?: boolean }): Promise<ContactInteractionRow & { duplicate?: boolean }> {
+    return this.activityDb.transaction(async (tx) => {
+      const [prospect] = await tx.select({ id: prospects.id, mergedIntoProspectId: prospects.mergedIntoProspectId })
         .from(prospects)
         .where(and(eq(prospects.id, interactionData.prospectId), eq(prospects.userId, interactionData.userId)))
         .for('update');
-      if (!prospect) {
-        throw new ProspectReferenceError({
-          message: 'Prospect was not found for the signed-in broker.',
-          status: 404,
-          code: 'prospect_not_found',
+      if (!prospect) throw new ProspectReferenceError({ message: 'Prospect was not found for the signed-in broker.', status: 404, code: 'prospect_not_found' });
+      if (prospect.mergedIntoProspectId) throw new ProspectReferenceError({ message: 'This prospect was consolidated into another record.', status: 409, code: 'prospect_merged', canonicalProspectId: prospect.mergedIntoProspectId });
+
+      const imported = Boolean(interactionData.sourceProvider && interactionData.sourceMessageId);
+      if (imported) {
+        // Unique receipt serializes this identity across processes. Query historical
+        // interactions under the same lock; no destructive deduplication migration.
+        await tx.execute(sql`INSERT INTO public.interaction_event_receipts
+          (user_id, source_provider, source_message_id, prospect_id)
+          VALUES (${interactionData.userId}, ${interactionData.sourceProvider}, ${interactionData.sourceMessageId}, ${interactionData.prospectId})
+          ON CONFLICT DO NOTHING`);
+        await tx.execute(sql`SELECT interaction_id FROM public.interaction_event_receipts
+          WHERE user_id = ${interactionData.userId} AND source_provider = ${interactionData.sourceProvider}
+          AND source_message_id = ${interactionData.sourceMessageId} AND prospect_id = ${interactionData.prospectId} FOR UPDATE`);
+        const [existing] = await tx.select().from(contactInteractions).where(and(
+          eq(contactInteractions.userId, interactionData.userId),
+          eq(contactInteractions.prospectId, interactionData.prospectId),
+          eq(contactInteractions.sourceProvider, interactionData.sourceProvider!),
+          eq(contactInteractions.sourceMessageId, interactionData.sourceMessageId!),
+        )).orderBy(contactInteractions.createdAt).limit(1);
+        if (existing) return { ...existing, duplicate: true };
+      }
+      const [created] = await tx.insert(contactInteractions).values({ ...interactionData, id: randomUUID() }).returning();
+      if (imported) {
+        await tx.execute(sql`UPDATE public.interaction_event_receipts SET interaction_id = ${created.id}
+          WHERE user_id = ${interactionData.userId} AND source_provider = ${interactionData.sourceProvider}
+          AND source_message_id = ${interactionData.sourceMessageId} AND prospect_id = ${interactionData.prospectId}`);
+      }
+      if (!options?.skipXp) {
+        const kind = interactionData.type === 'call' || interactionData.type === 'email' || interactionData.type === 'meeting' ? interactionData.type : 'note';
+        await this.addSkillActivityInTransaction(tx, {
+          userId: interactionData.userId, skillType: 'followUp', action: actionForInteractionType(kind),
+          xpGained: xpForInteractionType(kind), relatedId: created.id, multiplier: 1,
         });
       }
-      if (prospect.mergedIntoProspectId) {
-        throw new ProspectReferenceError({
-          message: 'This prospect was consolidated into another record.',
-          status: 409,
-          code: 'prospect_merged',
-          canonicalProspectId: prospect.mergedIntoProspectId,
-        });
-      }
-      const [created] = await tx.insert(contactInteractions)
-        .values({
-          ...interactionData,
-          id: randomUUID()
-        })
-        .returning();
       return created;
     });
-
-    if (options?.skipXp) {
-      return result;
-    }
-    
-    // Award XP for follow-up activities
-    const interactionType = (interactionData.type === 'call' || interactionData.type === 'email' || interactionData.type === 'meeting')
-      ? interactionData.type
-      : 'note';
-    const xpGained = xpForInteractionType(interactionType);
-    const action = actionForInteractionType(interactionType);
-    
-    await this.addSkillActivity({
-      userId: interactionData.userId,
-      skillType: 'followUp',
-      action,
-      xpGained,
-      relatedId: result.id,
-      multiplier: 1
-    });
-    
-    return result;
   }
 
   async deleteContactInteraction(id: string, userId: string): Promise<boolean> {
@@ -1476,54 +1468,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async addSkillActivity(activityData: InsertSkillActivity & { userId: string }): Promise<SkillActivityRow> {
-    // First, add the activity record
-    const [activity] = await db.insert(skillActivities)
-      .values({
-        ...activityData,
-        id: randomUUID()
-      })
-      .returning();
+    return this.activityDb.transaction((tx) => this.addSkillActivityInTransaction(tx, activityData));
+  }
 
-    // Then update the corresponding skill XP and streaks
-    const currentSkills = await this.getBrokerSkills(activityData.userId);
-    const updateData: any = {};
-    
-    switch (activityData.skillType) {
-      case 'prospecting':
-        updateData.prospecting = (currentSkills.prospecting || 0) + activityData.xpGained;
-        break;
-      case 'followUp':
-        updateData.followUp = (currentSkills.followUp || 0) + activityData.xpGained;
-        break;
-      case 'consistency':
-        updateData.consistency = (currentSkills.consistency || 0) + activityData.xpGained;
-        break;
-      case 'marketKnowledge':
-        updateData.marketKnowledge = (currentSkills.marketKnowledge || 0) + activityData.xpGained;
-        break;
-    }
-
-    // Daily streak update (consistency) – increment when crossing day boundary
+  private async addSkillActivityInTransaction(
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    activityData: InsertSkillActivity & { userId: string },
+  ): Promise<SkillActivityRow> {
+    await tx.insert(brokerSkills).values({ userId: activityData.userId }).onConflictDoNothing({ target: brokerSkills.userId });
+    const [current] = await tx.select().from(brokerSkills).where(eq(brokerSkills.userId, activityData.userId)).for('update');
+    const [activity] = await tx.insert(skillActivities).values({ ...activityData, id: randomUUID() }).returning();
     const now = new Date();
-    const last = currentSkills.lastActivity ? new Date(currentSkills.lastActivity) : null;
-    let streakDays = currentSkills.streakDays || 0;
-    if (!last) {
-      streakDays = 1;
-    } else {
-      const lastDay = new Date(last.getFullYear(), last.getMonth(), last.getDate());
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const diffDays = Math.floor((today.getTime() - lastDay.getTime()) / (1000 * 60 * 60 * 24));
-      if (diffDays === 1) {
-        streakDays += 1;
-      } else if (diffDays > 1) {
-        streakDays = 1;
-      }
-    }
-
-    await db.update(brokerSkills)
-      .set({ ...updateData, lastActivity: now, streakDays, updatedAt: now })
-      .where(eq(brokerSkills.userId, activityData.userId));
-
+    const day = (date: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Edmonton', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+    const last = current.lastActivity ? new Date(current.lastActivity) : null;
+    const elapsedDays = last ? Math.round((Date.parse(day(now)) - Date.parse(day(last))) / 86_400_000) : 2;
+    const streakDays = !current.streakDays || elapsedDays > 1 ? 1 : elapsedDays === 1 ? current.streakDays + 1 : current.streakDays;
+    const field = { prospecting: brokerSkills.prospecting, followUp: brokerSkills.followUp, consistency: brokerSkills.consistency, marketKnowledge: brokerSkills.marketKnowledge }[activityData.skillType];
+    if (!field) throw new Error('Unknown skill type');
+    await tx.update(brokerSkills).set({
+      [activityData.skillType]: sql`COALESCE(${field}, 0) + ${activityData.xpGained}`,
+      lastActivity: now, streakDays, updatedAt: now,
+    }).where(eq(brokerSkills.userId, activityData.userId));
     return activity;
   }
 

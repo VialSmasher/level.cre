@@ -1,3 +1,4 @@
+import { useTelemetry } from '@/contexts/TelemetryContext'
 import type { ReactNode } from 'react'
 import { Link, useLocation } from 'wouter'
 import {
@@ -44,6 +45,9 @@ type NavItem = {
 
 export function AppLayout({ children }: AppLayoutProps) {
   const { user, signOut } = useAuth()
+  const telemetry = useTelemetry()
+  const syncLabel = { live: 'Live updates', polling: 'Auto refresh', connecting: 'Connecting', offline: 'Offline', demo: 'Demo' }[telemetry.mode]
+  const syncIndicator = <span title={telemetry.lastSyncedAt ? 'Dashboard checked ' + new Date(telemetry.lastSyncedAt).toLocaleString() : 'Waiting for a successful refresh'} className="inline-flex items-center gap-1.5 text-[11px]"><span aria-hidden="true" className={cn('h-1.5 w-1.5 rounded-full', telemetry.mode === 'live' ? 'bg-emerald-500' : telemetry.mode === 'offline' ? 'bg-amber-500' : 'bg-slate-400')} />{syncLabel}</span>
   const [location] = useLocation()
 
   const handleSignOut = async () => {
@@ -205,6 +209,7 @@ export function AppLayout({ children }: AppLayoutProps) {
         </nav>
 
         <div className="mt-auto border-t border-white/10 p-3">
+          <div className="px-2 pb-2 text-slate-400">{syncIndicator}</div>
           {accountMenu(false)}
         </div>
       </aside>

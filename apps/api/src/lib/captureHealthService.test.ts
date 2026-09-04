@@ -4,7 +4,7 @@ import test from 'node:test'
 import { summarizeCaptureHealth } from './captureHealthService'
 import type { ProductionActivityRow } from './productionActivityService'
 
-function canonical(timestamp: string): ProductionActivityRow {
+function canonical(timestamp: string, identities: string[] = []): ProductionActivityRow {
   return {
     id: `activity:${timestamp}`,
     timestamp,
@@ -14,6 +14,7 @@ function canonical(timestamp: string): ProductionActivityRow {
     direction: 'outbound',
     sourceProvider: 'codex_followup',
     sourceMetadata: {},
+    sourceIdentities: identities.map(id => "external:" + id),
     prospectId: null,
     interactionId: null,
   }
@@ -28,7 +29,7 @@ test('flags the count gap that caused missing email production credit', () => {
     sent_at: `2026-08-21T${String(index + 10).padStart(2, '0')}:00:00.000Z`,
     created_at: null,
   }))
-  const canonicalRows = capturedRows.slice(0, 8).map((row) => canonical(row.sent_at))
+  const canonicalRows = capturedRows.slice(0, 8).map((row) => canonical(row.sent_at, [row.provider_message_id]))
 
   const health = summarizeCaptureHealth({
     capturedRows,
@@ -43,7 +44,7 @@ test('flags the count gap that caused missing email production credit', () => {
   assert.equal(health.canonicalOutboundEmails, 8)
 })
 
-test('deduplicates the same captured message arriving through two providers', () => {
+test('reconciles two provider captures by their canonical identity aliases', () => {
   const capturedRows = [
     {
       provider: 'outlook', provider_message_id: 'outlook-one', subject: 'Hello',
@@ -56,12 +57,12 @@ test('deduplicates the same captured message arriving through two providers', ()
   ]
   const health = summarizeCaptureHealth({
     capturedRows,
-    canonicalRows: [canonical('2026-08-21T10:00:20.000Z')],
+    canonicalRows: [canonical('2026-08-21T10:00:20.000Z', ['outlook-one', 'postmark-one'])],
     now: new Date('2026-08-22T12:00:00.000Z'),
   })
 
   assert.equal(health.status, 'healthy')
-  assert.equal(health.capturedOutboundEmails, 1)
+  assert.equal(health.capturedOutboundEmails, 2)
   assert.equal(health.canonicalOutboundEmails, 1)
 })
 

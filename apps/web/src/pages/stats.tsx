@@ -244,7 +244,7 @@ export default function StatsPage() {
           </div>
         ) : null}
 
-        <section className="grid overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm sm:grid-cols-2 xl:grid-cols-4" aria-label="This week's outbound production">
+        <section className="grid grid-cols-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm xl:grid-cols-4" aria-label="This week's outbound production">
           <MetricCard
             label="Outbound this week"
             value={metric(weekly.thisWeek.total)}

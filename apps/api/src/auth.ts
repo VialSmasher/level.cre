@@ -1,3 +1,8 @@
+export function legacyAgentRouteAllowed(method: string, path: string): boolean {
+  if (path.startsWith('/api/intel/')) return true
+  if (method === 'GET') return ['/api/prospects', '/api/automation/', '/api/agent/sales-activity/imports', '/api/activity-events'].some(route => path === route || (route.endsWith('/') && path.startsWith(route)))
+  return method === 'POST' && ['/api/agent/sales-activity/batch', '/api/agent/sales-prospect-maps/batch', '/api/agent/activity-events/batch', '/api/agent/market-record-proposals', '/api/agent/opportunity-proposals', '/api/agent/entity-resolution', '/api/agent/runs'].includes(path)
+}
 import { Request, Response, NextFunction } from 'express'
 // storage import intentionally omitted in dev/demo to avoid DB calls in restricted environments
 import { jwtVerify, JWTPayload } from 'jose'
@@ -114,6 +119,7 @@ export async function verifySupabaseToken(req: Request, res: Response, next: Nex
 
   const agentUser = getConfiguredAgentUser(req)
   if (agentUser) {
+    if (!legacyAgentRouteAllowed(req.method, req.path)) return res.status(403).json({ message: 'Use a scoped agent endpoint or broker authentication.' })
     ;(req as any).user = {
       id: agentUser.id,
       email: agentUser.email,
@@ -159,6 +165,7 @@ export function getUserId(req: Request): string {
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const agentUser = getConfiguredAgentUser(req)
   if (agentUser) {
+    if (!legacyAgentRouteAllowed(req.method, req.path)) return res.status(403).json({ message: 'Use a scoped agent endpoint or broker authentication.' })
     ;(req as any).user = {
       id: agentUser.id,
       email: agentUser.email,

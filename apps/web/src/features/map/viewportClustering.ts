@@ -174,3 +174,13 @@ export function clusterViewportPoints<T extends ViewportMapPoint>(
 
   return [...viewportResults, ...selectedResults].sort((left, right) => left.id.localeCompare(right.id))
 }
+
+/** Conservative bounds intersection: covering polygons must not disappear when all vertices lie offscreen. */
+export function polygonIntersectsViewport(paths: Array<{ lat: number; lng: number }>, bounds: ViewportBounds): boolean {
+  if (!paths.length) return false
+  const north = Math.max(...paths.map(point => point.lat)), south = Math.min(...paths.map(point => point.lat))
+  if (south > bounds.north || north < bounds.south) return false
+  const west = Math.min(...paths.map(point => point.lng)), east = Math.max(...paths.map(point => point.lng))
+  if (east - west > 180) return true
+  return bounds.west <= bounds.east ? east >= bounds.west && west <= bounds.east : east >= bounds.west || west <= bounds.east
+}

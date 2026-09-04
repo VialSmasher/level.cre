@@ -46,6 +46,7 @@ export type NormalizedFootprintEvent = {
   kind: ActivityFootprintKind
   prospectId: string | null
   sourceProvider: string
+  subject: string | null
 }
 
 export type ActivityFootprintMarker = {
@@ -185,6 +186,7 @@ function normalizeActivities(
       kind,
       prospectId,
       sourceProvider: String(activity.sourceProvider || 'captured'),
+      subject: typeof (activity.sourceMetadata as any)?.subject === 'string' ? (activity.sourceMetadata as any).subject : null,
     }]
   })
 }

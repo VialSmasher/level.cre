@@ -20,7 +20,7 @@ export const loadAdvancedMarkerLibrary = async () => {
   return markerLibraryPromise;
 };
 
-export const createCircleMarkerContent = ({
+export const updateCircleMarkerContent = (content: HTMLElement, {
   color,
   borderColor = '#ffffff',
   label,
@@ -29,7 +29,6 @@ export const createCircleMarkerContent = ({
   selected = false,
 }: MarkerContentOptions) => {
   const size = Math.max(scale * 2, label ? 26 : 0);
-  const content = document.createElement('div');
   content.style.width = `${size}px`;
   content.style.height = `${size}px`;
   content.style.borderRadius = '9999px';
@@ -50,6 +49,8 @@ export const createCircleMarkerContent = ({
   content.textContent = label ?? '';
   return content;
 };
+
+export const createCircleMarkerContent = (options: MarkerContentOptions) => updateCircleMarkerContent(document.createElement('div'), options);
 
 export const clearAdvancedMarker = (marker: AdvancedAssetMarker | null | undefined) => {
   if (marker) {

@@ -1,3 +1,5 @@
+import { MappingRecovery } from '@/components/TelemetryPanels';
+import { clusterViewportPoints, pointInViewport, type ViewportBounds } from '../map/viewportClustering';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GoogleMap, useJsApiLoader } from '@react-google-maps/api'
 import { useQuery } from '@tanstack/react-query'
@@ -96,81 +98,75 @@ function normalizeDemoInteractions(rows: any[]): ActivityFootprintActivity[] {
   }))
 }
 
-function ActivityMap({
-  markers,
-  markerColor,
-  selectedProspectId,
-  onSelect,
-}: {
-  markers: ActivityFootprintMarker[]
-  markerColor: string
-  selectedProspectId: string | null
-  onSelect: (prospectId: string) => void
+function ActivityMap({ markers, markerColor, selectedProspectId, onSelect }: {
+  markers: ActivityFootprintMarker[]; markerColor: string; selectedProspectId: string | null; onSelect: (id: string) => void;
 }) {
-  const { isLoaded } = useJsApiLoader({
-    id: 'google-map-script',
-    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
-    libraries: GOOGLE_LIBRARIES,
-    mapIds: [GOOGLE_MAPS_MAP_ID],
-  })
+  const { isLoaded } = useJsApiLoader({ id: 'google-map-script', googleMapsApiKey: GOOGLE_MAPS_API_KEY, libraries: GOOGLE_LIBRARIES, mapIds: [GOOGLE_MAPS_MAP_ID] })
   const mapRef = useRef<google.maps.Map | null>(null)
-
-  const frameMarkers = useCallback((map: google.maps.Map) => {
-    if (!markers.length || !window.google?.maps) {
-      map.setCenter(DEFAULT_CENTER)
-      map.setZoom(10)
-      return
-    }
-    if (markers.length === 1) {
-      map.setCenter(markers[0].position)
-      map.setZoom(13)
-      return
-    }
+  const initiallyFramed = useRef(false)
+  const [viewport, setViewport] = useState<{ bounds: ViewportBounds | null; zoom: number }>({ bounds: null, zoom: 10 })
+  const frame = useCallback((all: boolean) => {
+    const map = mapRef.current
+    if (!map || !markers.length) return
+    const local = all ? markers : markers.filter(marker => Math.abs(marker.position.lat - DEFAULT_CENTER.lat) < 0.6 && Math.abs(marker.position.lng - DEFAULT_CENTER.lng) < 1)
+    if (!local.length) return
     const bounds = new window.google.maps.LatLngBounds()
-    markers.forEach((marker) => bounds.extend(marker.position))
-    map.fitBounds(bounds, 56)
+    local.forEach(marker => bounds.extend(marker.position))
+    if (local.length === 1) { map.setCenter(local[0].position); map.setZoom(13) }
+    else map.fitBounds(bounds, 56)
   }, [markers])
-
   useEffect(() => {
-    if (mapRef.current) frameMarkers(mapRef.current)
-  }, [frameMarkers])
-
-  if (!isLoaded) {
-    return <div className="h-full animate-pulse bg-slate-100" aria-label="Loading activity map" />
-  }
-
+    if (!initiallyFramed.current && mapRef.current && markers.length) {
+      initiallyFramed.current = true
+      frame(false)
+    }
+  }, [markers, frame])
+  const points = useMemo(() => markers.map(marker => ({ ...marker, id: marker.prospectId, category: 'prospect' as const })), [markers])
+  const clusters = useMemo(() => clusterViewportPoints(points, viewport.bounds, viewport.zoom, {
+    selectedIds: new Set(selectedProspectId ? [selectedProspectId] : []),
+  }), [points, viewport, selectedProspectId])
+  const outside = viewport.bounds ? markers.filter(marker => !pointInViewport(marker.position, viewport.bounds!)).length : 0
+  if (!isLoaded) return <div className="h-full animate-pulse bg-slate-100" aria-label="Loading activity map" />
   return (
-    <GoogleMap
-      mapContainerStyle={MAP_CONTAINER_STYLE}
-      center={DEFAULT_CENTER}
-      zoom={10}
-      options={MAP_OPTIONS}
-      onLoad={(map) => {
-        mapRef.current = map
-        frameMarkers(map)
-      }}
-      onUnmount={() => {
-        mapRef.current = null
-      }}
-    >
-      {markers.map((marker) => (
-        <AdvancedMapMarker
-          key={marker.prospectId}
-          markerId={`activity:${marker.prospectId}`}
-          markerCategory="activity-footprint"
-          position={marker.position}
-          title={`${marker.name}: ${marker.total} outbound ${marker.total === 1 ? 'action' : 'actions'}`}
-          color={markerColor}
-          label={String(marker.total)}
-          scale={Math.min(18, 10 + Math.log2(marker.total + 1) * 2)}
-          zIndex={marker.prospectId === selectedProspectId ? 20 : 10 + marker.total}
-          selected={marker.prospectId === selectedProspectId}
-          onClick={() => onSelect(marker.prospectId)}
-        />
-      ))}
-    </GoogleMap>
+    <div className="relative h-full">
+      <GoogleMap mapContainerStyle={MAP_CONTAINER_STYLE} center={DEFAULT_CENTER} zoom={10} options={MAP_OPTIONS}
+        onLoad={map => {
+          mapRef.current = map
+          if (markers.length && !initiallyFramed.current) { initiallyFramed.current = true; frame(false) }
+        }}
+        onIdle={() => {
+          const map = mapRef.current, bounds = map?.getBounds()?.toJSON()
+          if (map && bounds) setViewport(previous => {
+            const next = { bounds, zoom: map.getZoom() || 10 }
+            return JSON.stringify(previous) === JSON.stringify(next) ? previous : next
+          })
+        }}
+        onUnmount={() => { mapRef.current = null; initiallyFramed.current = false }}>
+        {clusters.map(item => item.kind === 'cluster' ? (
+          <AdvancedMapMarker key={item.id} markerId={'activity:' + item.id} markerKind="cluster" markerCategory="activity-footprint"
+            position={item.position} color={markerColor} label={String(item.count)} scale={18}
+            title={item.count + ' prospects. Zoom in to explore.'}
+            onClick={() => {
+              const map = mapRef.current
+              if (!map) return
+              map.panTo(item.position); map.setZoom(Math.min((map.getZoom() || 10) + 2, 20))
+            }} />
+        ) : (
+          <AdvancedMapMarker key={item.id} markerId={'activity:' + item.id} markerCategory="activity-footprint"
+            position={item.position} title={item.point.name + ': ' + item.point.total + ' outbound actions'}
+            color={markerColor} label={String(item.point.total)} scale={Math.min(18, 12 + Math.log2(item.point.total + 1) * 2)}
+            zIndex={item.id === selectedProspectId ? 100 : 10 + item.point.total}
+            selected={item.id === selectedProspectId} onClick={() => onSelect(item.id)} />
+        ))}
+      </GoogleMap>
+      <div className="absolute bottom-8 left-3 flex max-w-[calc(100%-70px)] flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" className="bg-white shadow-sm" onClick={() => frame(true)}>Fit all activity</Button>
+        {outside > 0 ? <span className="rounded-md bg-white/95 px-2 py-1.5 text-xs text-slate-700 shadow-sm">{outside} prospects outside this view</span> : null}
+      </div>
+    </div>
   )
 }
+
 
 function ActivityMapFrame({
   markers,
@@ -256,7 +252,15 @@ export function ActivityFootprint({ prospects, isDemoMode }: ActivityFootprintPr
   const [kind, setKind] = useState<ActivityFootprintKindFilter>('all')
   const [selectedProspectId, setSelectedProspectId] = useState<string | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
-  const now = useMemo(() => new Date(), [])
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(previous => {
+      const next = new Date()
+      const day = (value: Date) => value.toLocaleDateString('en-CA', { timeZone: EDMONTON_TZ })
+      return day(previous) === day(next) ? previous : next
+    }), 30_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const activityQuery = useQuery<ActivityFootprintActivity[]>({
     queryKey: ['/api/automation/production-activities', 'activity-footprint', isDemoMode ? 'demo' : 'live'],
@@ -426,14 +430,16 @@ export function ActivityFootprint({ prospects, isDemoMode }: ActivityFootprintPr
                     <div key={event.id} className="flex items-start gap-2.5">
                       <span className={cn('mt-1.5 h-2 w-2 shrink-0 rounded-full', KIND_META[event.kind].dot)} aria-hidden="true" />
                       <div className="min-w-0">
-                        <p className="text-xs font-semibold capitalize text-slate-800">{event.kind}</p>
-                        <p className="mt-0.5 text-[11px] text-slate-500">{formatTouchDate(event.timestamp)} · {event.sourceProvider}</p>
+                        <p className="text-xs font-semibold capitalize text-slate-800">{event.kind === 'email' ? 'Email sent' : event.kind === 'meeting' ? 'Meeting recorded' : 'Call recorded'}</p>
+                        {event.subject ? <p className="mt-0.5 text-xs leading-5 text-slate-700">{event.subject}</p> : null}
+                        <p className="mt-0.5 text-[11px] text-slate-500">{formatTouchDate(event.timestamp)}
+                          <span title={event.sourceProvider}> · {event.sourceProvider.includes('codex') ? 'Codex' : event.sourceProvider.includes('outlook') ? 'Outlook' : 'Captured activity'}</span></p>
                       </div>
                     </div>
                   ))}
                 </div>
                 <Button asChild variant="outline" size="sm" className="mt-5 w-full">
-                  <Link href="/app">Open on main map</Link>
+                  <Link href={"/app?prospectId=" + encodeURIComponent(selectedMarker.prospectId)}>Open on main map</Link>
                 </Button>
               </div>
             ) : (
@@ -506,6 +512,7 @@ export function ActivityFootprint({ prospects, isDemoMode }: ActivityFootprintPr
           <span>{footprint.days.at(-1)?.longLabel}</span>
         </div>
       </div>
+      <MappingRecovery />
     </section>
   )
 }

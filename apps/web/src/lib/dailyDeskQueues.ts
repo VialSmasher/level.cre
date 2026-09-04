@@ -62,6 +62,7 @@ export function buildWeeklyActivityMomentum(series: DailyActivityDay[]) {
     return {
       thisWeek: emptyActivityTotals(),
       lastWeek: emptyActivityTotals(),
+      lastWeekComparable: emptyActivityTotals(),
       target: 0,
       remaining: 0,
       progressPercent: 0,
@@ -84,6 +85,9 @@ export function buildWeeklyActivityMomentum(series: DailyActivityDay[]) {
   const lastWeekDays = datedDays.filter((day) => day.date >= previousStartKey && day.date < currentStartKey);
   const thisWeek = sumActivityDays(thisWeekDays);
   const lastWeek = sumActivityDays(lastWeekDays);
+  const comparableEnd = new Date(previousWeekStart);
+  comparableEnd.setUTCDate(comparableEnd.getUTCDate() + dayFromMonday);
+  const lastWeekComparable = sumActivityDays(lastWeekDays.filter(day => day.date <= toKey(comparableEnd)));
   const earlierActiveDays = datedDays.filter((day) => day.date < previousStartKey && day.total > 0);
   const baseline = earlierActiveDays.length
     ? Math.round((earlierActiveDays.reduce((sum, day) => sum + day.total, 0) / earlierActiveDays.length) * 5)
@@ -97,6 +101,7 @@ export function buildWeeklyActivityMomentum(series: DailyActivityDay[]) {
   return {
     thisWeek,
     lastWeek,
+    lastWeekComparable,
     target,
     remaining,
     progressPercent,

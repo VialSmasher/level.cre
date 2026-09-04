@@ -1,3 +1,4 @@
+import { AutomationStatus, CommercialProgress, MappingRecovery } from '@/components/TelemetryPanels';
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'wouter'
@@ -546,7 +547,7 @@ function ActivityMomentum({ data, maxDailyActivity }: { data: ActivityPulseRespo
 function WeeklyMomentum({ data }: { data: ActivityPulseResponse }) {
   const momentum = buildWeeklyActivityMomentum(data.series)
   const comparison = momentum.lastWeek.total > 0
-    ? momentum.thisWeek.total - momentum.lastWeek.total
+    ? momentum.thisWeek.total - momentum.lastWeekComparable.total
     : null
 
   return (
@@ -560,12 +561,7 @@ function WeeklyMomentum({ data }: { data: ActivityPulseResponse }) {
               Level CRE tracks the production. Codex can handle inbox and deal prioritization separately.
             </p>
           </div>
-          <Button asChild size="sm">
-            <Link href="/app/followup">
-              Open call queue
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </Button>
+
         </div>
       </div>
 
@@ -890,7 +886,7 @@ export default function DailyDeskPage() {
       tone: 'text-blue-700 bg-blue-50',
     },
     { group: 'This week', label: 'Outbound actions', value: weeklyMomentum.thisWeek.total, icon: Flame, tone: 'text-orange-700 bg-orange-50' },
-    { group: 'Last week', label: 'Outbound actions', value: weeklyMomentum.lastWeek.total, icon: Target, tone: 'text-violet-700 bg-violet-50' },
+    { group: 'Last week to date', label: 'Outbound actions', value: weeklyMomentum.lastWeekComparable.total, icon: Target, tone: 'text-violet-700 bg-violet-50' },
     { group: 'Response', label: 'Inbound emails (28d)', value: activityPulseQuery.data?.inboundEmail ?? 0, icon: Mail, tone: 'text-emerald-700 bg-emerald-50' },
   ]
   const maxDailyActivity = Math.max(1, ...(activityPulseQuery.data?.series.map((day) => day.total) || [1]))
@@ -920,12 +916,13 @@ export default function DailyDeskPage() {
           )}
         />
 
+        <AutomationStatus />
         <section className="mt-5 grid grid-cols-2 overflow-hidden border-y border-slate-200 bg-white lg:grid-cols-4" aria-label="Business development pulse">
           {pulseMetrics.map((metric, index) => {
             const MetricIcon = metric.icon
             return (
               <div
-                key={metric.label}
+                key={metric.group + ":" + metric.label}
                 className={cn(
                   'flex min-h-[108px] items-center gap-2 border-slate-200 px-3 sm:min-h-24 sm:gap-3 sm:px-5',
                   index < 2 && 'border-b lg:border-b-0',
@@ -945,6 +942,9 @@ export default function DailyDeskPage() {
             )
           })}
         </section>
+
+        <CommercialProgress />
+        <MappingRecovery />
 
         {hasError ? (
           <div role="alert" className="mt-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -1208,6 +1208,7 @@ export default function DailyDeskPage() {
                     </article>
                   )
                 })}
+                <div id="activity-review" className="scroll-mt-20" />
                 {imports.map((item) => {
                   const selectedProspect = prospectDrafts[item.id] || ''
                   const direction = describeSalesActivityDirection(item.activity_status)
