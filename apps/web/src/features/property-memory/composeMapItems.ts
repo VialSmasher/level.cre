@@ -1,3 +1,4 @@
+import { groupPropertyRecords } from '@level-cre/shared'
 import type { MarketMemoryAnchor } from '@level-cre/shared'
 import type { Prospect, ProspectStatusType } from '@level-cre/shared/schema'
 
@@ -8,6 +9,7 @@ export type PropertyMemoryPosition = { lat: number; lng: number }
 export type ComposedPropertyMapItem = {
   id: string
   kind: 'prospect' | 'memory'
+  occupants?: Prospect[]
   prospect: Prospect | null
   memoryAnchors: MarketMemoryAnchor[]
   primaryMemoryAnchor: MarketMemoryAnchor | null
@@ -100,12 +102,14 @@ export function composePropertyMapItems(
   prospects: Prospect[],
   anchors: MarketMemoryAnchor[],
 ): ComposedPropertyMapItem[] {
+  const groups = groupPropertyRecords(prospects)
   const prospectById = new Map(prospects.map((prospect) => [prospect.id, prospect]))
   const anchorsByProspectId = new Map<string, MarketMemoryAnchor[]>()
   const standaloneByKey = new Map<string, MarketMemoryAnchor[]>()
 
   for (const anchor of anchors) {
-    const linkedProspectId = anchor.persistence?.state === 'approved' ? anchor.persistence.linkedProspectId || null : null
+    const linkedRecordId = anchor.persistence?.state === 'approved' ? anchor.persistence.linkedProspectId || null : null
+    const linkedProspectId = linkedRecordId ? groups.rootById.get(linkedRecordId)?.id || linkedRecordId : null
     if (linkedProspectId && prospectById.has(linkedProspectId)) {
       const linked = anchorsByProspectId.get(linkedProspectId) || []
       linked.push(anchor)
@@ -118,7 +122,7 @@ export function composePropertyMapItems(
     standaloneByKey.set(key, standalone)
   }
 
-  const prospectItems = prospects.map((prospect): ComposedPropertyMapItem => {
+  const prospectItems = groups.roots.map((prospect): ComposedPropertyMapItem => {
     const memoryAnchors = anchorsByProspectId.get(prospect.id) || []
     const primaryMemoryAnchor = preferredAnchor(memoryAnchors)
     const prospectPosition = getProspectMapPosition(prospect)
@@ -129,6 +133,7 @@ export function composePropertyMapItems(
       id: `prospect:${prospect.id}`,
       kind: 'prospect',
       prospect,
+      occupants: groups.occupantsById.get(prospect.id) || [],
       memoryAnchors,
       primaryMemoryAnchor,
       position: prospectPosition || memoryPosition,

@@ -790,7 +790,10 @@ export default function HomePage() {
   const composedMapItemByProspectId = useMemo(() => {
     const result = new Map<string, (typeof composedMapItems)[number]>();
     for (const item of composedMapItems) {
-      if (item.kind === 'prospect' && item.prospect) result.set(item.prospect.id, item);
+      if (item.kind === 'prospect' && item.prospect) {
+        result.set(item.prospect.id, item);
+        for (const occupant of item.occupants || []) result.set(occupant.id, item);
+      }
     }
     return result;
   }, [composedMapItems]);
@@ -802,8 +805,9 @@ export default function HomePage() {
   // Lifecycle status, pursuit type, and geography are independent map filters.
   const inventoryByProspectId = useMemo(() => new Map(prospects.map(prospect => [prospect.id, getPropertyInventory(prospect)])), [prospects]);
   const filteredProspects = useMemo(() => {
-    return prospects.filter(prospect => {
-      const passesStatus = statusFilters.has(prospect.status);
+    return composedMapItems.flatMap(item => item.prospect ? [item.prospect] : []).filter(prospect => {
+      const item = composedMapItemByProspectId.get(prospect.id);
+      const passesStatus = [prospect, ...(item?.occupants || [])].some(record => statusFilters.has(record.status));
       const passesSubmarket = selectedSubmarkets.size === 0 ||
                               (prospect.submarketId && selectedSubmarkets.has(prospect.submarketId));
       const composedItem = composedMapItemByProspectId.get(prospect.id);
@@ -812,7 +816,7 @@ export default function HomePage() {
         : matchesProspectTypeFilters(prospectTypeFilters, []);
       return passesStatus && passesSubmarket && passesProspectType && matchesPropertyFilters(composedItem ? composedPropertyFilterSource(composedItem) : prospect, inventoryFilters);
     });
-  }, [composedMapItemByProspectId, prospectTypeFilters, prospects, selectedSubmarkets, statusFilters, inventoryByProspectId, inventoryFilters]);
+  }, [composedMapItems, composedMapItemByProspectId, prospectTypeFilters, prospects, selectedSubmarkets, statusFilters, inventoryByProspectId, inventoryFilters]);
 
   const linkedMemoryByProspectId = useMemo(() => {
     const result = new Map<string, MarketMemoryAnchor>();
@@ -838,7 +842,7 @@ export default function HomePage() {
 
   const renderableProspects = useMemo(() => {
     // Keep the asset being corrected on screen until selection changes.
-    const selected = prospects.find(p => p.id === selectedProspect?.id);
+    const selected = selectedProspect ? composedMapItemByProspectId.get(selectedProspect.id)?.prospect : null;
     const visible = selected && !filteredProspects.some(p => p.id === selected.id) ? [...filteredProspects, selected] : filteredProspects;
     return visible.map((prospect) => {
       const color = propertyPresentation(prospect).color;
@@ -877,7 +881,7 @@ export default function HomePage() {
       }
       return null;
     }).filter(Boolean) as RenderableProspectEntry[];
-  }, [filteredProspects, linkedMemoryByProspectId, visibleMarketMemoryLayers, inventoryByProspectId, prospects, selectedProspect?.id]);
+  }, [composedMapItemByProspectId, filteredProspects, linkedMemoryByProspectId, visibleMarketMemoryLayers, inventoryByProspectId, prospects, selectedProspect?.id]);
 
   const clearPolygonPathListeners = useCallback((prospectId?: string) => {
     if (prospectId) {
@@ -2291,13 +2295,13 @@ export default function HomePage() {
 
   const selectedMapMarkerIds = useMemo(() => {
     const selected = new Set<string>();
-    if (selectedProspect) selected.add(`prospect:${selectedProspect.id}`);
+    if (selectedProspect) selected.add(`prospect:${composedMapItemByProspectId.get(selectedProspect.id)?.prospect?.id || selectedProspect.id}`);
     if (selectedMarketMemoryAnchor) {
       const item = findMemoryMapItem(selectedMarketMemoryAnchor, composedMapItems);
       if (item) selected.add(item.id);
     }
     return selected;
-  }, [composedMapItems, selectedMarketMemoryAnchor, selectedProspect]);
+  }, [composedMapItemByProspectId, composedMapItems, selectedMarketMemoryAnchor, selectedProspect]);
 
   const prospectsErrorMessage = prospectsError instanceof Error
     ? prospectsError.message
@@ -2379,7 +2383,7 @@ export default function HomePage() {
             onProspectClick={handleProspectClick}
             polygonRefs={polygonRefs}
             bounds={bounds}
-            selectedProspectId={selectedProspect?.id || null}
+            selectedProspectId={selectedProspect ? composedMapItemByProspectId.get(selectedProspect.id)?.prospect?.id || selectedProspect.id : null}
           />
 
           <ClusteredMapMarkers
@@ -2552,6 +2556,17 @@ export default function HomePage() {
       {/* Edit Panel - Content-Sized with Proper Scrolling */}
       {isEditPanelOpen && selectedProspect && !prospectMergeGroup && (
         <ProspectEditPanel
+          propertyProspect={composedMapItemByProspectId.get(selectedProspect.id)?.prospect || selectedProspect}
+          relatedProspects={composedMapItemByProspectId.get(selectedProspect.id)?.occupants || []}
+          allProspects={prospects}
+          onSelectRelated={handleProspectClick}
+          onPropertyLinkSaved={saved => {
+            const merge = (p: Prospect) => p.id === saved.id ? {...p, aiMetadata:saved.aiMetadata} : p;
+            setProspects(items => items.map(merge));
+            setSelectedProspect(p => p ? merge(p) : p);
+            queryClient.setQueryData<Prospect[]>(['/api/prospects'], items => items?.map(merge));
+            void queryClient.invalidateQueries({queryKey:['/api/prospects']});
+          }}
           evidenceContent={selectedProspectMemoryAnchors.length ? <details className="rounded-lg border border-slate-200 bg-slate-50">
             <summary className="cursor-pointer p-3 text-xs font-semibold">Linked property evidence ({selectedProspectMemoryAnchors.length})</summary>
             {selectedProspectMemoryAnchors.map(anchor => <MarketMemoryEvidence key={anchor.persistence?.importItemId || anchor.persistence?.dossierId || anchor.id} anchor={anchor} />)}

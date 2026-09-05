@@ -8,7 +8,8 @@ import { storage } from "./storage";
 import { ensureUser } from './ensureUser';
 import { getUserId, requireAuth, requireMarketRecordProposalAuth, requireSalesActivityAuth, getUserFromBearerAuthHeader } from "./auth";
 import { z } from 'zod';
-import { PropertyClassificationValue } from '@level-cre/shared';
+import { PropertyLinkInputSchema, PropertyLinkError, savePropertyLink } from './lib/propertyLinkService';
+import { getPropertyLink, PropertyClassificationValue } from '@level-cre/shared';
 import { ProspectGeometry, ProspectStatus, ProspectType, FollowUpTimeframe } from '@level-cre/shared/schema';
 import { createCipheriv, createDecipheriv, createHmac, createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import * as demo from './demoStore';
@@ -4193,6 +4194,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch('/api/prospects/:id/property-link', requireAuth, async (req, res) => {
+    if (rejectDirectAgentMapWrite(req, res)) return;
+    const parsed = PropertyLinkInputSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({message:'Invalid building link.'});
+    if (isDemo(req)) return res.status(400).json({message:'Building links require saved records.'});
+    try {
+      const result = await savePropertyLink({pool, userId:getUserId(req), occupantId:req.params.id, ...parsed.data});
+      res.json(result);
+    } catch (error) {
+      if (error instanceof PropertyLinkError) return res.status(error.status).json({message:error.message});
+      console.error('Building link save failed', {code:(error as any)?.code});
+      res.status(500).json({message:'Could not save the building link. Refresh and retry.'});
+    }
+  });
+
   app.patch('/api/prospects/:id', requireAuth, async (req, res) => {
     try {
       if (rejectDirectAgentMapWrite(req, res)) return;
@@ -4233,6 +4249,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const parseResult = ProspectPatchSchema.safeParse(req.body);
       if (!parseResult.success) {
         return res.status(400).json({ message: 'Invalid prospect patch data', error: parseResult.error.errors });
+      }
+      if (parseResult.data.aiMetadata && ('propertyLink' in parseResult.data.aiMetadata || 'propertyLinkHistory' in parseResult.data.aiMetadata)) {
+        return res.status(400).json({message:'Use the building-link endpoint for occupant associations.'});
+      }
+      if (!isDemo(req) && parseResult.data.propertyClassification !== undefined) {
+        const record = await storage.getProspect(req.params.id, userId);
+        const link = record && getPropertyLink(record);
+        if (link) return res.status(409).json({message:'Classify the linked building from its property profile.', code:'classify_linked_building'});
       }
       if (parseResult.data.propertyClassification !== undefined && parseResult.data.aiMetadata !== undefined) {
         return res.status(400).json({message: 'Send a classification correction separately from imported metadata.'});

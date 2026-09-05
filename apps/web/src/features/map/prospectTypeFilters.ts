@@ -50,7 +50,7 @@ export function getPropertyProspectTypes(
 }
 
 export function getComposedPropertyProspectTypes(item: ComposedPropertyMapItem): ProspectTypeType[] {
-  return getPropertyProspectTypes(item.prospect, item.memoryAnchors)
+  return Array.from(new Set([...getPropertyProspectTypes(item.prospect, item.memoryAnchors), ...(item.occupants || []).flatMap(getProspectRecordTypes)]))
 }
 
 export function isProspectTypeFilterKey(value: unknown): value is ProspectTypeFilterKey {

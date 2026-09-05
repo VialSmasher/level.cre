@@ -1,6 +1,8 @@
 import { useId, useMemo, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { InventoryDetails } from './InventoryDetails';
+import { PropertyRecords } from './PropertyRecords';
+import { getPropertyLink } from '@level-cre/shared';
 import { PropertyTypePicker } from './PropertyTypePicker';
 import { AssetProfileTabs } from './AssetProfileTabs';
 import { Button } from '@/components/ui/button';
@@ -125,6 +127,11 @@ const formatInteractionDate = (value?: string | null) => {
 const readableInteractionValue = (value: string) => value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 
 type ProspectEditPanelProps = {
+  propertyProspect?: Prospect;
+  relatedProspects?: Prospect[];
+  allProspects?: Prospect[];
+  onSelectRelated?: (record: Prospect) => unknown;
+  onPropertyLinkSaved?: (record: Pick<Prospect,'id'|'aiMetadata'>) => void;
   evidenceContent?: ReactNode;
   onClassificationSaved?: (saved: Prospect) => void;
   prospect: Prospect;
@@ -169,6 +176,11 @@ type ProspectEditPanelProps = {
 
 export function ProspectEditPanel({
   evidenceContent,
+  propertyProspect,
+  relatedProspects,
+  allProspects,
+  onSelectRelated,
+  onPropertyLinkSaved,
   onClassificationSaved,
   prospect,
   saveStatus = 'saved',
@@ -209,6 +221,8 @@ export function ProspectEditPanel({
   onContactPhoneChange,
   onContactPhoneBlur,
 }: ProspectEditPanelProps) {
+  const property = propertyProspect || prospect;
+  const missingBuilding = Boolean(getPropertyLink(prospect)) && property.id === prospect.id;
   const fieldId = useId();
   const [activeTab, setActiveTab] = useState('property');
   const interactionsQuery = useQuery<ContactInteraction[]>({
@@ -235,7 +249,7 @@ export function ProspectEditPanel({
 
   return (
     <div
-      data-testid="asset-profile" data-asset-kind="prospect" data-asset-id={prospect.id}
+      data-testid="asset-profile" data-asset-kind="prospect" data-asset-id={prospect.id} data-property-id={property.id}
       className="absolute bottom-2 left-2 right-2 z-[80] flex max-h-[74dvh] flex-col overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-xl md:left-auto md:right-0 md:top-0 md:bottom-auto md:w-80 md:max-h-[90vh] md:rounded-none md:border-y-0 md:border-r-0 md:border-l"
       style={{ pointerEvents: 'auto' }}
     >
@@ -281,11 +295,17 @@ export function ProspectEditPanel({
         </div>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <AssetProfileTabs />
-          <PropertyTypePicker key={prospect.id} prospect={prospect} disabled={!onClassificationSaved || !canEditShape || saveStatus !== 'saved'} onSaved={onClassificationSaved || (() => {})} />
+          {allProspects && onSelectRelated && onPropertyLinkSaved && <PropertyRecords key={prospect.id}
+            record={prospect} property={property} occupants={relatedProspects || []} records={allProspects}
+            disabled={saveStatus !== 'saved'} onSelect={onSelectRelated} onSaved={onPropertyLinkSaved} />}
+          {!missingBuilding && <div data-testid="property-classification-target" data-property-id={property.id}>
+            <PropertyTypePicker key={property.id} prospect={property} disabled={!onClassificationSaved || !canEditShape || saveStatus !== 'saved'} onSaved={onClassificationSaved || (() => {})} />
+          </div>}
 
           <TabsContent value="property" className="space-y-4">
-            <InventoryDetails prospect={prospect} onReviewContact={() => setActiveTab('contact')} />
+            <InventoryDetails prospect={property} onReviewContact={() => setActiveTab('contact')} />
             {evidenceContent}
+            {property.id !== prospect.id && <p className="text-xs text-slate-500">You’re editing the occupant’s record. <button type="button" data-testid="open-building-record" onClick={() => onSelectRelated?.(property)} className="text-blue-700 hover:underline">Open building details</button></p>}
             <div>
               <Label htmlFor={`${fieldId}-business-name`} className="text-xs font-medium text-gray-700">Business Name</Label>
               <Input

@@ -63,7 +63,23 @@ Record the before/after type, source and outcome in the work log.
 
 Re-read the profile identity after navigation. Marker color, list position and generated local `csv-*` IDs are not stable identity evidence. A demo-mode save is not a production save.
 
-## Implemented classification routes
+## Buildings and occupant records
+
+A company/occupant record can be linked to an existing building record without merging contacts, notes, ownership, activity or relationship stages. Use **This is an occupant? Link to a building** in the profile, then select the exact building. **Building & occupants** switches between the building and its companies; Contact and Activity always belong to the selected record. Property classification edits target the building. **Change link → Unlink** restores a separate map pin.
+
+The map renders one property per explicit building link, uses the building's classification and coordinates, and includes occupants' relationship/pursuit types when filtering. Unlinked records remain independent, even at the same address. Missing, inaccessible, malformed or cyclic links never hide a record. This association does not establish ownership or verify a lease, and does not infer single tenancy from the number of known occupants.
+
+`PATCH /api/prospects/:occupantId/property-link` accepts exactly:
+
+```json
+{"propertyProspectId":"EXACT-BUILDING-ID","expectedPropertyProspectId":null}
+```
+
+Both records must be editable by the signed-in broker, including existing workspace editor rights. Scoped agent map writes remain prohibited. Set `propertyProspectId` to `null` to unlink; supply the current linked building ID as `expectedPropertyProspectId`. An identical retry is a no-op; a stale change returns 409. Links cannot nest or cycle. The response is `{id, aiMetadata, unchanged}`. Current association and its change history are stored in the occupant's existing metadata. General metadata updates preserve these fields; they cannot create associations. A classification PATCH against an occupant returns 409: classify its building instead.
+
+Browser agent selectors: `property-records` (`data-property-id`), `property-record-select`, `property-link-toggle`, `property-link-search`, `property-link-target-<buildingId>`, `property-link-remove`, and `property-link-save-status` (`data-save-state`). The profile exposes both `data-asset-id` (selected CRM record) and `data-property-id` (building). `property-classification-target` identifies the record receiving classification edits. Research spreadsheets should retain exact record IDs and, when supported by evidence, identify a separate building ID for Codex to link. Do not auto-link by distance or address alone.
+
+## Classification route reference
 
 | Target | Route | Response |
 | --- | --- | --- |

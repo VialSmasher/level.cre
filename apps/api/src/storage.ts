@@ -21,7 +21,7 @@ import { XP_VALUES, actionForInteractionType, inferInteractionTypeFromNote, xpFo
 import { ProspectReferenceError } from "./lib/prospectReferenceService";
 import { buildLeaderboardIdentities } from "./lib/leaderboardIdentity";
 import type { PropertyClassificationType } from '@level-cre/shared';
-import { classificationMetadataPatch } from './lib/propertyClassificationPatch';
+import { classificationMetadataPatch, metadataPatchPreservingPropertyLinks } from './lib/propertyClassificationPatch';
 
 type ProspectCreateInput = Omit<
   InsertProspect,
@@ -1067,7 +1067,7 @@ export class DatabaseStorage implements IStorage {
       ...(updates.lotSizeAcres !== undefined && {
         lotSizeAcres: updates.lotSizeAcres === null ? null : String(updates.lotSizeAcres),
       }),
-      ...(updates.aiMetadata !== undefined && { aiMetadata: updates.aiMetadata }),
+      ...(updates.aiMetadata !== undefined && { aiMetadata: metadataPatchPreservingPropertyLinks(prospects.aiMetadata, updates.aiMetadata) }),
       ...(updates.propertyClassification !== undefined && {
         aiMetadata: classificationMetadataPatch(prospects.aiMetadata, updates.propertyClassification, userId),
       }),
