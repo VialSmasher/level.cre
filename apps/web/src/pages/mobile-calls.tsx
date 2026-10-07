@@ -319,15 +319,15 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
             </div>
 
             <div className="border-t border-slate-100 px-4 py-3">
-              <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
-                {session ? <Button variant="ghost" className="h-11 px-2 text-xs text-slate-500" disabled={busy} onClick={() => discardMutation.mutate(session)}>Didn't call</Button> : <Button variant="ghost" className="h-11 px-3 text-slate-500" disabled={candidates.length < 2} onClick={() => setActiveIndex((index) => (index + 1) % candidates.length)}>Skip</Button>}
+              <div className="flex flex-wrap items-center gap-2">
                 {session ? (
-                  <Button className="h-11 gap-2 bg-emerald-700 text-sm font-semibold hover:bg-emerald-800" disabled={busy} onClick={() => confirm()}>{outcomeMutation.isPending ? 'Confirming...' : discardMutation.isPending ? 'Undoing...' : 'I called · next'}<ArrowRight className="h-4 w-4" /></Button>
+                  <Button className="h-11 shrink-0 gap-2 bg-emerald-700 px-4 text-sm font-semibold hover:bg-emerald-800" disabled={busy} onClick={() => confirm()}>{outcomeMutation.isPending ? 'Confirming...' : discardMutation.isPending ? 'Undoing...' : 'I called · next'}<ArrowRight aria-hidden="true" className="h-4 w-4" /></Button>
                 ) : telHref ? (
-                  <Button asChild className="h-11 bg-blue-600 text-sm font-semibold hover:bg-blue-700"><a href={telHref} onClick={startCall}><Phone className="mr-2 h-4 w-4 shrink-0" /><span className="truncate">Call {displayName(activeCandidate)}</span></a></Button>
+                  <Button asChild className="h-11 shrink-0 gap-2 bg-blue-600 px-4 text-sm font-semibold hover:bg-blue-700"><a href={telHref} onClick={startCall} aria-label={'Call ' + displayName(activeCandidate)}><Phone aria-hidden="true" className="h-4 w-4" /><span>Call</span></a></Button>
                 ) : <Button className="h-11" disabled>Check phone number</Button>}
+                {session ? <Button variant="ghost" className="h-11 px-2 text-xs text-slate-500" disabled={busy} onClick={() => discardMutation.mutate(session)}>Didn't call</Button> : <Button variant="ghost" className="h-11 px-3 text-slate-500" disabled={candidates.length < 2} onClick={() => setActiveIndex((index) => (index + 1) % candidates.length)}>Skip</Button>}
               </div>
-              <p className="mt-2 text-center text-[11px] text-slate-500">{session ? 'Confirm after trying the call.' : 'Opens your dialer.'}</p>
+              <p className="mt-2 text-[11px] text-slate-500">{session ? 'Confirm after trying the call.' : 'Opens your dialer.'}</p>
 
               {session ? (
                 <div className="mt-2">
