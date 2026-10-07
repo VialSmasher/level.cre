@@ -6,9 +6,16 @@ type CallSession = {
   expectedPhone: string;
   startedAt: string;
   eventId: string;
+  contactId: string | null;
+  contactSnapshot: TestContact | null;
 };
 
 type CallRequest = Record<string, unknown> & { clientEventId: string; prospectId: string };
+type TestContact = {
+  id: string; prospectId: string; isPrimary: boolean; name: string; company: string | null;
+  phone: string | null; email: string | null; title: string | null;
+  additionalPhones: Array<{ label: string; number: string }>; archivedAt: string | null;
+};
 
 const phone = '(780) 555-0100';
 const candidates = ['Morgan Lee', 'Vas Patel', 'Jim Carter', 'Alex Rivera', 'Jordan Miller', 'Sam Taylor'].map((name, index) => ({
@@ -34,16 +41,45 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function installCallingScenario(page: Page, options: { startFailures?: number; confirmFailures?: number; lostConfirmationResponses?: number } = {}) {
+async function installCallingScenario(page: Page, options: { startFailures?: number; confirmFailures?: number; lostConfirmationResponses?: number; selectedHistoryDelayMs?: number; delayedStart?: boolean; rejectedStart?: boolean; unavailableDiscard?: boolean; discardFailures?: number; callsPerDay?: number } = {}) {
   const starts: CallRequest[] = [];
   const confirmations: CallRequest[] = [];
   const discards: CallRequest[] = [];
   const sessions = new Map<string, CallSession>();
   const confirmed = new Set<string>();
   const discarded = new Set<string>();
+  const mutationSequence: string[] = [];
+  let releaseStart = () => {};
+  const startGate = options.delayedStart ? new Promise<void>((resolve) => { releaseStart = resolve; }) : Promise.resolve();
+  const roster = new Map<string, TestContact[]>(candidates.map((candidate, index) => [candidate.prospect.id, [{
+    id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, prospectId: candidate.prospect.id,
+    isPrimary: true, ...candidate.contact, title: null, additionalPhones: index === 0 ? [{ label: 'Mobile', number: '(780) 555-0101' }] : [], archivedAt: null,
+  }]]));
+  const firstRoster = roster.get(candidates[0].prospect.id)!;
+  for (const [index, name] of ['Rowan Singh', 'Casey Davis', 'Avery Kim'].entries()) firstRoster.push({
+    id: `00000000-0000-4000-8000-${String(101 + index).padStart(12, '0')}`, prospectId: candidates[0].prospect.id,
+    isPrimary: false, name, company: candidates[0].contact.company, phone: `(780) 555-010${index + 2}`,
+    email: null, title: index === 0 ? 'Operations' : null, additionalPhones: [], archivedAt: null,
+  });
+  const history = new Map<string, Array<Record<string, unknown>>>(candidates.map((candidate) => [candidate.prospect.id,
+    candidate.recentActivity.map((activity) => ({ ...activity, contactId: null, contactName: null, phoneSnapshot: null }))]));
+  history.get(candidates[0].prospect.id)!.unshift(
+    { id: 'morgan-attributed', type: 'call', outcome: 'attempted', occurredAt: '2026-10-06T17:00:00.000Z', notes: 'Morgan-only saved history.', contactId: firstRoster[0].id, contactName: firstRoster[0].name, phoneSnapshot: firstRoster[0].phone },
+    { id: 'rowan-attributed', type: 'call', outcome: 'no_answer', occurredAt: '2026-10-06T16:00:00.000Z', notes: 'Rowan-only saved history.', contactId: firstRoster[1].id, contactName: firstRoster[1].name, phoneSnapshot: firstRoster[1].phone },
+  );
+  const workspace = (prospectId: string, contactId?: string | null) => {
+    const candidate = candidates.find((candidate) => candidate.prospect.id === prospectId)!;
+    const contacts = roster.get(prospectId)!.filter((contact) => !contact.archivedAt);
+    const activity = history.get(prospectId) || [];
+    return { prospect: { ...candidate.prospect, notes: 'Existing account notes.', websiteUrl: null, buildingSf: null, lotSizeAcres: null, aiMetadata: null },
+      contacts, primaryContactId: contacts.find((contact) => contact.isPrimary)!.id,
+      activity: contactId ? activity.filter((row) => row.contactId === contactId) : activity,
+      unattributedActivityCount: activity.filter((row) => !row.contactId).length };
+  };
   let startFailures = options.startFailures || 0;
   let confirmFailures = options.confirmFailures || 0;
   let lostConfirmationResponses = options.lostConfirmationResponses || 0;
+  let discardFailures = options.discardFailures || 0;
   const progress = () => ({
     startedToday: [...sessions.keys()].filter((id) => !discarded.has(id)).length,
     confirmedToday: confirmed.size,
@@ -74,6 +110,14 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
       body: 'export const isDemoModeRequested = () => true; export const getDemoApiResult = () => null; export const demoJsonResponse = result => new Response(JSON.stringify(result.payload), {status: result.status || 200, headers: {"Content-Type": "application/json"}});',
     });
   });
+  if (options.callsPerDay !== undefined) {
+    // Exercise the actual profile query with synthetic local identity and goal;
+    // the normal demo AuthContext intentionally disables profile loading.
+    await page.route(/\/src\/contexts\/AuthContext\.tsx(?:\?|$)/, (route) => route.fulfill({
+      contentType: 'application/javascript',
+      body: 'const user={id:"demo-user",email:"calling-broker@example.test"}; export const useAuth=()=>({user,session:{user},loading:false,needsOnboarding:false,isDemoMode:false,signOut:async()=>{}}); export const AuthProvider=({children})=>children;',
+    }));
+  }
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -83,7 +127,8 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     }
     if (path === '/api/calling/queue') {
       const confirmedProspects = new Set([...sessions.values()].filter((session) => confirmed.has(session.clientEventId)).map((session) => session.prospectId));
-      const rows = candidates.filter((candidate) => !confirmedProspects.has(candidate.prospect.id));
+      const includeCalledToday = new URL(request.url()).searchParams.get('includeCalledToday') === 'true';
+      const rows = candidates.filter((candidate) => includeCalledToday || !confirmedProspects.has(candidate.prospect.id));
       return json(route, {
         generatedAt: new Date().toISOString(), rows, total: rows.length,
         progress: progress(),
@@ -96,13 +141,41 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
             phoneSnapshot: session.expectedPhone,
             callStartedAt: session.startedAt,
             eventId: session.eventId,
+            contactId: session.contactId, contactSnapshot: session.contactSnapshot,
             candidate: candidates.find((candidate) => candidate.prospect.id === session.prospectId),
           })),
       });
     }
+    const workspaceMatch = /^\/api\/calling\/prospects\/([^/]+)\/workspace$/.exec(path);
+    if (workspaceMatch && method === 'GET') {
+      const contactId = new URL(request.url()).searchParams.get('contactId');
+      if (contactId && options.selectedHistoryDelayMs) await new Promise((resolve) => setTimeout(resolve, options.selectedHistoryDelayMs));
+      return json(route, workspace(workspaceMatch[1], contactId));
+    }
+    const contactsMatch = /^\/api\/calling\/prospects\/([^/]+)\/contacts(?:\/([^/]+))?$/.exec(path);
+    if (contactsMatch && method === 'POST') {
+      const payload = request.postDataJSON();
+      const contacts = roster.get(contactsMatch[1])!;
+      contacts.push({ id: `00000000-0000-4000-8000-${String(500 + contacts.length).padStart(12, '0')}`, prospectId: contactsMatch[1], isPrimary: false, company: null, phone: null, email: null, title: null, additionalPhones: [], archivedAt: null, ...payload });
+      return json(route, workspace(contactsMatch[1]), 201);
+    }
+    if (contactsMatch && method === 'PATCH') {
+      const payload = request.postDataJSON();
+      const contact = roster.get(contactsMatch[1])!.find((contact) => contact.id === contactsMatch[2])!;
+      Object.assign(contact, payload);
+      if (payload.archived) contact.archivedAt = new Date().toISOString();
+      return json(route, workspace(contactsMatch[1]));
+    }
     if (path === '/api/calling/starts' && method === 'POST') {
       const payload = request.postDataJSON() as CallRequest & { expectedPhone: string; callStartedAt: string };
       starts.push(payload);
+      mutationSequence.push('start-request');
+      await startGate;
+      if (discarded.has(payload.clientEventId)) {
+        mutationSequence.push('discarded-start-returned');
+        return json(route, { duplicate: true, eventId: `start-${payload.clientEventId}`, prospectId: payload.prospectId, contactId: payload.contactId || null, status: 'discarded' });
+      }
+      if (options.rejectedStart) return json(route, { message: 'This contact number changed on the server', code: 'contact_phone_changed' }, 409);
       if (startFailures-- > 0) return json(route, { message: 'Test start persistence failed' }, 503);
       const duplicate = sessions.has(payload.clientEventId);
       if (!duplicate) {
@@ -110,30 +183,43 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
           clientEventId: payload.clientEventId, prospectId: payload.prospectId,
           expectedPhone: payload.expectedPhone, startedAt: payload.callStartedAt || new Date().toISOString(),
           eventId: `start-${payload.clientEventId}`,
+          contactId: typeof payload.contactId === 'string' ? payload.contactId : null,
+          contactSnapshot: structuredClone(roster.get(payload.prospectId)!.find((contact) => contact.id === payload.contactId) || roster.get(payload.prospectId)![0]),
         });
       }
+      mutationSequence.push('start-saved');
       return json(route, {
         duplicate, eventId: `start-${payload.clientEventId}`, prospectId: payload.prospectId,
         status: confirmed.has(payload.clientEventId) ? 'confirmed' : discarded.has(payload.clientEventId) ? 'discarded' : 'started',
         callStartedAt: sessions.get(payload.clientEventId)?.startedAt,
+        contactId: sessions.get(payload.clientEventId)?.contactId,
+        contactSnapshot: sessions.get(payload.clientEventId)?.contactSnapshot,
       }, duplicate ? 200 : 201);
     }
     if (path === '/api/calling/outcomes' && method === 'POST') {
       const payload = request.postDataJSON() as CallRequest;
       confirmations.push(payload);
+      mutationSequence.push('outcome-request');
+      if (!sessions.has(payload.clientEventId)) return json(route, { message: 'The observed start must be saved before confirmation' }, 409);
       if (confirmFailures-- > 0) return json(route, { message: 'Test confirmation persistence failed' }, 503);
       const duplicate = confirmed.has(payload.clientEventId);
       confirmed.add(payload.clientEventId);
+      if (!duplicate) {
+        const session = sessions.get(payload.clientEventId)!;
+        history.get(payload.prospectId)!.unshift({ id: `interaction-${payload.clientEventId}`, type: 'call', outcome: payload.outcome, occurredAt: payload.occurredAt, notes: payload.notes || '', contactId: session.contactId, contactName: session.contactSnapshot?.name || null, phoneSnapshot: session.expectedPhone });
+      }
       if (lostConfirmationResponses-- > 0) return json(route, { message: 'Test response lost after server confirmed the call' }, 503);
       return json(route, { duplicate, eventId: `event-${payload.clientEventId}`, interactionId: `interaction-${payload.clientEventId}`, prospectId: payload.prospectId, newXpGained: duplicate ? 0 : 15 }, duplicate ? 200 : 201);
     }
     if (path === '/api/calling/discards' && method === 'POST') {
       const payload = request.postDataJSON() as CallRequest;
       discards.push(payload);
+      if (discardFailures-- > 0) return json(route, { message: 'Local test discard request failed before being saved' }, 503);
+      if (options.unavailableDiscard) return json(route, { prospectId: payload.prospectId, status: 'unavailable', canDismissLocally: true });
       discarded.add(payload.clientEventId);
       return json(route, { discarded: true, prospectId: payload.prospectId, status: 'discarded' });
     }
-    if (path === '/api/profile') return json(route, { goals: { callsPerDay: 10 } });
+    if (path === '/api/profile') return json(route, { goals: { callsPerDay: options.callsPerDay ?? 10 } });
     if (path === '/api/stats/header') return json(route, { totalLevel: 1, assetsTracked: 3, followupsLogged: confirmed.size, streakDays: 0 });
     if (path === '/api/skills') return json(route, { prospecting: 0, followUp: 0, consistency: 0, marketKnowledge: 0 });
     if (path === '/api/automation/activity-pulse') return json(route, { days: 28, total: 0, activeDays: 0, streakDays: 0, automated: 0, manual: 0, inboundEmail: 0, currentPeriodTotal: 0, previousPeriodTotal: 0, trendPercent: 0, series: [] });
@@ -146,7 +232,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
   await page.goto('/app/calls');
   await expect(page.getByRole('heading', { name: 'Calls', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
-  return { starts, confirmations, discards, sessions, progress, confirmOnServer: (clientEventId: string) => confirmed.add(clientEventId) };
+  return { starts, confirmations, discards, sessions, progress, roster, workspace, mutationSequence, releaseStart, confirmOnServer: (clientEventId: string) => confirmed.add(clientEventId) };
 }
 
 async function dial(page: Page, name = 'Morgan Lee') {
@@ -166,8 +252,8 @@ async function assertUnobscuredReward(page: Page) {
 
 test('two clicks confirm a call and present the next contact without notes or scheduling', async ({ page }) => {
   const scenario = await installCallingScenario(page);
-  await expect(page.getByText('Started today', { exact: true })).toBeVisible();
-  await expect(page.getByText('Confirmed today', { exact: true })).toBeVisible();
+  await expect(page.getByText('Calls started', { exact: true })).toBeVisible();
+  await expect(page.getByText('Calls logged', { exact: true })).toBeVisible();
   await expect(page.getByRole('textbox')).toHaveCount(0);
   await dial(page);
   await expect.poll(() => scenario.progress().startedToday).toBe(1);
@@ -185,6 +271,22 @@ test('two clicks confirm a call and present the next contact without notes or sc
   expect(scenario.progress()).toMatchObject({ startedToday: 1, confirmedToday: 1 });
   await expect(page.getByTestId('calls-confirmed-today')).toHaveText('1');
   expect(await page.evaluate(() => (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs)).toEqual(['tel:7805550100']);
+});
+
+test('a synthetic saved daily goal advances only after confirmation', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { callsPerDay: 20 });
+  const goal = page.getByRole('progressbar', { name: 'Daily call target' });
+  await expect(page.getByText('0 / 20 daily target', { exact: true })).toBeVisible();
+  await expect(goal).toHaveAttribute('aria-valuemax', '20');
+  await expect(goal).toHaveAttribute('aria-valuenow', '0');
+  await dial(page);
+  await expect.poll(() => scenario.progress().startedToday).toBe(1);
+  await expect(page.getByText('0 / 20 daily target', { exact: true })).toBeVisible();
+  await expect(goal).toHaveAttribute('aria-valuenow', '0');
+  await page.getByRole('button', { name: 'I called · next', exact: true }).click();
+  await expect(page.getByText('1 / 20 daily target', { exact: true })).toBeVisible();
+  await expect(goal).toHaveAttribute('aria-valuenow', '1');
+  expect(scenario.confirmations).toHaveLength(1);
 });
 
 test('refresh reconciles the same broker-scoped pending call without a second start credit', async ({ page }) => {
@@ -377,32 +479,22 @@ test('undo excludes the start from progress without confirming a call', async ({
 
 test('phone-sized calling controls stay in view with no horizontal overflow', async ({ page }, testInfo) => {
   await installCallingScenario(page);
-  const assertCompactGeometry = async () => {
-    const card = page.getByRole('region', { name: 'Current call', exact: true });
-    const upcoming = page.getByRole('region', { name: 'Next companies', exact: true });
-    const secondUpcoming = upcoming.getByRole('listitem').nth(1);
-    await expect(card).toBeInViewport();
-    await expect(secondUpcoming).toBeInViewport();
-    const viewportBottom = (page.viewportSize()?.height || 0) - (testInfo.project.name === 'calling-mobile' ? 64 : 0);
-    const cardBounds = await card.boundingBox();
-    expect(cardBounds).not.toBeNull();
-    expect((cardBounds?.y || 0) + (cardBounds?.height || 0)).toBeLessThanOrEqual(viewportBottom);
-    const nextBounds = await secondUpcoming.boundingBox();
-    expect((nextBounds?.y || 0) + (nextBounds?.height || 0)).toBeLessThanOrEqual(viewportBottom);
-  };
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   const call = page.getByRole('link', { name: 'Call Morgan Lee', exact: true });
   await expect(call).toBeInViewport();
   const callBounds = await call.boundingBox();
   expect(callBounds?.height).toBeGreaterThanOrEqual(44);
-  await assertCompactGeometry();
+  await expect(page.getByRole('region', { name: 'Current call', exact: true })).toBeInViewport();
   await page.screenshot({ path: `work/calling-playwright/${testInfo.project.name}-ready.png` });
   await dial(page);
   const confirm = page.getByRole('button', { name: 'I called · next', exact: true });
   await expect(confirm).toBeInViewport();
   expect((await confirm.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-  await assertCompactGeometry();
+  const upcoming = page.getByRole('region', { name: 'Next companies', exact: true });
+  await expect(upcoming).toBeVisible();
+  // The new roster stacks above the queue on mobile; primary actions stay near
+  // the company while the full workspace remains available by scrolling.
   await page.screenshot({ path: `work/calling-playwright/${testInfo.project.name}.png` });
 });
 
@@ -412,13 +504,9 @@ test('compact call page provides company and contact context with several compan
   await expect(currentCall.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
   await expect(currentCall).toContainText('Morgan Lee');
   await expect(page.getByRole('link', { name: 'View record', exact: true })).toHaveAttribute('href', '/app?prospectId=calling-prospect-1');
-  const recentActivity = currentCall.locator('details');
-  await expect(recentActivity).not.toHaveAttribute('open');
-  await expect(recentActivity.getByText('Saved context for Calling Company 1.', { exact: true })).toBeHidden();
-  await recentActivity.locator('summary').click();
-  await expect(recentActivity).toHaveAttribute('open', '');
-  await expect(recentActivity.getByText('Saved context for Calling Company 1.', { exact: true })).toBeVisible();
-  await recentActivity.locator('summary').click();
+  const activity = currentCall.getByRole('region', { name: 'Account activity', exact: true });
+  await activity.getByRole('button', { name: 'All account activity', exact: true }).click();
+  await expect(activity.getByText('Saved context for Calling Company 1.', { exact: true })).toBeVisible();
   const nextCompanies = page.getByRole('region', { name: 'Next companies', exact: true });
   await expect(nextCompanies).toBeVisible();
   for (const number of [2, 3, 4, 5]) {
@@ -428,17 +516,20 @@ test('compact call page provides company and contact context with several compan
   await expect(nextCompanies.getByText(/^Jim Carter ·/)).toBeVisible();
   const capturePrefix = testInfo.project.name === 'calling-mobile' ? 'mobile' : 'desktop';
   await expect(page.getByTestId('calls-started-today')).toHaveText('0');
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: `work/calling-playwright/${capturePrefix}-01-ready.png` });
+  await page.screenshot({ path: `work/calling-playwright/${capturePrefix}-01-ready-full.png`, fullPage: true });
   await dial(page);
   await expect(page.getByText('Call started', { exact: true })).toBeVisible();
   await expect(page.getByTestId('calls-started-today')).toHaveText('1');
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: `work/calling-playwright/${capturePrefix}-02-started.png` });
-  await recentActivity.locator('summary').click();
   await page.getByRole('button', { name: 'I called · next', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
   await expect(currentCall.getByRole('heading', { name: 'Calling Company 2', exact: true })).toBeFocused();
-  await expect(recentActivity).not.toHaveAttribute('open');
-  await expect(recentActivity.getByText('Saved context for Calling Company 2.', { exact: true })).toBeHidden();
+  await activity.getByRole('button', { name: 'All account activity', exact: true }).click();
+  await expect(activity.getByText('Saved context for Calling Company 2.', { exact: true })).toBeVisible();
+  await expect(activity.getByText('Saved context for Calling Company 1.', { exact: true })).toHaveCount(0);
   await expect(page.getByTestId('calls-confirmed-today')).toHaveText('1');
   await assertUnobscuredReward(page);
   await page.screenshot({ path: `work/calling-playwright/${capturePrefix}-03-next.png`, animations: 'disabled' });
@@ -467,4 +558,191 @@ test('calling stays reachable from the desktop tools and under Today on the five
   await startCalling.click();
   await expect(page.getByRole('heading', { name: 'Calls', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
+});
+
+test('contact selection and history switches keep people separate while preserving legacy account context', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { selectedHistoryDelayMs: 350 });
+  const contacts = page.getByRole('region', { name: 'Contacts', exact: true });
+  const activity = page.getByRole('region', { name: 'Account activity', exact: true });
+  await expect(contacts.getByRole('button', { name: 'Select contact Morgan Lee', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(contacts.getByRole('button', { name: 'Select contact Avery Kim', exact: true })).toHaveCount(0);
+  await contacts.getByRole('button', { name: 'View all contacts', exact: true }).click();
+  await expect(contacts.getByRole('button', { name: 'Select contact Avery Kim', exact: true })).toBeVisible();
+  await activity.getByRole('button', { name: 'Selected contact', exact: true }).click();
+  await expect(activity.getByText('Morgan-only saved history.', { exact: true })).toBeVisible();
+  await contacts.getByRole('button', { name: 'Select contact Rowan Singh', exact: true }).click();
+  await expect(activity.getByText('Morgan-only saved history.', { exact: true })).toHaveCount(0);
+  await expect(activity.getByText('Rowan-only saved history.', { exact: true })).toBeVisible();
+  await expect(activity.getByText('Saved context for Calling Company 1.', { exact: true })).toHaveCount(0);
+  await expect(activity.getByText(/earlier activity has no contact attribution/)).toBeVisible();
+  await activity.getByRole('button', { name: 'All account activity', exact: true }).click();
+  await expect(activity.getByText('Saved context for Calling Company 1.', { exact: true })).toBeVisible();
+  await expect(activity.getByText('Morgan-only saved history.', { exact: true })).toBeVisible();
+  expect(scenario.starts).toHaveLength(0);
+  expect(scenario.confirmations).toHaveLength(0);
+  expect(scenario.roster.get('calling-prospect-1')!.find((contact) => contact.isPrimary)?.name).toBe('Morgan Lee');
+});
+
+test('a selected alternate number freezes its contact and company until confirmation or undo', async ({ page }) => {
+  const scenario = await installCallingScenario(page);
+  const number = page.getByRole('combobox', { name: 'Phone number for Morgan Lee', exact: true });
+  await number.selectOption('(780) 555-0101');
+  await dial(page);
+  await expect.poll(() => scenario.starts.length).toBe(1);
+  const primaryId = scenario.roster.get('calling-prospect-1')![0].id;
+  expect(scenario.starts[0]).toMatchObject({ prospectId: 'calling-prospect-1', contactId: primaryId, expectedPhone: '(780) 555-0101' });
+  await expect(number).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Select company Calling Company 2', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Edit contact Morgan Lee', exact: true })).toBeDisabled();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'I called · next', exact: true })).toBeVisible();
+  await expect.poll(() => scenario.starts.length).toBe(2);
+  expect(scenario.starts[1]).toEqual(scenario.starts[0]);
+  await page.getByRole('button', { name: "Didn't call", exact: true }).click();
+  await expect.poll(() => scenario.progress().startedToday).toBe(0);
+  expect(scenario.confirmations).toHaveLength(0);
+  await expect(page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true })).toBeEnabled();
+});
+
+test('explicit log-and-alternate stays with the company while the default advances after a different person', async ({ page }) => {
+  const scenario = await installCallingScenario(page);
+  await dial(page);
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Log & try another contact', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Call Rowan Singh', exact: true })).toBeVisible();
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText('1');
+  await dial(page, 'Rowan Singh');
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'I called · next', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  expect(scenario.confirmations).toHaveLength(2);
+  expect(scenario.confirmations.map((payload) => payload.prospectId)).toEqual(['calling-prospect-1', 'calling-prospect-1']);
+  expect(new Set(scenario.confirmations.map((payload) => payload.contactId)).size).toBe(2);
+  expect(new Set(scenario.confirmations.map((payload) => payload.clientEventId)).size).toBe(2);
+  expect(scenario.progress()).toMatchObject({ startedToday: 2, confirmedToday: 2 });
+});
+
+test('selecting a queue company prepares its own contact context without recording a call', async ({ page }) => {
+  const scenario = await installCallingScenario(page);
+  await page.getByRole('button', { name: 'Select company Calling Company 3', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 3', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Call Jim Carter', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Select contact Morgan Lee', exact: true })).toHaveCount(0);
+  await expect(page.getByText('Morgan-only saved history.', { exact: true })).toHaveCount(0);
+  expect(scenario.starts).toHaveLength(0);
+  expect(scenario.confirmations).toHaveLength(0);
+});
+
+test('adding a private contact with a second number prepares the person without call credit', async ({ page }) => {
+  const scenario = await installCallingScenario(page);
+  await page.getByRole('button', { name: 'Add contact', exact: true }).click();
+  const editor = page.getByRole('dialog');
+  await editor.getByLabel('Name', { exact: true }).fill('New local contact');
+  await editor.getByLabel('Email', { exact: true }).fill('new-contact@example.test');
+  await editor.getByLabel('Phone', { exact: true }).fill('(780) 555-0110');
+  await editor.getByRole('button', { name: 'Add another phone number', exact: true }).click();
+  await editor.getByLabel('Number', { exact: true }).fill('(780) 555-0111');
+  await editor.getByRole('button', { name: 'Save contact', exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Call New local contact', exact: true })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Phone number for New local contact', exact: true })).toHaveValue('(780) 555-0110');
+  const saved = scenario.roster.get('calling-prospect-1')!.find((contact) => contact.name === 'New local contact')!;
+  expect(saved.additionalPhones).toEqual([{ label: 'Mobile', number: '(780) 555-0111' }]);
+  expect(saved.isPrimary).toBe(false);
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0 });
+});
+
+test('quick confirmation waits for the observed start and reuses its identity without redialing', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { delayedStart: true });
+  await dial(page);
+  await expect.poll(() => scenario.starts.length).toBeGreaterThanOrEqual(1);
+  await page.getByRole('button', { name: 'I called · next', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Confirming...', exact: true })).toBeVisible();
+  expect(scenario.confirmations).toHaveLength(0);
+  scenario.releaseStart();
+  await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  expect(scenario.confirmations).toHaveLength(1);
+  expect(new Set(scenario.starts.map((payload) => payload.clientEventId)).size).toBe(1);
+  expect(scenario.confirmations[0].clientEventId).toBe(scenario.starts[0].clientEventId);
+  expect(scenario.mutationSequence.indexOf('start-saved')).toBeLessThan(scenario.mutationSequence.indexOf('outcome-request'));
+  expect(scenario.progress()).toMatchObject({ startedToday: 1, confirmedToday: 1 });
+  await expect(page.getByTestId('calls-started-today')).toHaveText('1');
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText('1');
+  expect(await page.evaluate(() => (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs)).toEqual(['tel:7805550100']);
+});
+
+test('undo of a server-rejected stale contact start clears the frozen target without retrying or credit', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { rejectedStart: true });
+  await dial(page);
+  await expect(page.getByText('Call start not recorded', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: "Didn't call", exact: true }).click();
+  await expect(page.getByRole('button', { name: 'I called · next', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Select company Calling Company 2', exact: true })).toBeEnabled();
+  expect(scenario.starts).toHaveLength(1);
+  expect(scenario.discards).toHaveLength(1);
+  expect(scenario.confirmations).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0 });
+});
+
+test('an unavailable owned context can be cleared locally while a failed undo remains retryable', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { rejectedStart: true, unavailableDiscard: true, discardFailures: 1 });
+  await dial(page);
+  await expect(page.getByText('Call start not recorded', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: "Didn't call", exact: true }).click();
+  await expect(page.getByText('Recording failed', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: "Didn't call", exact: true }).click();
+  await expect(page.getByRole('button', { name: 'I called · next', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Select contact Vas Patel', exact: true })).toBeEnabled();
+  await expect(page.getByText('Recording failed', { exact: true })).toHaveCount(0);
+  expect(scenario.starts).toHaveLength(1);
+  expect(scenario.discards).toHaveLength(2);
+  expect(scenario.confirmations).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0 });
+});
+
+test('a second saved pending person at the same company is recovered after the first call is resolved', async ({ page }) => {
+  const scenario = await installCallingScenario(page);
+  await dial(page);
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  const alternate = scenario.roster.get('calling-prospect-1')![1];
+  const secondKey = 'saved-second-person-same-company-001';
+  scenario.sessions.set(secondKey, {
+    clientEventId: secondKey, prospectId: 'calling-prospect-1', expectedPhone: alternate.phone!,
+    startedAt: new Date().toISOString(), eventId: `start-${secondKey}`, contactId: alternate.id,
+    contactSnapshot: structuredClone(alternate),
+  });
+  await page.getByRole('button', { name: 'I called · next', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'I called · next', exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('level-cre-active-call:v2:demo-user') || '{}').clientEventId)).toBe(secondKey);
+  await expect(page.getByRole('region', { name: 'Current call', exact: true }).getByText('Rowan Singh', { exact: true }).first()).toBeVisible();
+  expect(scenario.starts).toHaveLength(1);
+  await page.getByRole('button', { name: 'I called · next', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  expect(scenario.confirmations).toHaveLength(2);
+  expect(scenario.confirmations[1].clientEventId).toBe(secondKey);
+  expect(scenario.progress()).toMatchObject({ startedToday: 2, confirmedToday: 2 });
+  expect(await page.evaluate(() => (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs)).toEqual(['tel:7805550100']);
+});
+
+test('undo arriving before a delayed original start prevents the late response from restoring the call', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { delayedStart: true });
+  await dial(page);
+  await expect.poll(() => scenario.starts.length).toBe(1);
+  await page.getByRole('button', { name: "Didn't call", exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
+  scenario.releaseStart();
+  await expect.poll(() => scenario.mutationSequence.includes('discarded-start-returned')).toBe(true);
+  await expect(page.getByRole('button', { name: 'I called · next', exact: true })).toHaveCount(0);
+  await expect(page.getByText('Recording failed', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true })).toBeEnabled();
+  expect(scenario.discards).toHaveLength(1);
+  expect(scenario.confirmations).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0 });
 });

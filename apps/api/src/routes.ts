@@ -1,3 +1,4 @@
+import { ProspectContactError, ProspectContactCreateSchema, ProspectContactUpdateSchema, getCallingWorkspace, createProspectContact, updateProspectContact } from './lib/prospectContactService';
 import { getTelemetryInsights } from './lib/telemetryInsights';
 import { inboundWebhookAuthorized } from './lib/inboundWebhookAuth';
 import { ingestionRateLimit, ingestionTrace, RunReceiptSchema, recordRunReceipt, listRunReceipts } from './lib/automationTelemetry';
@@ -6113,6 +6114,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error creating interaction from email review item:', error);
       res.status(500).json({ message: 'Failed to create interaction from email' });
+    }
+  });
+
+  app.get('/api/calling/prospects/:prospectId/workspace', requireAuth, async (req, res) => {
+    try {
+      if (isDemo(req)) return res.status(404).json({ message: 'Contact workspace is unavailable in demo mode.' });
+      const contactId = req.query.contactId;
+      if (contactId !== undefined && (typeof contactId !== 'string' || !z.string().uuid().safeParse(contactId).success)) return res.status(400).json({ message: 'Invalid contact filter.' });
+      res.json(await getCallingWorkspace({ pool, userId: getUserId(req), prospectId: req.params.prospectId, contactId: contactId as string | undefined }));
+    } catch (error) {
+      if (error instanceof ProspectContactError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error loading private calling workspace:', error);
+      res.status(500).json({ message: 'Failed to load calling workspace' });
+    }
+  });
+
+  app.post('/api/calling/prospects/:prospectId/contacts', requireAuth, async (req, res) => {
+    try {
+      if (isDemo(req)) return res.status(403).json({ message: 'Contact changes are unavailable in demo mode.' });
+      const parsed = ProspectContactCreateSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid contact', error: parsed.error.errors });
+      res.status(201).json(await createProspectContact({ pool, userId: getUserId(req), prospectId: req.params.prospectId, input: parsed.data }));
+    } catch (error) {
+      if (error instanceof ProspectContactError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error creating private contact:', error);
+      res.status(500).json({ message: 'Failed to save contact' });
+    }
+  });
+
+  app.patch('/api/calling/prospects/:prospectId/contacts/:contactId', requireAuth, async (req, res) => {
+    try {
+      if (isDemo(req)) return res.status(403).json({ message: 'Contact changes are unavailable in demo mode.' });
+      if (!z.string().uuid().safeParse(req.params.contactId).success) return res.status(400).json({ message: 'Invalid contact identity.' });
+      const parsed = ProspectContactUpdateSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid contact change', error: parsed.error.errors });
+      res.json(await updateProspectContact({ pool, userId: getUserId(req), prospectId: req.params.prospectId, contactId: req.params.contactId, input: parsed.data }));
+    } catch (error) {
+      if (error instanceof ProspectContactError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error updating private contact:', error);
+      res.status(500).json({ message: 'Failed to update contact' });
     }
   });
 

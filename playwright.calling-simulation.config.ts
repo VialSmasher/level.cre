@@ -29,7 +29,7 @@ export default defineConfig({
     env: { ...process.env, VITE_DEMO_MODE: 'false', VITE_RUNTIME_OVERLAY: 'false' },
   },
   projects: [
-    { name: 'simulation-desktop', use: { viewport: { width: 1440, height: 1000 } } },
+    { name: 'simulation-desktop', use: { viewport: { width: 1536, height: 1024 } } },
     { name: 'simulation-mobile', use: { viewport: { width: 390, height: 844 }, hasTouch: true } },
   ],
 });

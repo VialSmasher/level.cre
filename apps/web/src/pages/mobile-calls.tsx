@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, Check, ChevronDown, Phone, RotateCcw } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Building2, Check, ChevronDown, MapPin, Phone, RotateCcw } from 'lucide-react'
 import { Link } from 'wouter'
 
 import { Button } from '@/components/ui/button'
@@ -10,10 +10,12 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useProfile } from '@/hooks/useProfile'
 import { useToast } from '@/hooks/use-toast'
 import { apiRequest } from '@/lib/queryClient'
+import { CallingContacts, contactName } from '@/features/calling/CallingContacts'
+import { CallingActivity } from '@/features/calling/CallingActivity'
 import {
-  buildTelHref, callSessionStorageKey, nextCallFollowUpIso, parseStoredCallSession,
+  buildTelHref, brokerCallDate, callSessionStorageKey, contactPhoneOptions, nextCallFollowUpIso, nextUncalledContact, parseStoredCallSession,
   type CallQueueCandidate, type CallQueueResponse, type MobileCallOutcome,
-  type MobileCallSession, type NextCallStep,
+  type MobileCallSession, type NextCallStep, type CallingContact, type CallingWorkspace,
 } from '@/lib/mobileCalling'
 import { cn } from '@/lib/utils'
 
@@ -55,9 +57,16 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const completionRef = useRef(false)
   const confirmationRef = useRef(session?.confirmation)
   const restorationChecked = useRef(false)
+  const resolvedClientEventIds = useRef(new Set<string>())
   const nameRef = useRef<HTMLHeadingElement>(null)
   const [focusNext, setFocusNext] = useState(false)
-  const [activeIndex, setActiveIndex] = useState(0)
+  const [selectedProspectId, setSelectedProspectId] = useState<string | null>(null)
+  const [retainedCandidate, setRetainedCandidate] = useState<CallQueueCandidate | null>(null)
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(session?.contactId || null)
+  const [selectedPhone, setSelectedPhone] = useState(session?.expectedPhone || '')
+  const [completedContactIds, setCompletedContactIds] = useState<Set<string>>(() => new Set())
+  const [activityFilter, setActivityFilter] = useState<'account' | 'contact'>('contact')
+  const [showAllCompanies, setShowAllCompanies] = useState(false)
   const [completedIds, setCompletedIds] = useState<Set<string>>(() => new Set())
   const [includeCalledToday, setIncludeCalledToday] = useState(false)
   const [showOptions, setShowOptions] = useState(false)
@@ -76,7 +85,58 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     refetchOnWindowFocus: true,
   })
   const candidates = (queueQuery.data?.rows || []).filter((candidate) => !completedIds.has(candidate.prospect.id))
-  const activeCandidate = session?.candidate || candidates[Math.min(activeIndex, Math.max(0, candidates.length - 1))] || null
+  const activeCandidate = session?.candidate || retainedCandidate || candidates.find((candidate) => candidate.prospect.id === selectedProspectId) || candidates[0] || null
+  const prospectId = activeCandidate?.prospect.id
+  const workspaceKey = ['/api/calling/workspace', brokerId, prospectId] as const
+  const workspaceQuery = useQuery<CallingWorkspace>({
+    queryKey: workspaceKey,
+    enabled: Boolean(prospectId),
+    queryFn: async () => (await apiRequest('GET', `/api/calling/prospects/${encodeURIComponent(prospectId!)}/workspace`)).json(),
+    staleTime: 30_000,
+  })
+  const contacts = (workspaceQuery.data?.contacts || []).filter((contact) => !contact.archivedAt)
+  const selectedContact = session?.contactSnapshot || contacts.find((contact) => contact.id === selectedContactId) || null
+  const selectedName = selectedContact ? contactName(selectedContact) : activeCandidate ? displayName(activeCandidate) : 'Selected contact'
+  const phoneOptions = selectedContact ? contactPhoneOptions(selectedContact) : []
+  const phone = session?.expectedPhone || selectedPhone
+  const activityContactId = session?.contactId || selectedContactId
+  const contactActivityQuery = useQuery<CallingWorkspace>({
+    queryKey: ['/api/calling/workspace-activity', brokerId, prospectId, activityContactId],
+    enabled: Boolean(prospectId && activityContactId && activityFilter === 'contact'),
+    queryFn: async () => (await apiRequest('GET', `/api/calling/prospects/${encodeURIComponent(prospectId!)}/workspace?contactId=${encodeURIComponent(activityContactId!)}`)).json(),
+    staleTime: 15_000,
+  })
+  const historyQuery = activityFilter === 'account' ? workspaceQuery : contactActivityQuery
+  const anotherContact = session && !session.contactId ? null : nextUncalledContact(contacts, session?.contactId || selectedContactId, workspaceQuery.data?.activity || [], completedContactIds)
+
+  useEffect(() => {
+    if (!prospectId || session) return
+    const current = contacts.find((contact) => contact.id === selectedContactId)
+    const primary = contacts.find((contact) => contact.id === workspaceQuery.data?.primaryContactId)
+    const next = current || (primary && contactPhoneOptions(primary).some((option) => option.href) ? primary : contacts.find((contact) => contactPhoneOptions(contact).some((option) => option.href))) || primary || contacts[0]
+    if (!next) { setSelectedContactId(null); setSelectedPhone(''); return }
+    if (next.id !== selectedContactId) setSelectedContactId(next.id)
+    const options = contactPhoneOptions(next)
+    if (!options.some((option) => option.number === selectedPhone)) setSelectedPhone(options.find((option) => option.href)?.number || options[0]?.number || '')
+  }, [prospectId, workspaceQuery.data, selectedContactId, session])
+
+  const selectContact = (contact: CallingContact) => {
+    if (sessionRef.current) return
+    setSelectedContactId(contact.id)
+    const options = contactPhoneOptions(contact)
+    setSelectedPhone(options.find((option) => option.href)?.number || options[0]?.number || '')
+    setActivityFilter('contact')
+  }
+
+  const selectCompany = (candidate: CallQueueCandidate) => {
+    if (sessionRef.current) return
+    setRetainedCandidate(null)
+    setSelectedProspectId(candidate.prospect.id)
+    setSelectedContactId(null)
+    setSelectedPhone('')
+    setActivityFilter('contact')
+    setFocusNext(true)
+  }
 
   const persistSession = (value: MobileCallSession | null) => {
     sessionRef.current = value
@@ -99,6 +159,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     setNextStep('keep')
     startMutation.reset()
     outcomeMutation.reset()
+    discardMutation.reset()
   }
 
   const refreshActivity = () => {
@@ -107,6 +168,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
       ['/api/automation/activity-pulse'], ['/api/prospects'], ['/api/interactions'],
       ['/api/automation/production-activities'],
       ['/api/skill-activities'], ['/api/skills'], ['/api/stats/header'],
+      ['/api/calling/workspace', brokerId], ['/api/calling/workspace-activity', brokerId],
     ]) void queryClient.invalidateQueries({ queryKey })
   }
 
@@ -115,18 +177,22 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
       const response = await apiRequest('POST', '/api/calling/starts', {
         clientEventId: started.clientEventId, prospectId: started.prospectId,
         expectedPhone: started.expectedPhone, callStartedAt: started.startedAt,
+        ...(started.contactId ? { contactId: started.contactId } : {}),
       }, { keepalive: true })
       return response.json()
     },
     onSuccess: (result, started) => {
       if (sessionRef.current?.clientEventId !== started.clientEventId) return
       if (result.status !== 'started') {
-        resetForm()
-        if (result.status === 'confirmed') setCompletedIds((ids) => new Set(ids).add(started.prospectId))
+        if (result.status === 'confirmed') completeCall(started)
+        else { resolvedClientEventIds.current.add(started.clientEventId); resetForm() }
         refreshActivity()
         return
       }
-      persistSession({ ...sessionRef.current, recorded: true })
+      persistSession({ ...sessionRef.current, recorded: true,
+        contactId: result.contactId ?? sessionRef.current.contactId,
+        contactSnapshot: result.contactSnapshot ?? sessionRef.current.contactSnapshot,
+      })
       setAnnouncement('Call start recorded. Confirm when you have tried the call.')
       void queueQuery.refetch()
     },
@@ -134,9 +200,16 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
 
   const outcomeMutation = useMutation({
     mutationFn: async ({ started, confirmation }: { started: MobileCallSession; confirmation: NonNullable<MobileCallSession['confirmation']> }) => {
+      // A fast confirmation must preserve the durable click before creating its outcome.
+      // Reconcile the same event ID when the initial start acknowledgement is still pending.
+      if (!started.recorded) {
+        const reconciled = await startMutation.mutateAsync(started)
+        if (reconciled.status !== 'started') return reconciled
+      }
       const response = await apiRequest('POST', '/api/calling/outcomes', {
         clientEventId: started.clientEventId, prospectId: started.prospectId,
         expectedPhone: started.expectedPhone, ...confirmation,
+        ...(started.contactId ? { contactId: started.contactId } : {}),
         occurredAt: started.startedAt, callStartedAt: started.startedAt,
       }, { keepalive: true })
       return response.json()
@@ -149,17 +222,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
         className: 'mt-14 border-slate-200 bg-white py-3 pl-4 pr-10 shadow-sm sm:mt-0',
         duration: 2400,
       })
-      // Advance the card without waiting for unrelated dashboard queries.
-      setCompletedIds((ids) => new Set(ids).add(started.prospectId))
-      setActiveIndex(0)
-      queryClient.setQueryData<CallQueueResponse>(queueKey, (current) => current ? {
-        ...current,
-        rows: current.rows.filter((candidate) => candidate.prospect.id !== started.prospectId),
-        pendingSessions: (current.pendingSessions || []).filter((item) => item.clientEventId !== started.clientEventId),
-      } : current)
-      resetForm()
-      setFocusNext(true)
-      setAnnouncement(`${displayName(started.candidate)} confirmed. Next prospect ready.`)
+      completeCall(sessionRef.current)
       refreshActivity()
     },
     onSettled: () => { completionRef.current = false },
@@ -167,23 +230,61 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
 
   const discardMutation = useMutation({
     mutationFn: async (started: MobileCallSession) => {
-      // Resolve a lost start response under the same key before discarding it.
-      if (!started.recorded) await startMutation.mutateAsync(started)
+      // The server records a discarded tombstone even when the initial start failed.
+      // Its session lock also prevents a delayed start from resurrecting this call.
       const response = await apiRequest('POST', '/api/calling/discards', {
         clientEventId: started.clientEventId, prospectId: started.prospectId,
+        ...(started.contactId ? { contactId: started.contactId } : {}),
       })
       return response.json()
     },
-    onSuccess: (_result, started) => {
+    onSuccess: (result, started) => {
       if (sessionRef.current?.clientEventId !== started.clientEventId) return
+      resolvedClientEventIds.current.add(started.clientEventId)
       queryClient.setQueryData<CallQueueResponse>(queueKey, (current) => current ? {
         ...current, pendingSessions: (current.pendingSessions || []).filter((item) => item.clientEventId !== started.clientEventId),
       } : current)
       resetForm()
-      setAnnouncement('Call start undone.')
-      void queueQuery.refetch()
+      if (result.status === 'unavailable' && result.canDismissLocally) {
+        setRetainedCandidate(null)
+        setSelectedProspectId(null)
+        setSelectedContactId(null)
+        setSelectedPhone('')
+        setCompletedIds((ids) => new Set(ids).add(started.prospectId))
+        setAnnouncement('Record unavailable. Local call attempt cleared.')
+      } else setAnnouncement('Call start undone.')
+      refreshActivity()
     },
   })
+
+  const completeCall = (started: MobileCallSession) => {
+    resolvedClientEventIds.current.add(started.clientEventId)
+    setCompletedIds((ids) => new Set(ids).add(started.prospectId))
+    if (started.contactId) setCompletedContactIds((ids) => new Set(ids).add(started.contactId!))
+    queryClient.setQueryData<CallQueueResponse>(queueKey, (current) => current ? {
+      ...current,
+      rows: current.rows.filter((candidate) => candidate.prospect.id !== started.prospectId),
+      pendingSessions: (current.pendingSessions || []).filter((item) => item.clientEventId !== started.clientEventId),
+    } : current)
+    if (started.afterConfirmation === 'another_contact' && started.nextContactId) {
+      setRetainedCandidate(started.candidate)
+      setSelectedProspectId(started.prospectId)
+      setSelectedContactId(started.nextContactId)
+      const next = contacts.find((contact) => contact.id === started.nextContactId)
+      setSelectedPhone(next ? contactPhoneOptions(next).find((option) => option.href)?.number || '' : '')
+      setActivityFilter('contact')
+      setAnnouncement('Call logged. Another contact is ready on this company; no call has started.')
+    } else {
+      setRetainedCandidate(null)
+      setSelectedProspectId(null)
+      setSelectedContactId(null)
+      setSelectedPhone('')
+      setActivityFilter('contact')
+      setAnnouncement('Call logged. Next company ready.')
+    }
+    resetForm()
+    setFocusNext(true)
+  }
 
   useEffect(() => {
     if (!queueQuery.data) return
@@ -193,12 +294,13 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
       if (stored) startMutation.mutate(stored)
     }
     if (sessionRef.current) return
-    const pending = queueQuery.data.pendingSessions?.find((item) => !completedIds.has(item.prospectId))
+    const pending = queueQuery.data.pendingSessions?.find((item) => !resolvedClientEventIds.current.has(item.clientEventId))
     if (!pending?.candidate) return
     persistSession({
       brokerId, clientEventId: pending.clientEventId, prospectId: pending.prospectId,
       expectedPhone: pending.phoneSnapshot, startedAt: pending.callStartedAt,
       recorded: true, candidate: pending.candidate,
+      contactId: pending.contactId, contactSnapshot: pending.contactSnapshot,
     })
   }, [queueQuery.data, completedIds])
 
@@ -210,19 +312,21 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
 
   const busy = outcomeMutation.isPending || discardMutation.isPending
   const submissionLocked = busy || Boolean(session?.confirmation)
-  const startCall = (event: MouseEvent<HTMLAnchorElement>) => {
-    if (!activeCandidate || sessionRef.current || busy) { event.preventDefault(); return }
+  const startCall = (event: MouseEvent<HTMLAnchorElement>, contact = selectedContact, number = phone) => {
+    if (!activeCandidate || !contact || !buildTelHref(number) || sessionRef.current || busy) { event.preventDefault(); return }
+    selectContact(contact)
     const started: MobileCallSession = {
       brokerId, clientEventId: newClientEventId(), prospectId: activeCandidate.prospect.id,
-      expectedPhone: activeCandidate.contact.phone, startedAt: new Date().toISOString(),
+      expectedPhone: number, startedAt: new Date().toISOString(),
       candidate: activeCandidate, recorded: false,
+      contactId: contact.id, contactSnapshot: { ...contact, additionalPhones: contact.additionalPhones.map((option) => ({ ...option })) },
     }
     persistSession(started)
-    setAnnouncement(`Starting a call to ${displayName(activeCandidate)}.`)
+    setAnnouncement(`Starting a call to ${contactName(contact)}.`)
     // Native link activation stays synchronous; recording proceeds alongside the dialer.
     startMutation.mutate(started)
   }
-  const confirm = (outcome: MobileCallOutcome = 'attempted') => {
+  const confirm = (outcome: MobileCallOutcome = 'attempted', after: 'next_company' | 'another_contact' = 'next_company') => {
     const started = sessionRef.current
     if (!started || busy || completionRef.current) return
     completionRef.current = true
@@ -231,26 +335,29 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
       ...(nextStep === 'keep' ? {} : { nextFollowUp: nextCallFollowUpIso(nextStep) }),
     }
     confirmationRef.current = confirmation
-    persistSession({ ...started, confirmation })
-    outcomeMutation.mutate({ started, confirmation })
+    const frozen = { ...started, confirmation,
+      afterConfirmation: started.afterConfirmation || after,
+      nextContactId: started.afterConfirmation ? started.nextContactId : after === 'another_contact' ? anotherContact?.id || null : null,
+    }
+    persistSession(frozen)
+    outcomeMutation.mutate({ started: frozen, confirmation })
   }
 
   const progress = queueQuery.data?.progress || { startedToday: 0, confirmedToday: 0, connectedToday: 0 }
   const recordedSessionIsListed = queueQuery.data?.pendingSessions?.some((item) => item.clientEventId === session?.clientEventId)
-  const brokerDate = (date: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Edmonton' }).format(date)
-  const pendingCredit = session && brokerDate(new Date(session.startedAt)) === brokerDate(new Date()) && !recordedSessionIsListed && !startMutation.isError && !discardMutation.isPending ? 1 : 0
+  const pendingCredit = session && brokerCallDate(session.startedAt) === brokerCallDate(new Date()) && !recordedSessionIsListed && !startMutation.isError && !discardMutation.isPending ? 1 : 0
   const startedToday = progress.startedToday + pendingCredit
   const callTarget = Math.max(0, Math.trunc(Number(profile?.goals?.callsPerDay) || 0))
   const targetPercent = callTarget ? Math.min(100, (progress.confirmedToday / callTarget) * 100) : 0
-  const telHref = activeCandidate ? buildTelHref(activeCandidate.contact.phone) : null
+  const telHref = selectedContact && phone ? buildTelHref(phone) : null
   const error = outcomeMutation.error || discardMutation.error || startMutation.error
-  const upcoming = candidates.filter((candidate) => candidate.prospect.id !== activeCandidate?.prospect.id).slice(0, 4)
-  const recentActivity = activeCandidate?.recentActivity[0]
+  const upcoming = candidates.filter((candidate) => candidate.prospect.id !== activeCandidate?.prospect.id)
+  const account = workspaceQuery.data?.prospect
 
   return (
     <div className="min-h-[calc(100dvh-7.5rem)] bg-slate-50 lg:min-h-screen">
       <header className="border-b border-slate-200 bg-white px-4 py-3 lg:px-6">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Button asChild variant="ghost" size="icon" aria-label="Back to Today">
               <Link href="/app/desk"><ArrowLeft className="h-4 w-4" /></Link>
@@ -263,11 +370,11 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-3xl space-y-3 px-4 py-4 lg:px-6">
+      <main className="mx-auto w-full max-w-7xl space-y-4 px-4 py-4 lg:px-6 lg:py-6">
         <section className="rounded-xl border border-slate-200 bg-white px-4 py-3" aria-label="Today's calling progress">
           <dl className="grid grid-cols-3 gap-3">
-            <div><dt className="text-[11px] text-slate-500">Started today</dt><dd data-testid="calls-started-today" className="mt-0.5 text-xl font-semibold tabular-nums text-slate-600">{startedToday}</dd></div>
-            <div><dt className="text-[11px] text-slate-500">Confirmed today</dt><dd data-testid="calls-confirmed-today" className="mt-0.5 text-xl font-semibold tabular-nums text-blue-700">{progress.confirmedToday}</dd></div>
+            <div><dt className="text-[11px] text-slate-500">Calls started</dt><dd data-testid="calls-started-today" className="mt-0.5 text-xl font-semibold tabular-nums text-slate-600">{startedToday}</dd></div>
+            <div><dt className="text-[11px] text-slate-500">Calls logged</dt><dd data-testid="calls-confirmed-today" className="mt-0.5 text-xl font-semibold tabular-nums text-blue-700">{progress.confirmedToday}</dd></div>
             <div><dt className="text-[11px] text-slate-500">Conversations</dt><dd className="mt-0.5 text-xl font-semibold tabular-nums text-slate-700">{progress.connectedToday}</dd></div>
           </dl>
           {callTarget ? (
@@ -292,48 +399,43 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
           <div className="rounded-lg border border-slate-200 bg-white p-5 text-center"><p className="font-semibold">Call queue unavailable</p><Button className="mt-3" variant="outline" onClick={() => queueQuery.refetch()}>Try again</Button></div>
         ) : null}
 
+        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(300px,1fr)]">
         {activeCandidate ? (
-          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Current call">
-            <div className="px-4 pb-2 pt-3">
+          <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Current call">
+            <div className="px-4 pb-4 pt-4 sm:px-5 sm:pt-5">
               <div className="mb-2 flex items-center justify-between gap-3 text-[11px]">
                 <span className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-600">{activeCandidate.reasons[0] || 'Ready to call'}</span>
                 <Link href={'/app?prospectId=' + encodeURIComponent(activeCandidate.prospect.id)} onClick={() => {
                   try { window.localStorage.setItem('levelcre:focusProspectId', activeCandidate.prospect.id); } catch {}
                 }} className="inline-flex min-h-8 shrink-0 items-center rounded text-xs text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2">View record<ArrowRight className="ml-1 h-3 w-3" /></Link>
               </div>
-              <h2 ref={nameRef} tabIndex={-1} className="break-words text-xl font-semibold leading-tight text-slate-950 outline-none">{companyName(activeCandidate)}</h2>
-              <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-                {activeCandidate.contact.name && activeCandidate.contact.name !== companyName(activeCandidate) ? <p className="text-slate-600">{activeCandidate.contact.name}</p> : null}
-                <p className="font-medium tabular-nums text-slate-800">{activeCandidate.contact.phone}</p>
-              </div>
-              {activeCandidate.prospect.address ? <p className="mt-2 text-xs leading-5 text-slate-500">{activeCandidate.prospect.address}</p> : null}
+              <h2 ref={nameRef} tabIndex={-1} className="break-words text-2xl font-semibold leading-tight text-slate-950 outline-none">{companyName(activeCandidate)}</h2>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500"><span className="capitalize">{(activeCandidate.prospect.status || 'prospect').replaceAll('_', ' ')}</span>{account?.buildingSf ? <span>{Number(account.buildingSf).toLocaleString()} SF</span> : null}{account?.lotSizeAcres ? <span>{Number(account.lotSizeAcres).toLocaleString()} acres</span> : null}</div>
+              {activeCandidate.prospect.address ? <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-slate-500"><MapPin className="mt-1 h-3 w-3 shrink-0" />{activeCandidate.prospect.address}</p> : null}
               {activeCandidate.listingTitles.length ? <p className="mt-1 text-xs text-slate-500">Pursuit: {activeCandidate.listingTitles.slice(0, 2).join(' · ')}</p> : null}
-              {!telHref && !session ? <p className="mt-2 text-xs leading-4 text-amber-700">This record needs one dialable number. Check the linked record or skip for now.</p> : null}
-              {recentActivity ? (
-                <details key={activeCandidate.prospect.id} className="group mt-3 border-t border-slate-100">
-                  <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between rounded text-xs text-slate-500 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 [&::-webkit-details-marker]:hidden">Recent activity<ChevronDown aria-hidden="true" className="h-3.5 w-3.5 transition-transform group-open:rotate-180" /></summary>
-                  <p className="pb-2 text-xs leading-5 text-slate-600">{recentActivity.notes || recentActivity.outcome.replaceAll('_', ' ')}</p>
-                </details>
-              ) : null}
-              {session ? <p className={cn('mt-2 text-xs font-medium', startMutation.isError ? 'text-amber-700' : 'text-emerald-700')}>{session.recorded ? 'Call started' : startMutation.isError ? 'Call start not recorded' : 'Saving call start...'}</p> : null}
             </div>
 
-            <div className="border-t border-slate-100 px-4 py-3">
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="border-t border-slate-100 px-4 py-3 sm:px-5">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                <div className="min-w-0 flex-1"><p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Calling contact</p><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><p className="break-words text-sm font-medium text-slate-800">{selectedName}</p>{phoneOptions.length > 1 ? <><label htmlFor="calling-phone" className="sr-only">Phone number for {selectedName}</label><select id="calling-phone" value={phone} disabled={Boolean(session)} onChange={(event) => setSelectedPhone(event.target.value)} className="min-h-11 max-w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:bg-slate-50">{phoneOptions.map((option) => <option key={option.number} value={option.number}>{option.label} · {option.number}{option.href ? '' : ' · check number'}</option>)}</select></> : phone ? <p className="min-h-8 content-center text-xs tabular-nums text-slate-600">{phone}</p> : null}</div></div>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
                 {session ? (
                   <Button className="h-11 shrink-0 gap-2 bg-emerald-700 px-4 text-sm font-semibold hover:bg-emerald-800" disabled={busy} onClick={() => confirm()}>{outcomeMutation.isPending ? 'Confirming...' : discardMutation.isPending ? 'Undoing...' : 'I called · next'}<ArrowRight aria-hidden="true" className="h-4 w-4" /></Button>
                 ) : telHref ? (
-                  <Button asChild className="h-11 shrink-0 gap-2 bg-blue-600 px-4 text-sm font-semibold hover:bg-blue-700"><a href={telHref} onClick={startCall} aria-label={'Call ' + displayName(activeCandidate)}><Phone aria-hidden="true" className="h-4 w-4" /><span>Call</span></a></Button>
-                ) : <Button className="h-11" disabled>Check phone number</Button>}
-                {session ? <Button variant="ghost" className="h-11 px-2 text-xs text-slate-500" disabled={busy} onClick={() => discardMutation.mutate(session)}>Didn't call</Button> : <Button variant="ghost" className="h-11 px-3 text-slate-500" disabled={candidates.length < 2} onClick={() => setActiveIndex((index) => (index + 1) % candidates.length)}>Skip</Button>}
+                  <Button asChild className="h-11 shrink-0 gap-2 bg-blue-600 px-4 text-sm font-semibold hover:bg-blue-700"><a href={telHref} onClick={(event) => startCall(event)} aria-label={'Call ' + selectedName}><Phone aria-hidden="true" className="h-4 w-4" /><span>Call</span></a></Button>
+                ) : <Button className="h-11" disabled>{workspaceQuery.isLoading ? 'Loading contacts...' : 'Check phone number'}</Button>}
+                {session ? <Button variant="ghost" className="h-11 px-2 text-xs text-slate-500" disabled={busy} onClick={() => discardMutation.mutate(session)}>Didn't call</Button> : <Button variant="ghost" className="h-11 px-3 text-slate-500" disabled={!upcoming.length} onClick={() => upcoming[0] && selectCompany(upcoming[0])}>Skip</Button>}
+                </div>
               </div>
-              <p className="mt-2 text-[11px] text-slate-500">{session ? 'Confirm after trying the call.' : 'Opens your dialer.'}</p>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]"><p className="text-slate-500">{session ? session.confirmation && session.afterConfirmation === 'another_contact' ? 'Retry will log this call and prepare another contact on this company.' : 'Confirm after trying the call.' : 'Opens your dialer.'}</p>{session ? <p className={cn('font-medium', startMutation.isError ? 'text-amber-700' : 'text-emerald-700')}>{session.recorded ? 'Call started' : startMutation.isError ? 'Call start not recorded' : 'Saving call start...'}</p> : null}</div>
+              {!telHref && !session && !workspaceQuery.isLoading && !workspaceQuery.isError ? <p className="mt-2 text-xs leading-4 text-amber-700">This contact needs one dialable number. Select another contact, edit the number, or skip for now.</p> : null}
 
               {session ? (
                 <div className="mt-2">
                   <div className="flex flex-wrap gap-1">
                     <Button variant="ghost" className="h-9 px-2 text-xs" onClick={() => setShowNotes((value) => !value)} aria-expanded={showNotes} aria-controls="call-notes">{showNotes ? 'Hide note' : 'Add a note'}</Button>
                     <Button variant="ghost" className="h-9 px-2 text-xs" onClick={() => setShowOptions((value) => !value)} aria-expanded={showOptions} aria-controls="call-options">More options<ChevronDown className="ml-1 h-3.5 w-3.5" /></Button>
+                    {anotherContact && !session.confirmation ? <Button variant="ghost" className="h-11 px-2 text-xs text-slate-600" aria-label="Log & try another contact" disabled={submissionLocked} onClick={() => confirm('attempted', 'another_contact')}>Log &amp; try another contact<ArrowRight className="ml-1.5 h-3.5 w-3.5" /></Button> : null}
                   </div>
                   {showNotes ? (
                     <div id="call-notes" className="mt-2">
@@ -354,25 +456,42 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
                 </div>
               ) : null}
             </div>
+            {workspaceQuery.isError ? <div role="alert" className="border-t border-slate-100 px-4 py-4"><p className="text-xs text-amber-800">Contacts could not be loaded.</p><Button variant="ghost" size="sm" onClick={() => workspaceQuery.refetch()}>Retry contacts</Button></div> : workspaceQuery.isLoading ? <p className="border-t border-slate-100 px-4 py-4 text-xs text-slate-500">Loading company workspace...</p> : <>
+              <CallingContacts key={activeCandidate.prospect.id} prospectId={activeCandidate.prospect.id} contacts={contacts} selectedId={session?.contactId || selectedContactId} selectedPhone={phone} locked={Boolean(session)} onSelect={selectContact} onDial={startCall} onSaved={(workspace, contactId) => {
+                queryClient.setQueryData(workspaceKey, workspace)
+                void queryClient.invalidateQueries({ queryKey: ['/api/calling/workspace-activity', brokerId, activeCandidate.prospect.id] })
+                void queryClient.invalidateQueries({ queryKey: ['/api/calling/queue', brokerId] })
+                void queryClient.invalidateQueries({ queryKey: ['/api/prospects'] })
+                const saved = workspace.contacts.find((contact) => contact.id === contactId)
+                if (saved) selectContact(saved)
+              }} />
+              {account?.notes ? <details className="border-t border-slate-100 px-4 py-3 sm:px-5"><summary className="min-h-9 cursor-pointer text-xs font-medium text-slate-500">Company notes</summary><p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{account.notes}</p></details> : null}
+              <CallingActivity rows={historyQuery.data?.activity || []} filter={activityFilter} onFilter={setActivityFilter} contactName={selectedName} unattributedCount={workspaceQuery.data?.unattributedActivityCount || 0} loading={activityFilter === 'contact' && Boolean(activityContactId) ? contactActivityQuery.isLoading : historyQuery.isLoading} error={historyQuery.isError} onRetry={() => historyQuery.refetch()} />
+            </>}
           </section>
         ) : !queueQuery.isLoading && !queueQuery.isError ? (
           <section className="rounded-lg border border-slate-200 bg-white p-5 text-center"><Check className="mx-auto h-6 w-6 text-emerald-600" /><h2 className="mt-2 text-lg font-bold text-slate-950">You're through the queue</h2><p className="mt-2 text-sm text-slate-500">{progress.confirmedToday ? progress.confirmedToday + ' calls confirmed today. Good progress.' : 'No prospects with a saved phone number are ready.'}</p><Button className="mt-4" variant="outline" onClick={() => { setCompletedIds(new Set()); setIncludeCalledToday(true) }}>Show contacts called today</Button></section>
         ) : null}
 
-        {upcoming.length ? (
-          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Next companies">
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5"><h2 className="text-xs font-semibold text-slate-700">Up next</h2><span className="text-[11px] text-slate-500">{queueQuery.data?.totalEligible ?? candidates.length} in queue</span></div>
-            <ol className="divide-y divide-slate-100">
+        {activeCandidate || upcoming.length ? (
+          <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white xl:sticky xl:top-4" aria-label="Next companies">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><h2 className="text-sm font-semibold text-slate-800">Calling queue</h2><span className="text-[11px] text-slate-500">{queueQuery.data?.totalEligible ?? candidates.length} in queue</span></div>
+            <ol className="divide-y divide-slate-100 xl:max-h-[calc(100dvh-14rem)] xl:overflow-y-auto">
               {upcoming.map((candidate, index) => (
-                <li key={candidate.prospect.id} className="flex items-start gap-3 px-4 py-2.5">
+                <li key={candidate.prospect.id} className={cn(index >= 5 && !showAllCompanies && 'hidden xl:block')}><button type="button" className="flex w-full items-start gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-600 disabled:cursor-default disabled:opacity-60" aria-label={'Select company ' + companyName(candidate)} disabled={Boolean(session)} onClick={() => selectCompany(candidate)}>
                   <span className="mt-0.5 w-4 shrink-0 text-xs tabular-nums text-slate-400">{index + 1}</span>
                   <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-800">{companyName(candidate)}</p><p className="mt-0.5 truncate text-[11px] text-slate-500">{candidate.contact.name ? candidate.contact.name + ' · ' : ''}{candidate.contact.phone}</p></div>
                   <span className="mt-0.5 max-w-[35%] text-right text-[10px] leading-4 text-slate-500">{candidate.reasons[0] || 'Ready'}</span>
+                </button>
                 </li>
               ))}
             </ol>
+            {upcoming.length > 5 ? <Button variant="ghost" className="m-2 h-11 text-xs text-slate-500 xl:hidden" aria-expanded={showAllCompanies} onClick={() => setShowAllCompanies((value) => !value)}>{showAllCompanies ? 'Show fewer companies' : 'View all companies'}</Button> : null}
+            {!upcoming.length ? <p className="px-4 py-6 text-xs text-slate-500">This is the last company in your queue.</p> : null}
+            <div className="flex items-start gap-2 border-t border-slate-100 bg-slate-50/60 px-4 py-3 text-[11px] leading-5 text-slate-500"><Building2 className="mt-1 h-3.5 w-3.5 shrink-0" /><p>Select a company to prepare the next call. Calls count toward your goal when you log them.</p></div>
           </section>
         ) : null}
+        </div>
       </main>
     </div>
   )

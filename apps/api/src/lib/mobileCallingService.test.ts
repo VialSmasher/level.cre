@@ -1,3 +1,4 @@
+import { primaryContactIdentity } from './prospectContactService';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
@@ -101,6 +102,12 @@ function outcomeHarness(options?: { existingEvent?: boolean; currentPhone?: stri
           merged_into_prospect_id: null,
           ...options?.prospect,
         }] };
+      }
+      if (text.includes('public.prospect_contacts')) {
+        const fields = { contact_name: 'Alex Owner', contact_email: 'alex@example.com', contact_phone: options?.currentPhone ?? '780-555-0100', ...options?.prospect };
+        return { rows: [{ id: '10000000-0000-4000-8000-000000000001', user_id: 'user-1', prospect_id: 'prospect-1',
+          is_primary: true, source: 'legacy_primary', name: fields.contact_name, email: fields.contact_email,
+          phone: fields.contact_phone, company: 'Acme Ltd.', identity_key: primaryContactIdentity(fields), additional_phones: [] }] };
       }
       if (text.includes('INSERT INTO public.activity_events')) {
         return { rows: options?.existingEvent ? [] : [{ id: 'event-1' }] };

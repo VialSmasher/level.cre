@@ -23,6 +23,7 @@ type SnapshotState = {
   coverage: { mappedActions: number; totalActions: number };
   badges: { trackedCounts: { call: number; touch: number }; bestDayCounts: { call: number }; values: Record<string, { value: number; unlocked: boolean }> };
   prospects: Array<Record<string, any>>;
+  contacts: Array<Record<string, any>>;
 };
 
 async function localRequest(request: APIRequestContext, path: string, method = 'GET', data?: unknown) {
@@ -106,7 +107,10 @@ async function installLocalSnapshot(page: Page, brokerId: string) {
       return route.abort('blockedbyclient');
     }
     if (!url.pathname.startsWith('/api/')) return route.fallback();
-    if (request.method() !== 'GET' && !(request.method() === 'POST' && /^\/api\/calling\/(starts|outcomes|discards)$/.test(url.pathname))) {
+    const callingWrite = request.method() === 'POST' && /^\/api\/calling\/(starts|outcomes|discards)$/.test(url.pathname);
+    const contactWrite = request.method() === 'POST' && /^\/api\/calling\/prospects\/[^/]+\/contacts$/.test(url.pathname)
+      || request.method() === 'PATCH' && /^\/api\/calling\/prospects\/[^/]+\/contacts\/[^/]+$/.test(url.pathname);
+    if (request.method() !== 'GET' && !callingWrite && !contactWrite) {
       unexpected.push(`${request.method()} ${url.pathname}`);
       return route.abort('blockedbyclient');
     }
@@ -136,10 +140,14 @@ async function selectSafelyDialableCard(page: Page) {
   // Use the real page's Skip action until its own phone parser renders a link.
   await expect(page.getByRole('region', { name: 'Current call', exact: true })).toBeVisible();
   for (let attempt = 0; attempt < 12; attempt++) {
-    if (await page.getByRole('link', { name: /^Call / }).count()) return;
+    if (await mainDialLink(page).count()) return;
     await page.getByRole('button', { name: 'Skip', exact: true }).click();
   }
   throw new Error('No safely dialable copied prospect remains in the current queue.');
+}
+
+function mainDialLink(page: Page) {
+  return page.getByRole('region', { name: 'Current call', exact: true }).getByRole('link', { name: /^Call / }).filter({ hasText: /^Call$/ });
 }
 
 async function assertScorecard(page: Page, state: SnapshotState) {
@@ -225,7 +233,7 @@ test('real copied prospects feed calls, asset history, scorecard, badges and XP 
     const calledCandidate = validRows.find((candidate: any) => candidate.prospect.id === prospectId)!;
     const calledCompany = calledCandidate.contact.company || calledCandidate.prospect.businessName || calledCandidate.prospect.name;
     completed.push(prospectId);
-    await page.getByRole('link', { name: /^Call / }).click();
+    await mainDialLink(page).click();
     await expect(page.getByText('Call started', { exact: true })).toBeVisible();
     if (index === 0) {
       const started: SnapshotState = await localRequest(request, '/simulation/state');
@@ -284,7 +292,7 @@ test('real copied prospects feed calls, asset history, scorecard, badges and XP 
   // Undo a sixth click and prove it awards no production or XP.
   await expect(page.getByText('Call saved · +15', { exact: true })).toBeHidden();
   await selectSafelyDialableCard(page);
-  await page.getByRole('link', { name: /^Call / }).click();
+  await mainDialLink(page).click();
   await expect(page.getByText('Call started', { exact: true })).toBeVisible();
   await expect(page.getByText('Call saved · +15', { exact: true })).toBeHidden();
   await page.getByRole('button', { name: "Didn't call", exact: true }).click();
@@ -347,4 +355,91 @@ test('real copied prospects feed calls, asset history, scorecard, badges and XP 
     ],
   };
   await writeFile(`work/calling-simulation/private/${prefix}-browser-report.json`, JSON.stringify(report, null, 2));
+});
+
+test('a synthetic private roster on a copied company records two people once and preserves unattributed history', async ({ page, request }, testInfo) => {
+  const health = await localRequest(request, '/health');
+  expect(String(health.sourceRoot).replace(/\\/g, '/').toLowerCase()).toBe(process.cwd().replace(/\\/g, '/').toLowerCase());
+  const baseline: SnapshotState = await localRequest(request, '/simulation/reset', 'POST');
+  const queue = await localRequest(request, '/api/calling/queue');
+  const first = queue.rows.find((candidate: any) => buildTelHref(candidate.contact.phone));
+  expect(first).toBeTruthy();
+  const prospectId = first.prospect.id;
+  const beforeWorkspace = await localRequest(request, `/api/calling/prospects/${encodeURIComponent(prospectId)}/workspace`);
+  const fixture = await installLocalSnapshot(page, baseline.brokerId);
+  const prefix = testInfo.project.name.endsWith('mobile') ? 'mobile' : 'desktop';
+  await page.goto('/app/calls');
+  await selectSafelyDialableCard(page);
+  await page.getByRole('button', { name: 'Add contact', exact: true }).click();
+  const editor = page.getByRole('dialog');
+  await editor.getByLabel('Name', { exact: true }).fill('LOCAL SIMULATION Additional contact');
+  await editor.getByLabel('Title', { exact: true }).fill('Synthetic rehearsal fixture');
+  await editor.getByLabel('Phone', { exact: true }).fill('(780) 555-0191');
+  await editor.getByRole('button', { name: 'Add another phone number', exact: true }).click();
+  await editor.getByLabel('Number', { exact: true }).fill('(780) 555-0192');
+  await editor.getByRole('button', { name: 'Save contact', exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Call LOCAL SIMULATION Additional contact', exact: true })).toBeVisible();
+  const workspace = await localRequest(request, `/api/calling/prospects/${encodeURIComponent(prospectId)}/workspace`);
+  const alternate = workspace.contacts.find((contact: any) => !contact.isPrimary);
+  const primary = workspace.contacts.find((contact: any) => contact.isPrimary);
+  expect(workspace.contacts).toHaveLength(2);
+  expect(workspace.primaryContactId).toBe(beforeWorkspace.primaryContactId);
+  const prepared: SnapshotState = await localRequest(request, '/simulation/state');
+  expect(prepared.production).toEqual(baseline.production);
+  expect(prepared.skills.followUp).toBe(baseline.skills.followUp);
+  expect(prepared.header.assetsTracked).toBe(baseline.header.assetsTracked);
+  const activity = page.getByRole('region', { name: 'Account activity', exact: true });
+  await expect(activity.getByText('No activity recorded for this contact yet.', { exact: true })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Phone number for LOCAL SIMULATION Additional contact', exact: true }).selectOption('(780) 555-0192');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: `${captureDirectory}/${prefix}-09-two-contact-workspace.png`, fullPage: true });
+  await mainDialLink(page).click();
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  expect(fixture.starts[0]).toMatchObject({ prospectId, contactId: alternate.id, expectedPhone: '(780) 555-0192' });
+  await expect(page.getByRole('button', { name: /^Select contact / }).first()).toBeDisabled();
+  await page.getByRole('button', { name: 'Log & try another contact', exact: true }).click();
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText(String(baseline.progress.confirmedToday + 1));
+  await expect(page.getByRole('button', { name: `Select contact ${primary.name || primary.company || 'Primary contact'}`, exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('link', { name: 'View record', exact: true })).toHaveAttribute('href', `/app?prospectId=${prospectId}`);
+  await expect(activity.getByText('No activity recorded for this contact yet.', { exact: true })).toBeVisible();
+  await activity.getByRole('button', { name: 'All account activity', exact: true }).click();
+  await expect(activity.getByText('LOCAL SIMULATION Additional contact', { exact: true })).toBeVisible();
+  const firstConfirmed: SnapshotState = await localRequest(request, '/simulation/state');
+  expect(firstConfirmed.skills.followUp).toBe(baseline.skills.followUp + 15);
+  await mainDialLink(page).click();
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'I called · next', exact: true }).click();
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText(String(baseline.progress.confirmedToday + 2));
+  await expect(page.getByRole('link', { name: 'View record', exact: true })).not.toHaveAttribute('href', `/app?prospectId=${prospectId}`);
+  const final: SnapshotState = await localRequest(request, '/simulation/state');
+  const history = await localRequest(request, `/api/calling/prospects/${encodeURIComponent(prospectId)}/workspace`);
+  expect(history.unattributedActivityCount).toBe(beforeWorkspace.unattributedActivityCount);
+  expect(history.activity.filter((row: any) => row.contactId === alternate.id)).toHaveLength(1);
+  expect(history.activity.filter((row: any) => row.contactId === beforeWorkspace.primaryContactId)).toHaveLength(1);
+  expect(history.activity.find((row: any) => row.contactId === alternate.id).phoneSnapshot).toBe('(780) 555-0192');
+  expect(final.production).toHaveLength(baseline.production.length + 2);
+  expect(final.skills.followUp).toBe(baseline.skills.followUp + 30);
+  expect(final.counts.interactions).toBe(baseline.counts.interactions + 2);
+  expect(final.counts.skill_activities).toBe(baseline.counts.skill_activities + 2);
+  expect(final.badges.trackedCounts.call).toBe(baseline.badges.trackedCounts.call + 2);
+  expect(final.coverage.mappedActions).toBe(baseline.coverage.mappedActions + 2);
+  expect(final.header.assetsTracked).toBe(baseline.header.assetsTracked);
+  const replay = await localRequest(request, '/api/calling/outcomes', 'POST', fixture.outcomes[0]);
+  expect(replay.duplicate).toBe(true);
+  const replayed: SnapshotState = await localRequest(request, '/simulation/state');
+  expect(replayed.counts).toEqual(final.counts);
+  expect(replayed.skills).toEqual(final.skills);
+  expect(fixture.starts).toHaveLength(2);
+  expect(fixture.outcomes).toHaveLength(2);
+  expect(new Set(fixture.outcomes.map((outcome) => outcome.contactId)).size).toBe(2);
+  expect(fixture.unexpected).toEqual([]);
+  expect(fixture.pageErrors).toEqual([]);
+  await writeFile(`work/calling-simulation/private/${prefix}-contact-workspace-report.json`, JSON.stringify({
+    verifiedAt: new Date().toISOString(), sourceRoot: health.sourceRoot, sourceFingerprints: health.sourceFingerprints,
+    sourceSnapshotSha256: baseline.sourceSnapshotSha256,
+    scope: 'Two local synthetic/primary contact interactions on one copied owned company; synthetic contact is not a production identity fact.',
+    baseline, final, beforeWorkspace, history, observedRequests: { starts: fixture.starts, outcomes: fixture.outcomes },
+    limitations: ['Memory-only contact migration and local owner authorization; deployed auth/RLS, carrier, realtime and PostGIS excluded.'],
+  }, null, 2));
 });

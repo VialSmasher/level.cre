@@ -1635,3 +1635,26 @@ export type IntelSurveyEvent = typeof intelSurveyEvents.$inferSelect;
 export type InsertIntelSurveyEvent = typeof intelSurveyEvents.$inferInsert;
 export type IntelAgentEvent = typeof intelAgentEvents.$inferSelect;
 export type InsertIntelAgentEvent = typeof intelAgentEvents.$inferInsert;
+
+
+// Private contact-at-record relationships. Primary rows version the legacy scalar
+// projection; they never replace prospects as assets or create a global person.
+export const prospectContacts = pgTable("prospect_contacts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()::text`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  prospectId: varchar("prospect_id").notNull().references(() => prospects.id, { onDelete: "cascade" }),
+  source: varchar("source").notNull(),
+  isPrimary: boolean("is_primary").notNull().default(false),
+  identityKey: text("identity_key"),
+  name: varchar("name"), company: varchar("company"), email: varchar("email"), phone: varchar("phone"), title: varchar("title"),
+  additionalPhones: jsonb("additional_phones").$type<Array<{ label: string; number: string }>>().notNull().default([]),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("uq_prospect_contacts_primary").on(table.userId, table.prospectId).where(sql`${table.isPrimary} AND ${table.archivedAt} IS NULL`),
+  index("idx_prospect_contacts_owner_record").on(table.userId, table.prospectId, table.archivedAt),
+  check("prospect_contacts_source", sql`${table.source} IN ('legacy_primary','broker_added')`),
+  check("prospect_contacts_primary_source", sql`NOT ${table.isPrimary} OR (${table.source}='legacy_primary' AND ${table.archivedAt} IS NULL)`),
+  check("prospect_contacts_phone_options", sql`jsonb_typeof(${table.additionalPhones})='array' AND jsonb_array_length(${table.additionalPhones})<=5`),
+]).enableRLS();
