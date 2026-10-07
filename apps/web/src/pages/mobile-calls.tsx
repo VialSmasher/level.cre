@@ -19,6 +19,8 @@ import {
 } from '@/lib/mobileCalling'
 import { cn } from '@/lib/utils'
 
+type CompanyVisit = { candidate: CallQueueCandidate; contactId: string | null; phone: string }
+
 const NEXT_STEPS: Array<{ value: 'keep' | NextCallStep; label: string }> = [
   { value: 'keep', label: 'Keep existing' }, { value: 'tomorrow', label: 'Tomorrow' },
   { value: '3d', label: '3 days' }, { value: '1w', label: '1 week' },
@@ -68,6 +70,8 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const [activityFilter, setActivityFilter] = useState<'account' | 'contact'>('contact')
   const [showAllCompanies, setShowAllCompanies] = useState(false)
   const [completedIds, setCompletedIds] = useState<Set<string>>(() => new Set())
+  const [skippedIds, setSkippedIds] = useState<Set<string>>(() => new Set())
+  const [previousCompanies, setPreviousCompanies] = useState<CompanyVisit[]>([])
   const [includeCalledToday, setIncludeCalledToday] = useState(false)
   const [showOptions, setShowOptions] = useState(false)
   const [showNotes, setShowNotes] = useState(false)
@@ -84,7 +88,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     staleTime: 30_000,
     refetchOnWindowFocus: true,
   })
-  const candidates = (queueQuery.data?.rows || []).filter((candidate) => !completedIds.has(candidate.prospect.id))
+  const candidates = (queueQuery.data?.rows || []).filter((candidate) => !completedIds.has(candidate.prospect.id) && !skippedIds.has(candidate.prospect.id))
   const activeCandidate = session?.candidate || retainedCandidate || candidates.find((candidate) => candidate.prospect.id === selectedProspectId) || candidates[0] || null
   const prospectId = activeCandidate?.prospect.id
   const workspaceKey = ['/api/calling/workspace', brokerId, prospectId] as const
@@ -110,7 +114,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const anotherContact = session && !session.contactId ? null : nextUncalledContact(contacts, session?.contactId || selectedContactId, workspaceQuery.data?.activity || [], completedContactIds)
 
   useEffect(() => {
-    if (!prospectId || session) return
+    if (!prospectId || session || !workspaceQuery.data) return
     const current = contacts.find((contact) => contact.id === selectedContactId)
     const primary = contacts.find((contact) => contact.id === workspaceQuery.data?.primaryContactId)
     const next = current || (primary && contactPhoneOptions(primary).some((option) => option.href) ? primary : contacts.find((contact) => contactPhoneOptions(contact).some((option) => option.href))) || primary || contacts[0]
@@ -128,13 +132,62 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     setActivityFilter('contact')
   }
 
+  const rememberCompany = (visit: CompanyVisit) => {
+    setPreviousCompanies((visits) => visits.at(-1)?.candidate.prospect.id === visit.candidate.prospect.id
+      ? [...visits.slice(0, -1), visit] : [...visits, visit])
+  }
+
+  const prepareCompany = (visit: CompanyVisit) => {
+    // Pin the viewed company across queue refreshes, including a previously logged company.
+    setRetainedCandidate(visit.candidate)
+    setSelectedProspectId(visit.candidate.prospect.id)
+    setSelectedContactId(visit.contactId)
+    setSelectedPhone(visit.phone)
+    setActivityFilter('contact')
+    setNotes('')
+    setShowNotes(false)
+    setShowOptions(false)
+    setNextStep('keep')
+    setFocusNext(true)
+  }
+
   const selectCompany = (candidate: CallQueueCandidate) => {
+    if (sessionRef.current || candidate.prospect.id === activeCandidate?.prospect.id) return
+    if (activeCandidate) rememberCompany({ candidate: activeCandidate, contactId: selectedContactId, phone })
+    prepareCompany({ candidate, contactId: null, phone: '' })
+  }
+
+  const skipCompany = () => {
+    if (sessionRef.current || !activeCandidate) return
+    rememberCompany({ candidate: activeCandidate, contactId: selectedContactId, phone })
+    setSkippedIds((ids) => new Set(ids).add(activeCandidate.prospect.id))
+    const next = candidates.find((candidate) => candidate.prospect.id !== activeCandidate.prospect.id)
+    if (next) prepareCompany({ candidate: next, contactId: null, phone: '' })
+    else {
+      setRetainedCandidate(null)
+      setSelectedProspectId(null)
+      setSelectedContactId(null)
+      setSelectedPhone('')
+    }
+    setAnnouncement('Company skipped for now. No call was logged.')
+  }
+
+  const previousCompany = () => {
     if (sessionRef.current) return
+    const previous = previousCompanies.at(-1)
+    if (!previous) return
+    setPreviousCompanies((visits) => visits.slice(0, -1))
+    prepareCompany(previous)
+    setAnnouncement('Previous company ready. No call has started.')
+  }
+
+  const revisitSkipped = () => {
+    if (sessionRef.current) return
+    setSkippedIds(new Set())
     setRetainedCandidate(null)
-    setSelectedProspectId(candidate.prospect.id)
+    setSelectedProspectId(null)
     setSelectedContactId(null)
     setSelectedPhone('')
-    setActivityFilter('contact')
     setFocusNext(true)
   }
 
@@ -252,7 +305,10 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
         setSelectedPhone('')
         setCompletedIds((ids) => new Set(ids).add(started.prospectId))
         setAnnouncement('Record unavailable. Local call attempt cleared.')
-      } else setAnnouncement('Call start undone.')
+      } else {
+        prepareCompany({ candidate: started.candidate, contactId: started.contactId || null, phone: started.expectedPhone })
+        setAnnouncement('Call start undone. This company is still selected.')
+      }
       refreshActivity()
     },
   })
@@ -275,11 +331,16 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
       setActivityFilter('contact')
       setAnnouncement('Call logged. Another contact is ready on this company; no call has started.')
     } else {
-      setRetainedCandidate(null)
-      setSelectedProspectId(null)
-      setSelectedContactId(null)
-      setSelectedPhone('')
-      setActivityFilter('contact')
+      rememberCompany({ candidate: started.candidate, contactId: started.contactId || null, phone: started.expectedPhone })
+      const next = candidates.find((candidate) => candidate.prospect.id !== started.prospectId)
+      if (next) prepareCompany({ candidate: next, contactId: null, phone: '' })
+      else {
+        setRetainedCandidate(null)
+        setSelectedProspectId(null)
+        setSelectedContactId(null)
+        setSelectedPhone('')
+        setActivityFilter('contact')
+      }
       setAnnouncement('Call logged. Next company ready.')
     }
     resetForm()
@@ -404,7 +465,10 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
           <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Current call">
             <div className="px-4 pb-4 pt-4 sm:px-5 sm:pt-5">
               <div className="mb-2 flex items-center justify-between gap-3 text-[11px]">
-                <span className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-600">{activeCandidate.reasons[0] || 'Ready to call'}</span>
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <Button variant="ghost" className="h-11 gap-1 px-2 text-xs text-slate-500" aria-label="Previous company" disabled={Boolean(session) || !previousCompanies.length} onClick={previousCompany}><ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />Previous</Button>
+                  <span className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-600">{activeCandidate.reasons[0] || 'Ready to call'}</span>
+                </div>
                 <Link href={'/app?prospectId=' + encodeURIComponent(activeCandidate.prospect.id)} onClick={() => {
                   try { window.localStorage.setItem('levelcre:focusProspectId', activeCandidate.prospect.id); } catch {}
                 }} className="inline-flex min-h-8 shrink-0 items-center rounded text-xs text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2">View record<ArrowRight className="ml-1 h-3 w-3" /></Link>
@@ -424,7 +488,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
                 ) : telHref ? (
                   <Button asChild className="h-11 shrink-0 gap-2 bg-blue-600 px-4 text-sm font-semibold hover:bg-blue-700"><a href={telHref} onClick={(event) => startCall(event)} aria-label={'Call ' + selectedName}><Phone aria-hidden="true" className="h-4 w-4" /><span>Call</span></a></Button>
                 ) : <Button className="h-11" disabled>{workspaceQuery.isLoading ? 'Loading contacts...' : 'Check phone number'}</Button>}
-                {session ? <Button variant="ghost" className="h-11 px-2 text-xs text-slate-500" disabled={busy} onClick={() => discardMutation.mutate(session)}>Didn't call</Button> : <Button variant="ghost" className="h-11 px-3 text-slate-500" disabled={!upcoming.length} onClick={() => upcoming[0] && selectCompany(upcoming[0])}>Skip</Button>}
+                <Button variant="ghost" className="h-11 px-3 text-slate-500" disabled={Boolean(session)} onClick={skipCompany}>Skip</Button>
                 </div>
               </div>
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]"><p className="text-slate-500">{session ? session.confirmation && session.afterConfirmation === 'another_contact' ? 'Retry will log this call and prepare another contact on this company.' : 'Confirm after trying the call.' : 'Opens your dialer.'}</p>{session ? <p className={cn('font-medium', startMutation.isError ? 'text-amber-700' : 'text-emerald-700')}>{session.recorded ? 'Call started' : startMutation.isError ? 'Call start not recorded' : 'Saving call start...'}</p> : null}</div>
@@ -432,7 +496,9 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
 
               {session ? (
                 <div className="mt-2">
+                  <p className="mb-1 text-[11px] leading-4 text-slate-500">Log this call or choose Didn’t call before changing companies.</p>
                   <div className="flex flex-wrap gap-1">
+                    <Button variant="ghost" className="h-11 px-2 text-xs text-slate-500" disabled={busy} onClick={() => discardMutation.mutate(session)}>Didn't call</Button>
                     <Button variant="ghost" className="h-9 px-2 text-xs" onClick={() => setShowNotes((value) => !value)} aria-expanded={showNotes} aria-controls="call-notes">{showNotes ? 'Hide note' : 'Add a note'}</Button>
                     <Button variant="ghost" className="h-9 px-2 text-xs" onClick={() => setShowOptions((value) => !value)} aria-expanded={showOptions} aria-controls="call-options">More options<ChevronDown className="ml-1 h-3.5 w-3.5" /></Button>
                     {anotherContact && !session.confirmation ? <Button variant="ghost" className="h-11 px-2 text-xs text-slate-600" aria-label="Log & try another contact" disabled={submissionLocked} onClick={() => confirm('attempted', 'another_contact')}>Log &amp; try another contact<ArrowRight className="ml-1.5 h-3.5 w-3.5" /></Button> : null}
@@ -470,7 +536,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
             </>}
           </section>
         ) : !queueQuery.isLoading && !queueQuery.isError ? (
-          <section className="rounded-lg border border-slate-200 bg-white p-5 text-center"><Check className="mx-auto h-6 w-6 text-emerald-600" /><h2 className="mt-2 text-lg font-bold text-slate-950">You're through the queue</h2><p className="mt-2 text-sm text-slate-500">{progress.confirmedToday ? progress.confirmedToday + ' calls confirmed today. Good progress.' : 'No prospects with a saved phone number are ready.'}</p><Button className="mt-4" variant="outline" onClick={() => { setCompletedIds(new Set()); setIncludeCalledToday(true) }}>Show contacts called today</Button></section>
+          <section className="rounded-lg border border-slate-200 bg-white p-5 text-center"><Check className="mx-auto h-6 w-6 text-emerald-600" /><h2 className="mt-2 text-lg font-bold text-slate-950">You're through the queue</h2><p className="mt-2 text-sm text-slate-500">{skippedIds.size ? skippedIds.size + ' companies skipped for now.' : progress.confirmedToday ? progress.confirmedToday + ' calls confirmed today. Good progress.' : 'No prospects with a saved phone number are ready.'}</p><div className="mt-4 flex flex-wrap justify-center gap-2"><Button variant="ghost" className="h-11 gap-1 text-xs text-slate-500" aria-label="Previous company" disabled={!previousCompanies.length} onClick={previousCompany}><ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />Previous</Button>{skippedIds.size ? <Button variant="outline" onClick={revisitSkipped}>Revisit skipped companies</Button> : null}<Button variant="outline" onClick={() => { setCompletedIds(new Set()); setSkippedIds(new Set()); setIncludeCalledToday(true) }}>Show contacts called today</Button></div></section>
         ) : null}
 
         {activeCandidate || upcoming.length ? (

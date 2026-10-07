@@ -2,6 +2,20 @@
 
 October 7, 2026. The approved calling pilot is published. The live amendment below supersedes prior preparation-status statements; earlier simulation and device sections retain their historical evidence and limitations.
 
+## Calling navigation repair, October 7, 2026
+
+Skip previously chose the first eligible company other than the current one, causing A to B to A. It now defers the current company for this pass and advances to the next remaining company. Deferred companies stay out of the upcoming list after a queue refetch; the end of the pass offers an explicit Revisit skipped companies action. Skip records no call or credit.
+
+A compact Previous control retraces viewed companies, including confirmed companies, and restores the selected person/number without replaying a call session or clearing completed-call suppression. Manual selections and ordinary Didn't call undo pin the current company across queue refreshes. Navigation history is local to the open calling desk; a full page reload begins a fresh viewing history while existing durable pending-call recovery remains intact.
+
+Previous, Skip, contact selection, and queue selection are disabled while a call is pending. Skip remains visibly separate from Didn't call, with a clear instruction to resolve the call before changing companies. Ordinary undo keeps the frozen company/person/number selected. Unsaved notes and follow-up controls reset before another company is prepared.
+
+The frontend production build and diff checks pass. The complete browser run passed 64 of 66 desktop/mobile cases; the two failures were an incorrect new test expectation that a previously deferred company would return to the forward queue. After correcting only that expectation, both affected cases passed. All 66 behaviors are covered, including progressive skips, queue refetch, Previous preserving contact/number, Previous on an already confirmed company with saved attributed history and unchanged credit, delayed-start navigation locks, draft reset, and end-of-pass revisit. No application source changed after the full run.
+
+Read-only private-preview rendering passed at 1536 by 1024, 390 by 844, and 698 by 936. Previous and Skip retain 44px tap heights; there is no horizontal overflow or browser error. Existing user simulation state was preserved with no call, discard, contact-edit, or external request. The captures cover the current ready state; pending/end states are covered by the mocked browser checks. Safe evidence remains ignored in nav-layout-smoke.json and private screenshots.
+
+This repair changes the calling page and its browser regressions only. The existing live API, migration, privacy rules, and activity accounting are unchanged. The exact frontend publication is recorded after deployment in the private release receipt and live follow-up below.
+
 ## Approved live rollout, October 7, 2026
 
 Patrick approved the live pilot after confirming the Android/Phone Link device handoff. The approved calling source is `9e7899bff4203072aa7ecb26fe2ab42f31648954`, with runtime implementation at `c81b4b7fa7a7a315891ec47172149f81f667c759`. It was published from the isolated calling release, with no unrelated primary-checkout changes or private simulation material included.

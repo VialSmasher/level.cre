@@ -49,6 +49,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
   const confirmed = new Set<string>();
   const discarded = new Set<string>();
   const mutationSequence: string[] = [];
+  const queueReads: string[] = [];
   let releaseStart = () => {};
   const startGate = options.delayedStart ? new Promise<void>((resolve) => { releaseStart = resolve; }) : Promise.resolve();
   const roster = new Map<string, TestContact[]>(candidates.map((candidate, index) => [candidate.prospect.id, [{
@@ -126,6 +127,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
       return json(route, { id: 'demo-user', email: 'calling-broker@example.test', firstName: 'Calling', lastName: 'Broker' });
     }
     if (path === '/api/calling/queue') {
+      queueReads.push(request.url());
       const confirmedProspects = new Set([...sessions.values()].filter((session) => confirmed.has(session.clientEventId)).map((session) => session.prospectId));
       const includeCalledToday = new URL(request.url()).searchParams.get('includeCalledToday') === 'true';
       const rows = candidates.filter((candidate) => includeCalledToday || !confirmedProspects.has(candidate.prospect.id));
@@ -232,7 +234,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
   await page.goto('/app/calls');
   await expect(page.getByRole('heading', { name: 'Calls', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
-  return { starts, confirmations, discards, sessions, progress, roster, workspace, mutationSequence, releaseStart, confirmOnServer: (clientEventId: string) => confirmed.add(clientEventId) };
+  return { starts, confirmations, discards, sessions, progress, roster, workspace, mutationSequence, queueReads, releaseStart, confirmOnServer: (clientEventId: string) => confirmed.add(clientEventId) };
 }
 
 async function dial(page: Page, name = 'Morgan Lee') {
@@ -745,4 +747,172 @@ test('undo arriving before a delayed original start prevents the late response f
   expect(scenario.discards).toHaveLength(1);
   expect(scenario.confirmations).toHaveLength(0);
   expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0 });
+});
+
+test('skip advances A to B to C and deferred companies stay out after a queue refresh', async ({ page }) => {
+  const scenario = await installCallingScenario(page);
+  const nextCompanies = page.getByRole('region', { name: 'Next companies', exact: true });
+  await expect(page.getByRole('button', { name: 'Previous company', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 2', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  await expect(nextCompanies.getByRole('button', { name: 'Select company Calling Company 1', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 3', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Call Jim Carter', exact: true })).toBeVisible();
+  for (const company of [1, 2]) await expect(nextCompanies.getByRole('button', { name: `Select company Calling Company ${company}`, exact: true })).toHaveCount(0);
+  const readsBeforeRefresh = scenario.queueReads.length;
+  await page.getByRole('button', { name: 'Refresh call queue', exact: true }).click();
+  await expect.poll(() => scenario.queueReads.length).toBeGreaterThan(readsBeforeRefresh);
+  await expect(page.getByRole('heading', { name: 'Calling Company 3', exact: true })).toBeVisible();
+  for (const company of [1, 2]) await expect(nextCompanies.getByRole('button', { name: `Select company Calling Company ${company}`, exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Alex Rivera', exact: true })).toBeVisible();
+  expect(scenario.starts).toHaveLength(0);
+  expect(scenario.confirmations).toHaveLength(0);
+  expect(scenario.discards).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0 });
+  expect(await page.evaluate(() => (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs)).toEqual([]);
+});
+
+test('Previous returns skipped companies with their selected contact and number without dialing', async ({ page }) => {
+  const scenario = await installCallingScenario(page);
+  const number = page.getByRole('combobox', { name: 'Phone number for Morgan Lee', exact: true });
+  await number.selectOption('(780) 555-0101');
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Jim Carter', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Previous company', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Previous company', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
+  await expect(number).toHaveValue('(780) 555-0101');
+  await page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true }).click();
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Jim Carter', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Alex Rivera', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Previous company', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Jim Carter', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Previous company', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Rowan Singh', exact: true })).toHaveAttribute('href', 'tel:7805550102');
+  await expect(page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Previous company', exact: true })).toBeDisabled();
+  expect(scenario.starts).toHaveLength(0);
+  expect(scenario.confirmations).toHaveLength(0);
+  expect(scenario.discards).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0 });
+  expect(await page.evaluate(() => (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs)).toEqual([]);
+});
+
+test('Previous returns a confirmed company with its saved history without another call or credit', async ({ page }) => {
+  const scenario = await installCallingScenario(page);
+  await dial(page);
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Add a note', exact: true }).click();
+  await page.getByRole('textbox').fill('Confirmed this company exactly once.');
+  await page.getByRole('button', { name: 'I called · next', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText('1');
+  await page.getByRole('button', { name: 'Previous company', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Account activity', exact: true }).getByText('Confirmed this company exactly once.', { exact: true })).toBeVisible();
+  const readsBeforeRefresh = scenario.queueReads.length;
+  await page.getByRole('button', { name: 'Refresh call queue', exact: true }).click();
+  await expect.poll(() => scenario.queueReads.length).toBeGreaterThan(readsBeforeRefresh);
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText('1');
+  expect(scenario.starts).toHaveLength(1);
+  expect(scenario.confirmations).toHaveLength(1);
+  expect(scenario.discards).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 1, confirmedToday: 1 });
+  expect(await page.evaluate(() => (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs)).toEqual(['tel:7805550100']);
+});
+
+test('pending calls clearly block Previous, Skip and queue navigation until resolved', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { delayedStart: true });
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Previous company', exact: true })).toBeEnabled();
+  await dial(page, 'Vas Patel');
+  await expect.poll(() => scenario.starts.length).toBe(1);
+  await expect(page.getByText('Saving call start...', { exact: true })).toBeVisible();
+  await expect(page.getByText('Log this call or choose Didn’t call before changing companies.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Previous company', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Skip', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Select company Calling Company 3', exact: true })).toBeDisabled();
+  const readsBeforeRefresh = scenario.queueReads.length;
+  await page.getByRole('button', { name: 'Refresh call queue', exact: true }).click();
+  await expect.poll(() => scenario.queueReads.length).toBeGreaterThan(readsBeforeRefresh);
+  await expect(page.getByRole('heading', { name: 'Calling Company 2', exact: true })).toBeVisible();
+  expect(scenario.confirmations).toHaveLength(0);
+  scenario.releaseStart();
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: "Didn't call", exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Previous company', exact: true })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Skip', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Previous company', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
+  expect(scenario.starts).toHaveLength(1);
+  expect(scenario.discards).toHaveLength(1);
+  expect(scenario.confirmations).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0 });
+  expect(await page.evaluate(() => (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs)).toEqual(['tel:7805550100']);
+});
+
+test('unsaved notes and follow-up options reset before calling another company', async ({ page }) => {
+  const scenario = await installCallingScenario(page);
+  await dial(page);
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Add a note', exact: true }).click();
+  await page.getByRole('textbox').fill('Unsaved note belongs only to company one.');
+  await page.getByRole('button', { name: 'More options', exact: true }).click();
+  await page.getByRole('button', { name: 'Tomorrow', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Tomorrow', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: "Didn't call", exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Skip', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  await dial(page, 'Vas Patel');
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Add a note', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: 'More options', exact: true })).toHaveAttribute('aria-expanded', 'false');
+  await page.getByRole('button', { name: 'Add a note', exact: true }).click();
+  await expect(page.getByRole('textbox')).toHaveValue('');
+  await page.getByRole('button', { name: 'More options', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Keep existing', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Tomorrow', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await page.getByRole('button', { name: 'I called · next', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Jim Carter', exact: true })).toBeVisible();
+  expect(scenario.confirmations).toHaveLength(1);
+  expect(scenario.confirmations[0]).toMatchObject({ prospectId: 'calling-prospect-2', outcome: 'attempted', notes: '' });
+  expect(scenario.confirmations[0]).not.toHaveProperty('nextFollowUp');
+  expect(scenario.discards).toHaveLength(1);
+});
+
+test('finishing a skipped pass offers an explicit revisit and Previous without automatic calls', async ({ page }) => {
+  const scenario = await installCallingScenario(page);
+  for (let index = 0; index < candidates.length; index++) {
+    await expect(page.getByRole('heading', { name: `Calling Company ${index + 1}`, exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  }
+  const revisit = page.getByRole('button', { name: 'Revisit skipped companies', exact: true });
+  await expect(revisit).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Previous company', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Previous company', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Sam Taylor', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await expect(revisit).toBeVisible();
+  await revisit.click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
+  expect(scenario.starts).toHaveLength(0);
+  expect(scenario.confirmations).toHaveLength(0);
+  expect(scenario.discards).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0 });
+  expect(await page.evaluate(() => (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs)).toEqual([]);
 });
