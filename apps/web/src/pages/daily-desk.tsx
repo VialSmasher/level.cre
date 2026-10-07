@@ -1334,8 +1334,8 @@ export default function DailyDeskPage() {
                 <div><dt className="text-[10px] uppercase text-slate-400">Meetings</dt><dd className="mt-1 text-base font-semibold tabular-nums">{activityPace.today.meeting}</dd></div>
               </dl>
               <Button asChild className="mt-4 w-full bg-blue-600 hover:bg-blue-500" size="sm">
-                <Link href="/app/followup">
-                  Open call queue
+                <Link href="/app/calls">
+                  Start calling
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>

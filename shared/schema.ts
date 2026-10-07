@@ -67,7 +67,7 @@ export const ContactInteraction = z.object({
   prospectId: z.string(),
   date: z.string(),
   type: z.enum(['call', 'email', 'meeting', 'note']),
-  outcome: z.enum(['contacted', 'no_answer', 'left_message', 'scheduled_meeting', 'not_interested', 'follow_up_later']),
+  outcome: z.enum(['attempted', 'contacted', 'no_answer', 'left_message', 'scheduled_meeting', 'not_interested', 'follow_up_later']),
   notes: z.string(),
   nextFollowUp: z.string().optional()
 });

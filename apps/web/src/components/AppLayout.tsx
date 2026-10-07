@@ -13,6 +13,7 @@ import {
   LogOut,
   Map,
   MapPinned,
+  Phone,
   Settings,
   Target,
   Trophy,
@@ -72,7 +73,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   }
 
   const primaryNav: NavItem[] = [
-    { label: 'Today', href: '/app/desk', icon: ListTodo, active: isActive('/app/desk') },
+    { label: 'Today', href: '/app/desk', icon: ListTodo, active: isActive('/app/desk') || isActive('/app/calls') },
     { label: 'Map', href: '/app', icon: Map, active: isActive('/app') },
     { label: 'Pursuits', shortLabel: 'Pursuits', href: '/app/workspaces', icon: Target, active: isActive('/app/workspaces') },
     { label: 'Activity', href: '/app/inbox', icon: Activity, active: isActive('/app/inbox') },
@@ -80,6 +81,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   ]
 
   const secondaryNav = [
+    { label: 'Calls', href: '/app/calls', icon: Phone },
     { label: 'Requirements', href: '/app/requirements', icon: ClipboardList },
     { label: 'Market memory', href: '/app/knowledge', icon: Database },
   ]
@@ -170,6 +172,7 @@ export function AppLayout({ children }: AppLayoutProps) {
               <Link
                 key={item.label}
                 href={item.href}
+                aria-current={item.active ? 'page' : undefined}
                 className={cn(
                   'group relative flex h-10 items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors',
                   item.active
@@ -196,6 +199,7 @@ export function AppLayout({ children }: AppLayoutProps) {
               <Link
                 key={item.label}
                 href={item.href}
+                aria-current={active ? 'page' : undefined}
                 className={cn(
                   'flex h-9 items-center gap-3 rounded-md px-3 text-xs font-medium transition-colors',
                   active ? 'bg-white/[0.07] text-slate-100' : 'text-slate-400 hover:bg-white/[0.05] hover:text-slate-200',
@@ -241,6 +245,7 @@ export function AppLayout({ children }: AppLayoutProps) {
             <Link
               key={item.label}
               href={item.href}
+              aria-current={item.active ? 'page' : undefined}
               className={cn(
                 'relative flex min-w-0 flex-col items-center justify-center gap-1 text-[10px] font-semibold',
                 item.active ? 'text-blue-700' : 'text-slate-500',

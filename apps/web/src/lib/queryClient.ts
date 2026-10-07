@@ -82,6 +82,7 @@ export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
+  options: Pick<RequestInit, 'keepalive'> = {},
 ): Promise<Response> {
   const demoResult = getDemoApiResult(method, url, data);
   if (demoResult?.handled) return demoJsonResponse(demoResult);
@@ -98,6 +99,7 @@ export async function apiRequest(
   const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 
   const res = await fetch(fullUrl, {
+    ...options,
     method,
     headers,
     body: data ? JSON.stringify(data) : undefined,

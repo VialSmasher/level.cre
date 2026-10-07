@@ -123,3 +123,7 @@ artifacts/ux-benchmark/
 .vscode-test
 
 .vercel
+
+# Private calling rehearsal data and generated browser evidence
+work/calling-simulation/
+work/calling-playwright/

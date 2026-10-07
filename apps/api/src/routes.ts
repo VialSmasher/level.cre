@@ -92,11 +92,23 @@ import { buildPipelineHealth } from './lib/pipelineHealth';
 import { buildActivityPulse } from './lib/activityPulse';
 import { listProductionActivities } from './lib/productionActivityService';
 import { filterPursuitActivity, summarizePursuitActivity } from './lib/pursuitActivity';
+import { canViewCallingInteraction, excludePrivateCallingSql, PRIVATE_CALL_EVENT_SOURCE } from './lib/callingActivityPrivacy';
 import {
   buildPublicPursuitSnapshot,
   createPursuitShareToken,
   isValidPursuitShareToken,
 } from './lib/pursuitPublicShareService';
+import {
+  MobileCallingError,
+  MobileCallStartSchema,
+  MobileCallDiscardSchema,
+  MobileCallOutcomeSchema,
+  listMobileCallQueue,
+  getMobileCallingProgress,
+  recordMobileCallStart,
+  discardMobileCallStart,
+  recordMobileCallOutcome,
+} from './lib/mobileCallingService';
 import { buildAutomationReconciliation } from './lib/automationReconciliation';
 import { rankEmailCleanup, rankFollowUpReminder } from './lib/salesBriefRanking';
 import { findSupabaseAuthUserByEmail } from './lib/supabaseAuthUsers';
@@ -1510,13 +1522,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       listingIds.length > 0
         ? admin
             .from('contact_interactions')
-            .select('id,listing_id,prospect_id,date')
+            .select('id,user_id,listing_id,prospect_id,date,source_provider')
             .in('listing_id', listingIds)
         : Promise.resolve({ data: [], error: null }),
       linkedProspectIds.length > 0
         ? admin
             .from('contact_interactions')
-            .select('id,listing_id,prospect_id,date')
+            .select('id,user_id,listing_id,prospect_id,date,source_provider')
             .in('prospect_id', linkedProspectIds)
         : Promise.resolve({ data: [], error: null }),
     ]);
@@ -1526,7 +1538,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     for (const interaction of [...(directInteractionResult.data || []), ...(linkedInteractionResult.data || [])]) {
       interactionById.set(interaction.id, interaction);
     }
-    const interactions = Array.from(interactionById.values());
+    const privateCallInteractionIds = new Set<string>();
+    const interactionIds = Array.from(interactionById.keys());
+    for (let offset = 0; offset < interactionIds.length; offset += 200) {
+      const { data: privateCalls, error: privateCallsError } = await admin
+        .from('activity_events')
+        .select('interaction_id')
+        .eq('source', PRIVATE_CALL_EVENT_SOURCE)
+        .in('interaction_id', interactionIds.slice(offset, offset + 200));
+      if (privateCallsError) throw privateCallsError;
+      for (const call of privateCalls || []) privateCallInteractionIds.add(call.interaction_id);
+    }
+    const interactions = Array.from(interactionById.values()).filter((interaction) => (
+      canViewCallingInteraction(interaction, userId, privateCallInteractionIds)
+    ));
 
     const ownerIds = Array.from(new Set(listingRows.map((row: any) => row.user_id).filter(Boolean)));
     const ownerProfileById = new Map<string, any>();
@@ -1996,7 +2021,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         createdAt: contactInteractions.createdAt,
       })
       .from(contactInteractions)
-      .where(inArray(contactInteractions.prospectId, prospectIds));
+      .where(and(
+        inArray(contactInteractions.prospectId, prospectIds),
+        sql`(${contactInteractions.userId} = ${userId} OR ${sql.raw(excludePrivateCallingSql('contact_interactions'))})`,
+      ));
 
     return rows.map((row) => ({
       id: row.id,
@@ -2665,22 +2693,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
               activityCount: sql<number>`COALESCE((
                 SELECT COUNT(*)::int
                 FROM ${contactInteractions} ci
-                WHERE ci.listing_id = ${listings.id}
+                WHERE (ci.listing_id = ${listings.id}
                   OR EXISTS (
                     SELECT 1 FROM ${listingProspects} lp_activity
                     WHERE lp_activity.listing_id = ${listings.id}
                       AND lp_activity.prospect_id = ci.prospect_id
-                  )
+                  ))
+                  AND (ci.user_id = ${userId} OR ${sql.raw(excludePrivateCallingSql('ci'))})
               ), 0)`,
               lastActivityAt: sql<string | null>`(
                 SELECT MAX(ci.date)
                 FROM ${contactInteractions} ci
-                WHERE ci.listing_id = ${listings.id}
+                WHERE (ci.listing_id = ${listings.id}
                   OR EXISTS (
                     SELECT 1 FROM ${listingProspects} lp_activity
                     WHERE lp_activity.listing_id = ${listings.id}
                       AND lp_activity.prospect_id = ci.prospect_id
-                  )
+                  ))
+                  AND (ci.user_id = ${userId} OR ${sql.raw(excludePrivateCallingSql('ci'))})
               )`,
             })
             .from(listings)
@@ -3299,13 +3329,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pool.query(`
           SELECT ci.id, ci.prospect_id, ci.date, ci.type, ci.outcome
           FROM public.contact_interactions ci
-          WHERE ci.listing_id = $1
+          WHERE (ci.listing_id = $1
             OR EXISTS (
               SELECT 1
               FROM public.listing_prospects lp
               WHERE lp.listing_id = $1
                 AND lp.prospect_id = ci.prospect_id
-            )
+            ))
+            AND ${excludePrivateCallingSql('ci')}
           ORDER BY ci.date DESC, ci.created_at DESC
           LIMIT 500
         `, [listing.id]),
@@ -6082,6 +6113,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error creating interaction from email review item:', error);
       res.status(500).json({ message: 'Failed to create interaction from email' });
+    }
+  });
+
+  app.get('/api/calling/queue', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const limit = Math.min(Math.max(Math.trunc(Number(req.query.limit) || 20), 1), 50);
+      if (isDemo(req)) {
+        return res.json({ generatedAt: new Date().toISOString(), rows: [], total: 0, totalEligible: 0, progress: { startedToday: 0, confirmedToday: 0, connectedToday: 0 }, pendingSessions: [] });
+      }
+      const now = new Date();
+      const [queue, calling] = await Promise.all([
+        listMobileCallQueue({ pool, userId, limit, now, includeCalledToday: req.query.includeCalledToday === 'true' }),
+        getMobileCallingProgress({ pool, userId, now }),
+      ]);
+      res.json({ generatedAt: now.toISOString(), rows: queue.rows, total: queue.rows.length, totalEligible: queue.totalEligible, ...calling });
+    } catch (error) {
+      console.error('Error building mobile call queue:', error);
+      res.status(500).json({ message: 'Failed to build call queue' });
+    }
+  });
+
+  app.post('/api/calling/starts', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = MobileCallStartSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid call start', error: parsed.error.errors });
+      if (isDemo(req)) return res.status(201).json({ duplicate: false, eventId: randomUUID(), prospectId: parsed.data.prospectId, status: 'started', callStartedAt: parsed.data.callStartedAt || new Date().toISOString(), demo: true });
+      await ensureUser(userId, (req as any)?.user?.email || null);
+      const result = await recordMobileCallStart({ pool, userId, input: parsed.data });
+      res.status(result.duplicate ? 200 : 201).json(result);
+    } catch (error) {
+      if (error instanceof MobileCallingError) return res.status(error.status).json({ message: error.message, code: error.code, ...(error.canonicalProspectId ? { canonicalProspectId: error.canonicalProspectId } : {}) });
+      console.error('Error recording call start:', error);
+      res.status(500).json({ message: 'Failed to save call start' });
+    }
+  });
+
+  app.post('/api/calling/discards', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = MobileCallDiscardSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid call undo', error: parsed.error.errors });
+      if (isDemo(req)) return res.json({ duplicate: false, eventId: randomUUID(), prospectId: parsed.data.prospectId, status: 'discarded', demo: true });
+      const result = await discardMobileCallStart({ pool, userId, input: parsed.data });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof MobileCallingError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error undoing call start:', error);
+      res.status(500).json({ message: 'Failed to undo call start' });
+    }
+  });
+
+  app.post('/api/calling/outcomes', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
+      const parsed = MobileCallOutcomeSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid call outcome', error: parsed.error.errors });
+      }
+      if (isDemo(req)) {
+        return res.status(201).json({
+          duplicate: false,
+          eventId: randomUUID(),
+          interactionId: randomUUID(),
+          prospectId: parsed.data.prospectId,
+          status: 'confirmed',
+          demo: true,
+        });
+      }
+      const result = await recordMobileCallOutcome({ pool, userId, input: parsed.data });
+      res.status(result.duplicate ? 200 : 201).json(result);
+    } catch (error) {
+      if (error instanceof MobileCallingError) {
+        return res.status(error.status).json({
+          message: error.message,
+          code: error.code,
+          ...(error.canonicalProspectId ? { canonicalProspectId: error.canonicalProspectId } : {}),
+        });
+      }
+      console.error('Error recording mobile call outcome:', error);
+      res.status(500).json({ message: 'Failed to record call outcome' });
     }
   });
 
