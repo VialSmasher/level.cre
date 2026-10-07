@@ -36,6 +36,12 @@ The preview at `http://127.0.0.1:5180/app/calls` was reset to its eight-record c
 
 PGlite executes PostgreSQL 18.3/WASM with copied production 17.6 schema; geometry is opaque and connections are not concurrent. Real device dialing, deployed auth/RLS, PostGIS, Supabase realtime, full global skills/header handlers, email auditing, and brokerage memory remain outside this rehearsal. Migration 0021 and API/frontend coordination require release validation, then one explicitly selected genuine call to an owned, unshared prospect. No blocking layout issue remains in the inspected states. The repeated Primary subtitle/badge found during comparison was corrected.
 
+## Private preview stylesheet follow-up
+
+The user reported an unstyled handoff preview after the implementation checkpoint. Tailwind's relative content globs resolved from the original checkout working directory, so the private preview compiled base styles without utility classes. Earlier browser QA started from the web workspace and did not exercise this startup path. The ignored preview adapter now supplies explicit PostCSS plugins with absolute content paths into the release tree; application source and production configuration are unchanged.
+
+Read-only verification of the actual port 5180 preview passed at 1536 by 1024, 698 by 936, and 390 by 844. The Call control measures 79.3 by 44 CSS pixels and has the expected blue background; navigation switches correctly, there is no horizontal overflow, the simulation notice remains visible, and browser error counts are zero. Call progress was unchanged. The repeatable `preview-style-smoke.mjs`, JSON results, and `preview-style-*.png` captures remain ignored in the original checkout's private simulation folder. The in-app automation helper was unavailable; the previously authorized isolated Chrome fallback supplied these captures. The supplied failure screenshot and corrected narrow screenshot were visually checked, as were corrected desktop/mobile views.
+
 final result: passed for the calling workspace local rehearsal within these boundaries.
 
 ---

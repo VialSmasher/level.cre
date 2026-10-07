@@ -2,6 +2,12 @@
 
 October 7, 2026. This report records a read-only production snapshot, local simulation work, and the release audit. No real phone call, production activity write, recurring automation change, push, or deployment has been performed as part of this work.
 
+## Private preview stylesheet follow-up
+
+The user reported an unstyled handoff preview after the implementation checkpoint. Tailwind's relative content globs resolved from the original checkout working directory, so the private preview compiled base styles without utility classes. Earlier browser QA started from the web workspace and did not exercise this startup path. The ignored preview adapter now supplies explicit PostCSS plugins with absolute content paths into the release tree; application source and production configuration are unchanged.
+
+Read-only verification of the actual port 5180 preview passed at 1536 by 1024, 698 by 936, and 390 by 844. The Call control measures 79.3 by 44 CSS pixels and has the expected blue background; navigation switches correctly, there is no horizontal overflow, the simulation notice remains visible, and browser error counts are zero. Call progress was unchanged. The repeatable `preview-style-smoke.mjs`, JSON results, and `preview-style-*.png` captures remain ignored in the original checkout's private simulation folder. The in-app automation helper was unavailable; the previously authorized isolated Chrome fallback supplied these captures. The supplied failure screenshot and corrected narrow screenshot were visually checked, as were corrected desktop/mobile views.
+
 ## Company/contact workspace, October 7, 2026
 
 Patrick approved the wider workspace and roster after the [design and data fit review](calling-account-workspace-review-2026-10-07.md). The implementation is verified locally in the managed `codex/calling-pilot` worktree, following compact-controls commit `e999baa804fefd3fab3336532b53822e9d975591`. The ignored release receipt records the exact checkpoint revision. No push, deployment, production migration, or genuine call is part of this pass. The sections below this amendment retain the pre-roster history; their no-migration statements apply only to that earlier implementation.
