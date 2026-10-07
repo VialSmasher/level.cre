@@ -16,7 +16,8 @@ Read-only private-preview rendering passed at 1536 by 1024, 390 by 844, and 698 
 
 This repair changes the calling page and its browser regressions only. The existing live API, migration, privacy rules, and activity accounting are unchanged. The exact frontend publication is recorded after deployment in the private release receipt and live follow-up below.
 
-## Approved live rollout, October 7, 2026
+Published to [live Calls](https://level-cre.vercel.app/app/calls) from source `0da7ce080c65212a0bd14f1a4459a505f811cfd0` in READY production frontend deployment `dpl_7DmwMmiWgixomYaKS7oj6P82fT7a`. The live alias was independently verified; `mobile-calls-DBu5oLLa.js` is 39,087 bytes and includes Previous, Revisit skipped companies, and pending-call guidance. API health is 200 and the frontend's unauthenticated calling queue rewrite returns 401. Fresh real Chrome desktop/mobile login-gate checks passed at 23:12:27 UTC with no browser errors, overflow, failed resources, workspace reads, sign-in, or call writes. Authenticated live navigation remains Patrick's manual acceptance. Existing API deployment `180be816-4028-48f3-b180-a890cf971ca0` and database migration are unchanged. The source-sync PR remains a draft pending the earlier specific main-merge approval; this frontend repair did not modify main.
+## Initial approved live rollout, October 7, 2026
 
 Patrick approved the live pilot after confirming the Android/Phone Link device handoff. The approved calling source is `9e7899bff4203072aa7ecb26fe2ab42f31648954`, with runtime implementation at `c81b4b7fa7a7a315891ec47172149f81f667c759`. It was published from the isolated calling release, with no unrelated primary-checkout changes or private simulation material included.
 
