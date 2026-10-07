@@ -1,6 +1,30 @@
-# Calling pilot simulation and release preparation
+# Calling pilot simulation and live release
 
-October 7, 2026. This report records a read-only production snapshot, local simulation work, and the release audit. No real phone call, production activity write, recurring automation change, push, or deployment has been performed as part of this work.
+October 7, 2026. The approved calling pilot is published. The live amendment below supersedes prior preparation-status statements; earlier simulation and device sections retain their historical evidence and limitations.
+
+## Approved live rollout, October 7, 2026
+
+Patrick approved the live pilot after confirming the Android/Phone Link device handoff. The approved calling source is `9e7899bff4203072aa7ecb26fe2ab42f31648954`, with runtime implementation at `c81b4b7fa7a7a315891ec47172149f81f667c759`. It was published from the isolated calling release, with no unrelated primary-checkout changes or private simulation material included.
+
+| Live surface | Verified release |
+| --- | --- |
+| Calls | [level-cre.vercel.app/app/calls](https://level-cre.vercel.app/app/calls) |
+| Frontend | Vercel production deployment `dpl_pkoHn9repdHHTXUKKtPC1K16Y5Wt`, READY, exact approved Git source; the live alias points to this deployment |
+| API | Railway production deployment `180be816-4028-48f3-b180-a890cf971ca0`, SUCCESS |
+| Database | Supabase `glgeqzgyvefcelzmdnte`; `0021_prospect_contacts.sql` applied at `2026-10-07T22:49:20.831556Z` with checksum `8a28c191fef2c7658a1a5c55c2d1506b48fd654afdfdecc1c12dc94bf8aee35b` |
+| Source synchronization | [Draft PR #34](https://github.com/VialSmasher/level.cre/pull/34) targets `main` from `codex/calling-pilot`; main remains at `37fb07ff0ee5b5140b82b16392ddefa46faed4c5` pending specific merge approval |
+
+The API shipped from an exact Git export with LF migration bytes. The raw Windows checkout and the first archive contained CRLF migrations and were rejected before deployment because the existing ledger uses LF checksums. The deployed export uses `core.autocrlf=false` and `core.eol=lf`, with all four migration hashes verified. Its archive SHA-256 is `11340fec7eab19a69fcea9b28002acec6079cc7649d1ed1695bb049ae772f704`; a legacy tracked `server/.env.bak` file was excluded from the shipping directory. The local-upload deployment does not supply Railway's Git commit environment, so `/api/version` reports a null commit; source provenance rests on the exact export, manifest, deployment identity, and migration fingerprints, not an invented version response.
+
+Postdeployment catalog checks verify table owner postgres, enabled RLS, zero browser policies, no anon/authenticated SELECT/INSERT/UPDATE/DELETE grants, the expected service-role grants, four indexes, and six valid constraints. Health is 200; queue, workspace, start, outcome, and discard routes deny unauthenticated requests with 401. The production frontend serves the new calling chunk and rewrites its queue request to that protected API. A bounded API error-log check found no new runtime error entry. These checks placed no calls and wrote no simulated production activity.
+
+Fresh real Chrome contexts passed the live smoke at 22:55:29 UTC for desktop 1536 by 1024 and mobile 390 by 844. The actual Calls URL returns 200 then reaches the real login gate; Google sign-in and blank Work email render with a 44px input, no horizontal overflow, and zero console/page errors, failed resource responses, mutation attempts, or workspace reads. The served `mobile-calls-D0lDT_oA.js` is 37,033 bytes and contains the released calling controls. No authentication override or demo flow was used. This verifies the real sign-in gate and shipped assets, not an authenticated call-workspace test.
+
+Patrick's normal signed-in acceptance remains: choose one owned, unshared prospect, open its selected number through Phone Link, make a genuine attempt, confirm once with I called · next, and verify the selected contact/account activity and live scorecard. The app cannot infer a connected carrier call from opening the dialer. Ordinary Vercel previews still target the live API and must not host copied-data confirmations.
+
+Automatic approval review rejected a direct push to main before execution because the general rollout approval did not specifically authorize that branch mutation. The deployment proceeded from the approved calling branch without modifying main. Draft PR #34 keeps the complete source change reviewable; merging it requires Patrick's specific approval. Until source synchronization, a future deployment of the old main branch could replace this calling release. Documentation-only follow-ups do not change the approved runtime or deployment provenance.
+
+Rollback remains the verified previous frontend artifact `dpl_49RGkPBaXQBJXdndMxSycTbffM9Y` while retaining the new API, private-call filters, table, and saved history. The previous API artifact is `4630d375-22b5-4095-bc2e-47042d9aa6d7`; after genuine calls exist, downgrading to its old source would remove the calling privacy filters, so preserve those protections or fix forward. Ignored package, catalog, HTTP, browser, and release receipts remain under `work/calling-simulation/private`. The private local preview and its user-testing state remain available.
 
 ## Private preview stylesheet follow-up
 
