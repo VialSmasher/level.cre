@@ -315,6 +315,11 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
 
   const completeCall = (started: MobileCallSession) => {
     resolvedClientEventIds.current.add(started.clientEventId)
+    setSkippedIds((ids) => {
+      const remaining = new Set(ids)
+      remaining.delete(started.prospectId)
+      return remaining
+    })
     setCompletedIds((ids) => new Set(ids).add(started.prospectId))
     if (started.contactId) setCompletedContactIds((ids) => new Set(ids).add(started.contactId!))
     queryClient.setQueryData<CallQueueResponse>(queueKey, (current) => current ? {
