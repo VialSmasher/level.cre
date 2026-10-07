@@ -84,3 +84,9 @@ For eventual production staging, Vercel supports a production build without assi
 ## Current status
 
 The read-only snapshot, final release SQL and browser rehearsal, narrow calling/private-activity patch, builds, and scoped checks are complete. The local `codex/calling-pilot` candidate is ready for review from the managed worktree; the release receipt records its exact Git revision. Disposable database integration, deployed authentication, device acceptance, and deployment remain open. No push or deployment has been performed, and this report does not claim a completed live calling pilot.
+
+## UI refinement, October 7, 2026
+
+The confirmation receipt now reads **Call saved · +15**, with the company below it and enough mobile spacing to clear the app header. The calling page gives the company and contact/phone a clearer hierarchy, emphasizes confirmed calls, uses quieter priority labels and a narrower desktop width, and puts recent history in a closed native disclosure. Instructions are shorter and the confirmation button uses a darker green. The two-click flow, next-company heading focus, 44px primary controls, and four upcoming companies remain intact.
+
+The cleanup passed the existing 141/141 frontend tests and 32/32 calling regressions. After the final toast-position adjustment, the production web build, 4/4 targeted receipt/compact checks, and 2/2 copied-data desktop/mobile journeys passed. Final receipts were visually inspected on both viewports; title hit-testing checks confirm the header does not obscure them. Stored logging and XP retain the previously verified backend behavior. Only the page, its two browser specs, and this report form the UI follow-up commit; private captures stay ignored. No push or deployment has been performed.

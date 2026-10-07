@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, Check, ChevronDown, Clock3, MapPin, Phone, RotateCcw } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, ChevronDown, Phone, RotateCcw } from 'lucide-react'
 import { Link } from 'wouter'
 
 import { Button } from '@/components/ui/button'
@@ -144,8 +144,9 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     onSuccess: (result, { started }) => {
       if (sessionRef.current?.clientEventId !== started.clientEventId) return
       toast({
-        title: result.newXpGained > 0 ? 'Call saved · +' + result.newXpGained + ' XP' : 'Call already recorded',
-        description: companyName(started.candidate) + ' · Next company ready.',
+        title: result.newXpGained > 0 ? 'Call saved · +' + result.newXpGained : 'Call already recorded',
+        description: companyName(started.candidate),
+        className: 'mt-14 border-slate-200 bg-white py-3 pl-4 pr-10 shadow-sm sm:mt-0',
         duration: 2400,
       })
       // Advance the card without waiting for unrelated dashboard queries.
@@ -244,16 +245,17 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const telHref = activeCandidate ? buildTelHref(activeCandidate.contact.phone) : null
   const error = outcomeMutation.error || discardMutation.error || startMutation.error
   const upcoming = candidates.filter((candidate) => candidate.prospect.id !== activeCandidate?.prospect.id).slice(0, 4)
+  const recentActivity = activeCandidate?.recentActivity[0]
 
   return (
     <div className="min-h-[calc(100dvh-7.5rem)] bg-slate-50 lg:min-h-screen">
       <header className="border-b border-slate-200 bg-white px-4 py-3 lg:px-6">
-        <div className="mx-auto flex max-w-4xl items-center justify-between gap-3">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Button asChild variant="ghost" size="icon" aria-label="Back to Today">
               <Link href="/app/desk"><ArrowLeft className="h-4 w-4" /></Link>
             </Button>
-            <div><h1 className="text-base font-bold text-slate-950">Calls</h1><p className="text-xs text-slate-500">Call, confirm, keep moving.</p></div>
+            <h1 className="text-base font-semibold text-slate-950">Calls</h1>
           </div>
           <Button variant="ghost" size="icon" aria-label="Refresh call queue" onClick={() => queueQuery.refetch()} disabled={queueQuery.isFetching}>
             <RotateCcw className={cn('h-4 w-4', queueQuery.isFetching && 'animate-spin')} />
@@ -261,12 +263,12 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-4xl space-y-3 px-4 py-4 lg:px-6">
-        <section className="rounded-lg border border-slate-200 bg-white px-4 py-3" aria-label="Today's calling progress">
+      <main className="mx-auto w-full max-w-3xl space-y-3 px-4 py-4 lg:px-6">
+        <section className="rounded-xl border border-slate-200 bg-white px-4 py-3" aria-label="Today's calling progress">
           <dl className="grid grid-cols-3 gap-3">
-            <div><dt className="text-[10px] font-medium text-slate-500">Started today</dt><dd data-testid="calls-started-today" className="text-xl font-bold tabular-nums text-blue-700">{startedToday}</dd></div>
-            <div><dt className="text-[10px] font-medium text-slate-500">Confirmed today</dt><dd data-testid="calls-confirmed-today" className="text-xl font-bold tabular-nums text-slate-950">{progress.confirmedToday}</dd></div>
-            <div><dt className="text-[10px] font-medium text-slate-500">Conversations</dt><dd className="text-xl font-bold tabular-nums text-emerald-700">{progress.connectedToday}</dd></div>
+            <div><dt className="text-[11px] text-slate-500">Started today</dt><dd data-testid="calls-started-today" className="mt-0.5 text-xl font-semibold tabular-nums text-slate-600">{startedToday}</dd></div>
+            <div><dt className="text-[11px] text-slate-500">Confirmed today</dt><dd data-testid="calls-confirmed-today" className="mt-0.5 text-xl font-semibold tabular-nums text-blue-700">{progress.confirmedToday}</dd></div>
+            <div><dt className="text-[11px] text-slate-500">Conversations</dt><dd className="mt-0.5 text-xl font-semibold tabular-nums text-slate-700">{progress.connectedToday}</dd></div>
           </dl>
           {callTarget ? (
             <div className="mt-2 flex items-center gap-3">
@@ -291,37 +293,41 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
         ) : null}
 
         {activeCandidate ? (
-          <section className="overflow-hidden rounded-lg border border-blue-200 bg-white shadow-sm" aria-label="Current call">
-            <div className="px-4 pb-3 pt-4">
+          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Current call">
+            <div className="px-4 pb-2 pt-3">
               <div className="mb-2 flex items-center justify-between gap-3 text-[11px]">
-                <span className="font-semibold text-blue-700">{activeCandidate.reasons[0] || 'Ready to call'}</span>
-                <span className="text-slate-500">{session ? 'Current call' : (queueQuery.data?.totalEligible ?? candidates.length) + ' in queue'}</span>
+                <span className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-600">{activeCandidate.reasons[0] || 'Ready to call'}</span>
+                <Link href={'/app?prospectId=' + encodeURIComponent(activeCandidate.prospect.id)} onClick={() => {
+                  try { window.localStorage.setItem('levelcre:focusProspectId', activeCandidate.prospect.id); } catch {}
+                }} className="inline-flex min-h-8 shrink-0 items-center rounded text-xs text-slate-500 underline-offset-2 hover:text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2">View record<ArrowRight className="ml-1 h-3 w-3" /></Link>
               </div>
-              {companyName(activeCandidate) !== displayName(activeCandidate) ? <p className="break-words text-xl font-bold leading-tight text-slate-950">{companyName(activeCandidate)}</p> : null}
-              <h2 ref={nameRef} tabIndex={-1} className={cn('break-words outline-none', companyName(activeCandidate) === displayName(activeCandidate) ? 'text-xl font-bold text-slate-950' : 'mt-1 text-sm font-medium text-slate-600')}>{displayName(activeCandidate)}</h2>
-              <p className="mt-2 flex items-center gap-2 text-base font-semibold tabular-nums text-blue-700"><Phone className="h-4 w-4 shrink-0" />{activeCandidate.contact.phone}</p>
-              {activeCandidate.prospect.address ? <p className="mt-2 flex items-start gap-1.5 text-xs leading-4 text-slate-500"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />{activeCandidate.prospect.address}</p> : null}
+              <h2 ref={nameRef} tabIndex={-1} className="break-words text-xl font-semibold leading-tight text-slate-950 outline-none">{companyName(activeCandidate)}</h2>
+              <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+                {activeCandidate.contact.name && activeCandidate.contact.name !== companyName(activeCandidate) ? <p className="text-slate-600">{activeCandidate.contact.name}</p> : null}
+                <p className="font-medium tabular-nums text-slate-800">{activeCandidate.contact.phone}</p>
+              </div>
+              {activeCandidate.prospect.address ? <p className="mt-2 text-xs leading-5 text-slate-500">{activeCandidate.prospect.address}</p> : null}
               {activeCandidate.listingTitles.length ? <p className="mt-1 text-xs text-slate-500">Pursuit: {activeCandidate.listingTitles.slice(0, 2).join(' · ')}</p> : null}
-              <Link href={'/app?prospectId=' + encodeURIComponent(activeCandidate.prospect.id)} onClick={() => {
-                try { window.localStorage.setItem('levelcre:focusProspectId', activeCandidate.prospect.id); } catch {}
-              }} className="mt-2 inline-flex min-h-6 items-center text-xs font-medium text-blue-700 underline-offset-2 hover:underline">View linked record<ArrowRight className="ml-1 h-3 w-3" /></Link>
               {!telHref && !session ? <p className="mt-2 text-xs leading-4 text-amber-700">This record needs one dialable number. Check the linked record or skip for now.</p> : null}
-              {activeCandidate.recentActivity[0] ? (
-                <p className="mt-2 flex items-start gap-1.5 text-xs leading-4 text-slate-500"><Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span className="line-clamp-2">{activeCandidate.recentActivity[0].notes || activeCandidate.recentActivity[0].outcome.replaceAll('_', ' ')}</span></p>
+              {recentActivity ? (
+                <details key={activeCandidate.prospect.id} className="group mt-3 border-t border-slate-100">
+                  <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between rounded text-xs text-slate-500 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 [&::-webkit-details-marker]:hidden">Recent activity<ChevronDown aria-hidden="true" className="h-3.5 w-3.5 transition-transform group-open:rotate-180" /></summary>
+                  <p className="pb-2 text-xs leading-5 text-slate-600">{recentActivity.notes || recentActivity.outcome.replaceAll('_', ' ')}</p>
+                </details>
               ) : null}
               {session ? <p className={cn('mt-2 text-xs font-medium', startMutation.isError ? 'text-amber-700' : 'text-emerald-700')}>{session.recorded ? 'Call started' : startMutation.isError ? 'Call start not recorded' : 'Saving call start...'}</p> : null}
             </div>
 
             <div className="border-t border-slate-100 px-4 py-3">
               <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
-                {session ? <Button variant="ghost" className="h-11 px-2 text-xs" disabled={busy} onClick={() => discardMutation.mutate(session)}>Didn't call</Button> : <Button variant="outline" className="h-11 px-3" disabled={candidates.length < 2} onClick={() => setActiveIndex((index) => (index + 1) % candidates.length)}>Skip</Button>}
+                {session ? <Button variant="ghost" className="h-11 px-2 text-xs text-slate-500" disabled={busy} onClick={() => discardMutation.mutate(session)}>Didn't call</Button> : <Button variant="ghost" className="h-11 px-3 text-slate-500" disabled={candidates.length < 2} onClick={() => setActiveIndex((index) => (index + 1) % candidates.length)}>Skip</Button>}
                 {session ? (
-                  <Button className="h-11 gap-2 bg-emerald-600 text-sm font-bold hover:bg-emerald-700" disabled={busy} onClick={() => confirm()}>{outcomeMutation.isPending ? 'Confirming...' : discardMutation.isPending ? 'Undoing...' : 'I called · next'}<ArrowRight className="h-4 w-4" /></Button>
+                  <Button className="h-11 gap-2 bg-emerald-700 text-sm font-semibold hover:bg-emerald-800" disabled={busy} onClick={() => confirm()}>{outcomeMutation.isPending ? 'Confirming...' : discardMutation.isPending ? 'Undoing...' : 'I called · next'}<ArrowRight className="h-4 w-4" /></Button>
                 ) : telHref ? (
-                  <Button asChild className="h-11 bg-blue-600 text-sm font-bold hover:bg-blue-700"><a href={telHref} onClick={startCall}><Phone className="mr-2 h-4 w-4 shrink-0" /><span className="truncate">Call {displayName(activeCandidate)}</span></a></Button>
+                  <Button asChild className="h-11 bg-blue-600 text-sm font-semibold hover:bg-blue-700"><a href={telHref} onClick={startCall}><Phone className="mr-2 h-4 w-4 shrink-0" /><span className="truncate">Call {displayName(activeCandidate)}</span></a></Button>
                 ) : <Button className="h-11" disabled>Check phone number</Button>}
               </div>
-              <p className="mt-2 text-center text-[10px] text-slate-500">{session ? 'Confirm the attempt. Saved to this record and your activity.' : 'Opens your dialer. Confirm after trying the call.'}</p>
+              <p className="mt-2 text-center text-[11px] text-slate-500">{session ? 'Confirm after trying the call.' : 'Opens your dialer.'}</p>
 
               {session ? (
                 <div className="mt-2">
@@ -354,14 +360,14 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
         ) : null}
 
         {upcoming.length ? (
-          <section className="overflow-hidden rounded-lg border border-slate-200 bg-white" aria-label="Next companies">
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5"><h2 className="text-xs font-semibold text-slate-700">Up next</h2><span className="text-[10px] text-slate-500">Next company after confirmation</span></div>
+          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Next companies">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5"><h2 className="text-xs font-semibold text-slate-700">Up next</h2><span className="text-[11px] text-slate-500">{queueQuery.data?.totalEligible ?? candidates.length} in queue</span></div>
             <ol className="divide-y divide-slate-100">
               {upcoming.map((candidate, index) => (
                 <li key={candidate.prospect.id} className="flex items-start gap-3 px-4 py-2.5">
                   <span className="mt-0.5 w-4 shrink-0 text-xs tabular-nums text-slate-400">{index + 1}</span>
-                  <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-slate-800">{companyName(candidate)}</p><p className="mt-0.5 truncate text-[11px] text-slate-500">{candidate.contact.name ? candidate.contact.name + ' · ' : ''}{candidate.contact.phone}</p></div>
-                  <span className="mt-0.5 max-w-[35%] text-right text-[10px] font-medium leading-4 text-blue-700">{candidate.reasons[0] || 'Ready'}</span>
+                  <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-800">{companyName(candidate)}</p><p className="mt-0.5 truncate text-[11px] text-slate-500">{candidate.contact.name ? candidate.contact.name + ' · ' : ''}{candidate.contact.phone}</p></div>
+                  <span className="mt-0.5 max-w-[35%] text-right text-[10px] leading-4 text-slate-500">{candidate.reasons[0] || 'Ready'}</span>
                 </li>
               ))}
             </ol>

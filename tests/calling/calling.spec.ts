@@ -27,7 +27,7 @@ const candidates = ['Morgan Lee', 'Vas Patel', 'Jim Carter', 'Alex Rivera', 'Jor
     lastContactDate: null,
   },
   listingTitles: [],
-  recentActivity: [],
+  recentActivity: [{ id: `calling-history-${index + 1}`, type: 'call', outcome: 'attempted', occurredAt: '2026-10-06T18:00:00.000Z', notes: `Saved context for Calling Company ${index + 1}.` }],
 }));
 
 async function json(route: Route, body: unknown, status = 200) {
@@ -153,6 +153,17 @@ async function dial(page: Page, name = 'Morgan Lee') {
   await page.getByRole('link', { name: `Call ${name}`, exact: true }).click();
 }
 
+async function assertUnobscuredReward(page: Page) {
+  const reward = page.getByText('Call saved · +15', { exact: true });
+  await expect(reward).toBeVisible();
+  await expect.poll(() => reward.evaluate((title) => {
+    const bounds = title.getBoundingClientRect();
+    return [0.1, 0.9].every((x) => [0.1, 0.9].every((y) =>
+      title.contains(document.elementFromPoint(bounds.x + bounds.width * x, bounds.y + bounds.height * y))));
+  }), { message: 'The complete reward title must be unobscured by the fixed header' }).toBe(true);
+  return reward.locator('xpath=ancestor::li[1]');
+}
+
 test('two clicks confirm a call and present the next contact without notes or scheduling', async ({ page }) => {
   const scenario = await installCallingScenario(page);
   await expect(page.getByText('Started today', { exact: true })).toBeVisible();
@@ -161,10 +172,12 @@ test('two clicks confirm a call and present the next contact without notes or sc
   await dial(page);
   await expect.poll(() => scenario.progress().startedToday).toBe(1);
   await expect(page.getByTestId('calls-started-today')).toHaveText('1');
-  await expect(page.getByText('Call saved · +15 XP', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Call saved · +15', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'I called · next', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
-  await expect(page.getByText('Call saved · +15 XP', { exact: true })).toBeVisible();
+  const savedNotification = await assertUnobscuredReward(page);
+  await expect(savedNotification.getByText('Calling Company 1', { exact: true })).toBeVisible();
+  await expect(savedNotification).not.toContainText(/\bXP\b|Next company ready/);
   expect(scenario.starts).toHaveLength(1);
   expect(scenario.confirmations).toHaveLength(1);
   expect(scenario.confirmations[0]).toMatchObject({ clientEventId: scenario.starts[0].clientEventId, outcome: 'attempted', notes: '' });
@@ -181,7 +194,7 @@ test('refresh reconciles the same broker-scoped pending call without a second st
   await page.reload();
   await expect(page.getByRole('button', { name: 'I called · next', exact: true })).toBeVisible();
   await expect.poll(() => scenario.starts.length).toBe(2);
-  await expect(page.getByRole('heading', { name: 'Morgan Lee', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'I called · next', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
   expect(scenario.starts).toHaveLength(2);
@@ -237,7 +250,7 @@ test('failed confirmation retains the active card and retry does not create a ne
   await expect.poll(() => scenario.progress().startedToday).toBe(1);
   await page.getByRole('button', { name: 'I called · next', exact: true }).click();
   await expect(page.getByText('Recording failed', { exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Morgan Lee', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'I called · next', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
@@ -307,7 +320,7 @@ test('a lost response retries the same explicit confirmation without a second cr
   expect(scenario.confirmations[1]).toEqual(scenario.confirmations[0]);
   expect(scenario.progress()).toMatchObject({ startedToday: 1, confirmedToday: 1 });
   await expect(page.getByText('Call already recorded', { exact: true })).toBeVisible();
-  await expect(page.getByText('Call saved · +15 XP', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Call saved · +15', { exact: true })).toHaveCount(0);
 });
 
 test('a restored call already confirmed elsewhere advances without dialing or confirming again', async ({ page }) => {
@@ -395,9 +408,17 @@ test('phone-sized calling controls stay in view with no horizontal overflow', as
 
 test('compact call page provides company and contact context with several companies next', async ({ page }, testInfo) => {
   await installCallingScenario(page);
-  await expect(page.getByText('Calling Company 1', { exact: true })).toBeVisible();
-  await expect(page.getByText('Morgan Lee', { exact: true })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'View linked record', exact: true })).toHaveAttribute('href', '/app?prospectId=calling-prospect-1');
+  const currentCall = page.getByRole('region', { name: 'Current call', exact: true });
+  await expect(currentCall.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(currentCall).toContainText('Morgan Lee');
+  await expect(page.getByRole('link', { name: 'View record', exact: true })).toHaveAttribute('href', '/app?prospectId=calling-prospect-1');
+  const recentActivity = currentCall.locator('details');
+  await expect(recentActivity).not.toHaveAttribute('open');
+  await expect(recentActivity.getByText('Saved context for Calling Company 1.', { exact: true })).toBeHidden();
+  await recentActivity.locator('summary').click();
+  await expect(recentActivity).toHaveAttribute('open', '');
+  await expect(recentActivity.getByText('Saved context for Calling Company 1.', { exact: true })).toBeVisible();
+  await recentActivity.locator('summary').click();
   const nextCompanies = page.getByRole('region', { name: 'Next companies', exact: true });
   await expect(nextCompanies).toBeVisible();
   for (const number of [2, 3, 4, 5]) {
@@ -412,10 +433,15 @@ test('compact call page provides company and contact context with several compan
   await expect(page.getByText('Call started', { exact: true })).toBeVisible();
   await expect(page.getByTestId('calls-started-today')).toHaveText('1');
   await page.screenshot({ path: `work/calling-playwright/${capturePrefix}-02-started.png` });
+  await recentActivity.locator('summary').click();
   await page.getByRole('button', { name: 'I called · next', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  await expect(currentCall.getByRole('heading', { name: 'Calling Company 2', exact: true })).toBeFocused();
+  await expect(recentActivity).not.toHaveAttribute('open');
+  await expect(recentActivity.getByText('Saved context for Calling Company 2.', { exact: true })).toBeHidden();
   await expect(page.getByTestId('calls-confirmed-today')).toHaveText('1');
-  await page.screenshot({ path: `work/calling-playwright/${capturePrefix}-03-next.png` });
+  await assertUnobscuredReward(page);
+  await page.screenshot({ path: `work/calling-playwright/${capturePrefix}-03-next.png`, animations: 'disabled' });
 });
 
 test('calling stays reachable from the desktop tools and under Today on the five-tab mobile navigation', async ({ page }, testInfo) => {

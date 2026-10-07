@@ -32,6 +32,17 @@ async function localRequest(request: APIRequestContext, path: string, method = '
   return response.json();
 }
 
+async function assertUnobscuredReward(page: Page) {
+  const reward = page.getByText('Call saved · +15', { exact: true });
+  await expect(reward).toBeVisible();
+  await expect.poll(() => reward.evaluate((title) => {
+    const bounds = title.getBoundingClientRect();
+    return [0.1, 0.9].every((x) => [0.1, 0.9].every((y) =>
+      title.contains(document.elementFromPoint(bounds.x + bounds.width * x, bounds.y + bounds.height * y))));
+  }), { message: 'The complete reward title must be unobscured by the fixed header' }).toBe(true);
+  return reward.locator('xpath=ancestor::li[1]');
+}
+
 // The map canvas is deliberately inert. Actual Home routing, prospect fields,
 // the ProspectEditPanel Activity tab, and its SQL-backed queries still run.
 const inertMapsModule = `
@@ -105,6 +116,8 @@ async function installLocalSnapshot(page: Page, brokerId: string) {
       url: new URL(`${url.pathname}${url.search}`, harness).href,
       headers: { ...request.headers(), ...harnessHeaders },
       maxRedirects: 0,
+      // Retry a reset read socket once; never replay a call mutation here.
+      maxRetries: request.method() === 'GET' ? 1 : 0,
     });
     await route.fulfill({ response });
   });
@@ -182,11 +195,11 @@ test('real copied prospects feed calls, asset history, scorecard, badges and XP 
   await expect(page.getByRole('heading', { name: 'Calls', exact: true })).toBeVisible();
   await expect(page.getByTestId('calls-confirmed-today')).toHaveText(String(baseline.progress.confirmedToday));
   await selectSafelyDialableCard(page);
-  await expect(page.getByRole('link', { name: 'View linked record', exact: true })).toHaveAttribute('href', `/app?prospectId=${firstId}`);
+  await expect(page.getByRole('link', { name: 'View record', exact: true })).toHaveAttribute('href', `/app?prospectId=${firstId}`);
   await page.screenshot({ path: `${captureDirectory}/${prefix}-01-real-ready.png`, fullPage: true });
 
   // Warm the real prospect history and scorecard/badge query caches in this SPA.
-  await page.getByRole('link', { name: 'View linked record', exact: true }).click();
+  await page.getByRole('link', { name: 'View record', exact: true }).click();
   await expect(page.getByTestId('inert-map-canvas')).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Activity', exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Activity', exact: true }).click();
@@ -199,14 +212,18 @@ test('real copied prospects feed calls, asset history, scorecard, badges and XP 
   await navigateWithoutReload(page, '/app/inbox');
   await assertActivityFootprint(page, baseline);
   await navigateWithoutReload(page, '/app/calls');
+  // Let the inert map's transient loading notification finish before Calls captures.
+  await expect(page.getByText('Drawing tools are still loading', { exact: true })).toBeHidden();
   await selectSafelyDialableCard(page);
 
   const completed: string[] = [];
   for (let index = 0; index < 5; index++) {
     await selectSafelyDialableCard(page);
     const firstUpcomingCompany = (await page.getByRole('region', { name: 'Next companies', exact: true }).getByRole('listitem').first().locator('p').first().textContent())!.trim();
-    const linkedRecord = await page.getByRole('link', { name: 'View linked record', exact: true }).getAttribute('href');
+    const linkedRecord = await page.getByRole('link', { name: 'View record', exact: true }).getAttribute('href');
     const prospectId = new URL(linkedRecord!, 'http://127.0.0.1').searchParams.get('prospectId')!;
+    const calledCandidate = validRows.find((candidate: any) => candidate.prospect.id === prospectId)!;
+    const calledCompany = calledCandidate.contact.company || calledCandidate.prospect.businessName || calledCandidate.prospect.name;
     completed.push(prospectId);
     await page.getByRole('link', { name: /^Call / }).click();
     await expect(page.getByText('Call started', { exact: true })).toBeVisible();
@@ -216,7 +233,7 @@ test('real copied prospects feed calls, asset history, scorecard, badges and XP 
       expect(started.production).toHaveLength(baseline.production.length);
       expect(started.counts.interactions).toBe(baseline.counts.interactions);
       expect(started.skills.followUp).toBe(baseline.skills.followUp);
-      await expect(page.getByText('Call saved · +15 XP', { exact: true })).toHaveCount(0);
+      await expect(page.getByText('Call saved · +15', { exact: true })).toHaveCount(0);
       await page.screenshot({ path: `${captureDirectory}/${prefix}-03-real-started.png`, fullPage: true });
     }
     if (index === 1 || index === 2 || index === 3) {
@@ -230,10 +247,12 @@ test('real copied prospects feed calls, asset history, scorecard, badges and XP 
       await page.getByRole('button', { name: 'I called · next', exact: true }).click();
     }
     await expect(page.getByTestId('calls-confirmed-today')).toHaveText(String(baseline.progress.confirmedToday + index + 1));
-    await expect(page.getByText('Call saved · +15 XP', { exact: true })).toBeVisible();
+    const savedNotification = await assertUnobscuredReward(page);
+    await expect(savedNotification.getByText(calledCompany, { exact: true })).toBeVisible();
+    await expect(savedNotification).not.toContainText(/\bXP\b|Next company ready/);
     await expect(page.getByRole('region', { name: 'Current call', exact: true })).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Current call', exact: true }).getByText(firstUpcomingCompany, { exact: true })).toBeVisible();
-    if (index === 0) await page.screenshot({ path: `${captureDirectory}/${prefix}-04-confirmed-next-xp.png`, fullPage: true });
+    await expect(page.getByRole('region', { name: 'Current call', exact: true }).getByRole('heading', { name: firstUpcomingCompany, exact: true })).toBeVisible();
+    if (index === 0) await page.screenshot({ path: `${captureDirectory}/${prefix}-04-confirmed-next-reward.png`, fullPage: true, animations: 'disabled' });
   }
   expect(new Set(completed).size).toBe(5);
   const confirmed: SnapshotState = await localRequest(request, '/simulation/state');
@@ -263,14 +282,14 @@ test('real copied prospects feed calls, asset history, scorecard, badges and XP 
   expect(reconciled.production).toEqual(confirmed.production);
 
   // Undo a sixth click and prove it awards no production or XP.
-  await expect(page.getByText('Call saved · +15 XP', { exact: true })).toBeHidden();
+  await expect(page.getByText('Call saved · +15', { exact: true })).toBeHidden();
   await selectSafelyDialableCard(page);
   await page.getByRole('link', { name: /^Call / }).click();
   await expect(page.getByText('Call started', { exact: true })).toBeVisible();
-  await expect(page.getByText('Call saved · +15 XP', { exact: true })).toBeHidden();
+  await expect(page.getByText('Call saved · +15', { exact: true })).toBeHidden();
   await page.getByRole('button', { name: "Didn't call", exact: true }).click();
   await expect(page.getByTestId('calls-started-today')).toHaveText(String(confirmed.progress.startedToday));
-  await expect(page.getByText('Call saved · +15 XP', { exact: true })).toBeHidden();
+  await expect(page.getByText('Call saved · +15', { exact: true })).toBeHidden();
   const final: SnapshotState = await localRequest(request, '/simulation/state');
   expect(final.production).toEqual(confirmed.production);
   expect(final.skills).toEqual(confirmed.skills);
