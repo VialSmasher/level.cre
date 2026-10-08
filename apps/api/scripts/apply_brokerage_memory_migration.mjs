@@ -8,6 +8,7 @@ const migrationNames = [
   '0018_brokerage_memory.sql',
   '0019_prospect_merge.sql',
   '0020_telemetry_hardening.sql',
+  '0021_prospect_contacts.sql',
 ]
 
 async function main() {

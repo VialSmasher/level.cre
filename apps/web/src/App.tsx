@@ -8,6 +8,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { queryClient } from "./lib/queryClient";
 import { TelemetryProvider } from '@/contexts/TelemetryContext';
 import { AuthProvider } from "@/contexts/AuthContext";
+import { CallingSessionProvider } from '@/features/calling/CallingSessionProvider';
+import { PendingCallBar } from '@/features/calling/PendingCallBar';
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/AppLayout";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
@@ -17,6 +19,7 @@ const Home = lazy(() => import("./pages/home"));
 const DailyDesk = lazy(() => import("./pages/daily-desk"));
 const Knowledge = lazy(() => import("./pages/knowledge"));
 const FollowUp = lazy(() => import("./pages/followup"));
+const MobileCalls = lazy(() => import("./pages/mobile-calls"));
 const Maintenance = lazy(() => import("./pages/maintenance"));
 const Inbox = lazy(() => import("./pages/inbox"));
 const Stats = lazy(() => import("./pages/stats"));
@@ -282,6 +285,18 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
+      <Route path="/app/calls">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <Suspense fallback={<Spinner />}>
+                <MobileCalls />
+              </Suspense>
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
+
       <Route path="/app/inbox">
         <ProtectedRoute>
           <OnboardingCheck>
@@ -445,12 +460,15 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <CallingSessionProvider>
         <TelemetryProvider>
         <TooltipProvider>
           <Toaster />
           <Router />
+          <PendingCallBar />
         </TooltipProvider>
         </TelemetryProvider>
+        </CallingSessionProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

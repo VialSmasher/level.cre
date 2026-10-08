@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from 'pg'
 import { z } from 'zod'
 
 import { normalizeMarketAddress } from '@level-cre/shared'
+import { primaryContactIdentity, reconcilePrimaryContact } from './prospectContactService'
 
 const MERGE_FIELD_KEYS = [
   'name',
@@ -121,6 +122,7 @@ type ProspectSnapshot = {
 
 type RelationshipKey =
   | 'contactInteractions'
+  | 'prospectContacts'
   | 'listingProspects'
   | 'opportunities'
   | 'activityEvents'
@@ -193,6 +195,10 @@ const FIELD_DEFINITIONS: FieldDefinition[] = [
 
 const RELATIONSHIP_QUERIES: Array<{ key: RelationshipKey; sql: string }> = [
   {
+    key: 'prospectContacts',
+    sql: `SELECT * FROM public.prospect_contacts WHERE user_id = $1 AND prospect_id IN ($2, $3) ORDER BY id`,
+  },
+  {
     key: 'contactInteractions',
     sql: `SELECT id, prospect_id FROM public.contact_interactions WHERE user_id = $1 AND prospect_id IN ($2, $3) ORDER BY id`,
   },
@@ -214,7 +220,7 @@ const RELATIONSHIP_QUERIES: Array<{ key: RelationshipKey; sql: string }> = [
   },
   {
     key: 'activityEvents',
-    sql: `SELECT id, prospect_id FROM public.activity_events WHERE user_id = $1 AND prospect_id IN ($2, $3) ORDER BY id`,
+    sql: `SELECT id, prospect_id, (source = 'level_cre_mobile_calling' AND event_type = 'call_started' AND evidence_status = 'observed' AND match_status <> 'ignored' AND source_metadata->>'sessionState' = 'started') AS call_pending FROM public.activity_events WHERE user_id = $1 AND prospect_id IN ($2, $3) ORDER BY id`,
   },
   {
     key: 'salesActivityImports',
@@ -251,6 +257,7 @@ const RELATIONSHIP_QUERIES: Array<{ key: RelationshipKey; sql: string }> = [
 ]
 
 const MOVE_QUERIES: Record<RelationshipKey, string> = {
+  prospectContacts: `UPDATE public.prospect_contacts SET prospect_id = $2, is_primary = false WHERE user_id = $1 AND id = ANY($3::varchar[]) AND prospect_id = $4`,
   contactInteractions: `UPDATE public.contact_interactions SET prospect_id = $2 WHERE user_id = $1 AND id = ANY($3::varchar[]) AND prospect_id = $4`,
   listingProspects: `
     UPDATE public.listing_prospects
@@ -309,6 +316,7 @@ function geometryValue(value: ProspectSnapshot['geometry_json']) {
 }
 
 function normalizedJson(value: unknown): unknown {
+  if (value instanceof Date) return value.toISOString()
   if (Array.isArray(value)) return value.map(normalizedJson)
   if (value && typeof value === 'object') {
     return Object.fromEntries(
@@ -317,7 +325,6 @@ function normalizedJson(value: unknown): unknown {
         .map(([key, nested]) => [key, normalizedJson(nested)]),
     )
   }
-  if (value instanceof Date) return value.toISOString()
   return value
 }
 
@@ -540,6 +547,12 @@ function relationshipSummary(
     }]),
   )
   const blockers: Array<{ code: string; message: string; ids: string[] }> = []
+  const pendingCalls = relationships.activityEvents.filter((row) => row.call_pending === true)
+  if (pendingCalls.length) blockers.push({
+    code: 'call_confirmation_pending',
+    message: 'Confirm or undo the pending call before merging these records.',
+    ids: pendingCalls.map((row) => row.id),
+  })
   const listingIds = intersectingValues(relationships.listingProspects, canonicalProspectId, duplicateProspectId, 'listing_id')
   if (listingIds.length) blockers.push({
     code: 'listing_link_collision',
@@ -953,6 +966,25 @@ export async function applyProspectMerge(params: {
       throw new ProspectMergeServiceError('The duplicate prospect changed before it could be archived.', 409, 'duplicate_changed')
     }
 
+    // Preserve an exact existing primary identity when the broker chose that
+    // contact's fields. Other people stay available as additional contacts.
+    const after = await loadProspectPairIncludingMerged(client, params.userId, canonical.id, duplicate.id)
+    if (relationships.prospectContacts.length) {
+      const desiredIdentity = primaryContactIdentity(after.canonical)
+      const selectedPrimary = [...relationships.prospectContacts]
+        .sort((left, right) => Number(right.prospect_id === canonical.id) - Number(left.prospect_id === canonical.id))
+        .find((row) => (
+        row.is_primary === true && !row.archived_at
+        && primaryContactIdentity({ contact_name: row.name, contact_email: row.email, contact_phone: row.phone }) === desiredIdentity
+      ))
+      if (selectedPrimary) {
+        await client.query(`UPDATE public.prospect_contacts SET is_primary=false
+          WHERE user_id=$1 AND prospect_id=$2 AND is_primary=true`, [params.userId, canonical.id])
+        await client.query(`UPDATE public.prospect_contacts SET is_primary=true
+          WHERE id=$1 AND user_id=$2 AND prospect_id=$3`, [selectedPrimary.id, params.userId, canonical.id])
+      }
+      await reconcilePrimaryContact(client, params.userId, after.canonical)
+    }
     const remaining = await loadRelationshipSnapshot(client, params.userId, canonical.id, duplicate.id)
     const remainingCounts = Object.fromEntries(
       (Object.keys(remaining) as RelationshipKey[]).map((key) => [key, rowsForProspect(remaining[key], duplicate.id).length]),
@@ -966,7 +998,6 @@ export async function applyProspectMerge(params: {
       )
     }
 
-    const after = await loadProspectPairIncludingMerged(client, params.userId, canonical.id, duplicate.id)
     await client.query(`
       UPDATE public.prospect_merge_events
       SET after_snapshot = $2::jsonb,
@@ -979,7 +1010,8 @@ export async function applyProspectMerge(params: {
         snapshotVersion: 2,
         canonical: prospectStateSnapshot(after.canonical),
         duplicate: prospectStateSnapshot(after.duplicate),
-      } satisfies ProspectPairStateSnapshot),
+        contactRelationships: remaining.prospectContacts,
+      } satisfies ProspectPairStateSnapshot & { contactRelationships: RelationshipRow[] }),
       JSON.stringify(movedCounts),
       params.userId,
     ])
@@ -1122,7 +1154,7 @@ function storedProspectPairSnapshot(
       'undo_snapshot_invalid',
     )
   }
-  return candidate as ProspectPairStateSnapshot
+  return { snapshotVersion: 2, canonical: candidate.canonical, duplicate: candidate.duplicate }
 }
 
 function storedRelationshipSnapshot(
@@ -1136,7 +1168,8 @@ function storedRelationshipSnapshot(
   const candidate = value as Partial<RelationshipSnapshot>
   const result = {} as RelationshipSnapshot
   for (const key of Object.keys(MOVE_QUERIES) as RelationshipKey[]) {
-    const rows = candidate[key]
+    // Events created before contact rosters had no contacts to restore.
+    const rows = key === 'prospectContacts' && candidate[key] === undefined ? [] : candidate[key]
     if (!Array.isArray(rows) || rows.some((row) => (
       !row
       || typeof row !== 'object'
@@ -1159,7 +1192,9 @@ function orderedRelationshipSnapshot(snapshot: RelationshipSnapshot) {
   return Object.fromEntries(
     (Object.keys(MOVE_QUERIES) as RelationshipKey[]).map((key) => [
       key,
-      [...snapshot[key]].sort((left, right) => left.id.localeCompare(right.id)),
+      [...snapshot[key]].map((row) => key === 'activityEvents'
+        ? { id: row.id, prospect_id: row.prospect_id }
+        : row).sort((left, right) => left.id.localeCompare(right.id)),
     ]),
   )
 }
@@ -1253,6 +1288,11 @@ async function restoreRelationships(
   const restoredCounts = {} as Record<RelationshipKey, number>
   for (const key of Object.keys(MOVE_QUERIES) as RelationshipKey[]) {
     const ids = idsOriginallyOnDuplicate(before[key], duplicateProspectId)
+    if (key === 'prospectContacts') {
+      await restoreContactRelationships(client, userId, canonicalProspectId, duplicateProspectId, before[key])
+      restoredCounts[key] = ids.length
+      continue
+    }
     if (!ids.length) {
       restoredCounts[key] = 0
       continue
@@ -1269,6 +1309,28 @@ async function restoreRelationships(
     restoredCounts[key] = ids.length
   }
   return restoredCounts
+}
+
+async function restoreContactRelationships(
+  client: PoolClient, userId: string, canonicalId: string, duplicateId: string, rows: RelationshipRow[],
+) {
+  const columns = ['source', 'is_primary', 'identity_key', 'name', 'company', 'email', 'phone', 'title', 'additional_phones', 'archived_at', 'created_at', 'updated_at']
+  if (rows.some((row) => row.user_id !== userId || columns.some((key) => !(key in row)))) {
+    throw new ProspectMergeServiceError('The saved contact roster is incomplete. Undo was not attempted.', 409, 'undo_snapshot_invalid')
+  }
+  // Relationship equality was checked before reaching this point. Only a primary
+  // anchor created by this merge can be absent from the pre-merge snapshot.
+  await client.query(`DELETE FROM public.prospect_contacts WHERE user_id=$1 AND prospect_id IN ($2,$3)
+    AND NOT (id=ANY($4::varchar[]))`, [userId, canonicalId, duplicateId, rows.map((row) => row.id)])
+  await client.query(`UPDATE public.prospect_contacts SET is_primary=false
+    WHERE user_id=$1 AND prospect_id IN ($2,$3) AND is_primary=true`, [userId, canonicalId, duplicateId])
+  for (const row of rows) {
+    const values = [row.id, userId, row.prospect_id, ...columns.map((column) => column === 'additional_phones' ? JSON.stringify(row[column]) : row[column])]
+    const assignments = columns.map((column, index) => `${column}=$${index + 4}${column === 'additional_phones' ? '::jsonb' : ''}`)
+    const result = await client.query(`UPDATE public.prospect_contacts SET prospect_id=$3,${assignments.join(',')}
+      WHERE id=$1 AND user_id=$2`, values)
+    if (result.rowCount !== 1) throw new ProspectMergeServiceError('A contact changed after this merge.', 409, 'undo_relationship_changed')
+  }
 }
 
 export async function undoProspectMerge(params: {
@@ -1381,6 +1443,14 @@ export async function undoProspectMerge(params: {
       event.canonical_prospect_id,
       duplicateProspectId,
     )
+    const contactAfter = (event.after_snapshot as Record<string, unknown>).contactRelationships
+    if (contactAfter !== undefined) {
+      expectedCurrentRelationships.prospectContacts = storedRelationshipSnapshot(
+        { ...expectedCurrentRelationships, prospectContacts: contactAfter }, event.canonical_prospect_id, duplicateProspectId,
+      ).prospectContacts
+    } else if (savedRelationships.prospectContacts.length) {
+      throw new ProspectMergeServiceError('The merged contact snapshot is missing.', 409, 'undo_snapshot_invalid')
+    }
     if (!relationshipSnapshotsEqual(currentRelationships, expectedCurrentRelationships)) {
       throw new ProspectMergeServiceError(
         'Prospect relationships were added, removed, or reassigned after the merge. Undo was not attempted.',

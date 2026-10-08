@@ -13,6 +13,7 @@ import {
 } from './prospectMergeService'
 
 const relationshipKeys = [
+  'prospectContacts',
   'contactInteractions',
   'listingProspects',
   'opportunities',
@@ -35,6 +36,7 @@ function emptyRelationships(): TestRelationships {
 }
 
 const relationshipTableToKey = {
+  prospect_contacts: 'prospectContacts',
   contact_interactions: 'contactInteractions',
   listing_prospects: 'listingProspects',
   opportunities: 'opportunities',
@@ -248,6 +250,8 @@ function undoPool(options: { changedProspect?: boolean; eventVisible?: boolean }
         return { rows: [], rowCount: 1 }
       }
       if (/^UPDATE public\.prospect_merge_events/i.test(normalized)) return { rows: [], rowCount: 1 }
+      if (/^(?:UPDATE|DELETE FROM) public\.prospect_contacts/i.test(normalized)) return { rows: [], rowCount: 0 }
+      if (/FROM public\.prospect_contacts/i.test(normalized)) return { rows: [], rowCount: 0 }
       if (/FROM public\.(contact_interactions|listing_prospects|opportunities|activity_events|sales_activity_imports|email_prospect_matches|intel_property_dossiers|brokerage_memory_items|touches|activity_event_links|intel_dossier_entity_links|skill_activities)/i.test(normalized)) {
         return { rows: [], rowCount: 0 }
       }

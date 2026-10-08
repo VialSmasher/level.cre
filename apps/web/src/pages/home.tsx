@@ -5,7 +5,7 @@ import { readInventoryFilters, matchesPropertyFilters, inventoryMapExtent, type 
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { GoogleMap, useJsApiLoader, Polygon, InfoWindow } from '@react-google-maps/api';
 import { Button } from '@/components/ui/button';
-import { Download, MapIcon, Satellite, ChevronLeft, ChevronRight, X, Filter, User, LogOut, Settings, Phone, Handshake, GitMerge } from 'lucide-react';
+import { Download, MapIcon, Satellite, ChevronLeft, ChevronRight, X, Filter, User, LogOut, Settings, Handshake, GitMerge } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MapControls } from '@/features/map/MapControls';
 import { MapContextMenu } from '@/features/map/MapContextMenu';
@@ -21,6 +21,7 @@ import { GamificationToast } from '@/components/GamificationToast';
 import { useToast } from '@/hooks/use-toast';
 import { useGeocode } from '@/hooks/useGeocode';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCallingSession } from '@/features/calling/CallingSessionProvider';
 import { useProfile } from '@/hooks/useProfile';
 import { uniqueSubmarketNames } from '@/lib/submarkets';
 import { nsKey, readJSON, removeKey, writeJSON } from '@/lib/storage';
@@ -580,6 +581,21 @@ export default function HomePage() {
     }
   }, [isDemoMode]);
   
+  const mapCalling = useCallingSession();
+  useEffect(() => {
+    const resolution = mapCalling.resolution;
+    if (resolution?.type !== 'confirmed' || prospectSaveStatus !== 'saved') return;
+    const saved = prospectsData.find(p => p.id === resolution.session.prospectId);
+    if (!saved) return;
+    setSelectedProspect(current => {
+      if (!current || current.id !== saved.id) return current;
+      const fields = ['status', 'followUpDueDate', 'lastContactDate', 'contactName', 'contactCompany', 'contactEmail', 'contactPhone'] as const;
+      if (fields.every(field => current[field] === saved[field])) return current;
+      const patch = Object.fromEntries(fields.map(field => [field, saved[field]]));
+      return { ...current, ...patch } as Prospect;
+    });
+  }, [mapCalling.resolution, prospectsData, prospectSaveStatus]);
+
   // Remove submarkets query - we'll use profile submarkets instead
   
   // Sync React Query data with local state
@@ -2074,6 +2090,8 @@ export default function HomePage() {
     if (!isEditPanelOpen && !editingProspectId) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // Close the active call picker or editor before its parent panel.
+        if (document.querySelector('[data-map-call-overlay]')) return;
         // Act like a save button then close the panel
         e.preventDefault();
         e.stopPropagation();
@@ -2573,6 +2591,16 @@ export default function HomePage() {
           </details> : undefined}
           prospect={selectedProspect}
           saveStatus={prospectSaveStatus}
+          beforePhoneSave={() => flushHomeQueuedSave(selectedProspect.id)}
+          onPhoneSaved={workspace => {
+            const primary = workspace.contacts.find(contact => contact.isPrimary && !contact.archivedAt);
+            if (!primary) return;
+            const patch: Partial<Prospect> = { contactName: primary.name || undefined, contactCompany: primary.company || undefined, contactEmail: primary.email || undefined, contactPhone: primary.phone || undefined };
+            const merge = (p: Prospect) => p.id === workspace.prospect.id ? { ...p, ...patch } : p;
+            setProspects(items => items.map(merge));
+            setSelectedProspect(p => p ? merge(p) : p);
+            queryClient.setQueryData<Prospect[]>(['/api/prospects'], items => items?.map(merge));
+          }}
           values={{
             address: selectedProspect.address || getDisplayAddressValue(selectedProspect.name),
             businessName: selectedProspect.businessName || '',
@@ -2600,21 +2628,7 @@ export default function HomePage() {
           ) : null}
           footerLeadingActions={(
             <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={() => void runQuickLog('call')}
-                    variant="outline"
-                    className="h-8 w-8 p-0"
-                    aria-label="Quick log call"
-                    title="Quick log call"
-                    disabled={quickLogPendingType !== null}
-                  >
-                    <Phone className="h-3.5 w-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Quick call + 30d follow-up</TooltipContent>
-              </Tooltip>
+
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button

@@ -1,3 +1,8 @@
+import { CallingSearchQuerySchema, searchCallingContacts } from './lib/callingSearchService';
+import { ProspectContactError, ProspectContactCreateSchema, ProspectContactUpdateSchema, getCallingWorkspace, createProspectContact, updateProspectContact } from './lib/prospectContactService';
+import { PhoneEnrichmentBatchSchema, PhoneEnrichmentError, getPhoneEnrichmentContext, enrichProspectPhoneBatch } from './lib/phoneEnrichmentService';
+import { derivePhoneReadiness } from './lib/phoneReadiness';
+import { PhoneReadinessError, PhoneResearchStatusSchema, listProspectsNeedingPhone, recordPhoneResearchStatus } from './lib/phoneReadinessService';
 import { getTelemetryInsights } from './lib/telemetryInsights';
 import { inboundWebhookAuthorized } from './lib/inboundWebhookAuth';
 import { ingestionRateLimit, ingestionTrace, RunReceiptSchema, recordRunReceipt, listRunReceipts } from './lib/automationTelemetry';
@@ -92,11 +97,23 @@ import { buildPipelineHealth } from './lib/pipelineHealth';
 import { buildActivityPulse } from './lib/activityPulse';
 import { listProductionActivities } from './lib/productionActivityService';
 import { filterPursuitActivity, summarizePursuitActivity } from './lib/pursuitActivity';
+import { canViewCallingInteraction, excludePrivateCallingSql, PRIVATE_CALL_EVENT_SOURCE } from './lib/callingActivityPrivacy';
 import {
   buildPublicPursuitSnapshot,
   createPursuitShareToken,
   isValidPursuitShareToken,
 } from './lib/pursuitPublicShareService';
+import {
+  MobileCallingError,
+  MobileCallStartSchema,
+  MobileCallDiscardSchema,
+  MobileCallOutcomeSchema,
+  listMobileCallQueue,
+  getMobileCallingProgress,
+  recordMobileCallStart,
+  discardMobileCallStart,
+  recordMobileCallOutcome,
+} from './lib/mobileCallingService';
 import { buildAutomationReconciliation } from './lib/automationReconciliation';
 import { rankEmailCleanup, rankFollowUpReminder } from './lib/salesBriefRanking';
 import { findSupabaseAuthUserByEmail } from './lib/supabaseAuthUsers';
@@ -1510,13 +1527,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       listingIds.length > 0
         ? admin
             .from('contact_interactions')
-            .select('id,listing_id,prospect_id,date')
+            .select('id,user_id,listing_id,prospect_id,date,source_provider')
             .in('listing_id', listingIds)
         : Promise.resolve({ data: [], error: null }),
       linkedProspectIds.length > 0
         ? admin
             .from('contact_interactions')
-            .select('id,listing_id,prospect_id,date')
+            .select('id,user_id,listing_id,prospect_id,date,source_provider')
             .in('prospect_id', linkedProspectIds)
         : Promise.resolve({ data: [], error: null }),
     ]);
@@ -1526,7 +1543,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     for (const interaction of [...(directInteractionResult.data || []), ...(linkedInteractionResult.data || [])]) {
       interactionById.set(interaction.id, interaction);
     }
-    const interactions = Array.from(interactionById.values());
+    const privateCallInteractionIds = new Set<string>();
+    const interactionIds = Array.from(interactionById.keys());
+    for (let offset = 0; offset < interactionIds.length; offset += 200) {
+      const { data: privateCalls, error: privateCallsError } = await admin
+        .from('activity_events')
+        .select('interaction_id')
+        .eq('source', PRIVATE_CALL_EVENT_SOURCE)
+        .in('interaction_id', interactionIds.slice(offset, offset + 200));
+      if (privateCallsError) throw privateCallsError;
+      for (const call of privateCalls || []) privateCallInteractionIds.add(call.interaction_id);
+    }
+    const interactions = Array.from(interactionById.values()).filter((interaction) => (
+      canViewCallingInteraction(interaction, userId, privateCallInteractionIds)
+    ));
 
     const ownerIds = Array.from(new Set(listingRows.map((row: any) => row.user_id).filter(Boolean)));
     const ownerProfileById = new Map<string, any>();
@@ -1996,7 +2026,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         createdAt: contactInteractions.createdAt,
       })
       .from(contactInteractions)
-      .where(inArray(contactInteractions.prospectId, prospectIds));
+      .where(and(
+        inArray(contactInteractions.prospectId, prospectIds),
+        sql`(${contactInteractions.userId} = ${userId} OR ${sql.raw(excludePrivateCallingSql('contact_interactions'))})`,
+      ));
 
     return rows.map((row) => ({
       id: row.id,
@@ -2665,22 +2698,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
               activityCount: sql<number>`COALESCE((
                 SELECT COUNT(*)::int
                 FROM ${contactInteractions} ci
-                WHERE ci.listing_id = ${listings.id}
+                WHERE (ci.listing_id = ${listings.id}
                   OR EXISTS (
                     SELECT 1 FROM ${listingProspects} lp_activity
                     WHERE lp_activity.listing_id = ${listings.id}
                       AND lp_activity.prospect_id = ci.prospect_id
-                  )
+                  ))
+                  AND (ci.user_id = ${userId} OR ${sql.raw(excludePrivateCallingSql('ci'))})
               ), 0)`,
               lastActivityAt: sql<string | null>`(
                 SELECT MAX(ci.date)
                 FROM ${contactInteractions} ci
-                WHERE ci.listing_id = ${listings.id}
+                WHERE (ci.listing_id = ${listings.id}
                   OR EXISTS (
                     SELECT 1 FROM ${listingProspects} lp_activity
                     WHERE lp_activity.listing_id = ${listings.id}
                       AND lp_activity.prospect_id = ci.prospect_id
-                  )
+                  ))
+                  AND (ci.user_id = ${userId} OR ${sql.raw(excludePrivateCallingSql('ci'))})
               )`,
             })
             .from(listings)
@@ -3299,13 +3334,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         pool.query(`
           SELECT ci.id, ci.prospect_id, ci.date, ci.type, ci.outcome
           FROM public.contact_interactions ci
-          WHERE ci.listing_id = $1
+          WHERE (ci.listing_id = $1
             OR EXISTS (
               SELECT 1
               FROM public.listing_prospects lp
               WHERE lp.listing_id = $1
                 AND lp.prospect_id = ci.prospect_id
-            )
+            ))
+            AND ${excludePrivateCallingSql('ci')}
           ORDER BY ci.date DESC, ci.created_at DESC
           LIMIT 500
         `, [listing.id]),
@@ -4253,6 +4289,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (parseResult.data.aiMetadata && ('propertyLink' in parseResult.data.aiMetadata || 'propertyLinkHistory' in parseResult.data.aiMetadata)) {
         return res.status(400).json({message:'Use the building-link endpoint for occupant associations.'});
       }
+      if (parseResult.data.aiMetadata && ('phoneReadiness' in parseResult.data.aiMetadata || 'phoneEnrichment' in parseResult.data.aiMetadata)) {
+        return res.status(400).json({message:'Use the phone research and calling endpoints for phone state.'});
+      }
       if (!isDemo(req) && parseResult.data.propertyClassification !== undefined) {
         const record = await storage.getProspect(req.params.id, userId);
         const link = record && getPropertyLink(record);
@@ -4853,6 +4892,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(await getTelemetryInsights(pool, getUserId(req)));
     } catch (error) { next(error); }
   });
+  const PhoneResearchQuerySchema = z.object({
+    limit: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(1000)).optional(),
+    eligibleOnly: z.enum(['true', 'false']).transform(value => value === 'true').optional(),
+    includeReportedBad: z.enum(['true', 'false']).transform(value => value === 'true').optional(),
+  }).strict();
+  app.get('/api/agent/phone-enrichment/needs-number', requireSalesActivityAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    try {
+      if (isDemo(req)) return res.status(403).json({ message: 'Phone research is unavailable in demo mode.' });
+      const parsed = PhoneResearchQuerySchema.safeParse(req.query);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid phone research query', error: parsed.error.errors });
+      const userId = getUserId(req);
+      const result = await listProspectsNeedingPhone({ pool, userId, limit: parsed.data.limit, eligibleOnly: parsed.data.eligibleOnly ?? true, includeReportedBad: parsed.data.includeReportedBad ?? true });
+      res.json({ actor: { userId, email: (req as any).user?.email || null, role: (req as any).user?.role || 'broker' }, ...result });
+    } catch (error) {
+      if (error instanceof PhoneReadinessError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error building owned phone research queue:', error);
+      res.status(500).json({ message: 'Failed to load phone research queue' });
+    }
+  });
+
+  app.post('/api/agent/phone-enrichment/research-status', requireSalesActivityAuth, ingestionLimit, async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    try {
+      if (isDemo(req)) return res.status(403).json({ message: 'Phone research is unavailable in demo mode.' });
+      const parsed = PhoneResearchStatusSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid phone research status', error: parsed.error.errors });
+      const result = await recordPhoneResearchStatus({ pool, userId: getUserId(req), input: parsed.data });
+      res.json({ ...result, requestId: res.locals.requestId });
+    } catch (error) {
+      if (error instanceof PhoneReadinessError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error saving owned phone research status:', error);
+      res.status(500).json({ message: 'Failed to save phone research status' });
+    }
+  });
+
+  app.get('/api/agent/phone-enrichment/context', requireSalesActivityAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    try {
+      if (isDemo(req)) return res.status(403).json({ message: 'Phone enrichment is unavailable in demo mode.' });
+      const parsed = z.object({
+        limit: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(1000)).optional(),
+      }).strict().safeParse(req.query);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid phone enrichment context query', error: parsed.error.errors });
+      const userId = getUserId(req);
+      const context = await getPhoneEnrichmentContext({ pool, userId, limit: parsed.data.limit });
+      res.json({
+        actor: { userId, email: (req as any).user?.email || null, role: (req as any).user?.role || 'broker' },
+        ...context,
+      });
+    } catch (error) {
+      if (error instanceof PhoneEnrichmentError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error exporting private phone enrichment context:', error);
+      res.status(500).json({ message: 'Failed to load phone enrichment context' });
+    }
+  });
+
+  app.post('/api/agent/phone-enrichment/batch', requireSalesActivityAuth, ingestionLimit, async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    try {
+      if (isDemo(req)) return res.status(403).json({ message: 'Phone enrichment is unavailable in demo mode.' });
+      const parsed = PhoneEnrichmentBatchSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid phone enrichment batch', error: parsed.error.errors });
+      const result = await enrichProspectPhoneBatch({ pool, userId: getUserId(req), input: parsed.data });
+      res.json({ ...result, requestId: res.locals.requestId });
+    } catch (error) {
+      if (error instanceof PhoneEnrichmentError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error enriching owned prospect phones:', error);
+      res.status(500).json({ message: 'Failed to enrich prospect phones' });
+    }
+  });
+
   app.get('/api/agent/mapping-coverage', requireSalesActivityAuth, ingestionLimit, async (req, res, next) => {
     try {
       if (isDemo(req)) return res.json({ groups: [] });
@@ -6085,6 +6196,160 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get('/api/calling/prospects/:prospectId/workspace', requireAuth, async (req, res) => {
+    try {
+      if (isDemo(req)) return res.status(404).json({ message: 'Contact workspace is unavailable in demo mode.' });
+      const contactId = req.query.contactId;
+      if (contactId !== undefined && (typeof contactId !== 'string' || !z.string().uuid().safeParse(contactId).success)) return res.status(400).json({ message: 'Invalid contact filter.' });
+      res.json(await getCallingWorkspace({ pool, userId: getUserId(req), prospectId: req.params.prospectId, contactId: contactId as string | undefined }));
+    } catch (error) {
+      if (error instanceof ProspectContactError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error loading private calling workspace:', error);
+      res.status(500).json({ message: 'Failed to load calling workspace' });
+    }
+  });
+
+  app.post('/api/calling/prospects/:prospectId/contacts', requireAuth, async (req, res) => {
+    try {
+      if (isDemo(req)) return res.status(403).json({ message: 'Contact changes are unavailable in demo mode.' });
+      const parsed = ProspectContactCreateSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid contact', error: parsed.error.errors });
+      res.status(201).json(await createProspectContact({ pool, userId: getUserId(req), prospectId: req.params.prospectId, input: parsed.data }));
+    } catch (error) {
+      if (error instanceof ProspectContactError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error creating private contact:', error);
+      res.status(500).json({ message: 'Failed to save contact' });
+    }
+  });
+
+  app.patch('/api/calling/prospects/:prospectId/contacts/:contactId', requireAuth, async (req, res) => {
+    try {
+      if (isDemo(req)) return res.status(403).json({ message: 'Contact changes are unavailable in demo mode.' });
+      if (!z.string().uuid().safeParse(req.params.contactId).success) return res.status(400).json({ message: 'Invalid contact identity.' });
+      const parsed = ProspectContactUpdateSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid contact change', error: parsed.error.errors });
+      res.json(await updateProspectContact({ pool, userId: getUserId(req), prospectId: req.params.prospectId, contactId: req.params.contactId, input: parsed.data }));
+    } catch (error) {
+      if (error instanceof ProspectContactError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error updating private contact:', error);
+      res.status(500).json({ message: 'Failed to update contact' });
+    }
+  });
+
+  app.get('/api/calling/needs-number', requireAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    try {
+      const parsed = PhoneResearchQuerySchema.safeParse(req.query);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid phone research query', error: parsed.error.errors });
+      if (isDemo(req)) return res.json({ generatedAt: new Date().toISOString(), rows: [], total: 0, eligibleNow: 0 });
+      res.json(await listProspectsNeedingPhone({ pool, userId: getUserId(req), limit: parsed.data.limit ?? 25, eligibleOnly: parsed.data.eligibleOnly ?? false, includeReportedBad: parsed.data.includeReportedBad ?? false }));
+    } catch (error) {
+      if (error instanceof PhoneReadinessError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error building missing-phone list:', error);
+      res.status(500).json({ message: 'Failed to load missing-phone list' });
+    }
+  });
+
+  app.get('/api/calling/search', requireAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    const parsed = CallingSearchQuerySchema.safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ message: 'Search by contact or company using 2–120 characters.', error: parsed.error.errors });
+    if (isDemo(req)) return res.json({ query: parsed.data.q, rows: [], hasMore: false });
+    try {
+      const result = await searchCallingContacts({ pool, userId: getUserId(req), input: parsed.data });
+      res.json(result);
+    } catch (error) {
+      console.error('Error searching saved calling contacts:', error);
+      res.status(500).json({ message: 'Failed to search saved contacts' });
+    }
+  });
+
+  app.get('/api/calling/queue', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const limit = Math.min(Math.max(Math.trunc(Number(req.query.limit) || 20), 1), 50);
+      if (isDemo(req)) {
+        return res.json({ generatedAt: new Date().toISOString(), rows: [], total: 0, totalEligible: 0, progress: { startedToday: 0, confirmedToday: 0, connectedToday: 0 }, pendingSessions: [] });
+      }
+      const now = new Date();
+      const [queue, calling] = await Promise.all([
+        listMobileCallQueue({ pool, userId, limit, now, includeCalledToday: req.query.includeCalledToday === 'true' }),
+        getMobileCallingProgress({ pool, userId, now }),
+      ]);
+      res.json({ generatedAt: now.toISOString(), rows: queue.rows, total: queue.rows.length, totalEligible: queue.totalEligible, ...calling });
+    } catch (error) {
+      console.error('Error building mobile call queue:', error);
+      res.status(500).json({ message: 'Failed to build call queue' });
+    }
+  });
+
+  app.post('/api/calling/starts', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = MobileCallStartSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid call start', error: parsed.error.errors });
+      if (isDemo(req)) return res.status(201).json({ duplicate: false, eventId: randomUUID(), prospectId: parsed.data.prospectId, status: 'started', callStartedAt: parsed.data.callStartedAt || new Date().toISOString(), demo: true });
+      await ensureUser(userId, (req as any)?.user?.email || null);
+      const result = await recordMobileCallStart({ pool, userId, input: parsed.data });
+      res.status(result.duplicate ? 200 : 201).json(result);
+    } catch (error) {
+      if (error instanceof MobileCallingError) return res.status(error.status).json({ message: error.message, code: error.code, ...(error.canonicalProspectId ? { canonicalProspectId: error.canonicalProspectId } : {}) });
+      console.error('Error recording call start:', error);
+      res.status(500).json({ message: 'Failed to save call start' });
+    }
+  });
+
+  app.post('/api/calling/discards', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const parsed = MobileCallDiscardSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid call undo', error: parsed.error.errors });
+      if (isDemo(req)) return res.json({ duplicate: false, eventId: randomUUID(), prospectId: parsed.data.prospectId, status: 'discarded', demo: true });
+      const result = await discardMobileCallStart({ pool, userId, input: parsed.data });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof MobileCallingError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error undoing call start:', error);
+      res.status(500).json({ message: 'Failed to undo call start' });
+    }
+  });
+
+  app.post('/api/calling/outcomes', requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const email = (req as any)?.user?.email || null;
+      if (!isDemo(req)) {
+        await ensureUser(userId, email);
+      }
+      const parsed = MobileCallOutcomeSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid call outcome', error: parsed.error.errors });
+      }
+      if (isDemo(req)) {
+        return res.status(201).json({
+          duplicate: false,
+          eventId: randomUUID(),
+          interactionId: randomUUID(),
+          prospectId: parsed.data.prospectId,
+          status: 'confirmed',
+          demo: true,
+        });
+      }
+      const result = await recordMobileCallOutcome({ pool, userId, input: parsed.data });
+      res.status(result.duplicate ? 200 : 201).json(result);
+    } catch (error) {
+      if (error instanceof MobileCallingError) {
+        return res.status(error.status).json({
+          message: error.message,
+          code: error.code,
+          ...(error.canonicalProspectId ? { canonicalProspectId: error.canonicalProspectId } : {}),
+        });
+      }
+      console.error('Error recording mobile call outcome:', error);
+      res.status(500).json({ message: 'Failed to record call outcome' });
+    }
+  });
+
   app.post('/api/broker-actions/log-activity', requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
@@ -6628,7 +6893,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             p.contact_phone,
             p.contact_company,
             p.business_name,
-            p.website_url,
+            COALESCE(to_jsonb(p)->>'website_url',p.ai_metadata->'salesProspectMapping'->>'websiteUrl') AS website_url,
+            p.ai_metadata,
+            COALESCE((SELECT jsonb_agg(jsonb_build_object(
+              'id',pc.id,'is_primary',pc.is_primary,'identity_key',pc.identity_key,
+              'name',pc.name,'email',pc.email,'phone',pc.phone,'company',pc.company,
+              'additional_phones',pc.additional_phones
+            ) ORDER BY pc.is_primary DESC,pc.created_at,pc.id)
+              FROM public.prospect_contacts pc WHERE pc.user_id=p.user_id AND pc.prospect_id=p.id AND pc.archived_at IS NULL), '[]'::jsonb) AS phone_contacts,
             p.created_at,
             p.updated_at,
             MAX(ci.created_at) AS last_interaction_at,
@@ -6706,6 +6978,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const lastTouch = row.last_contact_date || row.last_interaction_at || row.updated_at || row.created_at;
         const inactiveDays = daysSince(lastTouch, now);
         const name = prospectBriefName(row);
+        const phoneReadiness = derivePhoneReadiness(row, Array.isArray(row.phone_contacts) ? row.phone_contacts : [], {now});
+        const preferredPhone = phoneReadiness.usableChoices[0] || null;
+        const callable = phoneReadiness.status === 'ready';
         const prospect = {
           id: row.id,
           name,
@@ -6713,7 +6988,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           address: row.address || null,
           contactName: row.contact_name || null,
           contactEmail: row.contact_email || null,
-          contactPhone: row.contact_phone || null,
+          contactPhone: preferredPhone?.number || null,
+          callContactId: preferredPhone?.contactId || null,
+          callContactName: preferredPhone?.contactName || row.contact_name || null,
+          phoneReadiness,
           listingTitles: row.listing_titles || [],
           lastTouch: briefIso(lastTouch),
           followUpDueDate: briefIso(row.follow_up_due_date),
@@ -6732,7 +7010,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             priorityScore: score,
             title: `${reminderRank.titlePrefix}: ${name}`,
             reason: reminderRank.reason,
-            suggestedAction: row.contact_phone
+            suggestedAction: callable
               ? 'Call first, then log the outcome and set the next follow-up.'
               : 'Send a short follow-up email, then log the outcome and set the next follow-up.',
             source: 'level_cre',
@@ -6740,7 +7018,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             prospect,
             automationHints: {
               checkOutlookThread: Boolean(row.contact_email),
-              enrichWithZoomInfo: !row.contact_phone || !row.contact_email,
+              phoneResearchNeeded: !callable,
+              enrichWithZoomInfo: !row.contact_email,
             },
           });
         }
@@ -6755,19 +7034,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
             priorityScore: score,
             title: `Revive stale activity: ${name}`,
             reason: `No logged activity for ${inactiveDays} days while status is ${row.status}.`,
-            suggestedAction: row.contact_phone
+            suggestedAction: callable
               ? 'Make a quick check-in call and decide whether this is still real pipeline.'
               : 'Find the best contact, send a check-in, and decide whether to keep this active.',
             source: 'level_cre',
             prospect,
             automationHints: {
               checkOutlookThread: Boolean(row.contact_email),
-              enrichWithZoomInfo: !row.contact_phone || !row.contact_email,
+              phoneResearchNeeded: !callable,
+              enrichWithZoomInfo: !row.contact_email,
             },
           });
         }
 
-        if (!row.contact_phone && !row.contact_email && row.status !== 'no_go') {
+        if (!callable && !row.contact_email && row.status !== 'no_go') {
           const score = row.status === 'listing' || row.status === 'contacted' ? 58 : 36;
           actions.push({
             id: `research:${row.id}`,
@@ -6776,7 +7056,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             priorityScore: score,
             title: `Find a reachable contact: ${name}`,
             reason: 'Prospect is active but missing both phone and email contact details.',
-            suggestedAction: 'Use ZoomInfo to find the likely decision maker and add direct contact info before outreach.',
+            suggestedAction: 'Check the saved contact roster and current company sources for a reachable contact before outreach.',
             source: 'level_cre',
             prospect,
             automationHints: {

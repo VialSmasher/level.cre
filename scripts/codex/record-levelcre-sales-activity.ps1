@@ -9,6 +9,18 @@ param(
     [string] $Company,
     [string] $Email,
     [string] $ContactPhone,
+    [ValidateSet("contact_direct", "company_main")]
+    [string] $PhoneKind,
+    [ValidateSet("mobile", "office")]
+    [string] $PhoneNumberType,
+    [ValidateSet("company_website", "email_signature", "broker_confirmed", "zoominfo", "official_directory")]
+    [string] $PhoneSource,
+    [ValidateLength(0, 2000)]
+    [string] $PhoneEvidenceUrl,
+    [ValidateLength(0, 500)]
+    [string] $PhoneEvidenceId,
+    [string] $PhoneObservedAt,
+    [switch] $PhoneVerified,
     [string] $Subject,
     [string] $Notes,
     [string] $ProspectId,
@@ -40,6 +52,109 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+function Get-LevelCrePhoneEvidence {
+    if (-not $PhoneVerified.IsPresent) { return $null }
+    if ([string]::IsNullOrWhiteSpace($ContactPhone) -or [string]::IsNullOrWhiteSpace($PhoneKind) -or [string]::IsNullOrWhiteSpace($PhoneSource) -or [string]::IsNullOrWhiteSpace($PhoneObservedAt)) {
+        throw "Verified phone capture requires ContactPhone, PhoneKind, PhoneSource, and the original PhoneObservedAt."
+    }
+    $observedAtValue = [DateTimeOffset]::MinValue
+    if ($PhoneObservedAt -notmatch '^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$' -or -not [DateTimeOffset]::TryParse($PhoneObservedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$observedAtValue)) {
+        throw "PhoneObservedAt must be the original ISO-8601 timestamp with a timezone offset or Z."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PhoneEvidenceUrl)) {
+        $evidenceUri = $null
+        if (-not [Uri]::TryCreate($PhoneEvidenceUrl, [UriKind]::Absolute, [ref]$evidenceUri) -or $evidenceUri.Scheme -notin @('http', 'https') -or -not [string]::IsNullOrEmpty($evidenceUri.UserInfo)) {
+            throw "PhoneEvidenceUrl must be an HTTP(S) evidence page without embedded credentials."
+        }
+    }
+    if ($PhoneSource -in @('company_website', 'official_directory') -and [string]::IsNullOrWhiteSpace($PhoneEvidenceUrl)) {
+        throw "This phone source requires its public PhoneEvidenceUrl."
+    }
+    if ($PhoneSource -eq 'zoominfo' -and [string]::IsNullOrWhiteSpace($PhoneEvidenceUrl) -and [string]::IsNullOrWhiteSpace($PhoneEvidenceId)) {
+        throw "ZoomInfo phone evidence requires its source PhoneEvidenceUrl or stable PhoneEvidenceId."
+    }
+    if ($PhoneSource -eq 'email_signature' -and [string]::IsNullOrWhiteSpace($PhoneEvidenceId)) {
+        throw "Email signature phone evidence requires the stable source message/provider PhoneEvidenceId."
+    }
+    $evidence = [ordered]@{
+        kind = $PhoneKind
+        source = $PhoneSource
+        observedAt = $PhoneObservedAt
+        verified = $true
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PhoneNumberType)) {
+        if ($PhoneKind -ne 'contact_direct') { throw 'PhoneNumberType applies only to a named contact_direct number.' }
+        $evidence['directNumberType'] = $PhoneNumberType.ToLowerInvariant()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PhoneEvidenceUrl)) { $evidence['url'] = $PhoneEvidenceUrl }
+    if (-not [string]::IsNullOrWhiteSpace($PhoneEvidenceId)) { $evidence['providerId'] = $PhoneEvidenceId }
+    return $evidence
+}
+
+function Test-LevelCreLegacyMapPhone {
+    param([string] $PhoneValue, $Evidence)
+    # The separate legacy map intake has no phone kind. Never label a company
+    # main line, an unsupported number, or future evidence as a person's direct.
+    if ($null -eq $Evidence -or $Evidence.kind -ne 'contact_direct') { return $false }
+    $observedAtValue = [DateTimeOffset]::MinValue
+    if (-not [DateTimeOffset]::TryParse([string]$Evidence.observedAt, [ref]$observedAtValue) -or $observedAtValue -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) { return $false }
+    $mainNumber = $PhoneValue.Trim() -replace '(?i)\s*(?:;ext=|ext(?:ension)?\.?|x|#)\s*\d{1,8}\s*$', ''
+    if ($mainNumber -notmatch '^\+?[\d\s().-]+$') { return $false }
+    $digitCount = ($mainNumber -replace '\D', '').Length
+    return $digitCount -ge 10 -and $digitCount -le 15
+}
+
+function Get-LevelCreReceiptValue {
+    param($Object, [string]$Name, $Default = $null)
+    if ($null -eq $Object) { return $Default }
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name) -and $null -ne $Object[$Name]) { return $Object[$Name] }
+        return $Default
+    }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -ne $property -and $null -ne $property.Value) { return $property.Value }
+    return $Default
+}
+
+# Local reporting only: phone review never changes email acceptance or retry identity.
+function Get-LevelCrePhoneSummary {
+    param([object[]]$ResultRows = @(), [switch]$SummaryRows)
+    $byActivity = [ordered]@{}
+    $index = 0
+    foreach ($row in $ResultRows) {
+        $phone = if ($SummaryRows) { $row } else { Get-LevelCreReceiptValue $row 'phoneEnrichment' }
+        if ($null -eq $phone) { continue }
+        $externalId = [string](Get-LevelCreReceiptValue $row 'externalActivityId' '')
+        $source = [string](Get-LevelCreReceiptValue $row 'source' '')
+        $key = if ($externalId) { "$source|$externalId" } else { "missing-id:$index" }
+        $status = [string](Get-LevelCreReceiptValue $phone 'status' '')
+        $reason = [string](Get-LevelCreReceiptValue $phone 'reason' '')
+        if ($status -notin @('applied', 'unchanged', 'needs_review', 'error')) {
+            $status = 'unconfirmed'
+            if (-not $reason) { $reason = 'unrecognized_phone_verdict' }
+        }
+        $byActivity[$key] = [pscustomobject]@{
+            externalActivityId = $externalId
+            source = $source
+            prospectId = [string](Get-LevelCreReceiptValue $phone 'prospectId' '')
+            contactId = [string](Get-LevelCreReceiptValue $phone 'contactId' '')
+            status = $status
+            reason = $reason
+        }
+        $index++
+    }
+    $rows = @($byActivity.Values)
+    [pscustomobject]@{
+        reported = $rows.Count
+        applied = @($rows | Where-Object { $_.status -eq 'applied' }).Count
+        unchanged = @($rows | Where-Object { $_.status -eq 'unchanged' }).Count
+        needsReview = @($rows | Where-Object { $_.status -eq 'needs_review' }).Count
+        errors = @($rows | Where-Object { $_.status -eq 'error' }).Count
+        unconfirmed = @($rows | Where-Object { $_.status -eq 'unconfirmed' }).Count
+        results = $rows
+    }
+}
 
 function Get-StableActivityId {
     param([string] $Seed)
@@ -175,10 +290,11 @@ function Flush-Outbox {
     $snapshot = @(Get-OutboxSnapshot $Path)
     $cooldown = @(Get-OutboxSnapshot "$Path.retry-after.jsonl")
     if ($cooldown.Count -and [DateTimeOffset]::Parse([string](Get-ItemValue $cooldown[0] 'retryAt')) -gt [DateTimeOffset]::UtcNow) {
-        return [pscustomobject]@{ applied = 0; rejected = 0; needsReview = 0; queued = $snapshot.Count; blocked = $false; warning = 'Waiting for the server retry interval.' }
+        return [pscustomobject]@{ applied = 0; rejected = 0; needsReview = 0; queued = $snapshot.Count; blocked = $false; warning = 'Waiting for the server retry interval.'; phoneEnrichment = Get-LevelCrePhoneSummary @() }
     }
     $applied = 0; $rejected = 0; $needsReview = 0; $blocked = $false; $warning = $null
     $offset = 0
+    $phoneResultRows = @()
     while ($offset -lt $snapshot.Count) {
         $batch = @(); $bytes = 2048
         while ($offset -lt $snapshot.Count -and $batch.Count -lt 50) {
@@ -199,6 +315,7 @@ function Flush-Outbox {
         $payload[$Collection] = $wireItems
         try {
             $result = Invoke-RecorderRequest $Uri $payload $ApiKey
+            $phoneResultRows += @(Get-LevelCreReceiptValue $result 'results' @())
             $failed = @(Get-FailedBatchItems $batch $result)
             $failedIds = @{}
             foreach ($item in $failed) { $failedIds[[string](Get-ItemValue $item '_deliveryId')] = $true }
@@ -233,6 +350,7 @@ function Flush-Outbox {
                     $single[$Collection] = @($item | Select-Object -Property * -ExcludeProperty '_deliveryId','_queuedAt','_rejection')
                     try {
                         $singleResult = Invoke-RecorderRequest $Uri $single $ApiKey
+                        $phoneResultRows += @(Get-LevelCreReceiptValue $singleResult 'results' @())
                         if (@(Get-FailedBatchItems @($item) $singleResult).Count -eq 0) { Complete-OutboxItems $Path @($item); $applied++ }
                     } catch {
                         $singleResponse = (Get-ItemValue $_.Exception 'Response')
@@ -246,7 +364,7 @@ function Flush-Outbox {
             } else { break }
         }
     }
-    [pscustomobject]@{ applied = $applied; rejected = $rejected; needsReview = $needsReview; queued = @(Get-OutboxSnapshot $Path).Count; blocked = $blocked; warning = $warning }
+    [pscustomobject]@{ applied = $applied; rejected = $rejected; needsReview = $needsReview; queued = @(Get-OutboxSnapshot $Path).Count; blocked = $blocked; warning = $warning; phoneEnrichment = Get-LevelCrePhoneSummary $phoneResultRows }
 }
 
 
@@ -294,6 +412,7 @@ $activity = $null
 $mapCandidate = $null
 $mapQueueWarning = $null
 if (-not $FlushOnly.IsPresent) {
+    $phoneEvidence = Get-LevelCrePhoneEvidence
     if ([string]::IsNullOrWhiteSpace($ExternalActivityId)) {
         $ExternalActivityId = Get-StableActivityId -Seed (@($Status, $ActivityType, $Email, $Subject, $ActivityAt) -join "|")
     }
@@ -320,6 +439,7 @@ if (-not $FlushOnly.IsPresent) {
         addressConfidence = $AddressConfidence
         addressVerified = $AddressVerified.IsPresent
     }
+    if ($null -ne $phoneEvidence) { $activity["phoneEvidence"] = $phoneEvidence }
 
     if ($AddressVerified.IsPresent -and $Status -eq "sent") {
         $mapLatitude = ConvertTo-Coordinate -Value $Latitude -Minimum -90 -Maximum 90
@@ -341,7 +461,6 @@ if (-not $FlushOnly.IsPresent) {
                 company = $Company
                 contactName = $Contact
                 contactEmail = $Email
-                contactPhone = $ContactPhone
                 websiteUrl = $WebsiteUrl
                 address = $Address
                 latitude = $mapLatitude
@@ -354,6 +473,7 @@ if (-not $FlushOnly.IsPresent) {
                 verified = $true
                 notes = "Verified during Codex sales follow-up research."
             }
+            if (Test-LevelCreLegacyMapPhone -PhoneValue $ContactPhone -Evidence $phoneEvidence) { $mapCandidate["contactPhone"] = $ContactPhone }
             Add-ToMapOutbox -Candidate $mapCandidate
         }
     }
@@ -388,10 +508,11 @@ try {
         runStatus = $runStatus; runId = $RunId; producerId = $ProducerId
         flushed = $activityDelivery.applied; mapFlushed = $mapDelivery.applied
         activityOutboxRemaining = $activityDelivery.queued; mapOutboxRemaining = $mapDelivery.queued
+        phoneEnrichment = Get-LevelCrePhoneSummary -ResultRows @($activityDelivery.phoneEnrichment.results + $mapDelivery.phoneEnrichment.results) -SummaryRows
         needsReview = $receipt.needsReview; errors = $rejected; receiptPending = $receiptPending
         activityMessage = $activityDelivery.warning; mapMessage = $mapDelivery.warning
         rejectedOutbox = "$OutboxPath.rejected.jsonl"; mapRejectedOutbox = "$MapOutboxPath.rejected.jsonl"
-    } | ConvertTo-Json -Compress
+    } | ConvertTo-Json -Depth 8 -Compress
 } catch {
     [pscustomobject]@{ status = 'queued_local'; reason = 'outbox_recovery_needed'; message = $_.Exception.Message; outbox = $OutboxPath; mapOutbox = $MapOutboxPath } | ConvertTo-Json -Compress
 }

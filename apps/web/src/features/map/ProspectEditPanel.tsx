@@ -7,7 +7,8 @@ import { PropertyTypePicker } from './PropertyTypePicker';
 import { AssetProfileTabs } from './AssetProfileTabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { PhoneInput } from '@/components/ui/phone-input';
+import { MapCallControl } from '@/features/calling/MapCallControl';
+import type { CallingWorkspace } from '@/lib/mobileCalling';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -145,6 +146,8 @@ type ProspectEditPanelProps = {
   deleteDisabled?: boolean;
   coordinateLabel?: string;
   footerLeadingActions?: ReactNode;
+  beforePhoneSave?: () => Promise<boolean>;
+  onPhoneSaved?: (workspace: CallingWorkspace) => void;
   footerOverlay?: ReactNode;
   onClose: () => void;
   onSaveAction?: () => void;
@@ -193,6 +196,8 @@ export function ProspectEditPanel({
   deleteDisabled = false,
   coordinateLabel,
   footerLeadingActions,
+  beforePhoneSave,
+  onPhoneSaved,
   footerOverlay,
   onClose,
   onSaveAction,
@@ -250,7 +255,7 @@ export function ProspectEditPanel({
   return (
     <div
       data-testid="asset-profile" data-asset-kind="prospect" data-asset-id={prospect.id} data-property-id={property.id}
-      className="absolute bottom-2 left-2 right-2 z-[80] flex max-h-[74dvh] flex-col overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-xl md:left-auto md:right-0 md:top-0 md:bottom-auto md:w-80 md:max-h-[90vh] md:rounded-none md:border-y-0 md:border-r-0 md:border-l"
+      className="absolute bottom-[calc(4rem+env(safe-area-inset-bottom)+0.5rem)] left-2 right-2 z-[80] flex max-h-[74dvh] flex-col overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-xl md:left-auto md:right-0 md:top-0 md:bottom-auto md:w-80 md:max-h-[calc(100dvh-8rem-env(safe-area-inset-bottom))] lg:max-h-[90vh] md:rounded-none md:border-y-0 md:border-r-0 md:border-l"
       style={{ pointerEvents: 'auto' }}
     >
       <div className="sticky top-0 z-10 bg-white border-b px-4 pt-3 pb-2">
@@ -484,10 +489,7 @@ export function ProspectEditPanel({
           </TabsContent>
 
           <TabsContent value="contact" className="space-y-4">
-            {values.contactPhone.replace(/\D/g, '').length >= 7 ? <a
-              href={`tel:${values.contactPhone.replace(/[^\d+]/g, '')}`}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-md bg-slate-900 px-3 text-sm font-semibold text-white hover:bg-slate-800"
-            ><Phone className="h-4 w-4" aria-hidden />Call {values.contactName || values.contactCompany || 'recorded number'}</a> : <p className="text-xs text-slate-500">Add a verified phone number to call this property contact.</p>}
+            <MapCallControl prospect={prospect} disabled={saveStatus !== 'saved'} beforePhoneSave={beforePhoneSave} onPhoneSaved={onPhoneSaved} />
             <div>
               <Label htmlFor={`${fieldId}-website`} className="text-xs font-medium text-gray-700">Website</Label>
               <Input
@@ -540,12 +542,14 @@ export function ProspectEditPanel({
               </div>
               <div>
                 <Label htmlFor={`${fieldId}-phone`} className="text-xs font-medium text-gray-700">Phone</Label>
-                <PhoneInput
+                <Input
+                  type="tel"
+                  maxLength={80}
                   id={`${fieldId}-phone`} data-testid="asset-contact-phone"
                   value={values.contactPhone}
-                  onValueChange={onContactPhoneChange}
+                  onChange={(event) => onContactPhoneChange(event.target.value)}
                   onBlur={onContactPhoneBlur}
-                  placeholder="(000) 000-0000"
+                  placeholder="+1 780 555 0123 ext. 204"
                   className="h-8 text-sm"
                 />
               </div>
@@ -620,6 +624,7 @@ export function ProspectEditPanel({
         <div className="relative flex items-center justify-between gap-2">
           {footerOverlay}
           <div className={`flex items-center gap-1 ${savePulse ? 'animate-pulse' : ''}`}>
+            <MapCallControl prospect={prospect} compact disabled={saveStatus !== 'saved'} beforePhoneSave={beforePhoneSave} onPhoneSaved={onPhoneSaved} />
             {footerLeadingActions}
             {showSaveAction && (
               <Tooltip>

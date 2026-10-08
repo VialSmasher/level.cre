@@ -45,3 +45,21 @@ test('generic metadata replacement preserves validated links, handles null, and 
     assert.equal(Array.isArray(cleared),false)
   } finally {await db.close()}
 })
+
+
+test('generic imports preserve current phone findings and provenance, including stale or null metadata', async () => {
+  const db = new PGlite(), dialect = new PgDialect()
+  try {
+    await db.exec("CREATE TABLE assets(metadata jsonb); INSERT INTO assets VALUES (null)")
+    const apply = async (value: Record<string,unknown> | null) => {
+      const query = dialect.sqlToQuery(sql`UPDATE assets SET metadata=${metadataPatchPreservingPropertyLinks(sql`metadata`,value)} RETURNING metadata`)
+      return (await db.query<{metadata:any}>(query.sql,query.params)).rows[0].metadata
+    }
+    assert.deepEqual(await apply({importReceipt:'one',phoneReadiness:{blocks:[]},phoneEnrichment:{source:'injected'}}),{importReceipt:'one'})
+    const protectedState = {phoneReadiness:{blocks:[{reason:'wrong_number',phoneKey:'7805550100'}]},phoneEnrichment:{source:'company_website',observedAt:'2026-10-08T12:00:00Z'}}
+    await db.query('UPDATE assets SET metadata=$1::jsonb',[JSON.stringify({...protectedState,old:'value'})])
+    assert.deepEqual(await apply({importReceipt:'two',phoneReadiness:{blocks:[]},phoneEnrichment:null}),{...protectedState,importReceipt:'two'})
+    assert.deepEqual(await apply(null),protectedState)
+    assert.deepEqual(await apply({importReceipt:'three'}),{...protectedState,importReceipt:'three'})
+  } finally {await db.close()}
+})
