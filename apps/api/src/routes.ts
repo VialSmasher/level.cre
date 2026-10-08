@@ -1,3 +1,4 @@
+import { CallingSearchQuerySchema, searchCallingContacts } from './lib/callingSearchService';
 import { ProspectContactError, ProspectContactCreateSchema, ProspectContactUpdateSchema, getCallingWorkspace, createProspectContact, updateProspectContact } from './lib/prospectContactService';
 import { PhoneEnrichmentBatchSchema, PhoneEnrichmentError, getPhoneEnrichmentContext, enrichProspectPhoneBatch } from './lib/phoneEnrichmentService';
 import { derivePhoneReadiness } from './lib/phoneReadiness';
@@ -6246,6 +6247,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof PhoneReadinessError) return res.status(error.status).json({ message: error.message, code: error.code });
       console.error('Error building missing-phone list:', error);
       res.status(500).json({ message: 'Failed to load missing-phone list' });
+    }
+  });
+
+  app.get('/api/calling/search', requireAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    const parsed = CallingSearchQuerySchema.safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ message: 'Search by contact or company using 2–120 characters.', error: parsed.error.errors });
+    if (isDemo(req)) return res.json({ query: parsed.data.q, rows: [], hasMore: false });
+    try {
+      const result = await searchCallingContacts({ pool, userId: getUserId(req), input: parsed.data });
+      res.json(result);
+    } catch (error) {
+      console.error('Error searching saved calling contacts:', error);
+      res.status(500).json({ message: 'Failed to search saved contacts' });
     }
   });
 

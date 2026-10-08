@@ -22,6 +22,8 @@ import {
 import { cn } from '@/lib/utils'
 import { callingEmailLink } from '@/lib/callingEmail'
 import { CallingContext } from '@/features/calling/CallingContext'
+import { CallingSearch } from '@/features/calling/CallingSearch'
+import { searchedCallingCandidate } from '@/lib/callingSearch'
 
 type CompanyVisit = { candidate: CallQueueCandidate; contactId: string | null; phone: string }
 
@@ -181,6 +183,17 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     if (sessionRef.current || candidate.prospect.id === activeCandidate?.prospect.id) return
     if (activeCandidate) rememberCompany({ candidate: activeCandidate, contactId: selectedContactId, phone })
     prepareCompany({ candidate, contactId: null, phone: '' })
+  }
+
+  const selectSearchContact = (workspace: CallingWorkspace, contact: CallingContact) => {
+    if (sessionRef.current || calling.busy || !calling.recoveryReady) return false
+    if (activeCandidate) rememberCompany({ candidate: activeCandidate, contactId: selectedContactId, phone })
+    requestedRecordHandled.current = true
+    const candidate = searchedCallingCandidate(workspace, contact)
+    const choice = preferredCallingChoice(workspace.phoneReadiness, contact.id)
+    prepareCompany({ candidate, contactId: contact.id, phone: choice?.number || contactPhoneOptions(contact, workspace.phoneReadiness || null)[0]?.number || '' })
+    setAnnouncement(contactName(contact) + ' selected. No call has started.')
+    return true
   }
 
   const reviewNumber = (row: NeedsNumberRow) => selectCompany({
@@ -385,8 +398,9 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
         ) : null}
 
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.43fr)_minmax(340px,1fr)]">
+        <div className="min-w-0 xl:col-start-2 xl:row-start-1"><CallingSearch brokerId={brokerId} locked={Boolean(session) || busy || !calling.recoveryReady} onSelect={selectSearchContact} /></div>
         {activeCandidate ? (
-          <section className="min-w-0 overflow-hidden rounded-xl border border-blue-100 bg-white" aria-label="Current call">
+          <section className="min-w-0 overflow-hidden rounded-xl border border-blue-100 bg-white xl:col-start-1 xl:row-start-1 xl:row-span-2" aria-label="Current call">
             <div className="bg-blue-50/70 px-4 pb-4 pt-4 sm:px-6 sm:pt-5">
               <div className="mb-3 flex items-center justify-between gap-3 text-xs">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -465,10 +479,10 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
             </>}
           </section>
         ) : !queueQuery.isLoading && !queueQuery.isError ? (
-          <section className="rounded-lg border border-slate-200 bg-white p-5 text-center"><Check className="mx-auto h-6 w-6 text-emerald-600" /><h2 className="mt-2 text-lg font-bold text-slate-950">You're through the queue</h2><p className="mt-2 text-sm text-slate-500">{skippedIds.size ? skippedIds.size + ' companies skipped for now.' : progress.confirmedToday ? progress.confirmedToday + ' calls confirmed today. Good progress.' : 'No prospects with a saved phone number are ready.'}</p><div className="mt-4 flex flex-wrap justify-center gap-2"><Button variant="ghost" className="h-11 gap-1 text-xs text-slate-500" aria-label="Previous company" disabled={!previousCompanies.length} onClick={previousCompany}><ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />Previous</Button>{skippedIds.size ? <Button variant="outline" onClick={revisitSkipped}>Revisit skipped companies</Button> : null}<Button variant="outline" onClick={() => { setCompletedIds(new Set()); setSkippedIds(new Set()); setIncludeCalledToday(true) }}>Show contacts called today</Button></div></section>
+          <section className="rounded-lg border border-slate-200 bg-white p-5 text-center xl:col-start-1 xl:row-start-1 xl:row-span-2"><Check className="mx-auto h-6 w-6 text-emerald-600" /><h2 className="mt-2 text-lg font-bold text-slate-950">You're through the queue</h2><p className="mt-2 text-sm text-slate-500">{skippedIds.size ? skippedIds.size + ' companies skipped for now.' : progress.confirmedToday ? progress.confirmedToday + ' calls confirmed today. Good progress.' : 'No prospects with a saved phone number are ready.'}</p><div className="mt-4 flex flex-wrap justify-center gap-2"><Button variant="ghost" className="h-11 gap-1 text-xs text-slate-500" aria-label="Previous company" disabled={!previousCompanies.length} onClick={previousCompany}><ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />Previous</Button>{skippedIds.size ? <Button variant="outline" onClick={revisitSkipped}>Revisit skipped companies</Button> : null}<Button variant="outline" onClick={() => { setCompletedIds(new Set()); setSkippedIds(new Set()); setIncludeCalledToday(true) }}>Show contacts called today</Button></div></section>
         ) : null}
 
-        <aside className="min-w-0 space-y-4 xl:sticky xl:top-4">
+        <aside className="min-w-0 space-y-4 xl:col-start-2 xl:row-start-2 xl:sticky xl:top-4">
         {activeCandidate || upcoming.length ? (
           <section className="min-w-0 overflow-hidden rounded-xl border border-blue-100 bg-white" aria-label="Next companies">
             <div className="flex items-center justify-between border-b border-blue-100 bg-blue-50/70 px-5 py-3"><h2 className="text-base font-semibold text-slate-900 sm:text-lg">Calling queue</h2><span className="text-xs tabular-nums text-slate-600">{queueQuery.data?.totalEligible ?? candidates.length} in queue</span></div>

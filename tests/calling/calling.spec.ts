@@ -45,8 +45,8 @@ const candidates = ['Morgan Lee', 'Vas Patel', 'Jim Carter', 'Alex Rivera', 'Jor
     id: `calling-prospect-${index + 1}`,
     name: `Calling prospect ${index + 1}`,
     status: 'prospect',
-    address: null,
-    businessName: null,
+    address: null as string | null,
+    businessName: null as string | null,
     followUpDueDate: null,
     lastContactDate: null,
   },
@@ -58,7 +58,7 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function installCallingScenario(page: Page, options: { startFailures?: number; confirmFailures?: number; lostConfirmationResponses?: number; selectedHistoryDelayMs?: number; workspaceDelayMs?: number; delayedStart?: boolean; rejectedStart?: boolean; unavailableDiscard?: boolean; discardFailures?: number; callsPerDay?: number; mainLineOnly?: boolean; missingEmailPrimary?: boolean; mobileFirst?: boolean; contactEmails?: 'all' | 'primary_only'; touchHistory?: boolean; noAlternates?: boolean; map?: boolean; missingPhone?: boolean; delayedContactSave?: boolean; lostContactSaveResponses?: number } = {}) {
+async function installCallingScenario(page: Page, options: { startFailures?: number; confirmFailures?: number; lostConfirmationResponses?: number; selectedHistoryDelayMs?: number; workspaceDelayMs?: number; delayedStart?: boolean; rejectedStart?: boolean; unavailableDiscard?: boolean; discardFailures?: number; callsPerDay?: number; mainLineOnly?: boolean; missingEmailPrimary?: boolean; mobileFirst?: boolean; contactEmails?: 'all' | 'primary_only'; touchHistory?: boolean; savedSearch?: boolean; differentEmployer?: boolean; delayedSearchQuery?: string; delayedSelectionProspectId?: string; noAlternates?: boolean; map?: boolean; missingPhone?: boolean; delayedContactSave?: boolean; lostContactSaveResponses?: number } = {}) {
   if (options.map) test.setTimeout(45_000); // Home's first lazy module compiles on a cold isolated Vite run.
   const starts: CallRequest[] = [];
   const confirmations: CallRequest[] = [];
@@ -70,6 +70,8 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
   const queueReads: string[] = [];
   const needsNumberReads: string[] = [];
   const workspaceReads: string[] = [];
+  const searchReads: string[] = [];
+  const savedCandidates = [...candidates];
   const contactWrites: Array<{ method: string; prospectId: string; contactId?: string; payload: Record<string, unknown> }> = [];
   const enrichmentWrites: Array<Record<string, any>> = [];
   const legacyCallWrites: CallRequest[] = [];
@@ -77,6 +79,10 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
   const pageErrors: string[] = [];
   if (options.map) page.on('pageerror', (error) => pageErrors.push(error.message));
   const blocks = new Map<string, PhoneBlock[]>();
+  let releaseSearch = () => {};
+  const searchGate = options.delayedSearchQuery ? new Promise<void>((resolve) => { releaseSearch = resolve; }) : Promise.resolve();
+  let releaseSelection = () => {};
+  const selectionGate = options.delayedSelectionProspectId ? new Promise<void>((resolve) => { releaseSelection = resolve; }) : Promise.resolve();
   let releaseStart = () => {};
   const startGate = options.delayedStart ? new Promise<void>((resolve) => { releaseStart = resolve; }) : Promise.resolve();
   let releaseContactSave = () => {};
@@ -85,12 +91,28 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, prospectId: candidate.prospect.id,
     isPrimary: true, ...candidate.contact, title: null, additionalPhones: index === 0 ? [{ label: options.mobileFirst ? 'Mobile' : 'Alternate phone', number: '(780) 555-0101' }] : [], archivedAt: null,
   }]]));
+  if (options.savedSearch) {
+    // Saved accounts are deliberately independent of today's six queue rows.
+    // Dana is the 36th saved account, beyond the queue's normal limit of 25.
+    for (let index = 0; index < 30; index++) {
+      const name = index === 29 ? 'Dana Outside' : index === 0 ? 'No Number Contact' : index === 1 ? 'Unanchored Person' : `Saved Person ${index + 1}`;
+      const company = index === 29 ? 'Beyond Queue Industrial' : index === 0 ? 'Numberless saved company' : index === 1 ? 'Anchorless Industries' : `Saved Company ${index + 1}`;
+      const id = `saved-prospect-${index + 1}`;
+      const candidate = { ...candidates[0], id: 'call:' + id, contact: { ...candidates[0].contact, name, company },
+        prospect: { ...candidates[0].prospect, id, name: company, businessName: company, address: `${100 + index} Test Avenue, Edmonton` }, recentActivity: [] };
+      savedCandidates.push(candidate);
+      roster.set(id, [{ id: `00000000-0000-4000-8000-${String(901 + index).padStart(12, '0')}`, prospectId: id,
+        isPrimary: true, name, company, phone: index === 0 ? null : `(780) 555-${String(200 + index).padStart(4, '0')}`,
+        email: `${index === 29 ? 'dana.outside' : 'saved' + index}@calling.example.test`, title: 'Saved account contact', additionalPhones: [], archivedAt: null }]);
+    }
+  }
   const firstRoster = roster.get(candidates[0].prospect.id)!;
   for (const [index, name] of ['Rowan Singh', 'Casey Davis', 'Avery Kim'].entries()) firstRoster.push({
     id: `00000000-0000-4000-8000-${String(101 + index).padStart(12, '0')}`, prospectId: candidates[0].prospect.id,
     isPrimary: false, name, company: candidates[0].contact.company, phone: `(780) 555-010${index + 2}`,
     email: null, title: index === 0 ? 'Operations' : null, additionalPhones: [], archivedAt: null,
   });
+  if (options.differentEmployer) firstRoster[1].company = 'Operations employer';
   if (options.missingEmailPrimary) { firstRoster[0].phone = null; firstRoster[0].additionalPhones = []; firstRoster[0].email = 'morgan@example.test'; firstRoster.splice(2); }
   if (options.mobileFirst) firstRoster[0].email = 'morgan@example.test';
   if (options.mainLineOnly) {
@@ -104,13 +126,13 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     roster.get(candidates[1].prospect.id)![0].email = contactEmails.vas;
   }
   const readiness = (prospectId: string) => {
-    const candidate = candidates.find((candidate) => candidate.prospect.id === prospectId)!;
+    const candidate = savedCandidates.find((candidate) => candidate.prospect.id === prospectId)!;
     const contacts = roster.get(prospectId)!.filter((contact) => !contact.archivedAt);
     const primary = contacts.find((contact) => contact.isPrimary)!;
     return derivePhoneReadiness({ ...candidate.prospect, contact_name: primary.name, contact_email: primary.email, contact_phone: primary.phone,
       ai_metadata: { phoneReadiness: { blocks: blocks.get(prospectId) || [] }, phoneEnrichment: { observations: options.mobileFirst ? [{contactId:primary.id,number:primary.phone,kind:'contact_direct',directNumberType:'office',status:'applied'}] : [] } } }, contacts);
   };
-  const history = new Map<string, Array<Record<string, unknown>>>(candidates.map((candidate) => [candidate.prospect.id,
+  const history = new Map<string, Array<Record<string, unknown>>>(savedCandidates.map((candidate) => [candidate.prospect.id,
     candidate.recentActivity.map((activity) => ({ ...activity, contactId: null, contactName: null, phoneSnapshot: null }))]));
   history.get(candidates[0].prospect.id)!.unshift(
     { id: 'morgan-attributed', type: 'call', outcome: 'attempted', occurredAt: '2026-10-06T17:00:00.000Z', notes: 'Morgan-only saved history.', contactId: firstRoster[0].id, contactName: firstRoster[0].name, phoneSnapshot: firstRoster[0].phone },
@@ -146,7 +168,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
       aiMetadata: null, buildingSf: null, lotSizeAcres: null, submarketId: null };
   });
   const workspace = (prospectId: string, contactId?: string | null) => {
-    const candidate = candidates.find((candidate) => candidate.prospect.id === prospectId)!;
+    const candidate = savedCandidates.find((candidate) => candidate.prospect.id === prospectId)!;
     const contacts = roster.get(prospectId)!.filter((contact) => !contact.archivedAt);
     const activity = history.get(prospectId) || [];
     return { prospect: { ...candidate.prospect, notes: 'Existing account notes.', websiteUrl: null, buildingSf: null, lotSizeAcres: null, aiMetadata: null },
@@ -212,6 +234,22 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     if (path === '/api/auth/demo/user') {
       return json(route, { id: 'demo-user', email: 'calling-broker@example.test', firstName: 'Calling', lastName: 'Broker' });
     }
+    if (path === '/api/calling/search' && method === 'GET') {
+      searchReads.push(request.url());
+      const params = new URL(request.url()).searchParams;
+      const query = (params.get('q') || '').trim().replace(/\s+/g, ' ');
+      const tokens = query.toLowerCase().split(' ').filter(Boolean);
+      const limit = Number(params.get('limit') || 10);
+      const rows = savedCandidates.flatMap((candidate) => roster.get(candidate.prospect.id)!.filter((contact) => !contact.archivedAt)
+        .filter((contact) => tokens.every((token) => [candidate.prospect.name, candidate.prospect.businessName, candidate.contact.company, contact.name, contact.company, contact.email].filter(Boolean).join(' ').toLowerCase().includes(token)))
+        .map((contact) => ({ prospect: candidate.prospect, companyName: candidate.prospect.businessName || candidate.contact.company || candidate.prospect.name,
+          contact: { id: candidate.prospect.id === 'saved-prospect-2' && contact.isPrimary ? null : contact.id,
+          isPrimary: contact.isPrimary, name: contact.name, company: contact.company, email: contact.email, phone: contact.phone, title: contact.title } })));
+      const snapshot = { query, rows: structuredClone(rows.slice(0, limit)), hasMore: rows.length > limit };
+      if (query.toLowerCase() === options.delayedSearchQuery?.toLowerCase()) await searchGate;
+      mutationSequence.push('search-return:' + query);
+      return json(route, snapshot);
+    }
     if (options.map && path === '/api/prospects' && method === 'GET') return json(route, mapProspects());
     const mapRecordMatch = /^\/api\/prospects\/([^/]+)$/.exec(path);
     if (options.map && mapRecordMatch && method === 'PATCH') {
@@ -252,7 +290,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
             callStartedAt: session.startedAt,
             eventId: session.eventId,
             contactId: session.contactId, contactSnapshot: session.contactSnapshot,
-            candidate: candidates.find((candidate) => candidate.prospect.id === session.prospectId),
+            candidate: savedCandidates.find((candidate) => candidate.prospect.id === session.prospectId),
           })),
       });
     }
@@ -272,8 +310,10 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     if (workspaceMatch && method === 'GET') {
       workspaceReads.push(request.url());
       const contactId = new URL(request.url()).searchParams.get('contactId');
+      if (!contactId && workspaceMatch[1] === options.delayedSelectionProspectId) await selectionGate;
       if (!contactId && options.workspaceDelayMs) await new Promise((resolve) => setTimeout(resolve, options.workspaceDelayMs));
       if (contactId && options.selectedHistoryDelayMs) await new Promise((resolve) => setTimeout(resolve, options.selectedHistoryDelayMs));
+      mutationSequence.push('workspace-return:' + workspaceMatch[1]);
       return json(route, workspace(workspaceMatch[1], contactId));
     }
     const contactsMatch = /^\/api\/calling\/prospects\/([^/]+)\/contacts(?:\/([^/]+))?$/.exec(path);
@@ -404,7 +444,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     await expect(page.getByRole('heading', { name: 'Calls', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: options.mainLineOnly || options.missingEmailPrimary ? 'Call Vas Patel' : 'Call Morgan Lee', exact: true })).toBeVisible();
   }
-  return { starts, confirmations, discards, sessions, progress, roster, workspace, readiness, mutationSequence, queueReads, needsNumberReads, workspaceReads, releaseStart, releaseContactSave, contactWrites, enrichmentWrites, legacyCallWrites, apiWrites, pageErrors, confirmOnServer: (clientEventId: string) => confirmed.add(clientEventId) };
+  return { starts, confirmations, discards, sessions, progress, roster, workspace, readiness, mutationSequence, queueReads, needsNumberReads, workspaceReads, searchReads, savedCandidates, releaseSearch, releaseSelection, releaseStart, releaseContactSave, contactWrites, enrichmentWrites, legacyCallWrites, apiWrites, pageErrors, confirmOnServer: (clientEventId: string) => confirmed.add(clientEventId) };
 }
 
 async function dial(page: Page, name = 'Morgan Lee') {
@@ -437,6 +477,170 @@ async function mailHrefs(page: Page) {
 function emailAction(page: Page, name: string, email: string) {
   return page.getByRole('link', { name: `Email ${name} at ${email}`, exact: true });
 }
+
+function savedContactSearch(page: Page) {
+  return page.getByRole('region', { name: 'Find a saved contact', exact: true });
+}
+
+async function searchForContact(page: Page, query: string, name: string, company: string) {
+  const search = savedContactSearch(page);
+  await search.getByRole('searchbox', { name: 'Search saved people or companies', exact: true }).fill(query);
+  const result = search.getByRole('button', { name: `Select ${name} at ${company}`, exact: true });
+  await expect(result).toBeVisible();
+  return result;
+}
+
+test('calling search finds a saved person beyond the queue slice and confirms only the explicitly dialed exact contact', async ({ page }, testInfo) => {
+  const scenario = await installCallingScenario(page, { savedSearch: true, contactEmails: 'all', callsPerDay: 10 });
+  const queue = page.getByRole('region', { name: 'Next companies', exact: true });
+  const search = savedContactSearch(page);
+  await expect(queue).toContainText('6 in queue');
+  expect(scenario.savedCandidates.findIndex((candidate) => candidate.prospect.id === 'saved-prospect-30')).toBeGreaterThan(25);
+  await page.screenshot({ path: `work/calling-playwright/search-${testInfo.project.name}-ready.png` });
+  const result = await searchForContact(page, 'Dana Outside', 'Dana Outside', 'Beyond Queue Industrial');
+  await page.screenshot({ path: `work/calling-playwright/search-${testInfo.project.name}-results.png` });
+  await result.click();
+  await expect(page.getByRole('heading', { name: 'Beyond Queue Industrial', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Call Dana Outside', exact: true })).toHaveAttribute('href', 'tel:+17805550229');
+  await expect(search.getByRole('searchbox')).toHaveValue('');
+  await expect(queue).toContainText('6 in queue');
+  await emailAction(page, 'Dana Outside', 'dana.outside@calling.example.test').click();
+  expect(scenario.apiWrites).toEqual([]);
+  expect(await dialHrefs(page)).toEqual([]);
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText('0');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: `work/calling-playwright/search-${testInfo.project.name}-selected.png` });
+  await dial(page, 'Dana Outside');
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await expect(search.getByRole('searchbox')).toBeDisabled();
+  await expect(page.getByTestId('calls-started-today')).toHaveText('1');
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText('0');
+  await page.screenshot({ path: `work/calling-playwright/search-${testInfo.project.name}-pending.png` });
+  await page.getByRole('button', { name: 'I called · next', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Previous company', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Dana Outside', exact: true })).toBeVisible();
+  const id = scenario.roster.get('saved-prospect-30')![0].id;
+  expect(scenario.starts).toHaveLength(1); expect(scenario.confirmations).toHaveLength(1);
+  expect(scenario.starts[0]).toMatchObject({ prospectId: 'saved-prospect-30', contactId: id, expectedPhone: '(780) 555-0229' });
+  expect(scenario.confirmations[0]).toMatchObject({ prospectId: 'saved-prospect-30', contactId: id, clientEventId: scenario.starts[0].clientEventId });
+  expect(scenario.progress()).toMatchObject({ startedToday: 1, confirmedToday: 1, connectedToday: 0 });
+  expect(scenario.apiWrites.map((write) => write.path)).toEqual(['/api/calling/starts', '/api/calling/outcomes']);
+});
+
+test('calling search selects an alternate at the same company and still finds that saved company after a call is logged', async ({ page }, testInfo) => {
+  const scenario = await installCallingScenario(page, { savedSearch: true, differentEmployer: true, contactEmails: 'all' });
+  await (await searchForContact(page, 'Rowan Calling Company 1', 'Rowan Singh', 'Calling Company 1')).click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Operations employer', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('link', { name: 'Call Rowan Singh', exact: true })).toHaveAttribute('href', 'tel:+17805550102');
+  await expect(emailAction(page, 'Rowan Singh', contactEmails.rowan)).toBeVisible();
+  expect(scenario.apiWrites).toEqual([]);
+  await dial(page, 'Rowan Singh');
+  await page.getByRole('button', { name: 'I called · next', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  const company = await searchForContact(page, 'Calling Company 1', 'Morgan Lee', 'Calling Company 1');
+  await expect(savedContactSearch(page).getByRole('button', { name: 'Select Rowan Singh at Calling Company 1', exact: true })).toBeVisible();
+  await savedContactSearch(page).screenshot({ path: `work/calling-playwright/search-${testInfo.project.name}-company-results.png` });
+  await company.click();
+  await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
+  expect(scenario.starts).toHaveLength(1); expect(scenario.confirmations).toHaveLength(1); expect(scenario.discards).toHaveLength(0);
+  expect(scenario.starts[0].contactId).toBe(scenario.roster.get('calling-prospect-1')![1].id);
+  expect(scenario.sessions.get(scenario.starts[0].clientEventId)?.contactSnapshot?.company).toBe('Operations employer');
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText('1');
+});
+
+test('calling search includes missing numbers and resolves an unchanged legacy primary without substituting another person', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { savedSearch: true });
+  const missing = await searchForContact(page, 'Numberless saved', 'No Number Contact', 'Numberless saved company');
+  await expect(missing).toContainText('No number saved');
+  await missing.click();
+  await expect(page.getByRole('heading', { name: 'Numberless saved company', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Current call', exact: true })).toContainText('No Number Contact');
+  await expect(page.getByRole('link', { name: 'Call No Number Contact', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Edit contact No Number Contact', exact: true })).toBeVisible();
+  await (await searchForContact(page, 'Unanchored Person', 'Unanchored Person', 'Anchorless Industries')).click();
+  await expect(page.getByRole('link', { name: 'Call Unanchored Person', exact: true })).toHaveAttribute('href', 'tel:+17805550201');
+  await expect(page.getByRole('button', { name: 'Select contact Unanchored Person', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  expect(scenario.apiWrites).toEqual([]);
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0 });
+  await expect(page.getByRole('region', { name: 'Next companies', exact: true })).toContainText('6 in queue');
+});
+
+test('calling search ignores late responses for an older query and clearing results preserves the prepared company', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { savedSearch: true, delayedSearchQuery: 'Rowan' });
+  const search = savedContactSearch(page);
+  const input = search.getByRole('searchbox');
+  await input.fill('Rowan');
+  await expect.poll(() => scenario.searchReads.some((url) => new URL(url).searchParams.get('q') === 'Rowan')).toBe(true);
+  await input.fill('Dana Outside');
+  const dana = search.getByRole('button', { name: 'Select Dana Outside at Beyond Queue Industrial', exact: true });
+  await expect(dana).toBeVisible();
+  scenario.releaseSearch();
+  await expect.poll(() => scenario.mutationSequence.includes('search-return:Rowan')).toBe(true);
+  await expect(dana).toBeVisible();
+  await expect(search.getByRole('button', { name: 'Select Rowan Singh at Calling Company 1', exact: true })).toHaveCount(0);
+  await search.getByRole('button', { name: 'Clear contact search', exact: true }).click();
+  await expect(input).toHaveValue('');
+  await expect(search.getByRole('list', { name: 'Matching saved contacts', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
+  expect(scenario.apiWrites).toEqual([]); expect(await dialHrefs(page)).toEqual([]);
+});
+
+test('calling search freezes while an unacknowledged call is pending and after broker-scoped recovery', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { savedSearch: true, delayedStart: true });
+  await searchForContact(page, 'Dana Outside', 'Dana Outside', 'Beyond Queue Industrial');
+  await dial(page);
+  await expect.poll(() => scenario.starts.length).toBe(1);
+  const search = savedContactSearch(page);
+  await expect(search.getByRole('searchbox')).toBeDisabled();
+  await expect(search.getByRole('button', { name: 'Clear contact search', exact: true })).toBeDisabled();
+  await expect(search.getByRole('button', { name: 'Select Dana Outside at Beyond Queue Industrial', exact: true })).toHaveCount(0);
+  scenario.releaseStart();
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await expect(search.getByRole('searchbox')).toBeDisabled();
+  await expect(page.getByRole('region', { name: 'Current call', exact: true })).toContainText('Morgan Lee');
+  expect(new Set(scenario.starts.map((start) => start.clientEventId)).size).toBe(1);
+  expect(scenario.confirmations).toHaveLength(0); expect(scenario.discards).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 1, confirmedToday: 0 });
+});
+
+test('calling search rejects rotated contact identities instead of selecting a different primary', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { savedSearch: true });
+  const rowan = await searchForContact(page, 'Rowan', 'Rowan Singh', 'Calling Company 1');
+  scenario.roster.get('calling-prospect-1')![1].archivedAt = new Date().toISOString();
+  await rowan.click();
+  await expect(savedContactSearch(page).getByRole('alert')).toHaveText('This contact changed. Search again to select the current saved contact.');
+  await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
+  const primary = await searchForContact(page, 'Unanchored Person', 'Unanchored Person', 'Anchorless Industries');
+  const saved = scenario.roster.get('saved-prospect-2')![0];
+  saved.name = 'Replacement Person'; saved.email = 'replacement@calling.example.test';
+  saved.id = '00000000-0000-4000-8000-000000001999';
+  await primary.click();
+  await expect(savedContactSearch(page).getByRole('alert')).toHaveText('This contact changed. Search again to select the current saved contact.');
+  await expect(page.getByRole('link', { name: 'Call Replacement Person', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
+  expect(scenario.apiWrites).toEqual([]); expect(await dialHrefs(page)).toEqual([]);
+});
+
+test('calling search cancels an older workspace selection when a call is started and undone before its response', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { savedSearch: true, delayedSelectionProspectId: 'saved-prospect-30' });
+  await (await searchForContact(page, 'Dana Outside', 'Dana Outside', 'Beyond Queue Industrial')).click();
+  await expect.poll(() => scenario.workspaceReads.some((url) => new URL(url).pathname.includes('/saved-prospect-30/'))).toBe(true);
+  await dial(page);
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: "Didn't call", exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toBeVisible();
+  scenario.releaseSelection();
+  await expect.poll(() => scenario.mutationSequence.includes('workspace-return:saved-prospect-30')).toBe(true);
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Call Dana Outside', exact: true })).toHaveCount(0);
+  expect(scenario.starts).toHaveLength(1); expect(scenario.discards).toHaveLength(1); expect(scenario.confirmations).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0 });
+});
 
 test('calling context selects each persons latest verified email subject and direction from unsorted history', async ({ page }, testInfo) => {
   const scenario = await installCallingScenario(page, { contactEmails: 'all', touchHistory: true, selectedHistoryDelayMs: 600 });
