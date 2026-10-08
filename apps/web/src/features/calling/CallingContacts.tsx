@@ -26,28 +26,28 @@ export function CallingContacts({ prospectId, contacts, selectedId, selectedPhon
   const [editor, setEditor] = useState<{ contact: CallingContact | null } | null>(null)
   const visible = showAll ? contacts : contacts.slice(0, 3)
   return (
-    <section aria-label="Contacts" className="border-t border-slate-100 px-4 py-3 sm:px-5">
+    <section aria-label="Contacts" className="border-t border-blue-100/70 px-4 py-4 sm:px-6">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-slate-900">Contacts <span className="ml-1 text-xs font-normal text-slate-400">{contacts.length}</span></h3>
-        <Button variant="ghost" className="h-9 gap-1.5 px-2 text-xs text-slate-600" disabled={locked} onClick={() => setEditor({ contact: null })}><Plus className="h-3.5 w-3.5" />Add contact</Button>
+        <h3 className="text-sm font-semibold text-slate-900 sm:text-base">Contacts <span className="ml-1.5 text-xs font-normal text-slate-500">{contacts.length}</span></h3>
+        <Button variant="ghost" className="h-11 gap-1.5 rounded-lg px-2 text-xs text-slate-600 hover:bg-blue-50 hover:text-blue-700 sm:text-sm" disabled={locked} onClick={() => setEditor({ contact: null })}><Plus className="h-3.5 w-3.5" />Add contact</Button>
       </div>
       <ul className="space-y-2">
         {visible.map((contact) => {
           const options = contactPhoneOptions(contact, readiness)
           const phone = (selectedId === contact.id ? options.find((option) => option.number === selectedPhone) : null) || options.find((option) => option.href) || options[0]
-          return <li key={contact.id} className={cn('flex items-center gap-2 rounded-lg border px-2.5 py-2', selectedId === contact.id ? 'border-blue-200 bg-blue-50/40' : 'border-slate-200 bg-white')}>
-            <span className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 sm:flex"><UserRound className="h-3.5 w-3.5" /></span>
+          return <li key={contact.id} className={cn('flex min-h-16 items-center gap-2 rounded-lg border px-3 py-2 transition-colors sm:gap-3', selectedId === contact.id ? 'border-blue-200 bg-blue-50/70' : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/30')}>
+            <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-50 text-slate-500 sm:flex"><UserRound className="h-4 w-4" /></span>
             <button type="button" className="min-h-11 min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:cursor-default" aria-label={'Select contact ' + contactName(contact)} aria-pressed={selectedId === contact.id} disabled={locked} onClick={() => onSelect(contact)}>
-              <span className="flex items-center gap-2"><span className="truncate text-sm font-medium text-slate-800">{contactName(contact)}</span>{contact.isPrimary ? <span className="hidden shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500 sm:inline">Primary</span> : null}</span>
-              {contact.title || contact.email || contact.isPrimary ? <span className={cn('mt-0.5 block truncate text-[11px] leading-4 text-slate-500', contact.isPrimary && !contact.title && !contact.email && 'sm:hidden')}>{contact.title || contact.email || (contact.isPrimary ? 'Primary' : '')}</span> : null}
+              <span className="flex items-center gap-2"><span className="truncate text-sm font-medium text-slate-800 sm:text-base">{contactName(contact)}</span>{contact.isPrimary ? <span className="hidden shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[11px] text-slate-500 sm:inline">Primary</span> : null}</span>
+              {contact.title || contact.email || contact.isPrimary ? <span className={cn('mt-0.5 block truncate text-xs leading-4 text-slate-500 sm:text-sm', contact.isPrimary && !contact.title && !contact.email && 'sm:hidden')}>{contact.title || contact.email || (contact.isPrimary ? 'Primary' : '')}</span> : null}
             </button>
-            {phone?.href && !locked ? <a href={phone.href} onClick={(event) => onDial(event, contact, phone.number)} aria-label={'Call ' + contactName(contact) + ' at ' + phone.number} className="inline-flex min-h-11 max-w-[45%] shrink-0 items-center gap-1.5 rounded text-[11px] tabular-nums text-slate-600 underline-offset-2 hover:text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"><Phone aria-hidden="true" className="h-3 w-3 shrink-0" /><span className="truncate">{phone.number}</span></a> : <span className="max-w-[40%] shrink-0 text-right text-[11px] tabular-nums text-slate-400"><span className="block truncate">{phone?.number || 'No phone'}</span>{phone?.blockedReason ? <span className="block text-[10px] text-amber-700">{phoneIssueLabel(phone.blockedReason)}</span> : null}</span>}
-            <Button variant="ghost" size="icon" className="h-11 w-8 shrink-0 text-slate-400" aria-label={'Edit contact ' + contactName(contact)} disabled={locked} onClick={() => setEditor({ contact })}><Pencil className="h-3.5 w-3.5" /></Button>
+            {phone?.href && !locked ? <a href={phone.href} onClick={(event) => onDial(event, contact, phone.number)} aria-label={'Call ' + contactName(contact) + ' at ' + phone.number} className="inline-flex min-h-11 max-w-[45%] shrink-0 items-center gap-1.5 rounded text-xs tabular-nums text-slate-600 underline-offset-2 hover:text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 sm:text-sm"><Phone aria-hidden="true" className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{phone.number}</span></a> : <span className="max-w-[40%] shrink-0 text-right text-xs tabular-nums text-slate-500 sm:text-sm"><span className="block truncate">{phone?.number || 'No phone'}</span>{phone?.blockedReason ? <span className="block text-[11px] text-amber-700">{phoneIssueLabel(phone.blockedReason)}</span> : null}</span>}
+            <Button variant="ghost" size="icon" className="h-11 w-11 shrink-0 rounded-lg text-slate-500 hover:bg-blue-100/60 hover:text-blue-700" aria-label={'Edit contact ' + contactName(contact)} disabled={locked} onClick={() => setEditor({ contact })}><Pencil className="h-3.5 w-3.5" /></Button>
           </li>
         })}
       </ul>
-      {contacts.length > 3 ? <Button variant="ghost" className="mt-2 h-9 px-2 text-xs text-slate-500" aria-expanded={showAll} onClick={() => setShowAll((value) => !value)}>{showAll ? 'Show fewer contacts' : 'View all contacts'}</Button> : null}
-      {locked ? <p className="mt-2 text-[11px] text-slate-500">Finish or undo this call before switching contacts.</p> : null}
+      {contacts.length > 3 ? <Button variant="ghost" className="mt-3 h-11 rounded-lg px-2 text-xs text-slate-600 hover:bg-blue-50 hover:text-blue-700" aria-expanded={showAll} onClick={() => setShowAll((value) => !value)}>{showAll ? 'Show fewer contacts' : 'View all contacts'}</Button> : null}
+      {locked ? <p className="mt-3 text-xs leading-5 text-slate-500">Finish or undo this call before switching contacts.</p> : null}
       {editor ? <ContactEditor key={editor.contact?.id || 'new'} prospectId={prospectId} contact={editor.contact} existingIds={contacts.map((item) => item.id)} onClose={() => setEditor(null)} onSaved={(workspace, contactId) => { onSaved(workspace, contactId); setEditor(null) }} /> : null}
     </section>
   )
