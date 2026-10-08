@@ -1,3 +1,52 @@
+# Calls Clear Blue visual polish, October 8, 2026
+
+**final result: passed**
+
+Patrick selected option 1, Clear Blue, and explicitly requested the live release after the completed checks so further functional and design changes can follow. This release is limited to presentation in the Calls page and its contact/activity components. The new isolated branch starts at released commit `4f27ceb4da850517f13ecfa9a7eeab2c4740a342`; concurrent functional work is excluded.
+
+## Source and rendered evidence
+
+- Source visual truth: `C:/Users/patri/.codex/generated_images/01a11c90-85d0-74a1-b85d-fb0ac3edb4f0/exec-add25553-0528-4859-ac3f-ad8f3ab4ab5c.png`.
+- Final browser-rendered implementation: `C:/Users/patri/Documents/GitHub/level.cre/work/calls-polish/iteration3/clear-blue-desktop.png`.
+- Full paired comparison: `C:/Users/patri/Documents/GitHub/level.cre/work/calls-polish/iteration3/clear-blue-comparison-full.png`.
+- Focused paired comparisons in the same private directory: `clear-blue-comparison-account.png`, `clear-blue-comparison-contacts.png`, `clear-blue-comparison-queue.png`, and `clear-blue-comparison-metrics.png`. Both source and implementation were opened together for each comparison.
+- Source and desktop render: 1787 x 880 pixels, 1787 x 880 CSS viewport, device scale 1. No resampling needed. Comparison canvases add labels and place both images side by side.
+- Additional rendered views: mobile 390 x 844 and tablet 820 x 1180, both scale 1, plus full-page and contact-editor captures in that directory.
+- State: selected company from the approved snapshot, two contacts including a phone-less primary and selected company line, empty activity, zero progress, no saved target, queue count 138 and queue positioned at row 11. All data is isolated browser fixture data. No production record or phone handoff is involved.
+
+## Comparison history and findings
+
+1. Initial comparison found P2 typography and vertical rhythm drift: small text and excess panel height. Desktop type scale was increased locally, KPI and section padding tightened, and the main width aligned with the source. The original checkout developed unrelated concurrent changes, so it was abandoned for final validation.
+2. Clean iteration 2 resolved those findings: account height 648.5px versus source approximately 646px, KPI height 80px versus approximately 78px, and clearer title/contact text. Queue density still showed nine companies where the source showed ten. Desktop queue row padding was reduced. KPI markup was also corrected so each immediate description-list group contains its own dt/dd elements.
+3. Clean iteration 3 recaptured the corrected source and paired it with the selected image. Ten queue company labels are visible, the current-call panel is contained, and no actionable P0/P1/P2 issue remains. The last queue phone sits near the viewport edge; the existing scrollable queue remains usable. Minor baseline, cropping and font-metric differences are P3 follow-up polish. Patrick requested ending further testing and releasing this iteration.
+
+## Required fidelity surfaces
+
+- **Fonts and typography:** Retain the established Aptos/Inter/Segoe UI/Arial stack. The desktop account title is 28px, queue/contact names 16px, section headings 16–18px, and secondary text 12–14px. Mobile retains smaller text and wrapping. Generated-reference font metrics differ slightly; established product typography is intentional.
+- **Spacing and layout:** Approximately 58/42 split, 16px gutter, compact content-sized 80 x 44 Call button, 64px contact rows, tighter queue rows, and a stacked phone/tablet layout. All captured document widths equal their viewports. Existing navigation and Needs a number remain present.
+- **Colors and tokens:** Cool-white `#f6f9ff` canvas, white tiles, pale blue headers and selected contact, existing blue call action, green logged count, and subdued amber overdue reason. The existing dark sidebar is retained.
+- **Images and icons:** Existing logo and Lucide icon library remain sharp. Outline phone/check/chat icons intentionally follow the app library rather than drawing the raster mock's solid icons. No new decorative artwork or custom SVG was introduced.
+- **Copy and content:** Existing labels, saved contact information, account history filters, goal, outcomes and queue actions are unchanged. No invented target, XP label or activity was added. Sidebar fixture identity and sync footer differ from the live session by design.
+
+## Completed verification
+
+- Frontend unit regressions: 147/147.
+- Full isolated desktop/mobile calling browser regressions: 80/80.
+- Final affected layout/calling/goal/history/navigation checks after the last markup and spacing adjustment: 14/14.
+- Final production frontend build passed.
+- TypeScript AST review confirms non-render state, hooks, mutation functions and handlers match the release base; component changes are classes only; existing event, accessibility and data attributes are preserved.
+- Desktop/mobile/tablet read-only fixture interactions exercised company and contact selection plus opening/cancelling the contact editor. Zero API mutations, zero horizontal overflow and zero app runtime exceptions were recorded. The sole console resource error is the deliberately blocked external Google font stylesheet; the established installed font fallback renders normally.
+
+This is targeted visual and interaction validation, not a full accessibility audit or verification of a genuine connected phone call. Private screenshots, fixtures and logs remain excluded from Git. Backend, database and automations are outside this cosmetic release.
+
+**Implementation checklist:** selected palette applied; compact actions retained; responsive layout captured; typography/rhythm findings corrected; valid KPI grouping restored; completed regression/build results recorded. Further visual refinements can accompany Patrick's next requested changes.
+
+---
+
+## Earlier company/contact workspace QA record
+
+The October 7 record below is retained for history. Its states and test counts describe that earlier implementation, not this visual release.
+
 # Calling Company/Contact Workspace Design QA
 
 October 7, 2026. Local implementation following Patrick's approved company/queue reference and the [saved design/data review](docs/calling-account-workspace-review-2026-10-07.md). The exact local checkpoint and source hashes are recorded in the ignored release receipt. No production migration, genuine call, push, or deployment is part of this QA.
