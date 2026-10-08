@@ -82,7 +82,8 @@ async function workspace(db: Queryable, userId: string, prospect: Record<string,
   const [history, counts] = await Promise.all([
     db.query(`SELECT id,type,outcome,date::text AS occurred_at,notes,source_metadata FROM public.contact_interactions
       WHERE user_id=$1 AND prospect_id=$2 AND ($3::varchar IS NULL OR source_metadata->>'contactId'=$3)
-      ORDER BY created_at DESC,id DESC LIMIT 100`, [userId, prospect.id, contactId || null]),
+      ORDER BY CASE WHEN date::text ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])($|[T ])'
+        THEN date::text END DESC NULLS LAST,created_at DESC,id DESC LIMIT 100`, [userId, prospect.id, contactId || null]),
     db.query(`SELECT COUNT(*)::int AS count FROM public.contact_interactions
       WHERE user_id=$1 AND prospect_id=$2 AND NULLIF(source_metadata->>'contactId','') IS NULL`, [userId, prospect.id]),
   ]);
@@ -95,7 +96,10 @@ async function workspace(db: Queryable, userId: string, prospect: Record<string,
     activity: history.rows.map((row) => ({ id: row.id, type: row.type, outcome: row.outcome, occurredAt: row.occurred_at,
       notes: row.notes || '', contactId: row.source_metadata?.contactId || null,
       contactName: row.source_metadata?.contactSnapshot?.name || row.source_metadata?.contactName || null,
-      phoneSnapshot: row.source_metadata?.phoneSnapshot || null })),
+      phoneSnapshot: row.source_metadata?.phoneSnapshot || null,
+      subject: clean(row.source_metadata?.subject), email: clean(row.source_metadata?.email),
+      direction: (['inbound','outbound','internal'].includes(row.source_metadata?.direction) ? row.source_metadata.direction : null) as 'inbound' | 'outbound' | 'internal' | null,
+      evidenceStatus: (['confirmed','observed','inferred'].includes(row.source_metadata?.evidenceStatus) ? row.source_metadata.evidenceStatus : null) as 'confirmed' | 'observed' | 'inferred' | null })),
     unattributedActivityCount: Number(counts.rows[0]?.count || 0),
   };
 }

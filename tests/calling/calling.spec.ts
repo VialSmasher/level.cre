@@ -19,6 +19,11 @@ type TestContact = {
 };
 
 const phone = '(780) 555-0100';
+const contactEmails = {
+  morgan: 'morgan.lee+cre@calling.example.test',
+  rowan: 'rowan.singh@calling.example.test',
+  vas: 'vas.patel@calling.example.test',
+};
 // Third-party rendering is inert; the real Home panel, saves and call control mount.
 const inertMapModule = `
 import React from '/node_modules/.vite/deps/react.js';
@@ -53,7 +58,7 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function installCallingScenario(page: Page, options: { startFailures?: number; confirmFailures?: number; lostConfirmationResponses?: number; selectedHistoryDelayMs?: number; workspaceDelayMs?: number; delayedStart?: boolean; rejectedStart?: boolean; unavailableDiscard?: boolean; discardFailures?: number; callsPerDay?: number; mainLineOnly?: boolean; missingEmailPrimary?: boolean; mobileFirst?: boolean; noAlternates?: boolean; map?: boolean; missingPhone?: boolean; delayedContactSave?: boolean; lostContactSaveResponses?: number } = {}) {
+async function installCallingScenario(page: Page, options: { startFailures?: number; confirmFailures?: number; lostConfirmationResponses?: number; selectedHistoryDelayMs?: number; workspaceDelayMs?: number; delayedStart?: boolean; rejectedStart?: boolean; unavailableDiscard?: boolean; discardFailures?: number; callsPerDay?: number; mainLineOnly?: boolean; missingEmailPrimary?: boolean; mobileFirst?: boolean; contactEmails?: 'all' | 'primary_only'; touchHistory?: boolean; noAlternates?: boolean; map?: boolean; missingPhone?: boolean; delayedContactSave?: boolean; lostContactSaveResponses?: number } = {}) {
   if (options.map) test.setTimeout(45_000); // Home's first lazy module compiles on a cold isolated Vite run.
   const starts: CallRequest[] = [];
   const confirmations: CallRequest[] = [];
@@ -64,9 +69,11 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
   const mutationSequence: string[] = [];
   const queueReads: string[] = [];
   const needsNumberReads: string[] = [];
+  const workspaceReads: string[] = [];
   const contactWrites: Array<{ method: string; prospectId: string; contactId?: string; payload: Record<string, unknown> }> = [];
   const enrichmentWrites: Array<Record<string, any>> = [];
   const legacyCallWrites: CallRequest[] = [];
+  const apiWrites: Array<{ method: string; path: string; body: string | null }> = [];
   const pageErrors: string[] = [];
   if (options.map) page.on('pageerror', (error) => pageErrors.push(error.message));
   const blocks = new Map<string, PhoneBlock[]>();
@@ -91,6 +98,11 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     firstRoster[0].email = 'morgan@example.test';
     firstRoster[1].name = 'Company main line'; firstRoster[1].title = 'Company switchboard'; firstRoster.splice(2);
   }
+  if (options.contactEmails) {
+    firstRoster[0].email = contactEmails.morgan;
+    if (options.contactEmails === 'all') firstRoster[1].email = contactEmails.rowan;
+    roster.get(candidates[1].prospect.id)![0].email = contactEmails.vas;
+  }
   const readiness = (prospectId: string) => {
     const candidate = candidates.find((candidate) => candidate.prospect.id === prospectId)!;
     const contacts = roster.get(prospectId)!.filter((contact) => !contact.archivedAt);
@@ -104,6 +116,26 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     { id: 'morgan-attributed', type: 'call', outcome: 'attempted', occurredAt: '2026-10-06T17:00:00.000Z', notes: 'Morgan-only saved history.', contactId: firstRoster[0].id, contactName: firstRoster[0].name, phoneSnapshot: firstRoster[0].phone },
     { id: 'rowan-attributed', type: 'call', outcome: 'no_answer', occurredAt: '2026-10-06T16:00:00.000Z', notes: 'Rowan-only saved history.', contactId: firstRoster[1].id, contactName: firstRoster[1].name, phoneSnapshot: firstRoster[1].phone },
   );
+  if (options.touchHistory) {
+    const morgan = firstRoster[0];
+    const rowan = firstRoster[1];
+    const email = (id: string, contact: TestContact, occurredAt: string, subject: string, direction: string, evidenceStatus = 'confirmed', outcome = 'contacted') => ({
+      id, type: 'email', outcome, occurredAt, subject, direction, evidenceStatus,
+      notes: 'Provider capture provenance, not the email subject.', contactId: contact.id, contactName: contact.name, phoneSnapshot: null,
+    });
+    // Deliberately unsorted. Newer drafts/internal/uncertain evidence and invalid
+    // dates must never replace a person's real recorded contact touch.
+    history.get(candidates[0].prospect.id)!.push(
+      email('morgan-old-email', morgan, '2026-10-03T18:00:00.000Z', 'Older warehouse check-in', 'outbound'),
+      email('morgan-draft', morgan, '2026-10-08T21:00:00.000Z', 'Unsent draft subject', 'outbound', 'confirmed', 'drafted'),
+      email('rowan-received', rowan, '2026-10-07T17:00:00.000Z', 'Re: Timing for the warehouse search', 'inbound'),
+      email('morgan-internal', morgan, '2026-10-08T22:00:00.000Z', 'Internal team note', 'internal'),
+      email('morgan-latest-sent', morgan, '2026-10-06T18:00:00.000Z', 'Warehouse space update', 'outbound'),
+      email('morgan-unconfirmed', morgan, '2026-10-08T23:00:00.000Z', 'Unconfirmed send subject', 'outbound', 'uncertain'),
+      email('morgan-invalid-date', morgan, 'not-a-date', 'Invalid timestamp subject', 'outbound'),
+      { id: 'morgan-private-note', type: 'note', outcome: 'noted', occurredAt: '2026-10-08T23:59:00.000Z', notes: 'Internal research note is not a touch.', contactId: morgan.id, contactName: morgan.name, phoneSnapshot: null },
+    );
+  }
   if (options.noAlternates) { firstRoster.splice(1); firstRoster[0].additionalPhones = []; }
   if (options.missingPhone) { firstRoster.splice(1); firstRoster[0].phone = null; firstRoster[0].additionalPhones = []; }
   const mapProspects = () => candidates.map((candidate, index) => {
@@ -136,12 +168,15 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
   await page.addInitScript(() => {
     localStorage.setItem('demo-mode', 'true');
     (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs = [];
-    // Preserve the React click handler while preventing a real phone/dialer handoff.
+    (window as Window & { __callingMailHrefs?: string[] }).__callingMailHrefs = [];
+    // Preserve React handlers while preventing native phone or email-app launch.
     document.addEventListener('click', (event) => {
-      const link = event.target instanceof Element ? event.target.closest('a[href^="tel:"]') : null;
+      const link = event.target instanceof Element ? event.target.closest('a[href^="tel:"], a[href^="mailto:"]') : null;
       if (!link) return;
       event.preventDefault();
-      (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs?.push(link.getAttribute('href') || '');
+      const href = link.getAttribute('href') || '';
+      if (href.startsWith('mailto:')) (window as Window & { __callingMailHrefs?: string[] }).__callingMailHrefs?.push(href);
+      else (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs?.push(href);
     }, true);
   });
   await page.route('**/*', (route) => {
@@ -173,6 +208,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     const request = route.request();
     const path = new URL(request.url()).pathname;
     const method = request.method();
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) apiWrites.push({ method, path, body: request.postData() });
     if (path === '/api/auth/demo/user') {
       return json(route, { id: 'demo-user', email: 'calling-broker@example.test', firstName: 'Calling', lastName: 'Broker' });
     }
@@ -234,6 +270,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     }
     const workspaceMatch = /^\/api\/calling\/prospects\/([^/]+)\/workspace$/.exec(path);
     if (workspaceMatch && method === 'GET') {
+      workspaceReads.push(request.url());
       const contactId = new URL(request.url()).searchParams.get('contactId');
       if (!contactId && options.workspaceDelayMs) await new Promise((resolve) => setTimeout(resolve, options.workspaceDelayMs));
       if (contactId && options.selectedHistoryDelayMs) await new Promise((resolve) => setTimeout(resolve, options.selectedHistoryDelayMs));
@@ -367,7 +404,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     await expect(page.getByRole('heading', { name: 'Calls', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: options.mainLineOnly || options.missingEmailPrimary ? 'Call Vas Patel' : 'Call Morgan Lee', exact: true })).toBeVisible();
   }
-  return { starts, confirmations, discards, sessions, progress, roster, workspace, readiness, mutationSequence, queueReads, needsNumberReads, releaseStart, releaseContactSave, contactWrites, enrichmentWrites, legacyCallWrites, pageErrors, confirmOnServer: (clientEventId: string) => confirmed.add(clientEventId) };
+  return { starts, confirmations, discards, sessions, progress, roster, workspace, readiness, mutationSequence, queueReads, needsNumberReads, workspaceReads, releaseStart, releaseContactSave, contactWrites, enrichmentWrites, legacyCallWrites, apiWrites, pageErrors, confirmOnServer: (clientEventId: string) => confirmed.add(clientEventId) };
 }
 
 async function dial(page: Page, name = 'Morgan Lee') {
@@ -392,6 +429,187 @@ async function navigateWithinApp(page: Page, path: string) {
 async function dialHrefs(page: Page) {
   return page.evaluate(() => (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs || []);
 }
+
+async function mailHrefs(page: Page) {
+  return page.evaluate(() => (window as Window & { __callingMailHrefs?: string[] }).__callingMailHrefs || []);
+}
+
+function emailAction(page: Page, name: string, email: string) {
+  return page.getByRole('link', { name: `Email ${name} at ${email}`, exact: true });
+}
+
+test('calling context selects each persons latest verified email subject and direction from unsorted history', async ({ page }, testInfo) => {
+  const scenario = await installCallingScenario(page, { contactEmails: 'all', touchHistory: true, selectedHistoryDelayMs: 600 });
+  const context = page.getByRole('region', { name: 'Calling context', exact: true });
+  await expect(context).toContainText('Last recorded touch · Morgan Lee');
+  await expect(context).toContainText('Email sent');
+  await expect(context).toContainText('Warehouse space update');
+  await expect(context.locator('time')).toHaveAttribute('datetime', '2026-10-06T18:00:00.000Z');
+  for (const excluded of ['Older warehouse check-in', 'Unsent draft subject', 'Internal team note', 'Unconfirmed send subject', 'Invalid timestamp subject', 'Provider capture provenance']) await expect(context).not.toContainText(excluded);
+  await page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true }).click();
+  await expect(page.getByText('Loading last touch…', { exact: true })).toBeVisible();
+  await expect(context).toHaveCount(0);
+  await expect(context).toContainText('Last recorded touch · Rowan Singh');
+  await expect(context).toContainText('Email received');
+  await expect(context).toContainText('Re: Timing for the warehouse search');
+  await expect(context).not.toContainText('Warehouse space update');
+  await expect(context.locator('time')).toHaveAttribute('datetime', '2026-10-07T17:00:00.000Z');
+  await context.screenshot({ path: `work/calling-playwright/context-${testInfo.project.name}-selected-touch.png` });
+  expect(scenario.apiWrites).toEqual([]);
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0 });
+});
+
+test('calling context labels account fallback with the actual person and replaces it only after a saved selected-person call', async ({ page }, testInfo) => {
+  const scenario = await installCallingScenario(page, { contactEmails: 'all', touchHistory: true });
+  await page.getByRole('button', { name: 'Select contact Casey Davis', exact: true }).click();
+  const context = page.getByRole('region', { name: 'Calling context', exact: true });
+  await expect(context).toContainText('No touch recorded for this contact yet.');
+  await expect(context).toContainText('Latest account activity · Rowan Singh');
+  await expect(context).toContainText('Email received');
+  await expect(context).toContainText('Re: Timing for the warehouse search');
+  await expect(context).not.toContainText('Last recorded touch');
+  await expect(context).not.toContainText('Casey Davis');
+  await page.getByRole('region', { name: 'Current call', exact: true }).screenshot({ path: `work/calling-playwright/context-${testInfo.project.name}-company-fallback.png` });
+  expect(scenario.apiWrites).toEqual([]);
+  await dial(page, 'Casey Davis');
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await expect(context).toContainText('Latest account activity · Rowan Singh');
+  await page.getByRole('button', { name: 'Add a note', exact: true }).click();
+  const note = 'Asked to call back after their lease review.';
+  await page.getByRole('textbox').fill(note);
+  await page.getByRole('button', { name: 'I called · next', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Previous company', exact: true }).click();
+  await expect(context).toContainText('Last recorded touch · Casey Davis');
+  await expect(context).toContainText('Call attempted');
+  await expect(context).toContainText(note);
+  await expect(context).not.toContainText('Latest account activity');
+  await expect(context).not.toContainText('Rowan Singh');
+  await context.screenshot({ path: `work/calling-playwright/context-${testInfo.project.name}-saved-call.png` });
+  expect(scenario.starts).toHaveLength(1); expect(scenario.confirmations).toHaveLength(1);
+  expect(scenario.confirmations[0]).toMatchObject({ contactId: scenario.roster.get('calling-prospect-1')![2].id, notes: note });
+  expect(scenario.progress()).toMatchObject({ startedToday: 1, confirmedToday: 1, connectedToday: 0 });
+});
+
+test('calling context recovers a frozen pending person without displaying the primary history while loading', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { contactEmails: 'all', touchHistory: true, selectedHistoryDelayMs: 900 });
+  await page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true }).click();
+  const context = page.getByRole('region', { name: 'Calling context', exact: true });
+  await expect(context).toContainText('Last recorded touch · Rowan Singh');
+  await dial(page, 'Rowan Singh');
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  const firstKey = scenario.starts[0].clientEventId;
+  const beforeReloadReads = scenario.workspaceReads.length;
+  await page.reload();
+  await expect(page.getByText('Loading last touch…', { exact: true })).toBeVisible();
+  await expect(context).toHaveCount(0);
+  await expect(context).toContainText('Last recorded touch · Rowan Singh');
+  await expect(context).toContainText('Email received');
+  await expect(context).toContainText('Re: Timing for the warehouse search');
+  await expect(context).not.toContainText('Warehouse space update');
+  const selectedReads = scenario.workspaceReads.slice(beforeReloadReads).map((url) => new URL(url).searchParams.get('contactId')).filter(Boolean);
+  expect(selectedReads.length).toBeGreaterThan(0);
+  expect(new Set(selectedReads)).toEqual(new Set([scenario.roster.get('calling-prospect-1')![1].id]));
+  await expect(page.getByRole('button', { name: 'Select contact Morgan Lee', exact: true })).toBeDisabled();
+  expect(scenario.starts).toHaveLength(2);
+  expect(scenario.starts[1].clientEventId).toBe(firstKey);
+  expect(scenario.confirmations).toHaveLength(0); expect(scenario.discards).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 1, confirmedToday: 0 });
+});
+
+test('calling email switches with the selected person and has no activity, credit or queue effects', async ({ page }, testInfo) => {
+  const scenario = await installCallingScenario(page, { contactEmails: 'all', callsPerDay: 10 });
+  const morgan = emailAction(page, 'Morgan Lee', contactEmails.morgan);
+  await expect(morgan).toHaveAttribute('href', 'mailto:morgan.lee%2Bcre@calling.example.test');
+  await expect(morgan).toHaveAttribute('title', 'Opens your default email app');
+  await expect(morgan).toHaveText(contactEmails.morgan);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: `work/calling-playwright/email-${testInfo.project.name}-ready.png` });
+  await morgan.click();
+  await page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true }).click();
+  await expect(morgan).toHaveCount(0);
+  const rowan = emailAction(page, 'Rowan Singh', contactEmails.rowan);
+  await expect(rowan).toHaveAttribute('href', 'mailto:rowan.singh@calling.example.test');
+  await rowan.click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Select contact Casey Davis', exact: true }).click();
+  await expect(page.getByText('No email saved for this contact', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Current call', exact: true }).locator('a[href^="mailto:"]')).toHaveCount(0);
+  await expect(page.getByTestId('calls-started-today')).toHaveText('0');
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText('0');
+  await expect(page.getByRole('progressbar', { name: 'Daily call target', exact: true })).toHaveAttribute('aria-valuenow', '0');
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0, connectedToday: 0 });
+  expect(scenario.apiWrites).toEqual([]);
+  expect(await dialHrefs(page)).toEqual([]);
+  expect(await mailHrefs(page)).toEqual(['mailto:morgan.lee%2Bcre@calling.example.test', 'mailto:rowan.singh@calling.example.test']);
+});
+
+test('calling email retains the frozen pending person address across a roster change and reload', async ({ page }, testInfo) => {
+  const scenario = await installCallingScenario(page, { contactEmails: 'all', callsPerDay: 10 });
+  await dial(page);
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  const initialKey = scenario.starts[0].clientEventId;
+  const currentPrimary = scenario.roster.get('calling-prospect-1')![0];
+  // The owned roster has a replacement identity, while the saved call still
+  // belongs to the original contact snapshot and selected address.
+  currentPrimary.id = '00000000-0000-4000-8000-000000000701';
+  currentPrimary.email = 'morgan.current@calling.example.test';
+  await page.reload();
+  await expect.poll(() => scenario.mutationSequence.filter((step) => step === 'start-saved').length).toBe(2);
+  const morgan = emailAction(page, 'Morgan Lee', contactEmails.morgan);
+  await expect(morgan).toBeVisible();
+  await expect(emailAction(page, 'Morgan Lee', currentPrimary.email)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true })).toBeDisabled();
+  const beforeEmail = scenario.apiWrites.length;
+  await morgan.click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'I called · next', exact: true })).toBeVisible();
+  expect(scenario.apiWrites).toHaveLength(beforeEmail);
+  expect(scenario.starts).toHaveLength(2);
+  expect(scenario.starts[1].clientEventId).toBe(initialKey);
+  expect(scenario.confirmations).toHaveLength(0); expect(scenario.discards).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 1, confirmedToday: 0, connectedToday: 0 });
+  expect(await mailHrefs(page)).toEqual(['mailto:morgan.lee%2Bcre@calling.example.test']);
+  await page.screenshot({ path: `work/calling-playwright/email-${testInfo.project.name}-pending.png` });
+});
+
+test('calling email never borrows the primary address for a pending contact with no email', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { contactEmails: 'primary_only' });
+  await page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true }).click();
+  await expect(page.getByText('No email saved for this contact', { exact: true })).toBeVisible();
+  await dial(page, 'Rowan Singh');
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await expect(page.getByText('No email saved for this contact', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Current call', exact: true }).locator('a[href^="mailto:"]')).toHaveCount(0);
+  expect(scenario.starts[0].contactId).toBe(scenario.roster.get('calling-prospect-1')![1].id);
+  expect([...scenario.sessions.values()][0].contactSnapshot?.email).toBeNull();
+  expect(scenario.confirmations).toHaveLength(0); expect(scenario.discards).toHaveLength(0);
+  expect(await mailHrefs(page)).toEqual([]);
+  expect(scenario.apiWrites.map((request) => request.path)).toEqual(['/api/calling/starts']);
+});
+
+test('calling email after confirmed next and Previous uses the original contact without another call or credit', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { contactEmails: 'all', callsPerDay: 10 });
+  await dial(page);
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'I called · next', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
+  await expect(emailAction(page, 'Vas Patel', contactEmails.vas)).toBeVisible();
+  await page.getByRole('button', { name: 'Previous company', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  const beforeEmail = scenario.apiWrites.length;
+  await emailAction(page, 'Morgan Lee', contactEmails.morgan).click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Select contact Morgan Lee', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText('1');
+  await expect(page.getByRole('progressbar', { name: 'Daily call target', exact: true })).toHaveAttribute('aria-valuenow', '1');
+  expect(scenario.apiWrites).toHaveLength(beforeEmail);
+  expect(scenario.starts).toHaveLength(1); expect(scenario.confirmations).toHaveLength(1); expect(scenario.discards).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 1, confirmedToday: 1, connectedToday: 0 });
+  expect(await dialHrefs(page)).toEqual(['tel:+17805550100']);
+  expect(await mailHrefs(page)).toEqual(['mailto:morgan.lee%2Bcre@calling.example.test']);
+});
 
 test('map call opens the canonical person number and gives credit only after confirmation without changing the map selection', async ({ page }, testInfo) => {
   const scenario = await installCallingScenario(page, { map: true });

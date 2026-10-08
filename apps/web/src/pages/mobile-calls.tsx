@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, Building2, Check, CircleCheck, ChevronDown, MapPin, MessageCircle, Phone, RotateCcw } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Building2, Check, CircleCheck, ChevronDown, MapPin, Mail, MessageCircle, Phone, RotateCcw } from 'lucide-react'
 import { Link } from 'wouter'
 
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,8 @@ import {
   type MobileCallSession, type NextCallStep, type CallingContact, type CallingWorkspace, type NeedsNumberRow,
 } from '@/lib/mobileCalling'
 import { cn } from '@/lib/utils'
+import { callingEmailLink } from '@/lib/callingEmail'
+import { CallingContext } from '@/features/calling/CallingContext'
 
 type CompanyVisit = { candidate: CallQueueCandidate; contactId: string | null; phone: string }
 
@@ -101,12 +103,13 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const readiness = workspaceQuery.data?.phoneReadiness || null
   const selectedContact = session?.contactSnapshot || contacts.find((contact) => contact.id === selectedContactId) || null
   const selectedName = selectedContact ? contactName(selectedContact) : activeCandidate ? displayName(activeCandidate) : 'Selected contact'
+  const email = callingEmailLink(session ? session.contactSnapshot?.email : selectedContact?.email)
   const phoneOptions = selectedContact ? contactPhoneOptions(selectedContact, readiness) : []
   const phone = session?.expectedPhone || selectedPhone
-  const activityContactId = session?.contactId || selectedContactId
+  const activityContactId = session ? session.contactId || null : selectedContactId
   const contactActivityQuery = useQuery<CallingWorkspace>({
     queryKey: ['/api/calling/workspace-activity', brokerId, prospectId, activityContactId],
-    enabled: Boolean(prospectId && activityContactId && activityFilter === 'contact'),
+    enabled: Boolean(prospectId && activityContactId),
     queryFn: async () => (await apiRequest('GET', `/api/calling/prospects/${encodeURIComponent(prospectId!)}/workspace?contactId=${encodeURIComponent(activityContactId!)}`)).json(),
     staleTime: 15_000,
   })
@@ -402,7 +405,9 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
 
             <div className="border-t border-blue-100/70 px-4 py-3 sm:px-6">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                <div className="min-w-0 flex-1"><p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Calling contact</p><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><p className="break-words text-sm font-medium text-slate-900 sm:text-base">{selectedName}</p>{phoneOptions.length > 1 ? <><label htmlFor="calling-phone" className="sr-only">Phone number for {selectedName}</label><select id="calling-phone" value={selectedPhoneOption?.phoneKey || ''} disabled={Boolean(session)} onChange={(event) => setSelectedPhone(phoneOptions.find((option) => option.phoneKey === event.target.value)?.number || '')} className="min-h-11 max-w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:bg-slate-50">{phoneOptions.map((option) => <option key={option.phoneKey} value={option.phoneKey} disabled={!option.href}>{option.label} · {option.number}{option.blockedReason ? ' · ' + phoneIssueLabel(option.blockedReason) : option.href ? '' : ' · check number'}</option>)}</select></> : phone ? <p className="min-h-8 content-center text-sm tabular-nums text-slate-600 sm:text-base">{phone}{selectedPhoneOption?.blockedReason ? <span className="ml-2 text-amber-700">{phoneIssueLabel(selectedPhoneOption.blockedReason)}</span> : null}</p> : null}</div></div>
+                <div className="min-w-0 flex-1"><p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Calling contact</p><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><p className="break-words text-sm font-medium text-slate-900 sm:text-base">{selectedName}</p>{phoneOptions.length > 1 ? <><label htmlFor="calling-phone" className="sr-only">Phone number for {selectedName}</label><select id="calling-phone" value={selectedPhoneOption?.phoneKey || ''} disabled={Boolean(session)} onChange={(event) => setSelectedPhone(phoneOptions.find((option) => option.phoneKey === event.target.value)?.number || '')} className="min-h-11 max-w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:bg-slate-50">{phoneOptions.map((option) => <option key={option.phoneKey} value={option.phoneKey} disabled={!option.href}>{option.label} · {option.number}{option.blockedReason ? ' · ' + phoneIssueLabel(option.blockedReason) : option.href ? '' : ' · check number'}</option>)}</select></> : phone ? <p className="min-h-8 content-center text-sm tabular-nums text-slate-600 sm:text-base">{phone}{selectedPhoneOption?.blockedReason ? <span className="ml-2 text-amber-700">{phoneIssueLabel(selectedPhoneOption.blockedReason)}</span> : null}</p> : null}</div>
+                  {email ? <a href={email.href} aria-label={'Email ' + selectedName + ' at ' + email.email} title="Opens your default email app" className="mt-1 inline-flex min-h-9 max-w-full items-center gap-1.5 rounded text-xs text-blue-700 underline-offset-2 hover:text-blue-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 sm:text-sm"><Mail aria-hidden="true" className="h-3.5 w-3.5 shrink-0" /><span className="min-w-0 break-all">{email.email}</span></a> : <p className="mt-1 text-xs text-slate-500">{selectedContact?.email ? 'Check this contact’s saved email address' : 'No email saved for this contact'}</p>}
+                </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
                 {session ? (
                   <Button className="h-11 shrink-0 gap-2 bg-emerald-700 px-4 text-sm font-semibold hover:bg-emerald-800" disabled={busy} onClick={() => confirm()}>{calling.pendingConfirmation ? 'Confirming...' : calling.pendingDiscard ? 'Undoing...' : 'I called · next'}<ArrowRight aria-hidden="true" className="h-4 w-4" /></Button>
@@ -413,6 +418,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
                 </div>
               </div>
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs"><p className="text-slate-500">{session ? session.confirmation && session.afterConfirmation === 'another_contact' ? 'Retry will log this call and prepare another contact on this company.' : 'Confirm after trying the call.' : 'Opens your dialer.'}</p>{session ? <p className={cn('font-medium', Boolean(calling.startError) ? 'text-amber-700' : 'text-emerald-700')}>{session.recorded ? 'Call started' : Boolean(calling.startError) ? 'Call start not recorded' : 'Saving call start...'}</p> : null}</div>
+              <CallingContext contactId={activityContactId} contactName={selectedName} contactRows={contactActivityQuery.data?.activity || []} accountRows={workspaceQuery.data?.activity || []} loading={activityContactId ? contactActivityQuery.isLoading : workspaceQuery.isLoading} error={activityContactId ? contactActivityQuery.isError : workspaceQuery.isError} />
               {!telHref && !session && !workspaceQuery.isLoading && !workspaceQuery.isError ? <p className="mt-2 text-xs leading-4 text-amber-700">This contact needs one dialable number. Select another contact, edit the number, or skip for now.</p> : null}
 
               {session ? (

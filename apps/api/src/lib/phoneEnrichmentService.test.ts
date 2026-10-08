@@ -39,7 +39,7 @@ async function harness(){
   const db=new PGlite();await db.exec(`
     CREATE TABLE users(id varchar PRIMARY KEY);INSERT INTO users VALUES('owner'),('foreign');
     CREATE TABLE prospects(id varchar PRIMARY KEY,user_id varchar REFERENCES users(id),name varchar,status varchar,business_name varchar,contact_company varchar,contact_name varchar,contact_email varchar,contact_phone varchar,address varchar,website_url varchar,last_contact_date varchar,follow_up_due_date timestamptz,ai_metadata jsonb,merged_into_prospect_id varchar,created_at timestamp DEFAULT now(),updated_at timestamp DEFAULT now());
-    CREATE TABLE contact_interactions(id varchar PRIMARY KEY,user_id varchar,prospect_id varchar,source_provider varchar,source_message_id varchar,source_metadata jsonb DEFAULT '{}',UNIQUE(user_id,source_provider,source_message_id,prospect_id));
+    CREATE TABLE contact_interactions(id varchar PRIMARY KEY,user_id varchar,prospect_id varchar,type varchar,date varchar,source_provider varchar,source_message_id varchar,source_metadata jsonb DEFAULT '{}',UNIQUE(user_id,source_provider,source_message_id,prospect_id));
     CREATE TABLE activity_events(id varchar PRIMARY KEY,user_id varchar,prospect_id varchar,source varchar,event_type varchar,evidence_status varchar,match_status varchar,interaction_id varchar,source_metadata jsonb,external_event_id varchar,match_reason varchar,confidence int,updated_at timestamp DEFAULT now());
     CREATE TABLE skill_activities(id varchar); CREATE TABLE opportunities(id varchar,user_id varchar,prospect_id varchar,archived_at timestamp,status varchar,stage varchar);
     CREATE TABLE sales_activity_imports(id varchar PRIMARY KEY,user_id varchar,source varchar,run_id varchar,external_activity_id varchar,activity_status varchar,activity_type varchar,contact_name varchar,company varchar,email varchar,email_domain varchar,subject varchar,notes varchar,activity_at timestamptz,prospect_id varchar,listing_id varchar,match_status varchar,match_reason varchar,confidence integer,interaction_id varchar,raw_payload jsonb,updated_at timestamp DEFAULT now(),UNIQUE(user_id,source,external_activity_id));
@@ -285,7 +285,7 @@ test('retained phone capture replays through manual and mapped links using real 
         const target = (await db.query<any>('SELECT contact_phone,contact_name FROM prospects WHERE id=$1', [fixture.id])).rows[0];
         assert.equal(target.contact_phone, fixture.prospect.phone || null);
         assert.equal(target.contact_name, fixture.prospect.name || 'Saved Buyer');
-        assert.equal((await db.query<any>('SELECT COUNT(*)::int AS n FROM prospect_contacts WHERE prospect_id=$1', [fixture.id])).rows[0].n, 0);
+        assert.equal((await db.query<any>('SELECT COUNT(*)::int AS n FROM prospect_contacts WHERE prospect_id=$1 AND phone IS NOT NULL', [fixture.id])).rows[0].n, fixture.prospect.phone ? 1 : 0);
       }
     });
     await t.test('foreign prospects/imports and cross-company contact IDs never acquire phone evidence', async () => {
@@ -295,9 +295,9 @@ test('retained phone capture replays through manual and mapped links using real 
       await assert.rejects(reviewSalesActivityImport({ pool, storage, userId:'foreign', importId, decision:{action:'link',prospectId:'foreign'} }), (error:any)=>error.status===404);
       assert.deepEqual(await counts(), before);
       const contactId = randomUUID();
+      const crossId = await capture('cross-contact', { contactId });
       await db.query(`INSERT INTO prospect_contacts(id,user_id,prospect_id,source,name,email,company,identity_key)
         VALUES($1,'owner','blank','broker_added','Saved Buyer','cross-contact@example.test','cross-contact company','{}')`, [contactId]);
-      const crossId = await capture('cross-contact', { contactId });
       await addProspect('cross-contact');
       const result = await link(crossId, 'cross-contact');
       assert.equal((result.phoneEnrichment as any).reason, 'contact_not_found');

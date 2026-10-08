@@ -138,6 +138,7 @@ export type CallingContact = {
 export type CallingActivity = {
   id: string; type: string; outcome: string; occurredAt: string; notes: string
   contactId: string | null; contactName: string | null; phoneSnapshot: string | null
+  subject?: string | null; direction?: 'inbound' | 'outbound' | 'internal' | null; evidenceStatus?: 'confirmed' | 'observed' | 'inferred' | null; email?: string | null
 }
 
 export type CallingWorkspace = {

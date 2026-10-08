@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { importSalesActivityBatch, reviewSalesActivityImport, SalesActivityBatchSchema } from './salesActivityImportService';
+import { normalizeSalesActivityInput } from './salesActivityImport';
+import { resolveSalesActivityContact, fillSalesActivityContactAttribution } from './salesActivityContactAttribution';
 import { PGlite } from '@electric-sql/pglite';
 import { createProspectContact, getCallingWorkspace, updateProspectContact, ProspectContactCreateSchema, ProspectContactUpdateSchema } from './prospectContactService';
 import { recordMobileCallStart, recordMobileCallOutcome, discardMobileCallStart, getMobileCallingProgress, listMobileCallQueue } from './mobileCallingService';
@@ -233,6 +237,169 @@ test('owned contact roster and calling attribution use actual disposable Postgre
       const discarded=await discardMobileCallStart({pool,userId:'owner',input:{clientEventId:input.clientEventId,prospectId:input.prospectId,contactId:started.contactId!}});
       assert.equal(discarded.status,'discarded');
       await assert.rejects(discardMobileCallStart({pool,userId:'owner',input:{clientEventId:'roster-call-start-2',prospectId:'account',contactId:primaryId}}),(error:any)=>error.code==='call_already_confirmed');
+    });
+  } finally { await db.close(); }
+});
+
+test('confirmed email sync attributes exact saved people using disposable PostgreSQL without replay credit', async (t) => {
+  const { db, pool, workspace, count } = await harness();
+  await db.exec(`CREATE TABLE opportunities(id varchar,user_id varchar,prospect_id varchar,archived_at timestamp,status varchar,stage varchar);
+    CREATE TABLE sales_activity_imports(id varchar PRIMARY KEY,user_id varchar,source varchar,run_id varchar,external_activity_id varchar,activity_status varchar,activity_type varchar,contact_name varchar,company varchar,email varchar,email_domain varchar,subject varchar,notes varchar,activity_at timestamptz,prospect_id varchar,listing_id varchar,match_status varchar,match_reason varchar,confidence integer,interaction_id varchar,raw_payload jsonb,updated_at timestamp DEFAULT now(),UNIQUE(user_id,source,external_activity_id));
+    CREATE TABLE automation_event_payloads(user_id varchar,producer_id varchar,source varchar,external_activity_id varchar,fingerprint varchar,UNIQUE(user_id,producer_id,source,external_activity_id));`);
+  let storageCalls = 0;
+  const storage = { async createContactInteraction(input: any, options?: any) {
+    storageCalls++;
+    const existing = await db.query<any>('SELECT id FROM contact_interactions WHERE user_id=$1 AND prospect_id=$2 AND source_provider=$3 AND source_message_id=$4',
+      [input.userId,input.prospectId,input.sourceProvider,input.sourceMessageId]);
+    if (existing.rows[0]) return { ...existing.rows[0], duplicate: true };
+    const id = randomUUID();
+    await db.query(`INSERT INTO contact_interactions(id,user_id,prospect_id,date,type,outcome,notes,source_provider,source_message_id,source_metadata)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
+      [id,input.userId,input.prospectId,input.date,input.type,input.outcome,input.notes,input.sourceProvider,input.sourceMessageId,JSON.stringify(input.sourceMetadata)]);
+    if (!options?.skipXp) await db.query('INSERT INTO skill_activities(id,user_id,related_id,xp_gained) VALUES($1,$2,$3,10)',[randomUUID(),input.userId,id]);
+    return { id };
+  }};
+  const activity = (id: string, extra: any = {}) => ({ externalActivityId: id, activityType:'email', status:'sent',
+    email:'alex@example.test', contactName:'Alex Manager', company:'Verified company', subject:'Recorded catch up',
+    activityAt:'2026-10-08T14:00:00.000Z', notes:'Verified sync context', ...extra });
+  const sync = (id: string, extra: any = {}, userId = 'owner') => importSalesActivityBatch({pool,storage,userId,
+    payload:SalesActivityBatchSchema.parse({source:'outlook_sync',activities:[activity(id,extra)]})});
+  const row = async (id: string) => (await db.query<any>('SELECT * FROM contact_interactions WHERE source_message_id=$1',[id])).rows[0];
+  let primaryId = ''; let alexId = '';
+  try {
+    await t.test('alternate saved email resolves an owned account and freezes that person without changing primary fields', async () => {
+      const added=await createProspectContact({pool,userId:'owner',prospectId:'account',input:{name:'Alex Manager',email:'alex@example.test',company:'Manager employer',phone:'780-555-0110'}});
+      primaryId=added.primaryContactId;alexId=added.contacts.find((contact)=>contact.name==='Alex Manager')!.id;
+      const result=await sync('alternate-sent',{body:'Never retain this body',html:'Never retain this HTML'});
+      assert.equal(result.errors,0);assert.equal(result.createdInteractions,1);assert.equal(result.results[0].prospectId,'account');
+      const stored=await row('alternate-sent');assert.equal(stored.source_metadata.contactId,alexId);
+      assert.equal(stored.source_metadata.contactSnapshot.name,'Alex Manager');assert.equal(stored.source_metadata.contactSnapshot.company,'Manager employer');
+      assert.equal(stored.source_metadata.subject,'Recorded catch up');assert.equal(stored.source_metadata.direction,'outbound');assert.equal(stored.source_metadata.evidenceStatus,'confirmed');
+      const account=(await db.query<any>("SELECT * FROM prospects WHERE id='account'")).rows[0];assert.equal(account.contact_name,'Joe Owner');assert.equal(account.contact_email,'joe@example.test');
+      const imported=(await db.query<any>("SELECT raw_payload FROM sales_activity_imports WHERE external_activity_id='alternate-sent'")).rows[0].raw_payload;
+      assert.equal(imported.body,undefined);assert.equal(imported.html,undefined);assert.equal(await count('skill_activities'),1);assert.equal(await count('prospects'),3);
+    });
+    await t.test('workspace exposes structured confirmed subject/direction/evidence only within owned selected history', async () => {
+      const selected=await workspace(alexId);assert.equal(selected.activity.length,1);
+      assert.equal(selected.activity[0].subject,'Recorded catch up');assert.equal(selected.activity[0].email,'alex@example.test');
+      assert.equal(selected.activity[0].direction,'outbound');assert.equal(selected.activity[0].evidenceStatus,'confirmed');
+      assert.equal((await workspace(primaryId)).activity.length,0);assert.equal((await workspace()).unattributedActivityCount,1);
+      await db.query(`INSERT INTO contact_interactions(id,user_id,prospect_id,date,type,source_metadata) VALUES
+        ('foreign-evidence','foreign','account','2026-10-08','email',$1::jsonb),('unknown-evidence','owner','account','2026-10-07','email',$2::jsonb)`,
+        [JSON.stringify({contactId:alexId,subject:'Foreign secret',direction:'inbound',evidenceStatus:'confirmed'}),JSON.stringify({direction:'sent',evidenceStatus:'guessed',subject:'Existing metadata'})]);
+      assert.equal((await workspace(alexId)).activity.length,1);
+      const unknown=(await workspace()).activity.find((item)=>item.id==='unknown-evidence')!;assert.equal(unknown.direction,null);assert.equal(unknown.evidenceStatus,null);
+      await assert.rejects(getCallingWorkspace({pool,userId:'foreign',prospectId:'account'}));
+    });
+    await t.test('inbound confirmed email gets person history but no sent credit or fresh outbound follow-up', async () => {
+      await db.query("UPDATE prospects SET follow_up_due_date=NULL WHERE id='account'");
+      const before=await count('skill_activities');const result=await sync('alternate-received',{status:'received'});
+      assert.equal(result.errors,0);assert.equal((await row('alternate-received')).source_metadata.contactId,alexId);
+      assert.equal((await row('alternate-received')).source_metadata.direction,'inbound');assert.equal(await count('skill_activities'),before);
+      assert.equal((await db.query<any>("SELECT follow_up_due_date FROM prospects WHERE id='account'")).rows[0].follow_up_due_date,null);
+    });
+    await t.test('retry preserves frozen attribution after a contact identity changes and never recreates or re-credits', async () => {
+      const before=await count('skill_activities');const calls=storageCalls;const old=await row('alternate-sent');
+      await updateProspectContact({pool,userId:'owner',prospectId:'account',contactId:alexId,input:{name:'Replacement Manager',email:'replacement@example.test'}});
+      const retry=await sync('alternate-sent',{prospectId:'account',email:'replacement@example.test',contactName:'Replacement Manager'});
+      assert.equal(retry.errors,0);assert.equal(retry.createdInteractions,0);assert.equal(storageCalls,calls);assert.equal(await count('skill_activities'),before);
+      assert.deepEqual(await row('alternate-sent'),old);
+      assert.equal(retry.results[0].contactAttribution?.contactId,alexId);
+      assert.equal(retry.results[0].contactResolution?.contactSnapshot?.name,'Replacement Manager');
+      const retained=(await db.query<any>("SELECT raw_payload FROM sales_activity_imports WHERE external_activity_id='alternate-sent'")).rows[0].raw_payload;
+      assert.equal(retained.contactAttribution.contactId,alexId);
+      assert.equal((await workspace(alexId)).activity.length,2);
+      const archived=await sync('archived-email');assert.equal(archived.needsReview,1);assert.equal(archived.results[0].prospectId,null);
+    });
+    await t.test('primary scalar replacement immediately excludes stale projected email and uses a new durable anchor', async () => {
+      await db.query("UPDATE prospects SET contact_name='New Director',contact_email='new@example.test' WHERE id='account'");
+      const stale=await sync('stale-primary',{email:'joe@example.test'});assert.equal(stale.needsReview,1);
+      const current=await sync('current-primary',{email:'NEW@example.test',contactName:'New Director'});assert.equal(current.errors,0);
+      const stored=await row('current-primary');assert.notEqual(stored.source_metadata.contactId,primaryId);assert.equal(stored.source_metadata.contactSnapshot.name,'New Director');
+      const old=(await db.query<any>('SELECT archived_at FROM prospect_contacts WHERE id=$1',[primaryId])).rows[0];assert.ok(old.archived_at);
+    });
+    await t.test('shared email across accounts remains reviewable; one-account shared inbox remains unassigned', async () => {
+      const common={name:'Shared Inbox One',email:'shared@example.test'};
+      await createProspectContact({pool,userId:'owner',prospectId:'account',input:common});
+      await createProspectContact({pool,userId:'owner',prospectId:'account',input:{...common,name:'Shared Inbox Two'}});
+      const same=await sync('same-account-shared',{email:common.email,contactName:null});assert.equal(same.errors,0);
+      const shared=await row('same-account-shared');assert.equal(shared.source_metadata.contactId,undefined);
+      assert.equal(shared.source_metadata.contactAttribution.reason,'ambiguous_saved_contact_email');
+      await createProspectContact({pool,userId:'owner',prospectId:'other-account',input:common});
+      const multiple=await sync('cross-account-shared',{email:common.email});assert.equal(multiple.needsReview,1);
+      assert.equal(multiple.results[0].matchReason,'ambiguous_contact_email');assert.equal(await row('cross-account-shared'),undefined);
+    });
+    await t.test('wrong actor/contact IDs and merged/archived relationships cannot assign a person by fallback', async () => {
+      const foreign=await createProspectContact({pool,userId:'foreign',prospectId:'foreign-account',input:{name:'Foreign Alex',email:'replacement@example.test'}});
+      const foreignId=foreign.contacts.find((contact)=>contact.name==='Foreign Alex')!.id;
+      const denied=await sync('wrong-contact',{prospectId:'account',email:'replacement@example.test',contactId:foreignId});assert.equal(denied.errors,0);
+      assert.equal((await row('wrong-contact')).source_metadata.contactId,undefined);assert.equal(denied.results[0].contactAttribution?.status,'conflict');assert.equal(denied.results[0].contactResolution?.status,'conflict');
+      const actor=await sync('wrong-actor',{prospectId:'account'},'foreign');assert.equal(actor.errors,1);assert.equal(await row('wrong-actor'),undefined);
+      await db.query("UPDATE prospects SET merged_into_prospect_id='account' WHERE id='other-account'");
+      const merged=await sync('merged-target',{prospectId:'other-account'});assert.equal(merged.errors,1);assert.equal(await row('merged-target'),undefined);
+      const justForeign=await sync('foreign-only-email',{email:'foreign@example.test'});assert.equal(justForeign.needsReview,1);
+    });
+    await t.test('an incremental exact canonical receipt fills missing attribution once while preserving evidence and credit', async () => {
+      const original=activity('legacy-replayed',{email:'late@example.test',prospectId:'account',contactName:'Late Contact'});
+      const first=await sync('legacy-replayed',original);assert.equal(first.errors,0);assert.equal((await row('legacy-replayed')).source_metadata.contactId,undefined);
+      const added=await createProspectContact({pool,userId:'owner',prospectId:'account',input:{name:'Late Contact',email:'late@example.test'}});
+      const contact=added.contacts.find((item)=>item.name==='Late Contact')!;const stored=await row('legacy-replayed');const xp=await count('skill_activities');const calls=storageCalls;
+      const retry=await sync('legacy-replayed',original);assert.equal(retry.createdInteractions,0);assert.equal(retry.errors,0);
+      const filled=await row('legacy-replayed');assert.equal(filled.source_metadata.contactId,contact.id);
+      assert.deepEqual({...filled,source_metadata:stored.source_metadata},stored);assert.equal(await count('skill_activities'),xp);assert.equal(storageCalls,calls);
+      const second=await sync('legacy-replayed',original);assert.equal(second.errors,0);assert.deepEqual(await row('legacy-replayed'),filled);
+      assert.equal((await db.query<any>("SELECT source_metadata FROM contact_interactions WHERE id='old-history'")).rows[0].source_metadata.contactId,undefined);
+    });
+    await t.test('duplicate receipt with changed email/company/date/type/direction or actor never fills missing attribution', async () => {
+      const base=activity('strict-replay',{email:'unlisted@example.test',prospectId:'account',contactName:'Unlisted'});
+      await sync('strict-replay',base);
+      const added=await createProspectContact({pool,userId:'owner',prospectId:'account',input:{name:'Unlisted',email:'unlisted@example.test'}});
+      const saved=await row('strict-replay');const contact=added.contacts.find((item)=>item.name==='Unlisted')!;
+      const dbActivity=normalizeSalesActivityInput(base,{source:'outlook_sync'});
+      const attribution=await resolveSalesActivityContact({db:pool,userId:'owner',prospectId:'account',activity:dbActivity});assert.equal(attribution.contactId,contact.id);
+      for(const extra of [{email:'new@example.test'},{company:'Different company'},{activityAt:'2026-10-09T14:00:00Z'},{activityType:'call'},{status:'received'},{subject:'Changed receipt subject'}]) {
+        await fillSalesActivityContactAttribution({db:pool,userId:'owner',prospectId:'account',interactionId:saved.id,activity:normalizeSalesActivityInput({...base,...extra},{source:'outlook_sync'}),attribution});
+        assert.deepEqual(await row('strict-replay'),saved);
+      }
+      await fillSalesActivityContactAttribution({db:pool,userId:'foreign',prospectId:'account',interactionId:saved.id,activity:dbActivity,attribution});assert.deepEqual(await row('strict-replay'),saved);
+      const xp=await count('skill_activities');await sync('strict-replay',{...base,company:'Changed retry company'});assert.deepEqual(await row('strict-replay'),saved);assert.equal(await count('skill_activities'),xp);
+    });
+    await t.test('manual delayed link attributes the saved verified email without any second interaction or credit', async () => {
+      const captured=await sync('manual-email',{email:'manual@example.test',contactName:'Manual Contact'});assert.equal(captured.needsReview,1);
+      const added=await createProspectContact({pool,userId:'owner',prospectId:'account',input:{name:'Manual Contact',email:'manual@example.test'}});
+      const contact=added.contacts.find((item)=>item.name==='Manual Contact')!;const xp=await count('skill_activities');
+      const input={pool,storage,userId:'owner',importId:captured.results[0].importId!,decision:{action:'link' as const,prospectId:'account'}};
+      await reviewSalesActivityImport(input);const linked=await row('manual-email');assert.equal(linked.source_metadata.contactId,contact.id);assert.equal(linked.source_metadata.contactSnapshot.name,'Manual Contact');
+      const calls=storageCalls;await reviewSalesActivityImport(input);assert.equal(storageCalls,calls);assert.deepEqual(await row('manual-email'),linked);assert.equal(await count('skill_activities'),xp);
+    });
+    await t.test('incremental retry never assigns an old named receipt to a replacement person with reused email', async () => {
+      await sync('reused-email',{email:'reuse@example.test',prospectId:'account',contactName:'Original Person'});
+      await createProspectContact({pool,userId:'owner',prospectId:'account',input:{name:'Replacement Person',email:'reuse@example.test'}});
+      const saved=await row('reused-email');const xp=await count('skill_activities');
+      const retry=await sync('reused-email',{email:'reuse@example.test',prospectId:'account',contactName:'Original Person'});
+      assert.deepEqual(await row('reused-email'),saved);assert.equal(await count('skill_activities'),xp);
+      assert.equal(retry.results[0].contactAttribution?.contactId,null);
+      assert.equal(retry.results[0].contactResolution?.contactSnapshot?.name,'Replacement Person');
+      const retained=(await db.query<any>("SELECT raw_payload FROM sales_activity_imports WHERE external_activity_id='reused-email'")).rows[0].raw_payload;
+      assert.equal(retained.contactAttribution.contactId,null);
+    });
+    await t.test('history caps original touch recency rather than late ingestion and safely ignores malformed dates', async () => {
+      await db.query(`INSERT INTO contact_interactions(id,user_id,prospect_id,date,type,created_at,source_metadata)
+        SELECT 'backfill-' || value,'owner','account','2020-01-01','email','2030-01-01','{}'
+        FROM generate_series(1,105) AS value`);
+      await db.query(`INSERT INTO contact_interactions(id,user_id,prospect_id,date,type,created_at,source_metadata)
+        VALUES('latest-original','owner','account','2026-10-09T14:00:00.000Z','call','2000-01-01','{}'),
+        ('malformed-date','owner','account','not a date','email','2031-01-01','{}')`);
+      const history=await workspace();assert.equal(history.activity.length,100);assert.equal(history.activity[0].id,'latest-original');
+      assert.equal(history.activity.some((item)=>item.id==='malformed-date'),false);
+      assert.ok(history.activity.some((item)=>item.id==='old-history'));
+    });
+    await t.test('draft, research, and merely clicked email create neither person history nor activity credit', async () => {
+      const calls=storageCalls;const xp=await count('skill_activities');
+      for (const status of ['draft','research','skipped']) {
+        const result=await sync(`no-confirmed-${status}`,{email:'manual@example.test',status});assert.equal(result.createdInteractions,0);assert.equal(await row(`no-confirmed-${status}`),undefined);
+      }
+      assert.equal(storageCalls,calls);assert.equal(await count('skill_activities'),xp);
     });
   } finally { await db.close(); }
 });
