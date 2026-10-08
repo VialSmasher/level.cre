@@ -10,7 +10,7 @@ import {
   type NormalizedSalesActivity,
 } from './salesActivityImport';
 import { ProspectReferenceError, requireActiveOwnedProspect } from './prospectReferenceService';
-import { applyProspectPhoneEnrichment, PhoneEnrichmentError, type PhoneEnrichmentResult } from './phoneEnrichmentService';
+import { applyProspectPhoneEnrichment, normalizePhoneCapture, PhoneEnrichmentError, type PhoneEnrichmentResult } from './phoneEnrichmentService';
 
 type Queryable = Pick<Pool | PoolClient, 'query'>;
 class DeliveryConflict extends Error {
@@ -899,6 +899,58 @@ export async function reviewSalesActivityImport(params: {
       prospectId: prospect.id,
       lock: true,
     });
+    // Mapping follows activity capture. Replay its retained phone evidence even
+    // when this link already has an interaction; never send or credit it again.
+    const latest = await client.query(
+      `SELECT raw_payload, prospect_id, interaction_id
+       FROM public.sales_activity_imports
+       WHERE id = $1 AND user_id = $2 FOR UPDATE`,
+      [params.importId, params.userId],
+    );
+    const latestImport = latest.rows[0];
+    if (!latestImport) throw new SalesActivityReviewError(404, 'Sales activity import not found');
+    if (latestImport.interaction_id && latestImport.prospect_id !== prospect.id) {
+      throw new SalesActivityReviewError(409, 'Activity is already logged to another prospect');
+    }
+    interactionId = latestImport.interaction_id || interactionId;
+    const savedPayload = latestImport.raw_payload;
+    if (savedPayload && typeof savedPayload === 'object' && !Array.isArray(savedPayload)) {
+      const capture = normalizePhoneCapture(savedPayload);
+      if (capture.contactPhone || capture.phoneCaptureIssue || savedPayload.phoneCaptureIssue) {
+        let phoneEnrichment: PhoneEnrichmentResult;
+        const savedActivity = normalizeSalesActivityInput(savedPayload);
+        if (savedActivity.contactId && !z.string().uuid().safeParse(savedActivity.contactId).success) {
+          phoneEnrichment = { prospectId: prospect.id, status: 'needs_review', reason: 'invalid_contact_id', evidence: capture.phoneEvidence };
+        } else {
+          try {
+            phoneEnrichment = await applyProspectPhoneEnrichment({
+              db: client,
+              userId: params.userId,
+              input: {
+                prospectId: prospect.id,
+                contactId: savedActivity.contactId,
+                contactName: savedActivity.contactName,
+                email: savedActivity.email,
+                company: savedActivity.company,
+                contactPhone: capture.contactPhone,
+                phoneEvidence: capture.phoneEvidence,
+              },
+            });
+          } catch (error) {
+            if (!(error instanceof PhoneEnrichmentError)) throw error;
+            phoneEnrichment = { prospectId: prospect.id, status: 'needs_review', reason: error.code, evidence: capture.phoneEvidence };
+          }
+        }
+        await client.query(
+          `UPDATE public.sales_activity_imports
+           SET raw_payload = raw_payload || $3::jsonb
+           WHERE id = $1 AND user_id = $2`,
+          [params.importId, params.userId, JSON.stringify({ phoneEnrichment })],
+        );
+        linkedRow = { phoneEnrichment };
+      }
+    }
+
     const linked = await client.query(
       `
         UPDATE public.sales_activity_imports
@@ -913,7 +965,7 @@ export async function reviewSalesActivityImport(params: {
       `,
       [params.importId, params.userId, prospect.id, interactionId],
     );
-    linkedRow = linked.rows[0] || null;
+    linkedRow = linked.rows[0] ? { ...linked.rows[0], ...linkedRow } : linkedRow;
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');

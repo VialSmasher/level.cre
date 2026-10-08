@@ -4,9 +4,12 @@ import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 
 import { XP_VALUES } from './gamification';
+import { businessPhoneKey, contactIdentityKey, derivePhoneReadiness, isPhoneBlocked, readPhoneReadinessMetadata, type PhoneReadiness } from './phoneReadiness';
 
 export const MOBILE_CALL_OUTCOMES = [
   'attempted',
+  'wrong_number',
+  'disconnected',
   'contacted',
   'no_answer',
   'left_message',
@@ -64,6 +67,7 @@ export class MobileCallingError extends Error {
 
 export type MobileCallQueueCandidate = {
   id: string;
+  phoneReadiness?: PhoneReadiness;
   priorityScore: number;
   priority: 'critical' | 'high' | 'medium' | 'low';
   reasons: string[];
@@ -182,28 +186,12 @@ export function rankMobileCallCandidate(params: {
   return { score: boundedScore, priority, reasons: reasons.slice(0, 3) } as const;
 }
 
-function normalizePhone(value: string) {
-  const parts = value.trim().split(/\s*(?:extension|ext\.?|x|;ext=|[,;#])\s*/i);
-  if (parts.length > 2 || /[^\d\s()+.\-]/.test(parts[0]) || (parts[1] && /\D/.test(parts[1]))) return null;
-  if (!/^\+?\d+$/.test(parts[0].replace(/[\s().-]/g, ''))) return null;
-  const digits = parts[0].replace(/\D/g, '');
-  if (digits.length < 7 || digits.length > 15) return null;
-  return { digits, extension: parts[1] || '' };
-}
-
 export function phonesMatch(left: string, right: string) {
-  const leftPhone = normalizePhone(left);
-  const rightPhone = normalizePhone(right);
-  if (!leftPhone || !rightPhone || leftPhone.extension !== rightPhone.extension) return false;
-  const leftDigits = leftPhone.digits;
-  const rightDigits = rightPhone.digits;
-  return leftDigits === rightDigits
-    || (leftDigits.length === 11 && leftDigits.startsWith('1') && leftDigits.slice(1) === rightDigits)
-    || (rightDigits.length === 11 && rightDigits.startsWith('1') && rightDigits.slice(1) === leftDigits);
+  const leftKey = businessPhoneKey(left);
+  return Boolean(leftKey && leftKey === businessPhoneKey(right));
 }
-
 export function eventTypeForCallOutcome(outcome: MobileCallOutcome) {
-  return outcome === 'attempted' || outcome === 'no_answer' || outcome === 'left_message' ? 'call_attempted' : 'call_connected';
+  return outcome === 'attempted' || outcome === 'wrong_number' || outcome === 'disconnected' || outcome === 'no_answer' || outcome === 'left_message' ? 'call_attempted' : 'call_connected';
 }
 
 export async function listMobileCallQueue(params: {
@@ -229,6 +217,9 @@ export async function listMobileCallQueue(params: {
       p.follow_up_due_date,
       p.last_contact_date,
       p.created_at,
+      p.ai_metadata,
+      COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c.is_primary DESC,c.created_at,c.id) FROM public.prospect_contacts c
+        WHERE c.user_id=p.user_id AND c.prospect_id=p.id AND c.archived_at IS NULL),'[]'::jsonb) AS contacts,
       latest.last_interaction_at,
       COALESCE(listings.listing_titles, ARRAY[]::varchar[]) AS listing_titles,
       COALESCE(recent.items, '[]'::jsonb) AS recent_activity
@@ -263,13 +254,7 @@ export async function listMobileCallQueue(params: {
     WHERE p.user_id = $1
       AND p.merged_into_prospect_id IS NULL
       AND COALESCE(p.status, '') <> 'no_go'
-      AND (NULLIF(BTRIM(p.contact_phone), '') IS NOT NULL OR EXISTS (
-        SELECT 1 FROM public.prospect_contacts callable_contact
-        WHERE callable_contact.user_id=p.user_id AND callable_contact.prospect_id=p.id
-          AND callable_contact.archived_at IS NULL
-          AND ((NOT callable_contact.is_primary AND NULLIF(BTRIM(callable_contact.phone),'') IS NOT NULL) OR jsonb_array_length(callable_contact.additional_phones)>0)
-      ))
-      AND ($4::boolean OR NOT EXISTS (
+      AND ($3::boolean OR NOT EXISTS (
         SELECT 1
         FROM public.contact_interactions today_call
         WHERE today_call.user_id = p.user_id
@@ -278,14 +263,15 @@ export async function listMobileCallQueue(params: {
           AND (today_call.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Edmonton')::date = ($2::timestamptz AT TIME ZONE 'America/Edmonton')::date
       ))
     ORDER BY COALESCE(p.follow_up_due_date, latest.last_interaction_at, p.created_at) ASC, p.id ASC
-    LIMIT $3
-  `, [params.userId, now.toISOString(), Math.max(params.limit * 4, params.limit), params.includeCalledToday === true]);
+
+  `, [params.userId, now.toISOString(), params.includeCalledToday === true]);
 
   const chronologicalKeys = new Map<string, number>(rows.map((row) => [row.id,
     (asDate(row.follow_up_due_date) || asDate(row.last_interaction_at) || asDate(row.created_at))?.getTime() ?? Infinity,
   ]));
   const candidates = rows
     .map((row) => {
+      const phoneReadiness = derivePhoneReadiness(row, Array.isArray(row.contacts) ? row.contacts : [], { now });
       const rank = rankMobileCallCandidate({
         status: row.status,
         followUpDueDate: row.follow_up_due_date,
@@ -295,14 +281,14 @@ export async function listMobileCallQueue(params: {
         now,
       });
       return {
-        id: `call:${row.id}`,
+        id: `call:${row.id}`, phoneReadiness,
         priorityScore: rank.score,
         priority: rank.priority,
         reasons: rank.reasons,
         contact: {
           name: row.contact_name || null,
           company: row.contact_company || row.business_name || null,
-          phone: row.contact_phone || '',
+          phone: phoneReadiness.usableChoices[0]?.number || '',
           email: row.contact_email || null,
         },
         prospect: {
@@ -318,16 +304,19 @@ export async function listMobileCallQueue(params: {
         recentActivity: Array.isArray(row.recent_activity) ? row.recent_activity : [],
       } satisfies MobileCallQueueCandidate;
     })
+    .filter((candidate) => candidate.phoneReadiness.status === 'ready')
     .sort((left, right) => right.priorityScore - left.priorityScore
       || (chronologicalKeys.get(left.prospect.id)! - chronologicalKeys.get(right.prospect.id)!)
       || left.prospect.id.localeCompare(right.prospect.id))
     .slice(0, params.limit);
-  return { rows: candidates, totalEligible: Number(rows[0]?.total_eligible || 0) };
+  return { rows: candidates, totalEligible: rows.filter((row) => derivePhoneReadiness(row, Array.isArray(row.contacts) ? row.contacts : [], { now }).status === 'ready').length };
 }
 
 function outcomeSummary(outcome: MobileCallOutcome, notes: string) {
   const labels: Record<MobileCallOutcome, string> = {
     attempted: 'Call attempted',
+    wrong_number: 'Wrong number',
+    disconnected: 'Disconnected number',
     contacted: 'Connected',
     no_answer: 'No answer',
     left_message: 'Left voicemail',
@@ -385,7 +374,7 @@ async function requireCallableProspect(client: PoolClient, userId: string, input
   const { rows } = await client.query(`
     SELECT id, name, status, address, contact_name, contact_email, contact_phone,
            contact_company, business_name, merged_into_prospect_id, follow_up_due_date,
-           last_contact_date, created_at
+           last_contact_date, created_at, ai_metadata
     FROM public.prospects
     WHERE id = $1 AND user_id = $2
     LIMIT 1
@@ -413,6 +402,7 @@ async function requireCallableProspect(client: PoolClient, userId: string, input
       throw error;
     }
     if (!contact) throw new MobileCallingError({ message: 'Contact was not found on this record.', status: 404, code: 'contact_not_found' });
+    if (isPhoneBlocked(prospect, contact, input.expectedPhone)) throw new MobileCallingError({ message: 'This number was reported wrong or disconnected. Choose another number.', status: 409, code: 'phone_blocked' });
     if (![contact.phone, ...contact.additionalPhones.map((item) => item.number)].some((phone) => phone && phonesMatch(input.expectedPhone, phone))) {
       throw new MobileCallingError({ message: 'The contact phone number changed. Refresh before recording this call.', status: 409, code: input.contactId ? 'contact_phone_changed' : 'prospect_phone_changed' });
     }
@@ -709,6 +699,14 @@ export async function recordMobileCallOutcome(params: {
       ON CONFLICT (event_id, entity_type, entity_id, role) DO NOTHING
     `, [randomUUID(), params.userId, eventId, params.input.prospectId, JSON.stringify({ phoneMatched: true })]);
 
+    if (params.input.outcome === 'wrong_number' || params.input.outcome === 'disconnected') {
+      const state = readPhoneReadinessMetadata(prospect.calling_account);
+      if (!state || state.blocks.length >= 200) throw new MobileCallingError({ message: 'Phone findings need review before another finding can be saved.', status: 409, code: 'phone_metadata_conflict' });
+      const block = { contactId: metadata.contactId, identityKey: contactIdentityKey(prospect.calling_contact), phoneKey: businessPhoneKey(params.input.expectedPhone)!, number: params.input.expectedPhone, reason: params.input.outcome, eventId, recordedAt: occurredAt };
+      const aiMetadata = { ...(prospect.calling_account.ai_metadata || {}), phoneReadiness: { ...state, blocks: [...state.blocks, block], research: null } };
+      await client.query('UPDATE public.prospects SET ai_metadata=$3::jsonb,updated_at=now() WHERE id=$1 AND user_id=$2', [prospect.id, params.userId, JSON.stringify(aiMetadata)]);
+      prospect.calling_account.ai_metadata = aiMetadata;
+    }
     const followUpProvided = Object.prototype.hasOwnProperty.call(params.input, 'nextFollowUp');
     const connected = eventTypeForCallOutcome(params.input.outcome) === 'call_connected';
     await client.query(`

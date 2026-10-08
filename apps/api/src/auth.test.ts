@@ -181,6 +181,8 @@ test('scoped market-record credentials cannot cross the broker approval gate', a
 const phoneEnrichmentEndpoints = [
   { method: 'GET', path: '/api/agent/phone-enrichment/context' },
   { method: 'POST', path: '/api/agent/phone-enrichment/batch' },
+  { method: 'GET', path: '/api/agent/phone-enrichment/needs-number' },
+  { method: 'POST', path: '/api/agent/phone-enrichment/research-status' },
 ] as const
 
 async function withPhoneEnrichmentAuthEnvironment(action: () => Promise<void>) {
@@ -217,6 +219,10 @@ test('phone enrichment exceptions require verified sales scope and exact endpoin
     { method: 'POST', path: '/api/agent/phone-enrichment/batch/foreign-record' },
     { method: 'GET', path: '/api/agent/phone-enrichment/context/' },
     { method: 'GET', path: '/api/agent/phone-enrichment/context-other' },
+    { method: 'POST', path: '/api/agent/phone-enrichment/needs-number' },
+    { method: 'GET', path: '/api/agent/phone-enrichment/research-status' },
+    { method: 'POST', path: '/api/agent/phone-enrichment/research-status/foreign' },
+    { method: 'GET', path: '/api/agent/phone-enrichment/needs-number/' },
   ]) {
     assert.equal(phoneEnrichmentRouteAllowed(endpoint.method, endpoint.path), false)
     assert.equal(legacyAgentRouteAllowed(endpoint.method, endpoint.path, true), false)

@@ -4,7 +4,7 @@ The phone-enrichment endpoints fill verified business phone information on a bro
 
 ## Authentication and ownership
 
-Both routes use `requireSalesActivityAuth`. A verified broker session or a configured sales-activity harness credential determines the actor through `getUserId`; a payload-supplied user ID cannot select the owner. Demo writes are rejected. The legacy agent middleware permits only the exact GET context and POST batch paths for the proper sales credential, rather than opening the general agent namespace.
+The agent routes use `requireSalesActivityAuth`. A verified broker session or a configured sales-activity harness credential determines the actor through `getUserId`; a payload-supplied user ID cannot select the owner. Demo writes are rejected. The legacy agent middleware permits only the exact GET context, GET needs-number, POST research-status and POST batch paths for the proper sales credential, rather than opening the general agent namespace.
 
 Responses use `Cache-Control: private, no-store`. Keep exported research context and enrichment results broker-private, outside version control and shared pursuit material. Never include credentials in payloads, evidence URLs, or saved research.
 
@@ -50,7 +50,7 @@ Synthetic example of a company routing line:
 
 Evidence kinds are `contact_direct` and `company_main`. Sources are `company_website`, `official_directory`, `zoominfo`, `email_signature`, and `broker_confirmed`. Web sources require a public HTTP(S) URL without embedded credentials. ZoomInfo requires a URL or stable provider ID. Signature evidence requires a stable provider message ID. All evidence requires an ISO timestamp with an offset and literal `verified: true`; evidence more than five minutes in the future is held for review. Do not attach message bodies.
 
-A direct number must match the existing person's name or email without conflicting identity fields. Use an owned active `contactId` to target an additional contact, and supply that contact's current name, email, and phone in `expectedContact`. A verified matching direct number can fill an empty phone; it does not create a guessed person.
+A direct number must match the existing person's name or email without conflicting identity fields. Use an owned active `contactId` to target an additional contact, and supply that contact's current name, email, and phone in `expectedContact`. A verified matching direct number can fill an empty phone. A fresh snapshot also permits replacement of an explicitly reported bad number, while keeping the same verified person. Healthy saved phones stay protected. It does not create a guessed person.
 
 A company main line must match the existing company identity and omit `contactId`. It creates or reuses a separate nonprimary contact labelled “Company main line” with title “Company switchboard”. It preserves the named primary person's phone and email. Describe corporate/shared routing accurately in research evidence; a corporate line does not verify an Edmonton facility or named person's direct number.
 
@@ -62,9 +62,32 @@ Results contain `applied`, `unchanged`, `needsReview`, `errors`, and per-entry s
 
 Only owned contact phones, contact relationships, provenance, and relevant update timestamps change. Backfill uses this endpoint, not a synthetic email or activity event. Existing verified-email ingestion may capture optional evidenced phone data, but its dispatch verification and activity identity remain independently authoritative.
 
+When a verified activity is initially unmatched, its sanitized phone capture remains in the private import payload. A later manual or verified-map link replays that evidence through the same enrichment helper inside the link transaction. Same-link retries can recover a pending-call deferral without adding another interaction or credit. The response returns a separate `phoneEnrichment` result; an accepted email link does not prove the phone was applied. Ignore decisions do not replay phone capture. Foreign contact IDs, mismatched identity, unverified evidence and existing-phone conflicts remain reviewable.
+
+The intake preserves supplied phone evidence; it does not discover numbers by itself. During authorized company research, check the existing owned roster and available signature/company sources, then report either a sourced direct/main line or an explicit unresolved reason. Numbers found after activity recording use the phone-only endpoint and a fresh target snapshot. Codex-fed spreadsheets preserve contact evidence in a separate phone handoff after the owned record is resolved. The property import alone does not turn contact text into a callable contact. Signature capture uses the verified counterparty identity and provider message ID; the broker signature, fax numbers and quoted history are excluded. Phone capture failures are reported separately and never cause a real email to be sent again.
+
+## Missing-number research and broker feedback
+
+`GET /api/calling/needs-number?limit=25` is a signed-in broker list shared by Desk and Calls. `GET /api/agent/phone-enrichment/needs-number?limit=20&eligibleOnly=true` is the same owned research cohort for Codex. Active, identifiable companies without a usable saved choice are ranked with due follow-ups first. Address-only property labels, foreign records, merged records and no-go records are excluded. Pending calls and research cooldowns prevent automated work on an unsafe or recently checked target.
+
+`POST /api/agent/phone-enrichment/research-status` accepts a current `expectedSnapshotToken` and one of `not_found`, `conflicting`, `identity_unclear` or `access_blocked`. The default retry is 14 days, bounded to 1–90 days. Retry of the same result does not extend its cooldown. Changed company/contact/phone state requires refreshed context.
+
+Wrong number and Disconnected are confirmed call-attempt outcomes. The existing frozen session determines the person and exact number, the attempt earns only normal call credit once, and the finding blocks that choice on that owned record. Another saved usable choice keeps the company callable; otherwise it enters Needs a number. Source retries cannot revive a reported bad number. Verified replacement preserves the old finding and person identity. Generic metadata edits/imports cannot erase these findings or phone provenance.
+
+Both the call queue/workspace and Desk sales brief derive readiness from the same active contact roster, current legacy primary identity, labeled additional numbers, and bad-number findings. A company routing line remains a separate contact and is never presented as a named person's direct number.
+
+The existing Evening Level CRE Sync performs a bounded weekday refill of up to 20 eligible companies at 6:15 p.m., using available authorized sources. A missing or unauthorized endpoint stops only refill, not verified activity recording. The morning brief is read-only. Source access and credit restrictions remain in force.
+
 ## Validation
 
-The focused API regression run passed 98 of 98 checks, and API type checking and bundling passed. Coverage includes credential actor binding and the exact legacy path allowlist, strict nested evidence and required snapshots, foreign/merged targets, read-only context privacy, direct versus company-main attribution, existing-phone preservation, pending-call and stale-snapshot conflicts, repeated evidence, and verified-email capture compatibility.
+Focused API and browser regression receipts are maintained in the private release report. API type checking and bundling are required before release. Coverage includes credential actor binding and the exact legacy path allowlist, strict nested evidence and required snapshots, foreign/merged targets, read-only context privacy, direct versus company-main attribution, existing-phone preservation, pending-call and stale-snapshot conflicts, repeated evidence, and verified-email capture compatibility.
 
 Relevant source files are `apps/api/src/auth.ts`, `apps/api/src/routes.ts`, `apps/api/src/lib/phoneEnrichmentService.ts`, and their associated API tests. These checks do not substitute for source verification or a broker's review of a disputed company/contact match.
 
+## Codex workflow handoff
+
+Research sheets feed through Codex and the existing authorized account import/link workflow. Preserve the verified phone with the exact saved prospect/contact IDs, company/person match, direct/main kind, source URL or stable provider ID, and original observation date. After the owned record is resolved, send a phone-only sidecar to the enrichment batch endpoint with a fresh `expectedContact` snapshot. A sheet cell alone does not verify a number. This handoff does not create an app spreadsheet UI, duplicate an account, change a property address, or invent an email/call to install a number.
+
+The recorder's local `phoneEnrichment` summary exposes `reported`, `applied`, `unchanged`, `needsReview`, `errors`, `unconfirmed`, and per-entry `results` containing activity/source identity, prospect/contact IDs, status and reason. It excludes raw phone evidence and message content. These phone verdicts remain separate from email acceptance, activity `needsReview`, and retained activity outbox counts. A phone-review failure never authorizes resending a real email. Missing or unrecognized verdicts cannot establish a saved phone; `applied`/`unchanged` also require fresh owned-context readback to confirm the intended usable number and attribution.
+
+The agent repair queue at `GET /api/agent/phone-enrichment/needs-number?limit=20&eligibleOnly=true&includeReportedBad=true` includes current blocked choices for replacement research even when the company has a usable alternate; the UI Needs a number list remains limited to companies with no usable choice. Preserve healthy choices. Automatic replacement requires the exact reported-bad primary/direct or Company main line and fresh context; a blocked labeled `additionalPhones` slot remains held for explicit review/contact editing instead of overwriting a healthy primary/main field. Pending-call exclusions and research cooldowns apply to this repair lane as well.

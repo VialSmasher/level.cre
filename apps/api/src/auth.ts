@@ -2,7 +2,9 @@ const PHONE_ENRICHMENT_PREFIX = '/api/agent/phone-enrichment';
 
 export function phoneEnrichmentRouteAllowed(method: string, path: string): boolean {
   return (method === 'GET' && path === PHONE_ENRICHMENT_PREFIX + '/context')
-    || (method === 'POST' && path === PHONE_ENRICHMENT_PREFIX + '/batch');
+    || (method === 'POST' && path === PHONE_ENRICHMENT_PREFIX + '/batch')
+    || (method === 'GET' && path === PHONE_ENRICHMENT_PREFIX + '/needs-number')
+    || (method === 'POST' && path === PHONE_ENRICHMENT_PREFIX + '/research-status');
 }
 
 export function legacyAgentRouteAllowed(method: string, path: string, verifiedSalesCredential = false): boolean {

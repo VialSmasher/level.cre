@@ -130,3 +130,6 @@ work/calling-playwright/
 
 # Private broker-owned phone research, snapshots and backfill receipts
 work/phone-enrichment/
+
+# Local legacy environment backup
+server/.env.bak

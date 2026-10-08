@@ -384,14 +384,14 @@ test('queue count represents all eligible prospects instead of the returned page
   let parameters: unknown[] = [];
   const pool = { async query(_text: string, values: unknown[]) {
     parameters = values;
-    return { rows: [{ id: 'prospect-1', name: 'Acme', status: 'prospect', contact_phone: '780-555-0100', total_eligible: '73' }] };
+    return { rows: [...Array.from({ length: 73 }, (_, index) => ({ id: 'prospect-' + (index + 1), name: 'Acme', status: 'prospect', contact_phone: '780-555-0100' })), { id: 'ambiguous', name: 'Ambiguous', status: 'prospect', contact_phone: 'Main: 780-555-0100 or 780-555-0101' }] };
   } } as any;
   const result = await listMobileCallQueue({ pool, userId: 'user-1', limit: 1, includeCalledToday: true });
   assert.equal(result.rows.length, 1);
   assert.equal(result.rows[0].id, 'call:prospect-1');
   assert.equal(result.totalEligible, 73);
   assert.equal(parameters[0], 'user-1');
-  assert.equal(parameters[3], true);
+  assert.equal(parameters[2], true);
 });
 
 test('equal call priorities keep the same chronological and prospect order across refetches', async () => {

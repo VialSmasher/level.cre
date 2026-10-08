@@ -1,10 +1,12 @@
 import test from 'node:test';
+import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 import {normalizeBusinessPhone,normalizePhoneCapture,PhoneEnrichmentBatchSchema,enrichProspectPhoneBatch,getPhoneEnrichmentContext} from './phoneEnrichmentService';
 import {normalizeSalesActivityInput} from './salesActivityImport';
-import {importSalesActivityBatch,SalesActivityBatchSchema} from './salesActivityImportService';
+import {importSalesActivityBatch,reviewSalesActivityImport,SalesActivityBatchSchema} from './salesActivityImportService';
+import {linkSalesActivityReference} from './salesProspectMappingService';
 
 const evidence={kind:'contact_direct',source:'company_website',url:'https://company.example.test/team',observedAt:'2026-10-07T12:00:00Z',verified:true} as const;
 test('phone capture accepts one explicit number and provenance while rejecting lists and private payload fields',()=>{
@@ -34,10 +36,10 @@ test('phone metadata survives activity normalization without changing event iden
 async function harness(){
   const db=new PGlite();await db.exec(`
     CREATE TABLE users(id varchar PRIMARY KEY);INSERT INTO users VALUES('owner'),('foreign');
-    CREATE TABLE prospects(id varchar PRIMARY KEY,user_id varchar REFERENCES users(id),name varchar,status varchar,business_name varchar,contact_company varchar,contact_name varchar,contact_email varchar,contact_phone varchar,address varchar,website_url varchar,ai_metadata jsonb,merged_into_prospect_id varchar,created_at timestamp DEFAULT now(),updated_at timestamp DEFAULT now());
-    CREATE TABLE contact_interactions(id varchar PRIMARY KEY,user_id varchar,prospect_id varchar,source_metadata jsonb DEFAULT '{}');
-    CREATE TABLE activity_events(id varchar PRIMARY KEY,user_id varchar,prospect_id varchar,source varchar,event_type varchar,evidence_status varchar,match_status varchar,interaction_id varchar,source_metadata jsonb);
-    CREATE TABLE skill_activities(id varchar);
+    CREATE TABLE prospects(id varchar PRIMARY KEY,user_id varchar REFERENCES users(id),name varchar,status varchar,business_name varchar,contact_company varchar,contact_name varchar,contact_email varchar,contact_phone varchar,address varchar,website_url varchar,last_contact_date varchar,follow_up_due_date timestamptz,ai_metadata jsonb,merged_into_prospect_id varchar,created_at timestamp DEFAULT now(),updated_at timestamp DEFAULT now());
+    CREATE TABLE contact_interactions(id varchar PRIMARY KEY,user_id varchar,prospect_id varchar,source_provider varchar,source_message_id varchar,source_metadata jsonb DEFAULT '{}',UNIQUE(user_id,source_provider,source_message_id,prospect_id));
+    CREATE TABLE activity_events(id varchar PRIMARY KEY,user_id varchar,prospect_id varchar,source varchar,event_type varchar,evidence_status varchar,match_status varchar,interaction_id varchar,source_metadata jsonb,external_event_id varchar,match_reason varchar,confidence int,updated_at timestamp DEFAULT now());
+    CREATE TABLE skill_activities(id varchar); CREATE TABLE opportunities(id varchar,user_id varchar,prospect_id varchar,archived_at timestamp,status varchar,stage varchar);
     CREATE TABLE sales_activity_imports(id varchar PRIMARY KEY,user_id varchar,source varchar,run_id varchar,external_activity_id varchar,activity_status varchar,activity_type varchar,contact_name varchar,company varchar,email varchar,email_domain varchar,subject varchar,notes varchar,activity_at timestamptz,prospect_id varchar,listing_id varchar,match_status varchar,match_reason varchar,confidence integer,interaction_id varchar,raw_payload jsonb,updated_at timestamp DEFAULT now(),UNIQUE(user_id,source,external_activity_id));
     INSERT INTO prospects(id,user_id,name,status,business_name,contact_company,contact_name,contact_email,contact_phone,ai_metadata) VALUES
       ('blank','owner','Verified company','prospect','Verified company','Verified company','Joe Owner','joe@example.test',NULL,'{"propertyLink":{"propertyProspectId":"building"}}'),
@@ -47,7 +49,7 @@ async function harness(){
       ('merged','owner','Merged company','prospect','Merged company','Merged company','Joe Owner','joe@example.test',NULL,'{}'),
       ('no-go','owner','No go company','no_go','No go company','No go company',NULL,NULL,NULL,'{}');
     UPDATE prospects SET merged_into_prospect_id='blank' WHERE id='merged';
-    INSERT INTO activity_events VALUES('pending-click','owner','pending','level_cre_mobile_calling','call_started','observed','matched',NULL,'{"sessionState":"started","contactSnapshot":{"name":"Pat Manager","phone":"780-555-0177"}}');
+    INSERT INTO activity_events(id,user_id,prospect_id,source,event_type,evidence_status,match_status,interaction_id,source_metadata) VALUES('pending-click','owner','pending','level_cre_mobile_calling','call_started','observed','matched',NULL,'{"sessionState":"started","contactSnapshot":{"name":"Pat Manager","phone":"780-555-0177"}}');
   `);
   await db.exec(await readFile(new URL('../../../../drizzle/0021_prospect_contacts.sql',import.meta.url),'utf8'));
   const pool:any={query:(sql:string,values?:any[])=>db.query(sql,values),connect:async()=>({query:(sql:string,values?:any[])=>db.query(sql,values),release(){}})};
@@ -132,4 +134,209 @@ test('verified enrichment uses real PostgreSQL locks and preserves identity, pro
     });
     assert.equal((await db.query<any>('SELECT count(*)::int AS n FROM skill_activities')).rows[0].n,0);assert.equal((await db.query<any>('SELECT count(*)::int AS n FROM contact_interactions')).rows[0].n,0);assert.equal((await db.query<any>('SELECT count(*)::int AS n FROM prospects')).rows[0].n,6);
   } finally {await db.close();}
+});
+
+test('retained phone capture replays through manual and mapped links using real PostgreSQL', async (t) => {
+  const { db, pool } = await harness();
+  let storageCalls = 0;
+  const storage = {
+    linkProspectToListingAny: async () => { throw new Error('These fixtures do not link listings'); },
+    createContactInteraction: async (input: any, options: any) => {
+      assert.deepEqual(options, { skipXp: true });
+      storageCalls++;
+      const { rows } = await db.query<any>(
+        `INSERT INTO contact_interactions(id,user_id,prospect_id,source_provider,source_message_id,source_metadata)
+         VALUES($1,$2,$3,$4,$5,$6::jsonb)
+         ON CONFLICT(user_id,source_provider,source_message_id,prospect_id)
+         DO UPDATE SET source_message_id=contact_interactions.source_message_id RETURNING id`,
+        [randomUUID(), input.userId, input.prospectId, input.sourceProvider, input.sourceMessageId, JSON.stringify(input.sourceMetadata)],
+      );
+      return rows[0];
+    },
+  };
+  const counts = async () => (await db.query<any>(
+    `SELECT (SELECT COUNT(*) FROM contact_interactions)::int AS interactions,
+     (SELECT COUNT(*) FROM activity_events)::int AS events,
+     (SELECT COUNT(*) FROM skill_activities)::int AS xp,
+     (SELECT COUNT(*) FROM prospects)::int AS prospects`,
+  )).rows[0];
+  const capture = async (id: string, extra: any = {}) => {
+    const result = await importSalesActivityBatch({
+      pool, storage, userId: 'owner',
+      payload: SalesActivityBatchSchema.parse({ activities: [{
+        externalActivityId: id, email: `${id}@example.test`, contactName: 'Saved Buyer',
+        company: `${id} company`, subject: 'Verified email', status: 'sent',
+        activityAt: '2026-10-07T10:00:00Z', contactPhone: '780-555-0188',
+        phoneEvidence: evidence, ...extra,
+      }] }),
+    });
+    assert.equal(result.errors, 0);
+    return result.results[0].importId!;
+  };
+  const addProspect = async (id: string, extra: any = {}) => {
+    const row = { company: `${id} company`, name: 'Saved Buyer', email: `${id}@example.test`, phone: null, owner: 'owner', ...extra };
+    await db.query(
+      `INSERT INTO prospects(id,user_id,name,status,business_name,contact_company,contact_name,contact_email,contact_phone,ai_metadata)
+       VALUES($1,$2,$3,'prospect',$3,$3,$4,$5,$6,'{"propertyLink":{"propertyProspectId":"building"}}')`,
+      [id,row.owner,row.company,row.name,row.email,row.phone],
+    );
+  };
+  const link = (importId: string, prospectId: string) => reviewSalesActivityImport({
+    pool, storage, userId: 'owner', importId, decision: { action: 'link', prospectId },
+  });
+  try {
+    await t.test('company main survives unmatched capture and omitted retry, then mapping attaches one switchboard', async () => {
+      const importId = await capture('mapped-main', { phoneEvidence: { ...evidence, kind: 'company_main' } });
+      assert.equal(storageCalls, 0);
+      await importSalesActivityBatch({
+        pool, storage, userId: 'owner', payload: SalesActivityBatchSchema.parse({ activities: [{
+          externalActivityId: 'mapped-main', email: 'mapped-main@example.test', contactName: 'Saved Buyer',
+          company: 'mapped-main company', status: 'sent', subject: 'Verified email', activityAt: '2026-10-07T10:00:00Z',
+        }] }),
+      });
+      const retained = (await db.query<any>('SELECT raw_payload FROM sales_activity_imports WHERE id=$1', [importId])).rows[0].raw_payload;
+      assert.equal(retained.contactPhone, '780-555-0188');
+      assert.equal(retained.phoneEvidence.kind, 'company_main');
+      await addProspect('mapped-main');
+      await db.query(`INSERT INTO activity_events(id,user_id,source,external_event_id,event_type,evidence_status,match_status,source_metadata)
+        VALUES('mapped-email','owner','codex_followup','mapped-main','email_sent','confirmed','needs_review','{}')`);
+      const before = await counts();
+      const first = await linkSalesActivityReference({ pool, storage, userId: 'owner', externalActivityId: 'mapped-main', prospectId: 'mapped-main' });
+      assert.equal(first.linked, true);
+      const result = (first as any).result;
+      assert.equal(result.phoneEnrichment.reason, 'added_company_main_line');
+      assert.equal(result.phoneEnrichment.evidence.kind, 'company_main');
+      const target = (await db.query<any>("SELECT * FROM prospects WHERE id='mapped-main'")).rows[0];
+      assert.equal(target.contact_name, 'Saved Buyer');
+      assert.equal(target.contact_email, 'mapped-main@example.test');
+      assert.equal(target.contact_phone, null);
+      assert.deepEqual(target.ai_metadata.propertyLink, { propertyProspectId: 'building' });
+      const contact = (await db.query<any>('SELECT * FROM prospect_contacts WHERE id=$1', [result.phoneEnrichment.contactId])).rows[0];
+      assert.equal(contact.name, 'Company main line');
+      assert.equal(contact.title, 'Company switchboard');
+      assert.equal(contact.is_primary, false);
+      assert.equal(contact.phone, '780-555-0188');
+      assert.equal(contact.email, null);
+      const once = await counts();
+      assert.deepEqual(once, { ...before, interactions: before.interactions + 1 });
+      const calls = storageCalls;
+      const retry = await linkSalesActivityReference({ pool, storage, userId: 'owner', externalActivityId: 'mapped-main', prospectId: 'mapped-main' });
+      assert.equal((retry as any).result.phoneEnrichment.reason, 'existing_main_line_matches');
+      assert.equal((retry as any).result.phoneEnrichment.contactId, contact.id);
+      assert.deepEqual(await counts(), once);
+      assert.equal(storageCalls, calls);
+      const after = (await db.query<any>("SELECT ai_metadata FROM prospects WHERE id='mapped-main'")).rows[0].ai_metadata;
+      assert.equal(after.phoneEnrichment.observations.length, 1);
+      const event = (await db.query<any>("SELECT prospect_id,interaction_id FROM activity_events WHERE id='mapped-email'")).rows[0];
+      assert.equal(event.prospect_id, 'mapped-main');
+      assert.equal(event.interaction_id, result.interaction_id);
+    });
+    await t.test('manual exact-person link fills blank direct number once and preserves evidence', async () => {
+      const importId = await capture('direct');
+      await addProspect('direct');
+      const first = await link(importId, 'direct');
+      assert.equal((first.phoneEnrichment as any).reason, 'filled_primary_phone');
+      const after = await counts();
+      const target = (await db.query<any>("SELECT * FROM prospects WHERE id='direct'")).rows[0];
+      assert.equal(target.contact_phone, '780-555-0188');
+      assert.equal(target.contact_name, 'Saved Buyer');
+      const primary = (await db.query<any>("SELECT * FROM prospect_contacts WHERE prospect_id='direct' AND is_primary")).rows[0];
+      assert.equal(primary.phone, target.contact_phone);
+      const retry = await link(importId, 'direct');
+      assert.equal((retry.phoneEnrichment as any).reason, 'existing_phone_matches');
+      assert.deepEqual(await counts(), after);
+      const retained = (await db.query<any>('SELECT raw_payload FROM sales_activity_imports WHERE id=$1', [importId])).rows[0].raw_payload;
+      assert.deepEqual(retained.phoneEvidence, evidence);
+      assert.equal(retained.phoneEnrichment.status, 'unchanged');
+    });
+    await t.test('person/company mismatches, unverified capture and nonblank phones remain reviewable', async () => {
+      for (const fixture of [
+        { id:'person-mismatch', prospect:{name:'Different Buyer'}, capture:{}, reason:'contact_identity_conflict' },
+        { id:'company-mismatch', prospect:{company:'Different company'}, capture:{phoneEvidence:{...evidence,kind:'company_main'}}, reason:'company_identity_conflict' },
+        { id:'unverified', prospect:{}, capture:{phoneEvidence:undefined}, reason:'unverified_phone' },
+        { id:'existing', prospect:{phone:'780-555-0198'}, capture:{}, reason:'existing_phone_conflict' },
+      ]) {
+        const importId = await capture(fixture.id, fixture.capture);
+        await addProspect(fixture.id, fixture.prospect);
+        const result = await link(importId, fixture.id);
+        assert.equal((result.phoneEnrichment as any).status, 'needs_review');
+        assert.equal((result.phoneEnrichment as any).reason, fixture.reason);
+        const target = (await db.query<any>('SELECT contact_phone,contact_name FROM prospects WHERE id=$1', [fixture.id])).rows[0];
+        assert.equal(target.contact_phone, fixture.prospect.phone || null);
+        assert.equal(target.contact_name, fixture.prospect.name || 'Saved Buyer');
+        assert.equal((await db.query<any>('SELECT COUNT(*)::int AS n FROM prospect_contacts WHERE prospect_id=$1', [fixture.id])).rows[0].n, 0);
+      }
+    });
+    await t.test('foreign prospects/imports and cross-company contact IDs never acquire phone evidence', async () => {
+      const importId = await capture('foreign-link');
+      const before = await counts();
+      await assert.rejects(link(importId, 'foreign'), (error:any) => error.status === 404);
+      await assert.rejects(reviewSalesActivityImport({ pool, storage, userId:'foreign', importId, decision:{action:'link',prospectId:'foreign'} }), (error:any)=>error.status===404);
+      assert.deepEqual(await counts(), before);
+      const contactId = randomUUID();
+      await db.query(`INSERT INTO prospect_contacts(id,user_id,prospect_id,source,name,email,company,identity_key)
+        VALUES($1,'owner','blank','broker_added','Saved Buyer','cross-contact@example.test','cross-contact company','{}')`, [contactId]);
+      const crossId = await capture('cross-contact', { contactId });
+      await addProspect('cross-contact');
+      const result = await link(crossId, 'cross-contact');
+      assert.equal((result.phoneEnrichment as any).reason, 'contact_not_found');
+      assert.equal((await db.query<any>('SELECT phone FROM prospect_contacts WHERE id=$1', [contactId])).rows[0].phone, null);
+      assert.equal((await db.query<any>("SELECT contact_phone FROM prospects WHERE id='cross-contact'")).rows[0].contact_phone, null);
+    });
+    await t.test('an invalid legacy contact ID reviews the phone without rejecting the email link', async () => {
+      const importId = await capture('bad-contact', { contactId:'legacy-slot' });
+      await addProspect('bad-contact');
+      const result = await link(importId, 'bad-contact');
+      assert.equal(result.match_status, 'matched');
+      assert.equal((result.phoneEnrichment as any).reason, 'invalid_contact_id');
+      assert.equal((await db.query<any>("SELECT contact_phone FROM prospects WHERE id='bad-contact'")).rows[0].contact_phone, null);
+    });
+    await t.test('a pending-call deferral replays after cancellation without another interaction or credit', async () => {
+      const importId = await capture('deferred');
+      await addProspect('deferred');
+      await db.query(`INSERT INTO activity_events(id,user_id,prospect_id,source,event_type,evidence_status,match_status,source_metadata)
+        VALUES('deferred-click','owner','deferred','level_cre_mobile_calling','call_started','observed','matched','{"sessionState":"started"}')`);
+      const deferred = await link(importId, 'deferred');
+      assert.equal((deferred.phoneEnrichment as any).reason, 'pending_call');
+      const once = await counts();
+      const calls = storageCalls;
+      await db.query("UPDATE activity_events SET match_status='ignored' WHERE id='deferred-click'");
+      const retry = await link(importId, 'deferred');
+      assert.equal((retry.phoneEnrichment as any).reason, 'filled_primary_phone');
+      assert.deepEqual(await counts(), once);
+      assert.equal(storageCalls, calls);
+    });
+    await t.test('phone replay rolls back when the link write fails, then recovers on the same link', async () => {
+      const importId = await capture('rollback');
+      await addProspect('rollback');
+      const existing = await storage.createContactInteraction({
+        userId:'owner',prospectId:'rollback',sourceProvider:'codex',sourceMessageId:'rollback',sourceMetadata:{},
+      },{skipXp:true});
+      await db.query('UPDATE sales_activity_imports SET prospect_id=$2,interaction_id=$3 WHERE id=$1', [importId,'rollback',existing.id]);
+      const before = await counts();
+      const retained = (await db.query<any>('SELECT raw_payload FROM sales_activity_imports WHERE id=$1', [importId])).rows[0].raw_payload;
+      await db.exec(`CREATE FUNCTION reject_phone_replay_link() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN IF NEW.external_activity_id='rollback' AND NEW.match_status='matched' THEN RAISE EXCEPTION 'injected link failure'; END IF; RETURN NEW; END $$;
+        CREATE TRIGGER reject_phone_replay_link BEFORE UPDATE ON sales_activity_imports FOR EACH ROW EXECUTE FUNCTION reject_phone_replay_link();`);
+      await assert.rejects(link(importId,'rollback'), /injected link failure/);
+      assert.equal((await db.query<any>("SELECT contact_phone FROM prospects WHERE id='rollback'")).rows[0].contact_phone, null);
+      assert.equal((await db.query<any>("SELECT COUNT(*)::int AS n FROM prospect_contacts WHERE prospect_id='rollback'")).rows[0].n, 0);
+      assert.deepEqual((await db.query<any>('SELECT raw_payload FROM sales_activity_imports WHERE id=$1', [importId])).rows[0].raw_payload, retained);
+      assert.deepEqual(await counts(), before);
+      await db.exec('DROP TRIGGER reject_phone_replay_link ON sales_activity_imports; DROP FUNCTION reject_phone_replay_link();');
+      assert.equal(((await link(importId,'rollback')).phoneEnrichment as any).reason, 'filled_primary_phone');
+      assert.deepEqual(await counts(), before);
+    });
+    await t.test('ignore never replays a retained verified phone', async () => {
+      const importId = await capture('ignored');
+      await addProspect('ignored');
+      const before = await counts();
+      const result = await reviewSalesActivityImport({pool,storage,userId:'owner',importId,decision:{action:'ignore'}});
+      assert.equal(result.match_status,'ignored');
+      assert.equal(result.phoneEnrichment,undefined);
+      assert.equal((await db.query<any>("SELECT contact_phone FROM prospects WHERE id='ignored'")).rows[0].contact_phone,null);
+      assert.deepEqual(await counts(),before);
+    });
+    assert.equal((await db.query<any>('SELECT COUNT(*)::int AS n FROM skill_activities')).rows[0].n,0);
+  } finally { await db.close(); }
 });

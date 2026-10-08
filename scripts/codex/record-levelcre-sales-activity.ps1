@@ -99,6 +99,57 @@ function Test-LevelCreLegacyMapPhone {
     return $digitCount -ge 10 -and $digitCount -le 15
 }
 
+function Get-LevelCreReceiptValue {
+    param($Object, [string]$Name, $Default = $null)
+    if ($null -eq $Object) { return $Default }
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name) -and $null -ne $Object[$Name]) { return $Object[$Name] }
+        return $Default
+    }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -ne $property -and $null -ne $property.Value) { return $property.Value }
+    return $Default
+}
+
+# Local reporting only: phone review never changes email acceptance or retry identity.
+function Get-LevelCrePhoneSummary {
+    param([object[]]$ResultRows = @(), [switch]$SummaryRows)
+    $byActivity = [ordered]@{}
+    $index = 0
+    foreach ($row in $ResultRows) {
+        $phone = if ($SummaryRows) { $row } else { Get-LevelCreReceiptValue $row 'phoneEnrichment' }
+        if ($null -eq $phone) { continue }
+        $externalId = [string](Get-LevelCreReceiptValue $row 'externalActivityId' '')
+        $source = [string](Get-LevelCreReceiptValue $row 'source' '')
+        $key = if ($externalId) { "$source|$externalId" } else { "missing-id:$index" }
+        $status = [string](Get-LevelCreReceiptValue $phone 'status' '')
+        $reason = [string](Get-LevelCreReceiptValue $phone 'reason' '')
+        if ($status -notin @('applied', 'unchanged', 'needs_review', 'error')) {
+            $status = 'unconfirmed'
+            if (-not $reason) { $reason = 'unrecognized_phone_verdict' }
+        }
+        $byActivity[$key] = [pscustomobject]@{
+            externalActivityId = $externalId
+            source = $source
+            prospectId = [string](Get-LevelCreReceiptValue $phone 'prospectId' '')
+            contactId = [string](Get-LevelCreReceiptValue $phone 'contactId' '')
+            status = $status
+            reason = $reason
+        }
+        $index++
+    }
+    $rows = @($byActivity.Values)
+    [pscustomobject]@{
+        reported = $rows.Count
+        applied = @($rows | Where-Object { $_.status -eq 'applied' }).Count
+        unchanged = @($rows | Where-Object { $_.status -eq 'unchanged' }).Count
+        needsReview = @($rows | Where-Object { $_.status -eq 'needs_review' }).Count
+        errors = @($rows | Where-Object { $_.status -eq 'error' }).Count
+        unconfirmed = @($rows | Where-Object { $_.status -eq 'unconfirmed' }).Count
+        results = $rows
+    }
+}
+
 function Get-StableActivityId {
     param([string] $Seed)
 
@@ -233,10 +284,11 @@ function Flush-Outbox {
     $snapshot = @(Get-OutboxSnapshot $Path)
     $cooldown = @(Get-OutboxSnapshot "$Path.retry-after.jsonl")
     if ($cooldown.Count -and [DateTimeOffset]::Parse([string](Get-ItemValue $cooldown[0] 'retryAt')) -gt [DateTimeOffset]::UtcNow) {
-        return [pscustomobject]@{ applied = 0; rejected = 0; needsReview = 0; queued = $snapshot.Count; blocked = $false; warning = 'Waiting for the server retry interval.' }
+        return [pscustomobject]@{ applied = 0; rejected = 0; needsReview = 0; queued = $snapshot.Count; blocked = $false; warning = 'Waiting for the server retry interval.'; phoneEnrichment = Get-LevelCrePhoneSummary @() }
     }
     $applied = 0; $rejected = 0; $needsReview = 0; $blocked = $false; $warning = $null
     $offset = 0
+    $phoneResultRows = @()
     while ($offset -lt $snapshot.Count) {
         $batch = @(); $bytes = 2048
         while ($offset -lt $snapshot.Count -and $batch.Count -lt 50) {
@@ -257,6 +309,7 @@ function Flush-Outbox {
         $payload[$Collection] = $wireItems
         try {
             $result = Invoke-RecorderRequest $Uri $payload $ApiKey
+            $phoneResultRows += @(Get-LevelCreReceiptValue $result 'results' @())
             $failed = @(Get-FailedBatchItems $batch $result)
             $failedIds = @{}
             foreach ($item in $failed) { $failedIds[[string](Get-ItemValue $item '_deliveryId')] = $true }
@@ -291,6 +344,7 @@ function Flush-Outbox {
                     $single[$Collection] = @($item | Select-Object -Property * -ExcludeProperty '_deliveryId','_queuedAt','_rejection')
                     try {
                         $singleResult = Invoke-RecorderRequest $Uri $single $ApiKey
+                        $phoneResultRows += @(Get-LevelCreReceiptValue $singleResult 'results' @())
                         if (@(Get-FailedBatchItems @($item) $singleResult).Count -eq 0) { Complete-OutboxItems $Path @($item); $applied++ }
                     } catch {
                         $singleResponse = (Get-ItemValue $_.Exception 'Response')
@@ -304,7 +358,7 @@ function Flush-Outbox {
             } else { break }
         }
     }
-    [pscustomobject]@{ applied = $applied; rejected = $rejected; needsReview = $needsReview; queued = @(Get-OutboxSnapshot $Path).Count; blocked = $blocked; warning = $warning }
+    [pscustomobject]@{ applied = $applied; rejected = $rejected; needsReview = $needsReview; queued = @(Get-OutboxSnapshot $Path).Count; blocked = $blocked; warning = $warning; phoneEnrichment = Get-LevelCrePhoneSummary $phoneResultRows }
 }
 
 
@@ -448,10 +502,11 @@ try {
         runStatus = $runStatus; runId = $RunId; producerId = $ProducerId
         flushed = $activityDelivery.applied; mapFlushed = $mapDelivery.applied
         activityOutboxRemaining = $activityDelivery.queued; mapOutboxRemaining = $mapDelivery.queued
+        phoneEnrichment = Get-LevelCrePhoneSummary -ResultRows @($activityDelivery.phoneEnrichment.results + $mapDelivery.phoneEnrichment.results) -SummaryRows
         needsReview = $receipt.needsReview; errors = $rejected; receiptPending = $receiptPending
         activityMessage = $activityDelivery.warning; mapMessage = $mapDelivery.warning
         rejectedOutbox = "$OutboxPath.rejected.jsonl"; mapRejectedOutbox = "$MapOutboxPath.rejected.jsonl"
-    } | ConvertTo-Json -Compress
+    } | ConvertTo-Json -Depth 8 -Compress
 } catch {
     [pscustomobject]@{ status = 'queued_local'; reason = 'outbox_recovery_needed'; message = $_.Exception.Message; outbox = $OutboxPath; mapOutbox = $MapOutboxPath } | ConvertTo-Json -Compress
 }

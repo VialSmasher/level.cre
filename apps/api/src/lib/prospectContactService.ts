@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
+import { derivePhoneReadiness, contactIdentityKey } from './phoneReadiness';
 
 type Queryable = Pick<PoolClient, 'query'>;
 const optionalText = (max: number) => z.string().trim().max(max).nullable().optional();
@@ -26,13 +27,7 @@ export class ProspectContactError extends Error {
 }
 const clean = (value: unknown) => typeof value === 'string' && value.trim() ? value.trim() : null;
 const dateText = (value: any) => value instanceof Date ? value.toISOString() : value || null;
-const normalizedName = (value: unknown) => (clean(value) || '').normalize('NFKC').toLowerCase().replace(/[\p{P}\p{Z}\s]+/gu, ' ').trim();
-export function primaryContactIdentity(prospect: Record<string, any>) {
-  const name = normalizedName(prospect.contact_name);
-  const email = (clean(prospect.contact_email) || '').toLowerCase();
-  // Unknown people do not share an identity merely because both names are blank.
-  return JSON.stringify(name || email ? { name, email } : { phone: (clean(prospect.contact_phone) || '').replace(/\s|[()+.\-]/g, '').toLowerCase() });
-}
+export const primaryContactIdentity = contactIdentityKey;
 function dto(row: Record<string, any>): ProspectContact {
   return { id: row.id, prospectId: row.prospect_id, isPrimary: row.is_primary,
     name: clean(row.name), company: clean(row.company), email: clean(row.email), phone: clean(row.phone), title: clean(row.title),
@@ -96,7 +91,7 @@ async function workspace(db: Queryable, userId: string, prospect: Record<string,
       businessName: prospect.business_name || null, notes: prospect.notes || '', websiteUrl: prospect.website_url || null,
       lastContactDate: dateText(prospect.last_contact_date), followUpDueDate: dateText(prospect.follow_up_due_date),
       buildingSf: prospect.building_sf ?? null, lotSizeAcres: prospect.lot_size_acres ?? null, aiMetadata: prospect.ai_metadata || null },
-    contacts, primaryContactId: contacts.find((contact) => contact.isPrimary)!.id,
+    contacts, primaryContactId: contacts.find((contact) => contact.isPrimary)!.id, phoneReadiness: derivePhoneReadiness(prospect, contacts),
     activity: history.rows.map((row) => ({ id: row.id, type: row.type, outcome: row.outcome, occurredAt: row.occurred_at,
       notes: row.notes || '', contactId: row.source_metadata?.contactId || null,
       contactName: row.source_metadata?.contactSnapshot?.name || row.source_metadata?.contactName || null,
