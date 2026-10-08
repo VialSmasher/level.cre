@@ -384,7 +384,7 @@ test('queue count represents all eligible prospects instead of the returned page
   let parameters: unknown[] = [];
   const pool = { async query(_text: string, values: unknown[]) {
     parameters = values;
-    return { rows: [...Array.from({ length: 73 }, (_, index) => ({ id: 'prospect-' + (index + 1), name: 'Acme', status: 'prospect', contact_phone: '780-555-0100' })), { id: 'ambiguous', name: 'Ambiguous', status: 'prospect', contact_phone: 'Main: 780-555-0100 or 780-555-0101' }] };
+    return { rows: [...Array.from({ length: 73 }, (_, index) => ({ id: 'prospect-' + (index + 1), name: 'Acme', status: 'prospect', contact_name: 'Morgan Contact', contact_phone: '780-555-0100' })), { id: 'ambiguous', name: 'Ambiguous', status: 'prospect', contact_phone: 'Main: 780-555-0100 or 780-555-0101' }] };
   } } as any;
   const result = await listMobileCallQueue({ pool, userId: 'user-1', limit: 1, includeCalledToday: true });
   assert.equal(result.rows.length, 1);
@@ -399,7 +399,7 @@ test('equal call priorities keep the same chronological and prospect order acros
     { id: 'prospect-b', follow_up_due_date: '2026-06-02T18:00:00.000Z' },
     { id: 'prospect-a', follow_up_due_date: '2026-06-02T18:00:00.000Z' },
     { id: 'prospect-c', follow_up_due_date: '2026-06-01T18:00:00.000Z' },
-  ].map((record) => ({ ...record, name: record.id, status: 'contacted', contact_phone: '780-555-0100', last_contact_date: '2026-05-01T18:00:00.000Z' }));
+  ].map((record) => ({ ...record, name: record.id, status: 'contacted', contact_name: 'Morgan Contact', contact_phone: '780-555-0100', last_contact_date: '2026-05-01T18:00:00.000Z' }));
   const queries: string[] = [];
   const fetch = async (rows: typeof records) => listMobileCallQueue({
     pool: { async query(text: string) { queries.push(text); return { rows }; } } as any,
@@ -411,4 +411,12 @@ test('equal call priorities keep the same chronological and prospect order acros
   assert.deepEqual(first.rows.map((candidate) => candidate.prospect.id), ['prospect-c', 'prospect-a', 'prospect-b']);
   assert.deepEqual(second.rows.map((candidate) => candidate.prospect.id), first.rows.map((candidate) => candidate.prospect.id));
   assert.ok(queries.every((query) => /ORDER BY COALESCE\(p\.follow_up_due_date, latest\.last_interaction_at, p\.created_at\) ASC, p\.id ASC/.test(query)));
+});
+
+test('queue uses the selected person and phone type instead of legacy primary display identity', async () => {
+  const prospect={id:'exact-person',name:'Acme Logistics',business_name:'Acme Logistics',status:'prospect',contact_name:'Morgan Contact',contact_email:null,contact_phone:null,contacts:[{id:'alex',is_primary:false,name:'Alex Manager',company:'Acme Logistics',email:'alex@example.test',phone:'780-555-0180',additional_phones:[{label:'Mobile',number:'780-555-0181'}]}]};
+  const pool={async query(){return {rows:[prospect]};}} as any;
+  const result=await listMobileCallQueue({pool,userId:'user-1',limit:10});
+  assert.equal(result.rows[0].contact.name,'Alex Manager');assert.equal(result.rows[0].contact.email,'alex@example.test');assert.equal(result.rows[0].contact.phone,'780-555-0181');assert.equal(result.rows[0].contact.phoneType,'mobile');
+  const missingEmail=await listMobileCallQueue({pool:{async query(){return {rows:[{...prospect,contact_email:'morgan@example.test'}]};}} as any,userId:'user-1',limit:10});assert.equal(missingEmail.rows.length,0);
 });

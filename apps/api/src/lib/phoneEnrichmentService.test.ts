@@ -21,6 +21,8 @@ test('phone capture accepts one explicit number and provenance while rejecting l
   assert.equal(normalizePhoneCapture({contactPhone:'780-555-0100',phoneEvidence:{...evidence,source:'email_signature',providerId:'<verified-message@example.test>'}}).phoneCaptureIssue,null);
   assert.equal(normalizePhoneCapture({contactPhone:'780-555-0100',phoneEvidence:{...evidence,source:'zoominfo',url:undefined,providerId:'16600394'}}).phoneCaptureIssue,null);
   assert.equal(normalizePhoneCapture({contactPhone:'780-555-0100',phoneEvidence:{...evidence,source:'zoominfo',url:undefined}}).phoneEvidence,null);
+  assert.equal(normalizePhoneCapture({contactPhone:'780-555-0100',phoneEvidence:{...evidence,directNumberType:'mobile'}}).phoneEvidence?.directNumberType,'mobile');
+  assert.equal(normalizePhoneCapture({contactPhone:'780-555-0100',phoneEvidence:{...evidence,kind:'company_main',directNumberType:'mobile'}}).phoneEvidence,null);
   assert.equal(PhoneEnrichmentBatchSchema.safeParse({entries:[{prospectId:'p',contactPhone:'780-555-0100',phoneEvidence:evidence}]}).success,false);
   assert.equal(PhoneEnrichmentBatchSchema.safeParse({entries:[{prospectId:'p',contactPhone:'780-555-0100',phoneEvidence:evidence,userId:'foreign'}]}).success,false);
 });
@@ -136,6 +138,25 @@ test('verified enrichment uses real PostgreSQL locks and preserves identity, pro
   } finally {await db.close();}
 });
 
+test('typed contact enrichment preserves healthy office, adds one owned mobile, and rejects conflicting types or company identities',async()=>{
+  const {db,pool,apply,entry}=await harness();try{
+    const mobile=entry('named',{contactName:'Tim Director',email:'tim@example.test',company:'Other company',contactPhone:'780-555-0188',phoneEvidence:{...evidence,directNumberType:'mobile',source:'zoominfo',providerId:'tim-director'}});
+    const first=await apply(mobile);assert.equal(first.applied,1);assert.equal(first.results[0].reason,'added_contact_mobile');
+    const saved=(await db.query<any>("SELECT * FROM prospects WHERE id='named'")).rows[0];assert.equal(saved.contact_phone,'780-555-0199');assert.equal(saved.contact_email,'tim@example.test');
+    const roster=(await db.query<any>("SELECT * FROM prospect_contacts WHERE prospect_id='named' AND is_primary=true")).rows[0];assert.deepEqual(roster.additional_phones,[{label:'Mobile',number:'780-555-0188'}]);
+    assert.equal((await apply(mobile)).unchanged,1);assert.equal((await apply({...mobile,contactPhone:'780-555-0189'})).results[0].reason,'existing_phone_type_conflict');
+    assert.equal((await apply({...mobile,contactPhone:'780-555-0199',phoneEvidence:{...mobile.phoneEvidence,directNumberType:'office'}})).unchanged,1);
+    assert.equal((await apply({...mobile,contactPhone:'780-555-0187',phoneEvidence:{...mobile.phoneEvidence,directNumberType:'office'}})).results[0].reason,'existing_phone_type_conflict');
+    const context=(await getPhoneEnrichmentContext({pool,userId:'owner'})).rows.find(row=>row.prospectId==='named')!;assert.equal(context.phoneReadiness.usableChoices[0].number,'780-555-0188');assert.equal(context.phoneReadiness.usableChoices[0].phoneType,'mobile');assert.equal(context.phoneReadiness.usableChoices[1].phoneType,'office');
+    const before=(await db.query<any>("SELECT * FROM prospect_contacts WHERE id=$1",[roster.id])).rows[0];
+    assert.equal((await apply({...mobile,email:'other@example.test',contactPhone:'780-555-0187'})).results[0].reason,'contact_identity_conflict');
+    assert.equal((await apply({...mobile,prospectId:'foreign',contactId:roster.id})).results[0].reason,'prospect_not_found');
+    assert.deepEqual((await db.query<any>("SELECT * FROM prospect_contacts WHERE id=$1",[roster.id])).rows[0],before);
+    await db.query("UPDATE prospects SET contact_name='Other company' WHERE id='named'");
+    assert.equal((await apply({...mobile,contactName:'Other company'})).results[0].reason,'person_identity_required');
+    for (const table of ['activity_events','contact_interactions','skill_activities']) assert.equal((await db.query<any>(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n,table==='activity_events'?1:0);
+  } finally {await db.close();}
+});
 test('retained phone capture replays through manual and mapped links using real PostgreSQL', async (t) => {
   const { db, pool } = await harness();
   let storageCalls = 0;

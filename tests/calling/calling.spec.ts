@@ -53,7 +53,7 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function installCallingScenario(page: Page, options: { startFailures?: number; confirmFailures?: number; lostConfirmationResponses?: number; selectedHistoryDelayMs?: number; workspaceDelayMs?: number; delayedStart?: boolean; rejectedStart?: boolean; unavailableDiscard?: boolean; discardFailures?: number; callsPerDay?: number; mainLineOnly?: boolean; noAlternates?: boolean; map?: boolean; missingPhone?: boolean; delayedContactSave?: boolean; lostContactSaveResponses?: number } = {}) {
+async function installCallingScenario(page: Page, options: { startFailures?: number; confirmFailures?: number; lostConfirmationResponses?: number; selectedHistoryDelayMs?: number; workspaceDelayMs?: number; delayedStart?: boolean; rejectedStart?: boolean; unavailableDiscard?: boolean; discardFailures?: number; callsPerDay?: number; mainLineOnly?: boolean; missingEmailPrimary?: boolean; mobileFirst?: boolean; noAlternates?: boolean; map?: boolean; missingPhone?: boolean; delayedContactSave?: boolean; lostContactSaveResponses?: number } = {}) {
   if (options.map) test.setTimeout(45_000); // Home's first lazy module compiles on a cold isolated Vite run.
   const starts: CallRequest[] = [];
   const confirmations: CallRequest[] = [];
@@ -76,7 +76,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
   const contactSaveGate = options.delayedContactSave ? new Promise<void>((resolve) => { releaseContactSave = resolve; }) : Promise.resolve();
   const roster = new Map<string, TestContact[]>(candidates.map((candidate, index) => [candidate.prospect.id, [{
     id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, prospectId: candidate.prospect.id,
-    isPrimary: true, ...candidate.contact, title: null, additionalPhones: index === 0 ? [{ label: 'Mobile', number: '(780) 555-0101' }] : [], archivedAt: null,
+    isPrimary: true, ...candidate.contact, title: null, additionalPhones: index === 0 ? [{ label: options.mobileFirst ? 'Mobile' : 'Alternate phone', number: '(780) 555-0101' }] : [], archivedAt: null,
   }]]));
   const firstRoster = roster.get(candidates[0].prospect.id)!;
   for (const [index, name] of ['Rowan Singh', 'Casey Davis', 'Avery Kim'].entries()) firstRoster.push({
@@ -84,16 +84,19 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     isPrimary: false, name, company: candidates[0].contact.company, phone: `(780) 555-010${index + 2}`,
     email: null, title: index === 0 ? 'Operations' : null, additionalPhones: [], archivedAt: null,
   });
+  if (options.missingEmailPrimary) { firstRoster[0].phone = null; firstRoster[0].additionalPhones = []; firstRoster[0].email = 'morgan@example.test'; }
+  if (options.mobileFirst) firstRoster[0].email = 'morgan@example.test';
   if (options.mainLineOnly) {
     firstRoster[0].phone = null; firstRoster[0].additionalPhones = [];
-    firstRoster[1].name = 'Company main line';
+    firstRoster[0].email = 'morgan@example.test';
+    firstRoster[1].name = 'Company main line'; firstRoster[1].title = 'Company switchboard'; firstRoster.splice(2);
   }
   const readiness = (prospectId: string) => {
     const candidate = candidates.find((candidate) => candidate.prospect.id === prospectId)!;
     const contacts = roster.get(prospectId)!.filter((contact) => !contact.archivedAt);
     const primary = contacts.find((contact) => contact.isPrimary)!;
     return derivePhoneReadiness({ ...candidate.prospect, contact_name: primary.name, contact_email: primary.email, contact_phone: primary.phone,
-      ai_metadata: { phoneReadiness: { blocks: blocks.get(prospectId) || [] } } }, contacts);
+      ai_metadata: { phoneReadiness: { blocks: blocks.get(prospectId) || [] }, phoneEnrichment: { observations: options.mobileFirst ? [{contactId:primary.id,number:primary.phone,kind:'contact_direct',directNumberType:'office',status:'applied'}] : [] } } }, contacts);
   };
   const history = new Map<string, Array<Record<string, unknown>>>(candidates.map((candidate) => [candidate.prospect.id,
     candidate.recentActivity.map((activity) => ({ ...activity, contactId: null, contactName: null, phoneSnapshot: null }))]));
@@ -199,7 +202,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
       const confirmedProspects = new Set([...sessions.values()].filter((session) => confirmed.has(session.clientEventId)).map((session) => session.prospectId));
       const includeCalledToday = new URL(request.url()).searchParams.get('includeCalledToday') === 'true';
       const rows = candidates.filter((candidate) => readiness(candidate.prospect.id).status === 'ready' && (includeCalledToday || !confirmedProspects.has(candidate.prospect.id)))
-        .map((candidate) => ({ ...candidate, phoneReadiness: readiness(candidate.prospect.id) }));
+        .map((candidate) => { const phoneReadiness=readiness(candidate.prospect.id); const choice=phoneReadiness.usableChoices[0]; const contact=roster.get(candidate.prospect.id)!.find(contact=>contact.id===choice.contactId)!; return { ...candidate, contact: {...contact,phone:choice.number,phoneType:choice.phoneType}, phoneReadiness }; });
       return json(route, {
         generatedAt: new Date().toISOString(), rows, total: rows.length,
         progress: progress(),
@@ -362,7 +365,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     await expect(page.getByTestId('asset-profile')).toHaveAttribute('data-asset-id', 'calling-prospect-1', { timeout: 20_000 });
   } else {
     await expect(page.getByRole('heading', { name: 'Calls', exact: true })).toBeVisible();
-    await expect(page.getByRole('link', { name: options.mainLineOnly ? 'Call Company main line' : 'Call Morgan Lee', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: options.mainLineOnly || options.missingEmailPrimary ? 'Call Vas Patel' : 'Call Morgan Lee', exact: true })).toBeVisible();
   }
   return { starts, confirmations, discards, sessions, progress, roster, workspace, readiness, mutationSequence, queueReads, needsNumberReads, releaseStart, releaseContactSave, contactWrites, enrichmentWrites, legacyCallWrites, pageErrors, confirmOnServer: (clientEventId: string) => confirmed.add(clientEventId) };
 }
@@ -620,14 +623,37 @@ async function assertUnobscuredReward(page: Page) {
   return reward.locator('xpath=ancestor::li[1]');
 }
 
-test('preferred roster main line avoids pairing a phone-less named primary with another persons number', async ({ page }) => {
+test('company main line remains saved context and never makes the email recipient callable', async ({ page }) => {
   const scenario = await installCallingScenario(page, { mainLineOnly: true });
-  await expect(page.getByRole('button', { name: 'Select contact Company main line', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('link', { name: 'Call Morgan Lee', exact: true })).toHaveCount(0);
-  await dial(page, 'Company main line');
-  await expect.poll(() => scenario.starts.length).toBe(1);
-  expect(scenario.starts[0]).toMatchObject({ contactId: scenario.roster.get('calling-prospect-1')![1].id, expectedPhone: '(780) 555-0102' });
-  await expect(page.getByRole('button', { name: 'I called · next', exact: true })).toBeVisible();
+  expect(scenario.readiness('calling-prospect-1').status).toBe('needs_number');
+  const target=page.getByRole('region',{name:'Needs a number',exact:true}).getByRole('listitem').filter({hasText:'Calling Company 1'});
+  await expect(target).toContainText('Morgan Lee');await expect(target).toContainText('Contact mobile or direct office number needed');
+  await target.getByRole('button',{name:'Review number',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'Calling Company 1',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Select contact Company main line',exact:true})).toBeVisible();
+  await expect(page.getByRole('link',{name:'Call Company main line',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('link',{name:'Call Morgan Lee',exact:true})).toHaveCount(0);
+  expect(scenario.starts).toHaveLength(0);expect(scenario.confirmations).toHaveLength(0);
+});
+
+test('missing email recipient stays selected until broker explicitly chooses a named alternate', async ({ page }) => {
+  const scenario=await installCallingScenario(page,{missingEmailPrimary:true});
+  const target=page.getByRole('region',{name:'Needs a number',exact:true}).getByRole('listitem').filter({hasText:'Calling Company 1'});
+  await expect(target).toContainText('Email contact needs a number');await target.getByRole('button',{name:'Review number',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Select contact Morgan Lee',exact:true})).toHaveAttribute('aria-pressed','true');
+  await expect(page.getByRole('link',{name:'Call Rowan Singh',exact:true})).toHaveCount(0);await expect(page.getByRole('link',{name:'Call Morgan Lee',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Select contact Rowan Singh',exact:true}).click();await expect(page.getByRole('link',{name:'Call Rowan Singh',exact:true})).toBeVisible();
+  expect(scenario.starts).toHaveLength(0);await dial(page,'Rowan Singh');await expect.poll(()=>scenario.starts.length).toBe(1);
+  expect(scenario.starts[0]).toMatchObject({contactId:scenario.roster.get('calling-prospect-1')![1].id,expectedPhone:'(780) 555-0102'});
+});
+
+test('named email contact mobile is prepared ahead of its office number with exact person attribution', async ({ page }) => {
+  const scenario=await installCallingScenario(page,{mobileFirst:true});
+  expect(scenario.readiness('calling-prospect-1').usableChoices.slice(0,2).map(choice=>choice.phoneType)).toEqual(['mobile','office']);
+  await expect(page.getByRole('link',{name:'Call Morgan Lee',exact:true})).toHaveAttribute('href','tel:+17805550101');
+  const options=page.getByRole('combobox',{name:'Phone number for Morgan Lee',exact:true});await expect(options).toHaveValue('7805550101:');
+  await dial(page);await expect.poll(()=>scenario.starts.length).toBe(1);
+  expect(scenario.starts[0]).toMatchObject({contactId:scenario.roster.get('calling-prospect-1')![0].id,expectedPhone:'(780) 555-0101'});
   expect(scenario.confirmations).toHaveLength(0);
 });
 

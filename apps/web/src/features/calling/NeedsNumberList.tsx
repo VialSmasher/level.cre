@@ -15,6 +15,8 @@ const RESEARCH_STATUS = {
 function reasonLabel(row: NeedsNumberRow) {
   const reason = row.phoneReadiness.reason
   if (reason === 'reported_bad_number') return row.phoneReadiness.blockedChoices.some((choice) => choice.reason === 'disconnected') ? 'Disconnected number reported' : 'Wrong number reported'
+  if (reason === 'company_line_only') return 'Contact mobile or direct office number needed'
+  if (reason === 'missing_primary_contact_number' || row.phoneReadiness.missingPrimaryContactNumber) return 'Email contact needs a number'
   if (reason === 'invalid_phone') return 'Number needs checking'
   if (reason === 'metadata_conflict') return 'Number information needs review'
   return 'No usable number saved'

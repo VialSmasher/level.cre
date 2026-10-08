@@ -11,6 +11,8 @@ param(
     [string] $ContactPhone,
     [ValidateSet("contact_direct", "company_main")]
     [string] $PhoneKind,
+    [ValidateSet("mobile", "office")]
+    [string] $PhoneNumberType,
     [ValidateSet("company_website", "email_signature", "broker_confirmed", "zoominfo", "official_directory")]
     [string] $PhoneSource,
     [ValidateLength(0, 2000)]
@@ -80,6 +82,10 @@ function Get-LevelCrePhoneEvidence {
         source = $PhoneSource
         observedAt = $PhoneObservedAt
         verified = $true
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PhoneNumberType)) {
+        if ($PhoneKind -ne 'contact_direct') { throw 'PhoneNumberType applies only to a named contact_direct number.' }
+        $evidence['directNumberType'] = $PhoneNumberType.ToLowerInvariant()
     }
     if (-not [string]::IsNullOrWhiteSpace($PhoneEvidenceUrl)) { $evidence['url'] = $PhoneEvidenceUrl }
     if (-not [string]::IsNullOrWhiteSpace($PhoneEvidenceId)) { $evidence['providerId'] = $PhoneEvidenceId }

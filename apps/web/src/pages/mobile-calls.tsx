@@ -120,7 +120,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     if (!workspace) return
     requestedRecordHandled.current = true
     const primary = workspace.contacts.find((contact) => contact.id === workspace.primaryContactId)
-    const preferred = preferredCallingChoice(workspace.phoneReadiness)
+    const preferred = workspace.phoneReadiness?.status === 'ready' ? preferredCallingChoice(workspace.phoneReadiness) : null
     const candidate = queueQuery.data?.rows.find((row) => row.prospect.id === workspace.prospect.id) || {
       id: 'call:' + workspace.prospect.id, prospect: workspace.prospect,
       contact: { name: primary?.name || null, company: workspace.prospect.businessName || primary?.company || workspace.prospect.name,
@@ -139,7 +139,8 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     const current = contacts.find((contact) => contact.id === selectedContactId)
     const primary = contacts.find((contact) => contact.id === workspaceQuery.data?.primaryContactId)
     const preferred = preferredCallingChoice(readiness)
-    const next = current || contacts.find((contact) => contact.id === preferred?.contactId) || primary || contacts[0]
+    const defaultContact = readiness?.missingPrimaryContactNumber && readiness.primaryEmailTarget ? primary : contacts.find((contact) => contact.id === preferred?.contactId)
+    const next = current || defaultContact || primary || contacts[0]
     if (!next) { setSelectedContactId(null); setSelectedPhone(''); return }
     if (next.id !== selectedContactId) setSelectedContactId(next.id)
     const options = contactPhoneOptions(next, readiness)

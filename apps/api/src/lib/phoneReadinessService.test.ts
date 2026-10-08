@@ -48,6 +48,24 @@ test('canonical phone readiness rejects ambiguous text, retains extension identi
   assert.equal(PhoneResearchStatusSchema.safeParse({prospectId:'p',expectedSnapshotToken:'a'.repeat(64),status:'not_found',userId:'foreign'}).success,false);
   assert.equal(PhoneResearchStatusSchema.safeParse({prospectId:'p',expectedSnapshotToken:'a'.repeat(64),status:'not_found',retryAfterDays:91}).success,false);
 });
+test('person-first dialing excludes switchboards and company placeholders, keeps recipient research and ranks mobiles', () => {
+  const prospect={name:'Acme Logistics Ltd.',business_name:'Acme Logistics Ltd.',contact_name:'Joe Owner',contact_email:'joe@example.test',contact_phone:'780-555-0100'};
+  const identity=contactIdentityKey(prospect);
+  const primary={id:'joe',is_primary:true,name:'Joe Owner',email:'joe@example.test',phone:'780-555-0100',identity_key:identity,additional_phones:[{label:'Direct office',number:'780-555-0102'},{label:'Mobile',number:'780-555-0101'}]};
+  const alternate={id:'alex',name:'Alex Manager',email:'alex@example.test',phone:'780-555-0103',additional_phones:[{label:'Mobile',number:'780-555-0104'}]};
+  const main={id:'main',name:'Company main line',phone:'780-555-0105',title:'Company switchboard'};
+  const ready=derivePhoneReadiness(prospect,[primary,alternate,main]);
+  assert.equal(ready.preferredContactId,'joe');assert.equal(ready.preferredPhoneKey,'7805550101:');assert.equal(ready.usableChoices[0].phoneType,'mobile');
+  assert.deepEqual(ready.usableChoices.slice(0,3).map(choice=>choice.phoneType),['mobile','office','direct']);assert.equal(ready.usableChoices.some(choice=>choice.contactId==='main'),false);
+  const missing=derivePhoneReadiness({...prospect,contact_phone:null},[{...primary,phone:null,additional_phones:[]},alternate,main]);
+  assert.equal(missing.status,'needs_number');assert.equal(missing.reason,'missing_primary_contact_number');assert.equal(missing.missingPrimaryContactNumber,true);assert.equal(missing.researchEligible,true);assert.equal(missing.usableChoices.length,2);
+  const company=derivePhoneReadiness({...prospect,contact_name:prospect.business_name,contact_phone:main.phone},[main]);assert.equal(company.status,'needs_number');assert.equal(company.reason,'company_line_only');
+  const legacyMain=derivePhoneReadiness({...prospect,ai_metadata:{phoneEnrichment:{observations:[{number:prospect.contact_phone,kind:'company_main',status:'applied',contactId:'main'}]}}},[]);
+  assert.equal(legacyMain.status,'needs_number');assert.equal(legacyMain.reason,'company_line_only');
+  const typed=derivePhoneReadiness({...prospect,ai_metadata:{phoneEnrichment:{observations:[{number:prospect.contact_phone,kind:'contact_direct',directNumberType:'mobile',status:'applied',contactName:'Joe Owner',email:'joe@example.test'}]}}},[]);
+  assert.equal(typed.usableChoices[0].phoneType,'mobile');assert.equal(typed.usableChoices[0].label,'Mobile');
+  const duplicates=derivePhoneReadiness(prospect,[{...primary,additional_phones:[{label:'Mobile',number:'+1 (780) 555-0100'}]}]);assert.equal(duplicates.usableChoices.length,1);assert.equal(duplicates.usableChoices[0].phoneType,'mobile');
+});
 test('phone readiness and refill use owned actual PostgreSQL rows without synthetic activity', async (t) => {
   const { db, pool, workspace, counts } = await harness(); const now = new Date('2026-10-08T18:00:00Z');
   const needs = (eligibleOnly = false) => listProspectsNeedingPhone({ pool, userId:'owner', now, eligibleOnly, limit:100 });
@@ -71,9 +89,9 @@ test('phone readiness and refill use owned actual PostgreSQL rows without synthe
       alternateId=extra.contacts.find(row=>row.name==='Alex Manager')!.id;
       assert.equal(extra.phoneReadiness.usableChoices.length,3);
       await db.query("UPDATE prospects SET contact_phone='Main: 780-555-0100 or 780-555-0101' WHERE id='account'");
-      const rosterReady=await workspace();assert.equal(rosterReady.phoneReadiness.status,'ready');assert.equal(rosterReady.phoneReadiness.preferredContactId,alternateId);
-      const queue=await listMobileCallQueue({pool,userId:'owner',limit:50,includeCalledToday:true});assert.equal(queue.rows.find(row=>row.prospect.id==='account')!.phoneReadiness!.preferredContactId,alternateId);
-      assert.equal((await needs()).rows.some(row=>row.prospect.id==='account'),false);
+      const rosterReady=await workspace();assert.equal(rosterReady.phoneReadiness.status,'needs_number');assert.equal(rosterReady.phoneReadiness.reason,'missing_primary_contact_number');assert.equal(rosterReady.phoneReadiness.preferredContactId,alternateId);
+      const queue=await listMobileCallQueue({pool,userId:'owner',limit:50,includeCalledToday:true});assert.equal(queue.rows.some(row=>row.prospect.id==='account'),false);
+      assert.equal((await needs()).rows.some(row=>row.prospect.id==='account'),true);
       await db.query("UPDATE prospects SET contact_phone='780-555-0100' WHERE id='account'");
       assert.equal((await workspace()).primaryContactId,primaryId);
     });
@@ -84,16 +102,16 @@ test('phone readiness and refill use owned actual PostgreSQL rows without synthe
       assert.equal(result.newXpGained,15);assert.equal((await recordMobileCallOutcome({pool,userId:'owner',input:{...input,outcome:'wrong_number',notes:''}})).duplicate,true);
       const after=await counts();assert.equal(after.xp-before.xp,15);assert.equal(after.interactions-before.interactions,1);assert.equal(after.assets,before.assets);
       const w=await workspace();assert.equal(w.phoneReadiness.blockedChoices.length,1);assert.equal(w.phoneReadiness.blockedChoices[0].contactId,primaryId);assert.equal(w.phoneReadiness.usableChoices.length,2);assert.equal(w.phoneReadiness.preferredContactId,alternateId);
-      assert.equal((await needs()).rows.some(row=>row.prospect.id==='account'),false);
+      assert.equal((await needs()).rows.some(row=>row.prospect.id==='account'),true);
       const stored=(await db.query<any>('SELECT * FROM activity_events WHERE id=$1',[result.eventId])).rows[0];assert.equal(stored.event_type,'call_attempted');assert.equal(stored.source_metadata.contactId,primaryId);
       const target=(await db.query<any>("SELECT * FROM prospects WHERE id='account'")).rows[0];assert.equal(target.last_contact_date,'2026-09-01');assert.equal(target.status,'prospect');assert.deepEqual(target.ai_metadata.propertyLink,{propertyProspectId:'building',relationship:'occupant'});
       assert.equal((await getMobileCallingProgress({pool,userId:'owner'})).progress.connectedToday,0);
       await assert.rejects(recordMobileCallStart({pool,userId:'owner',input:{...input,clientEventId:'blocked-new-call-start'}}),(error:any)=>error.code==='phone_blocked');
     });
-    await t.test('agent replacement research includes current bad choices on ready companies, while UI excludes them and cooldown applies', async () => {
-      assert.equal((await needs()).rows.some(row=>row.prospect.id==='account'),false);
+    await t.test('recipient replacement research remains visible despite saved alternate choices and respects cooldown', async () => {
+      assert.equal((await needs()).rows.some(row=>row.prospect.id==='account'),true);
       const agent=await listProspectsNeedingPhone({pool,userId:'owner',includeReportedBad:true,eligibleOnly:true,now});
-      const row=agent.rows.find(row=>row.prospect.id==='account')!;assert.ok(row);assert.equal(row.researchReason,'reported_bad_number');assert.equal(row.phoneReadiness.status,'ready');assert.equal(row.phoneReadiness.usableChoices.length,2);
+      const row=agent.rows.find(row=>row.prospect.id==='account')!;assert.ok(row);assert.equal(row.researchReason,'reported_bad_number');assert.equal(row.phoneReadiness.status,'needs_number');assert.equal(row.phoneReadiness.usableChoices.length,2);
       const before=await counts();const input=PhoneResearchStatusSchema.parse({prospectId:'account',expectedSnapshotToken:row.expectedSnapshotToken,status:'conflicting',retryAfterDays:10});
       await recordPhoneResearchStatus({pool,userId:'owner',input,now});
       assert.equal((await listProspectsNeedingPhone({pool,userId:'owner',includeReportedBad:true,eligibleOnly:true,now})).rows.some(row=>row.prospect.id==='account'),false);
@@ -135,14 +153,19 @@ test('phone readiness and refill use owned actual PostgreSQL rows without synthe
       const entry={prospectId:'main-only',company:'Main only company',contactPhone:'780-555-0150',phoneEvidence:{...evidence,kind:'company_main' as const},expectedContact:{name:'Company Buyer',email:'buyer@example.test',phone:null}};
       const enrich=(row:any)=>enrichProspectPhoneBatch({pool,userId:'owner',input:PhoneEnrichmentBatchSchema.parse({entries:[row]})});
       const added=await enrich(entry);const id=added.results[0].contactId!;
+      const start={clientEventId:'main-switchboard-bad-call',prospectId:'main-only',contactId:id,expectedPhone:'780-555-0150'};
+      await assert.rejects(recordMobileCallStart({pool,userId:'owner',input:{...start,clientEventId:'new-main-line-rejected'}}),(error:any)=>error.code==='person_phone_required');
+      const frozen=(await workspace('main-only')).contacts.find(row=>row.id===id)!;
+      await db.query(`INSERT INTO activity_events(id,user_id,source,external_event_id,event_type,evidence_status,match_status,prospect_id,phone,source_metadata,occurred_at) VALUES('legacy-frozen-main','owner','level_cre_mobile_calling',$1,'call_started','observed','matched','main-only',$2,$3::jsonb,$4)`,[start.clientEventId,start.expectedPhone,JSON.stringify({sessionState:'started',prospectId:'main-only',contactId:id,contactSnapshot:frozen,phoneSnapshot:start.expectedPhone,callStartedAt:'2026-10-07T18:00:00Z'}),'2026-10-07T18:00:00Z']);
+      const resumed=await recordMobileCallStart({pool,userId:'owner',input:start});assert.equal(resumed.duplicate,true);assert.equal(resumed.status,'started');
       const call={clientEventId:'main-switchboard-bad-call',prospectId:'main-only',contactId:id,expectedPhone:'780-555-0150',outcome:'wrong_number' as const,notes:''};
       await recordMobileCallOutcome({pool,userId:'owner',input:call});const before=await counts();
       assert.equal((await needs()).rows.some(row=>row.prospect.id==='main-only'),true);
       assert.equal((await enrich(entry)).results[0].reason,'reported_bad_phone');
       const replaced=await enrich({...entry,contactPhone:'780-555-0151'});assert.equal(replaced.results[0].reason,'replaced_bad_main_line');assert.equal(replaced.results[0].contactId,id);
       assert.equal((await enrich({...entry,contactPhone:'780-555-0151'})).unchanged,1);
-      const w=await workspace('main-only');assert.equal(w.contacts.find(row=>row.id===id)!.title,'Company switchboard');assert.equal(w.contacts.find(row=>row.isPrimary)!.phone,null);assert.equal(w.contacts.find(row=>row.isPrimary)!.name,'Company Buyer');assert.equal(w.phoneReadiness.status,'ready');
-      assert.equal((await listProspectsNeedingPhone({pool,userId:'owner',includeReportedBad:true,now})).rows.some(row=>row.prospect.id==='main-only'),false);
+      const w=await workspace('main-only');assert.equal(w.contacts.find(row=>row.id===id)!.title,'Company switchboard');assert.equal(w.contacts.find(row=>row.isPrimary)!.phone,null);assert.equal(w.contacts.find(row=>row.isPrimary)!.name,'Company Buyer');assert.equal(w.phoneReadiness.status,'needs_number');assert.equal(w.phoneReadiness.usableChoices.length,0);
+      assert.equal((await listProspectsNeedingPhone({pool,userId:'owner',includeReportedBad:true,now})).rows.some(row=>row.prospect.id==='main-only'),true);
       await updateProspectContact({pool,userId:'owner',prospectId:'main-only',contactId:id,input:{archived:true}});
       assert.equal((await enrich(entry)).results[0].reason,'reported_bad_phone');assert.equal((await workspace('main-only')).phoneReadiness.status,'needs_number');
       assert.deepEqual(await counts(),before);
@@ -187,5 +210,24 @@ test('phone readiness and refill use owned actual PostgreSQL rows without synthe
       assert.deepEqual(await counts(),before);
       const context=await getPhoneEnrichmentContext({pool,userId:'owner'});assert.equal(context.rows.find(row=>row.prospectId==='account')!.phoneReadiness.status,'needs_number');
     });
+  } finally {await db.close();}
+});
+test('verified replacement repairs only one confirmed bad mobile slot and retains healthy office, identity and evidence',async()=>{
+  const {db,pool,workspace,counts}=await harness();try{
+    const primaryId=(await workspace()).primaryContactId;
+    const base={prospectId:'account',contactId:primaryId,contactName:'Joe Owner',email:'joe@example.test',company:'Verified company',expectedContact:{name:'Joe Owner',email:'joe@example.test',phone:'780-555-0100'}};
+    const enrich=(input:any)=>enrichProspectPhoneBatch({pool,userId:'owner',input:PhoneEnrichmentBatchSchema.parse({entries:[input]})});
+    await enrich({...base,contactPhone:'780-555-0100',phoneEvidence:{...evidence,directNumberType:'office'}});
+    const mobile={...base,contactPhone:'780-555-0108',phoneEvidence:{...evidence,directNumberType:'mobile'}};assert.equal((await enrich(mobile)).results[0].reason,'added_contact_mobile');
+    const call={clientEventId:'bad-typed-mobile-slot',prospectId:'account',contactId:primaryId,expectedPhone:mobile.contactPhone};await recordMobileCallStart({pool,userId:'owner',input:call});await recordMobileCallOutcome({pool,userId:'owner',input:{...call,outcome:'wrong_number',notes:''}});
+    const before=await counts();const replacement={...mobile,contactPhone:'780-555-0109'};
+    assert.equal((await enrich({...replacement,expectedContact:{...base.expectedContact,phone:null}})).results[0].reason,'stale_contact_snapshot');
+    assert.equal((await enrich({...replacement,email:'other@example.test'})).results[0].reason,'contact_identity_conflict');
+    assert.equal((await enrich(replacement)).results[0].reason,'replaced_bad_contact_mobile');assert.equal((await enrich(replacement)).unchanged,1);
+    const w=await workspace();const primary=w.contacts.find(row=>row.id===primaryId)!;assert.equal(primary.phone,'780-555-0100');assert.deepEqual(primary.additionalPhones,[{label:'Mobile',number:'780-555-0109'}]);assert.equal(w.phoneReadiness.preferredPhoneKey,'7805550109:');
+    const saved=(await db.query<any>("SELECT * FROM prospects WHERE id='account'")).rows[0];assert.equal(saved.ai_metadata.phoneReadiness.blocks[0].phoneKey,'7805550108:');assert.ok(saved.ai_metadata.phoneEnrichment.observations.some((entry:any)=>entry.number==='780-555-0108'));assert.ok(saved.ai_metadata.phoneEnrichment.observations.some((entry:any)=>entry.number==='780-555-0109' && entry.reason==='replaced_bad_contact_mobile'));
+    assert.equal((await enrich({...replacement,contactPhone:'780-555-0110'})).results[0].reason,'existing_phone_type_conflict');assert.deepEqual(await counts(),before);
+    await recordMobileCallStart({pool,userId:'owner',input:{...call,clientEventId:'pending-other-phone',expectedPhone:'780-555-0100'}});
+    assert.equal((await enrich({...replacement,contactPhone:'780-555-0110'})).results[0].reason,'pending_call');
   } finally {await db.close();}
 });

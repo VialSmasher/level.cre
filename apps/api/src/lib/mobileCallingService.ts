@@ -75,6 +75,7 @@ export type MobileCallQueueCandidate = {
     name: string | null;
     company: string | null;
     phone: string;
+    phoneType?: 'mobile' | 'office' | 'direct';
     email: string | null;
   };
   prospect: {
@@ -272,6 +273,8 @@ export async function listMobileCallQueue(params: {
   const candidates = rows
     .map((row) => {
       const phoneReadiness = derivePhoneReadiness(row, Array.isArray(row.contacts) ? row.contacts : [], { now });
+      const choice = phoneReadiness.usableChoices[0];
+      const chosenContact = choice?.contactId ? (Array.isArray(row.contacts) ? row.contacts : []).find((contact: any) => contact.id === choice.contactId) : null;
       const rank = rankMobileCallCandidate({
         status: row.status,
         followUpDueDate: row.follow_up_due_date,
@@ -286,10 +289,11 @@ export async function listMobileCallQueue(params: {
         priority: rank.priority,
         reasons: rank.reasons,
         contact: {
-          name: row.contact_name || null,
-          company: row.contact_company || row.business_name || null,
-          phone: phoneReadiness.usableChoices[0]?.number || '',
-          email: row.contact_email || null,
+          name: choice?.contactName || null,
+          company: chosenContact?.company || row.contact_company || row.business_name || null,
+          phone: choice?.number || '',
+          phoneType: choice?.phoneType,
+          email: chosenContact ? chosenContact.email || null : row.contact_email || null,
         },
         prospect: {
           id: row.id,
@@ -370,7 +374,7 @@ async function lockSession(client: PoolClient, userId: string, clientEventId: st
   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify([CALLING_SOURCE, userId, clientEventId])]);
 }
 
-async function requireCallableProspect(client: PoolClient, userId: string, input: { prospectId: string; expectedPhone: string; contactId?: string }, frozenContact?: ProspectContact) {
+async function requireCallableProspect(client: PoolClient, userId: string, input: { prospectId: string; expectedPhone: string; contactId?: string }, frozenContact?: ProspectContact, requirePersonChoice = false) {
   const { rows } = await client.query(`
     SELECT id, name, status, address, contact_name, contact_email, contact_phone,
            contact_company, business_name, merged_into_prospect_id, follow_up_due_date,
@@ -394,8 +398,9 @@ async function requireCallableProspect(client: PoolClient, userId: string, input
   // The owned prospect is still checked on every new confirmation.
   let contact = frozenContact;
   if (!contact) {
+    let contacts: ProspectContact[];
     try {
-      const contacts = await listProspectContacts(client, userId, prospect);
+      contacts = await listProspectContacts(client, userId, prospect);
       contact = input.contactId ? contacts.find((item) => item.id === input.contactId) : contacts.find((item) => item.isPrimary);
     } catch (error) {
       if (error instanceof ProspectContactError) throw new MobileCallingError({ message: error.message, status: error.status, code: error.code });
@@ -405,6 +410,9 @@ async function requireCallableProspect(client: PoolClient, userId: string, input
     if (isPhoneBlocked(prospect, contact, input.expectedPhone)) throw new MobileCallingError({ message: 'This number was reported wrong or disconnected. Choose another number.', status: 409, code: 'phone_blocked' });
     if (![contact.phone, ...contact.additionalPhones.map((item) => item.number)].some((phone) => phone && phonesMatch(input.expectedPhone, phone))) {
       throw new MobileCallingError({ message: 'The contact phone number changed. Refresh before recording this call.', status: 409, code: input.contactId ? 'contact_phone_changed' : 'prospect_phone_changed' });
+    }
+    if (requirePersonChoice && !derivePhoneReadiness(prospect, contacts).usableChoices.some((choice) => choice.contactId === contact!.id && choice.phoneKey === businessPhoneKey(input.expectedPhone))) {
+      throw new MobileCallingError({ message: 'Choose a named contact mobile or direct office number. Company lines stay available as account information.', status: 409, code: 'person_phone_required' });
     }
   }
   return { ...prospect, contact_name: contact.name, contact_company: contact.company,
@@ -436,7 +444,7 @@ export async function recordMobileCallStart(params: { pool: Pool; userId: string
       await client.query('COMMIT');
       return { duplicate: true, eventId: existing.id, prospectId: params.input.prospectId, status: sessionState(existing), callStartedAt: existing.source_metadata?.callStartedAt || asDate(existing.occurred_at)?.toISOString(), contactId: existing.source_metadata?.contactId || null, contactSnapshot: existing.source_metadata?.contactSnapshot || null };
     }
-    const prospect = await requireCallableProspect(client, params.userId, params.input);
+    const prospect = await requireCallableProspect(client, params.userId, params.input, undefined, true);
     const now = new Date();
     const callStartedAt = params.input.callStartedAt || now.toISOString();
     if (new Date(callStartedAt).getTime() > now.getTime() + 300_000) {

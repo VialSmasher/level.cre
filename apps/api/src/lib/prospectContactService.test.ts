@@ -156,7 +156,7 @@ test('owned contact roster and calling attribution use actual disposable Postgre
       const retired=(await db.query<any>('SELECT * FROM prospect_contacts WHERE id=$1',[max.id])).rows[0];
       assert.equal(retired.name,'Max Contact'); assert.ok(retired.archived_at);
     });
-    await t.test('unknown primary people use a conservative phone identity and companies with only additional phones are callable', async () => {
+    await t.test('unknown primary phones stay research context while a named additional person is callable', async () => {
       const blank=await getCallingWorkspace({pool,userId:'owner',prospectId:'other-account'});
       await db.query("UPDATE prospects SET contact_phone='780-555-0131' WHERE id='other-account'");
       const numbered=await getCallingWorkspace({pool,userId:'owner',prospectId:'other-account'}); assert.notEqual(numbered.primaryContactId,blank.primaryContactId);
@@ -166,7 +166,7 @@ test('owned contact roster and calling attribution use actual disposable Postgre
       const empty=await getCallingWorkspace({pool,userId:'owner',prospectId:'other-account'});
       assert.equal((await listMobileCallQueue({pool,userId:'owner',limit:20})).rows.some((item)=>item.prospect.id==='other-account'),false);
       await updateProspectContact({pool,userId:'owner',prospectId:'other-account',contactId:empty.primaryContactId,input:{additionalPhones:[{label:'Saved office',number:'780-555-0133'}]}});
-      assert.ok((await listMobileCallQueue({pool,userId:'owner',limit:20})).rows.some((item)=>item.prospect.id==='other-account'));
+      assert.equal((await listMobileCallQueue({pool,userId:'owner',limit:20})).rows.some((item)=>item.prospect.id==='other-account'),false);
       await updateProspectContact({pool,userId:'owner',prospectId:'other-account',contactId:empty.primaryContactId,input:{additionalPhones:[]}});
       await createProspectContact({pool,userId:'owner',prospectId:'other-account',input:{name:'Only Callable Person',additionalPhones:[{label:'Office',number:'780-555-0132'}]}});
       const queue=await listMobileCallQueue({pool,userId:'owner',limit:20}); assert.ok(queue.rows.some((item)=>item.prospect.id==='other-account'));

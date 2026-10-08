@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
-import { normalizeBusinessPhone, businessPhoneKey, derivePhoneReadiness, isPhoneBlocked, readPhoneReadinessMetadata } from './phoneReadiness';
+import { normalizeBusinessPhone, businessPhoneKey, derivePhoneReadiness, isPhoneBlocked, readPhoneReadinessMetadata, isNamedPersonContact } from './phoneReadiness';
 export { normalizeBusinessPhone } from './phoneReadiness';
 import { primaryContactIdentity, reconcilePrimaryContact } from './prospectContactService';
 
@@ -12,10 +12,12 @@ const emailKey = (value: unknown) => (text(value) || '').toLowerCase();
 const urlSchema = z.string().max(2000).url().refine((value) => { const url = new URL(value); return ['http:','https:'].includes(url.protocol) && !url.username && !url.password; }, 'Use a public HTTP(S) evidence URL.');
 export const PhoneEvidenceSchema = z.object({
   kind: z.enum(['contact_direct','company_main']),
+  directNumberType: z.enum(['mobile','office']).optional(),
   source: z.enum(['company_website','email_signature','broker_confirmed','zoominfo','official_directory']),
   url: urlSchema.optional(), providerId: z.string().trim().min(1).max(500).optional(),
   observedAt: z.string().datetime({offset:true}), verified: z.literal(true),
 }).strict().superRefine((value,ctx) => {
+  if (value.kind === 'company_main' && value.directNumberType) ctx.addIssue({code:'custom',path:['directNumberType'],message:'Company lines cannot have a personal number type.'});
   if (['company_website','official_directory'].includes(value.source) && !value.url) ctx.addIssue({code:'custom',path:['url'],message:'Web evidence needs its source URL.'});
   if (value.source === 'zoominfo' && !value.url && !value.providerId) ctx.addIssue({code:'custom',path:['providerId'],message:'ZoomInfo evidence needs a source URL or stable provider identity.'});
   if (value.source === 'email_signature' && !value.providerId) ctx.addIssue({code:'custom',path:['providerId'],message:'Signature evidence needs a stable provider message identity.'});
@@ -42,7 +44,7 @@ export function normalizePhoneCapture(input:Record<string,unknown>) {
   const contactPhone=normalizeBusinessPhone(raw);
   const nested=input.phoneEvidence;
   const candidate=nested && typeof nested==='object' && !Array.isArray(nested) ? nested : {
-    kind:input.phoneKind,source:input.phoneSource,url:text(input.phoneEvidenceUrl) || undefined,
+    kind:input.phoneKind,directNumberType:input.phoneNumberType,source:input.phoneSource,url:text(input.phoneEvidenceUrl) || undefined,
     providerId:text(input.phoneEvidenceId) || undefined,observedAt:input.phoneObservedAt,
     verified:input.phoneVerified===true || input.phoneVerified==='true',
   };
@@ -99,10 +101,40 @@ export async function applyProspectPhoneEnrichment(params:{db:Queryable;userId:s
     const nameConflict=input.contactName && target.contact_name && nameKey(input.contactName)!==nameKey(target.contact_name);
     const companyConflict=input.company && target.contact_company && nameKey(input.company)!==nameKey(target.contact_company);
     const identityMatches=(input.email && target.contact_email && emailKey(input.email)===emailKey(target.contact_email)) || (input.contactName && target.contact_name && nameKey(input.contactName)===nameKey(target.contact_name));
-    if(identityMatches && !emailConflict && !nameConflict && !companyConflict) {
+    if (!isNamedPersonContact(prospect, target)) reason='person_identity_required';
+    else if(identityMatches && !emailConflict && !nameConflict && !companyConflict) {
       const blockedIncoming=isPhoneBlocked(prospect,target,number);
       const replaceBad=Boolean(text(target.contact_phone) && phoneKey(target.contact_phone)!==phoneKey(number) && input.expectedContact && isPhoneBlocked(prospect,target,target.contact_phone));
       if(blockedIncoming) {status='needs_review';reason='reported_bad_phone';}
+      else if(text(target.contact_phone) && !replaceBad && phoneKey(target.contact_phone)!==phoneKey(number) && evidence.directNumberType) {
+        // Additional evidenced mobile/office choices never replace a healthy saved number.
+        const anchor = target.id===prospect.id ? await reconcilePrimaryContact(db,userId,prospect) : null;
+        const contactRow = (await db.query('SELECT * FROM public.prospect_contacts WHERE id=$1 AND user_id=$2 AND prospect_id=$3 AND archived_at IS NULL FOR UPDATE',[anchor?.id || target.id,userId,prospect.id])).rows[0];
+        const additional = contactRow?.additional_phones;
+        if (!contactRow || !Array.isArray(additional)) reason='metadata_conflict';
+        else {
+          contactId=contactRow.id;
+          const same = additional.find((choice:any)=>phoneKey(choice.number)===phoneKey(number));
+          const typedAdditional = additional.filter((choice:any)=>new RegExp(evidence.directNumberType==='mobile'?'mobile|cell':'office|direct|desk|work','i').test(choice.label)
+            || previous.some((entry:any)=>['applied','unchanged'].includes(entry.status) && entry.kind==='contact_direct' && entry.directNumberType===evidence.directNumberType
+              && phoneKey(entry.number)===phoneKey(choice.number) && (entry.contactId===contactRow.id || (emailKey(entry.email)===emailKey(target.contact_email) && nameKey(entry.contactName)===nameKey(target.contact_name)))));
+          const blockedSlot = typedAdditional.length===1 && input.expectedContact && isPhoneBlocked(prospect,contactRow,typedAdditional[0].number) ? typedAdditional[0] : null;
+          const scalarType = previous.some((entry:any)=>['applied','unchanged'].includes(entry.status) && entry.kind==='contact_direct'
+            && entry.directNumberType===evidence.directNumberType && phoneKey(entry.number)===phoneKey(target.contact_phone)
+            && (entry.contactId===contactRow.id || (emailKey(entry.email)===emailKey(target.contact_email) && nameKey(entry.contactName)===nameKey(target.contact_name))));
+          if (same) {status='unchanged';reason='existing_additional_phone_matches';}
+          else if (blockedSlot && !scalarType) {
+            await db.query('UPDATE public.prospect_contacts SET additional_phones=$4::jsonb,updated_at=now() WHERE id=$1 AND user_id=$2 AND prospect_id=$3',[contactRow.id,userId,prospect.id,JSON.stringify(additional.map((choice:any)=>choice===blockedSlot ? {label:evidence.directNumberType==='mobile'?'Mobile':'Direct office',number} : choice))]);
+            status='applied';reason=evidence.directNumberType==='mobile'?'replaced_bad_contact_mobile':'replaced_bad_contact_office';
+          }
+          else if (typedAdditional.length || scalarType) reason='existing_phone_type_conflict';
+          else if (additional.length>=5) reason='additional_phone_limit';
+          else {
+            await db.query('UPDATE public.prospect_contacts SET additional_phones=$4::jsonb,updated_at=now() WHERE id=$1 AND user_id=$2 AND prospect_id=$3',[contactRow.id,userId,prospect.id,JSON.stringify([...additional,{label:evidence.directNumberType==='mobile'?'Mobile':'Direct office',number}])]);
+            status='applied';reason=evidence.directNumberType==='mobile'?'added_contact_mobile':'added_contact_office';
+          }
+        }
+      }
       else if(text(target.contact_phone) && !replaceBad) {status=phoneKey(target.contact_phone)===phoneKey(number)?'unchanged':'needs_review';reason=status==='unchanged'?'existing_phone_matches':'existing_phone_conflict';}
       else if(target.id!==prospect.id) {
         await db.query('UPDATE public.prospect_contacts SET phone=$4,updated_at=now() WHERE id=$1 AND user_id=$2 AND prospect_id=$3',[target.id,userId,prospect.id,number]);

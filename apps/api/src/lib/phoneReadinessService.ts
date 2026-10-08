@@ -39,10 +39,10 @@ export async function listProspectsNeedingPhone(params: { pool: Pool; userId: st
     const company = researchCompanyName(row); if (!company) return [];
     const contacts = Array.isArray(row.contacts) ? row.contacts : [];
     const readiness = derivePhoneReadiness(row, contacts, { now, pendingCall: row.pending_call });
-    if (readiness.status === 'ready' && !(params.includeReportedBad && readiness.blockedChoices.length > 0)) return [];
+    if (readiness.status === 'ready' && !readiness.missingPrimaryContactNumber && !(params.includeReportedBad && readiness.blockedChoices.length > 0)) return [];
     const rank = rankMobileCallCandidate({ status: row.status, followUpDueDate: row.follow_up_due_date, lastContactDate: row.last_contact_date, lastInteractionAt: row.last_interaction_at, createdAt: row.created_at, now });
     return [{ prospect: { id: row.id, name: row.name, businessName: row.business_name || null, address: row.address || null, status: row.status, followUpDueDate: iso(row.follow_up_due_date), lastContactDate: iso(row.last_contact_date) },
-      company, researchReason: readiness.blockedChoices.length > 0 ? 'reported_bad_number' as const : 'missing_number' as const, websiteUrl: phoneText(row.website_url), contactName: phoneText(row.contact_name), priorityScore: rank.score, priority: rank.priority, reasons: rank.reasons, phoneReadiness: readiness,
+      company, researchReason: readiness.blockedChoices.length > 0 ? 'reported_bad_number' as const : readiness.missingPrimaryContactNumber ? 'missing_primary_contact_number' as const : 'missing_number' as const, websiteUrl: phoneText(row.website_url), contactName: phoneText(row.contact_name), priorityScore: rank.score, priority: rank.priority, reasons: rank.reasons, phoneReadiness: readiness,
       targetSnapshot: phoneResearchTargetSnapshot(row, contacts), expectedSnapshotToken: phoneResearchSnapshotToken(row, contacts), pendingCall: Boolean(row.pending_call) }];
   }).sort((a, b) => b.priorityScore - a.priorityScore || ((Date.parse(a.prospect.followUpDueDate || '') || Infinity) - (Date.parse(b.prospect.followUpDueDate || '') || Infinity)) || a.prospect.id.localeCompare(b.prospect.id));
   const eligible = needs.filter((row) => row.phoneReadiness.researchEligible);
@@ -66,7 +66,7 @@ export async function recordPhoneResearchStatus(params: { pool: Pool; userId: st
     if (input.expectedSnapshotToken !== phoneResearchSnapshotToken(prospect, contacts) && !exactRetry) throw new PhoneReadinessError(409, 'stale_phone_snapshot', 'The company, contacts or research status changed. Refresh before saving research.');
     if (!state) throw new PhoneReadinessError(409, 'metadata_conflict', 'Phone metadata needs review before research can be saved.');
     const readiness = derivePhoneReadiness(prospect, contacts);
-    if (readiness.status === 'ready' && !readiness.blockedChoices.length) throw new PhoneReadinessError(409, 'phone_already_ready', 'This company already has a usable phone.');
+    if (readiness.status === 'ready' && !readiness.missingPrimaryContactNumber && !readiness.blockedChoices.length) throw new PhoneReadinessError(409, 'phone_already_ready', 'This company already has a usable phone.');
     const pending = await client.query(`SELECT id FROM public.activity_events WHERE user_id=$1 AND prospect_id=$2 AND source='level_cre_mobile_calling'
       AND event_type='call_started' AND evidence_status='observed' AND match_status<>'ignored' AND interaction_id IS NULL AND source_metadata->>'sessionState'='started' LIMIT 1`, [params.userId, prospect.id]);
     if (pending.rows.length) throw new PhoneReadinessError(409, 'pending_call', 'Log or cancel the saved call before updating phone research.');

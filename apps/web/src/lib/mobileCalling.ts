@@ -66,10 +66,12 @@ export type PhoneIssueOutcome = 'wrong_number' | 'disconnected'
 
 export type CallingPhoneChoice = {
   contactId: string | null; contactName: string | null; phoneKey: string
-  number: string; label: string; dialHref: string; isPrimary: boolean
+  number: string; label: string; phoneType?: 'mobile' | 'office' | 'direct'; dialHref: string; isPrimary: boolean
 }
 export type CallingPhoneReadiness = {
   status: 'ready' | 'needs_number'; reason: string
+  missingPrimaryContactNumber?: boolean
+  primaryEmailTarget?: boolean
   usableChoices: CallingPhoneChoice[]
   blockedChoices: Array<CallingPhoneChoice & { reason: PhoneIssueOutcome }>
   preferredContactId: string | null; preferredPhoneKey: string | null
@@ -97,6 +99,7 @@ export function isPhoneIssueOutcome(outcome: MobileCallOutcome): outcome is Phon
 }
 
 export function preferredCallingChoice(readiness: CallingPhoneReadiness | null | undefined, contactId?: string | null) {
+  if (contactId === undefined && readiness?.missingPrimaryContactNumber && readiness.primaryEmailTarget) return null
   const choices = readiness?.usableChoices || []
   return choices.find((choice) => (contactId === undefined || choice.contactId === contactId)
     && choice.phoneKey === readiness?.preferredPhoneKey)
@@ -118,8 +121,10 @@ export function blockConfirmedPhone(readiness: CallingPhoneReadiness, current: {
   const blocked = readiness.usableChoices.find(matches) || readiness.blockedChoices.find(matches)
   const usableChoices = readiness.usableChoices.filter((choice) => !matches(choice))
   const next = usableChoices.find((choice) => choice.contactId === readiness.preferredContactId && choice.phoneKey === readiness.preferredPhoneKey) || usableChoices[0]
-  return { ...readiness, usableChoices, blockedChoices: [...readiness.blockedChoices.filter((choice) => !matches(choice)), ...(blocked ? [{ ...blocked, reason }] : [])],
-    status: usableChoices.length ? 'ready' : 'needs_number', reason: usableChoices.length ? readiness.reason : 'reported_bad_number',
+  const missingPrimaryContactNumber = readiness.missingPrimaryContactNumber || Boolean(blocked?.isPrimary && !usableChoices.some((choice) => choice.isPrimary))
+  const ready = usableChoices.length > 0 && !(missingPrimaryContactNumber && readiness.primaryEmailTarget)
+  return { ...readiness, missingPrimaryContactNumber, usableChoices, blockedChoices: [...readiness.blockedChoices.filter((choice) => !matches(choice)), ...(blocked ? [{ ...blocked, reason }] : [])],
+    status: ready ? 'ready' : 'needs_number', reason: ready ? readiness.reason : 'reported_bad_number',
     preferredContactId: next?.contactId || null, preferredPhoneKey: next?.phoneKey || null }
 }
 
@@ -152,7 +157,7 @@ export type CallQueueCandidate = {
   priorityScore: number
   priority: 'critical' | 'high' | 'medium' | 'low'
   reasons: string[]
-  contact: { name: string | null; company: string | null; phone: string; email: string | null }
+  contact: { name: string | null; company: string | null; phone: string; phoneType?: 'mobile' | 'office' | 'direct'; email: string | null }
   prospect: {
     id: string; name: string; status: string; address: string | null
     businessName: string | null; followUpDueDate: string | null; lastContactDate: string | null

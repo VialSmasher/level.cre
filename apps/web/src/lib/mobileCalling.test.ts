@@ -24,15 +24,17 @@ const readiness: CallingPhoneReadiness = {
   usableChoices: [
     { contactId: primary.id, contactName: 'Morgan', phoneKey: '17805550100', number: primary.phone!, label: 'Main', dialHref: 'tel:+17805550100', isPrimary: true },
     { contactId: primary.id, contactName: 'Morgan', phoneKey: '17805550101', number: '780-555-0101', label: 'Mobile', dialHref: 'tel:+17805550101', isPrimary: true },
-    { contactId: 'contact-2', contactName: 'Company main line', phoneKey: '17805550100', number: primary.phone!, label: 'Main', dialHref: 'tel:+17805550100', isPrimary: false },
+    { contactId: 'contact-2', contactName: 'Alex Manager', phoneKey: '17805550100', number: primary.phone!, label: 'Main', dialHref: 'tel:+17805550100', isPrimary: false },
   ],
 }
 
-test('server readiness chooses the company main line when the named primary has no usable number', () => {
-  const companyMain = { ...readiness, usableChoices: [readiness.usableChoices[2]], preferredContactId: 'contact-2' }
-  assert.equal(preferredCallingChoice(companyMain)?.contactName, 'Company main line')
-  assert.equal(preferredCallingChoice(companyMain, primary.id), null)
+test('server readiness supplies a named personal alternate without borrowing primary identity', () => {
+  const alternate = { ...readiness, usableChoices: [readiness.usableChoices[2]], preferredContactId: 'contact-2' }
+  assert.equal(preferredCallingChoice(alternate)?.contactName, 'Alex Manager')
+  assert.equal(preferredCallingChoice(alternate, primary.id), null)
   assert.equal(contactPhoneOptions(primary, null).some((option) => option.href), false)
+  const missingRecipient={...alternate,status:'needs_number' as const,missingPrimaryContactNumber:true,primaryEmailTarget:true}
+  assert.equal(preferredCallingChoice(missingRecipient),null);assert.equal(preferredCallingChoice(missingRecipient,'contact-2')?.contactName,'Alex Manager')
 })
 
 test('confirmed bad-number feedback blocks only the frozen contact and exact phone choice', () => {
@@ -58,6 +60,14 @@ test('bad-number recovery prepares another exact phone before changing company a
   assert.equal(exhausted.status, 'needs_number')
   assert.equal(exhausted.preferredPhoneKey, null)
 })
+
+test('company switchboard remains visible context without a dial href and missing email recipient stays missing after feedback', () => {
+  const main={...primary,id:'main-line',isPrimary:false,name:'Company main line',phone:'780-555-0190',additionalPhones:[]};
+  assert.deepEqual(contactPhoneOptions(main,{...readiness,usableChoices:[],preferredContactId:null,preferredPhoneKey:null}).map(choice=>({number:choice.number,href:choice.href})),[{number:'780-555-0190',href:null}]);
+  const primaryOnly={...readiness,primaryEmailTarget:true,usableChoices:[readiness.usableChoices[0],readiness.usableChoices[2]]};
+  const blocked=blockConfirmedPhone(primaryOnly,{contactId:primary.id,phoneKey:readiness.usableChoices[0].phoneKey,expectedPhone:primary.phone!},'wrong_number');
+  assert.equal(blocked.status,'needs_number');assert.equal(blocked.missingPrimaryContactNumber,true);assert.equal(blocked.usableChoices[0].contactName,'Alex Manager');
+});
 
 test('contact phone choices preserve the exact selected number and do not guess invalid options', () => {
   const options = contactPhoneOptions({ ...primary, additionalPhones: [...primary.additionalPhones, { label: 'Repeated', number: primary.phone! }, { label: 'Office', number: 'ask reception' }] })
