@@ -6,12 +6,15 @@ export type MobileCallOutcome =
   | 'scheduled_meeting'
   | 'not_interested'
   | 'follow_up_later'
+  | 'wrong_number'
+  | 'disconnected'
 
 export type MobileCallSession = {
   brokerId: string
   clientEventId: string
   prospectId: string
   expectedPhone: string
+  phoneKey?: string
   startedAt: string
   recorded: boolean
   candidate: CallQueueCandidate
@@ -19,7 +22,69 @@ export type MobileCallSession = {
   contactSnapshot?: CallingContact | null
   afterConfirmation?: 'next_company' | 'another_contact'
   nextContactId?: string | null
+  nextPhoneKey?: string | null
   confirmation?: { outcome: MobileCallOutcome; notes: string; nextFollowUp?: string | null }
+}
+
+export type PhoneIssueOutcome = 'wrong_number' | 'disconnected'
+
+export type CallingPhoneChoice = {
+  contactId: string | null; contactName: string | null; phoneKey: string
+  number: string; label: string; dialHref: string; isPrimary: boolean
+}
+export type CallingPhoneReadiness = {
+  status: 'ready' | 'needs_number'; reason: string
+  usableChoices: CallingPhoneChoice[]
+  blockedChoices: Array<CallingPhoneChoice & { reason: PhoneIssueOutcome }>
+  preferredContactId: string | null; preferredPhoneKey: string | null
+  lastResearch: {
+    status: 'not_found' | 'conflicting' | 'identity_unclear' | 'access_blocked'
+    attemptedAt: string; retryAt: string | null; notes?: string | null
+  } | null
+  researchEligible: boolean
+}
+export type NeedsNumberRow = {
+  prospect: CallQueueCandidate['prospect']
+  company: string; contactName: string | null
+  priorityScore: number; priority: CallQueueCandidate['priority']; reasons: string[]
+  phoneReadiness: CallingPhoneReadiness; pendingCall: boolean
+  expectedSnapshotToken: string
+}
+export type NeedsNumberResponse = { rows: NeedsNumberRow[]; total: number; eligibleNow: number }
+
+export function phoneIssueLabel(reason: PhoneIssueOutcome) {
+  return reason === 'disconnected' ? 'Disconnected' : 'Wrong number'
+}
+
+export function isPhoneIssueOutcome(outcome: MobileCallOutcome): outcome is PhoneIssueOutcome {
+  return outcome === 'wrong_number' || outcome === 'disconnected'
+}
+
+export function preferredCallingChoice(readiness: CallingPhoneReadiness | null | undefined, contactId?: string | null) {
+  const choices = readiness?.usableChoices || []
+  return choices.find((choice) => (contactId === undefined || choice.contactId === contactId)
+    && choice.phoneKey === readiness?.preferredPhoneKey)
+    || choices.find((choice) => contactId === undefined || choice.contactId === contactId) || null
+}
+
+/** The server decides usability; this only chooses among its supplied options. */
+export function nextCallingChoice(readiness: CallingPhoneReadiness | null | undefined, current: { contactId?: string | null; phoneKey?: string; expectedPhone: string }, excludedContacts = new Set<string>()) {
+  const choices = (readiness?.usableChoices || []).filter((choice) => !(choice.contactId === (current.contactId || null)
+    && (current.phoneKey ? choice.phoneKey === current.phoneKey : choice.number === current.expectedPhone)))
+  return choices.find((choice) => choice.contactId === current.contactId)
+    || choices.find((choice) => !choice.contactId || !excludedContacts.has(choice.contactId)) || null
+}
+
+/** Optimistic removal is allowed only after the API has confirmed this feedback. */
+export function blockConfirmedPhone(readiness: CallingPhoneReadiness, current: { contactId?: string | null; phoneKey?: string; expectedPhone: string }, reason: PhoneIssueOutcome): CallingPhoneReadiness {
+  const matches = (choice: CallingPhoneChoice) => choice.contactId === (current.contactId || null)
+    && (current.phoneKey ? choice.phoneKey === current.phoneKey : choice.number === current.expectedPhone)
+  const blocked = readiness.usableChoices.find(matches) || readiness.blockedChoices.find(matches)
+  const usableChoices = readiness.usableChoices.filter((choice) => !matches(choice))
+  const next = usableChoices.find((choice) => choice.contactId === readiness.preferredContactId && choice.phoneKey === readiness.preferredPhoneKey) || usableChoices[0]
+  return { ...readiness, usableChoices, blockedChoices: [...readiness.blockedChoices.filter((choice) => !matches(choice)), ...(blocked ? [{ ...blocked, reason }] : [])],
+    status: usableChoices.length ? 'ready' : 'needs_number', reason: usableChoices.length ? readiness.reason : 'reported_bad_number',
+    preferredContactId: next?.contactId || null, preferredPhoneKey: next?.phoneKey || null }
 }
 
 export type CallingContact = {
@@ -43,6 +108,7 @@ export type CallingWorkspace = {
   primaryContactId: string | null
   activity: CallingActivity[]
   unattributedActivityCount: number
+  phoneReadiness?: CallingPhoneReadiness
 }
 
 export type CallQueueCandidate = {
@@ -57,6 +123,7 @@ export type CallQueueCandidate = {
   }
   listingTitles: string[]
   recentActivity: Array<{ id: string; type: string; outcome: string; occurredAt: string; notes: string }>
+  phoneReadiness?: CallingPhoneReadiness
 }
 
 export type CallingProgress = { startedToday: number; confirmedToday: number; connectedToday: number }
@@ -107,16 +174,23 @@ export function buildTelHref(phone: string) {
   return /^\+?\d{7,15}$/.test(dialable) ? `tel:${dialable}` : null
 }
 
-export function contactPhoneOptions(contact: CallingContact) {
+export function contactPhoneOptions(contact: CallingContact, readiness?: CallingPhoneReadiness | null) {
   const seen = new Set<string>()
-  return [
+  const saved = [
     ...(contact.phone ? [{ label: 'Main', number: contact.phone }] : []),
     ...(contact.additionalPhones || []),
   ].filter((option) => {
     if (!option.number || seen.has(option.number)) return false
     seen.add(option.number)
     return true
-  }).map((option) => ({ ...option, href: buildTelHref(option.number) }))
+  })
+  if (readiness === undefined) return saved.map((option) => ({ ...option, phoneKey: option.number, href: buildTelHref(option.number), blockedReason: undefined as PhoneIssueOutcome | undefined }))
+  const belongs = (choice: CallingPhoneChoice) => choice.contactId === contact.id || (!choice.contactId && contact.isPrimary)
+  const supplied = [
+    ...(readiness?.usableChoices || []).filter(belongs).map((choice) => ({ label: choice.label, number: choice.number, phoneKey: choice.phoneKey, href: choice.dialHref, blockedReason: undefined as PhoneIssueOutcome | undefined })),
+    ...(readiness?.blockedChoices || []).filter(belongs).map((choice) => ({ label: choice.label, number: choice.number, phoneKey: choice.phoneKey, href: null, blockedReason: choice.reason })),
+  ]
+  return [...supplied, ...saved.filter((option) => !supplied.some((choice) => choice.number === option.number)).map((option) => ({ ...option, phoneKey: option.number, href: null, blockedReason: undefined as PhoneIssueOutcome | undefined }))]
 }
 
 export function brokerCallDate(value: string | Date) {
@@ -124,12 +198,12 @@ export function brokerCallDate(value: string | Date) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Edmonton' }).format(new Date(value))
 }
 
-export function nextUncalledContact(contacts: CallingContact[], currentId: string | null | undefined, activity: CallingActivity[], completed = new Set<string>(), now = new Date()) {
+export function nextUncalledContact(contacts: CallingContact[], currentId: string | null | undefined, activity: CallingActivity[], completed = new Set<string>(), now = new Date(), readiness?: CallingPhoneReadiness | null) {
   const called = new Set(completed)
   for (const item of activity) {
     if (item.type === 'call' && item.contactId && brokerCallDate(item.occurredAt) === brokerCallDate(now)) called.add(item.contactId)
   }
-  return contacts.find((contact) => !contact.archivedAt && contact.id !== currentId && !called.has(contact.id) && contactPhoneOptions(contact).some((phone) => phone.href)) || null
+  return contacts.find((contact) => !contact.archivedAt && contact.id !== currentId && !called.has(contact.id) && contactPhoneOptions(contact, readiness).some((phone) => phone.href)) || null
 }
 
 export function parseStoredCallSession(value: string | null, brokerId: string): MobileCallSession | null {
@@ -148,18 +222,21 @@ export function parseStoredCallSession(value: string | null, brokerId: string): 
       || !Array.isArray(parsed.candidate.listingTitles)) return null
     if (parsed.candidate.reasons.some((reason) => typeof reason !== 'string')
       || parsed.candidate.recentActivity.some((activity) => !activity || typeof activity.notes !== 'string' || typeof activity.outcome !== 'string')) return null
-    if (parsed.confirmation && (!['attempted', 'contacted', 'no_answer', 'left_message', 'scheduled_meeting', 'not_interested', 'follow_up_later'].includes(parsed.confirmation.outcome)
+    if (parsed.confirmation && (!['attempted', 'contacted', 'no_answer', 'left_message', 'scheduled_meeting', 'not_interested', 'follow_up_later', 'wrong_number', 'disconnected'].includes(parsed.confirmation.outcome)
       || typeof parsed.confirmation.notes !== 'string')) return null
     if (parsed.contactId !== undefined && parsed.contactId !== null && (typeof parsed.contactId !== 'string' || !parsed.contactId)) return null
     if (parsed.contactId && !parsed.contactSnapshot) return null
     if (parsed.contactSnapshot) {
       const contact = parsed.contactSnapshot
+      const frozenChoice = parsed.candidate.phoneReadiness?.usableChoices.find((choice) => (choice.contactId === contact.id || (!choice.contactId && contact.isPrimary)) && choice.phoneKey === parsed.phoneKey && choice.number === parsed.expectedPhone)
       if (contact.id !== parsed.contactId || contact.prospectId !== parsed.prospectId || !Array.isArray(contact.additionalPhones)
         || contact.additionalPhones.some((phone) => typeof phone.label !== 'string' || typeof phone.number !== 'string')
-        || !contactPhoneOptions(contact).some((phone) => phone.number === parsed.expectedPhone)) return null
+        || (!frozenChoice && !contactPhoneOptions(contact).some((phone) => phone.number === parsed.expectedPhone))) return null
     }
     if (parsed.afterConfirmation !== undefined && !['next_company', 'another_contact'].includes(parsed.afterConfirmation)) return null
     if (parsed.nextContactId !== undefined && parsed.nextContactId !== null && typeof parsed.nextContactId !== 'string') return null
+    if (parsed.phoneKey !== undefined && typeof parsed.phoneKey !== 'string') return null
+    if (parsed.nextPhoneKey !== undefined && parsed.nextPhoneKey !== null && typeof parsed.nextPhoneKey !== 'string') return null
     return parsed as MobileCallSession
   } catch {
     return null

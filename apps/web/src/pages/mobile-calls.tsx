@@ -12,10 +12,12 @@ import { useToast } from '@/hooks/use-toast'
 import { apiRequest } from '@/lib/queryClient'
 import { CallingContacts, contactName } from '@/features/calling/CallingContacts'
 import { CallingActivity } from '@/features/calling/CallingActivity'
+import { NeedsNumberList } from '@/features/calling/NeedsNumberList'
 import {
-  buildTelHref, brokerCallDate, callSessionStorageKey, contactPhoneOptions, nextCallFollowUpIso, nextUncalledContact, parseStoredCallSession,
+  brokerCallDate, callSessionStorageKey, contactPhoneOptions, nextCallFollowUpIso, nextUncalledContact, parseStoredCallSession,
+  preferredCallingChoice, nextCallingChoice, blockConfirmedPhone, isPhoneIssueOutcome, phoneIssueLabel,
   type CallQueueCandidate, type CallQueueResponse, type MobileCallOutcome,
-  type MobileCallSession, type NextCallStep, type CallingContact, type CallingWorkspace,
+  type MobileCallSession, type NextCallStep, type CallingContact, type CallingWorkspace, type NeedsNumberRow,
 } from '@/lib/mobileCalling'
 import { cn } from '@/lib/utils'
 
@@ -99,9 +101,10 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     staleTime: 30_000,
   })
   const contacts = (workspaceQuery.data?.contacts || []).filter((contact) => !contact.archivedAt)
+  const readiness = workspaceQuery.data?.phoneReadiness || null
   const selectedContact = session?.contactSnapshot || contacts.find((contact) => contact.id === selectedContactId) || null
   const selectedName = selectedContact ? contactName(selectedContact) : activeCandidate ? displayName(activeCandidate) : 'Selected contact'
-  const phoneOptions = selectedContact ? contactPhoneOptions(selectedContact) : []
+  const phoneOptions = selectedContact ? contactPhoneOptions(selectedContact, readiness) : []
   const phone = session?.expectedPhone || selectedPhone
   const activityContactId = session?.contactId || selectedContactId
   const contactActivityQuery = useQuery<CallingWorkspace>({
@@ -111,24 +114,25 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     staleTime: 15_000,
   })
   const historyQuery = activityFilter === 'account' ? workspaceQuery : contactActivityQuery
-  const anotherContact = session && !session.contactId ? null : nextUncalledContact(contacts, session?.contactId || selectedContactId, workspaceQuery.data?.activity || [], completedContactIds)
+  const anotherContact = session && !session.contactId ? null : nextUncalledContact(contacts, session?.contactId || selectedContactId, workspaceQuery.data?.activity || [], completedContactIds, new Date(), readiness)
 
   useEffect(() => {
     if (!prospectId || session || !workspaceQuery.data) return
     const current = contacts.find((contact) => contact.id === selectedContactId)
     const primary = contacts.find((contact) => contact.id === workspaceQuery.data?.primaryContactId)
-    const next = current || (primary && contactPhoneOptions(primary).some((option) => option.href) ? primary : contacts.find((contact) => contactPhoneOptions(contact).some((option) => option.href))) || primary || contacts[0]
+    const preferred = preferredCallingChoice(readiness)
+    const next = current || contacts.find((contact) => contact.id === preferred?.contactId) || primary || contacts[0]
     if (!next) { setSelectedContactId(null); setSelectedPhone(''); return }
     if (next.id !== selectedContactId) setSelectedContactId(next.id)
-    const options = contactPhoneOptions(next)
-    if (!options.some((option) => option.number === selectedPhone)) setSelectedPhone(options.find((option) => option.href)?.number || options[0]?.number || '')
+    const options = contactPhoneOptions(next, readiness)
+    if (!options.some((option) => option.number === selectedPhone && option.href)) setSelectedPhone(preferredCallingChoice(readiness, next.id)?.number || options.find((option) => option.href)?.number || options[0]?.number || '')
   }, [prospectId, workspaceQuery.data, selectedContactId, session])
 
-  const selectContact = (contact: CallingContact) => {
+  const selectContact = (contact: CallingContact, workspace = workspaceQuery.data) => {
     if (sessionRef.current) return
     setSelectedContactId(contact.id)
-    const options = contactPhoneOptions(contact)
-    setSelectedPhone(options.find((option) => option.href)?.number || options[0]?.number || '')
+    const options = contactPhoneOptions(contact, workspace?.phoneReadiness || null)
+    setSelectedPhone(preferredCallingChoice(workspace?.phoneReadiness, contact.id)?.number || options.find((option) => option.href)?.number || options[0]?.number || '')
     setActivityFilter('contact')
   }
 
@@ -156,6 +160,13 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     if (activeCandidate) rememberCompany({ candidate: activeCandidate, contactId: selectedContactId, phone })
     prepareCompany({ candidate, contactId: null, phone: '' })
   }
+
+  const reviewNumber = (row: NeedsNumberRow) => selectCompany({
+    id: 'call:' + row.prospect.id, prospect: row.prospect,
+    contact: { name: row.contactName, company: row.company, phone: '', email: null },
+    priority: row.priority, priorityScore: row.priorityScore, reasons: row.reasons,
+    listingTitles: [], recentActivity: [], phoneReadiness: row.phoneReadiness,
+  })
 
   const skipCompany = () => {
     if (sessionRef.current || !activeCandidate) return
@@ -222,6 +233,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
       ['/api/automation/production-activities'],
       ['/api/skill-activities'], ['/api/skills'], ['/api/stats/header'],
       ['/api/calling/workspace', brokerId], ['/api/calling/workspace-activity', brokerId],
+      ['/api/calling/needs-number'],
     ]) void queryClient.invalidateQueries({ queryKey })
   }
 
@@ -265,10 +277,23 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
         ...(started.contactId ? { contactId: started.contactId } : {}),
         occurredAt: started.startedAt, callStartedAt: started.startedAt,
       }, { keepalive: true })
-      return response.json()
+      const result = await response.json()
+      if (isPhoneIssueOutcome(confirmation.outcome)) {
+        // Read the confirmed server state before preparing another number, including
+        // legacy sessions whose stored phone text predates canonical phone keys.
+        const workspace = await (await apiRequest('GET', `/api/calling/prospects/${encodeURIComponent(started.prospectId)}/workspace`)).json() as CallingWorkspace
+        return { ...result, workspace }
+      }
+      return result
     },
-    onSuccess: (result, { started }) => {
+    onSuccess: (result, { started, confirmation }) => {
       if (sessionRef.current?.clientEventId !== started.clientEventId) return
+      if (isPhoneIssueOutcome(confirmation.outcome)) {
+        const issue = confirmation.outcome
+        queryClient.setQueryData<CallingWorkspace>(workspaceKey, (current) => result.workspace || (current?.phoneReadiness ? {
+          ...current, phoneReadiness: blockConfirmedPhone(current.phoneReadiness, started, issue),
+        } : current))
+      }
       toast({
         title: result.newXpGained > 0 ? 'Call saved · +' + result.newXpGained : 'Call already recorded',
         description: companyName(started.candidate),
@@ -327,14 +352,17 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
       rows: current.rows.filter((candidate) => candidate.prospect.id !== started.prospectId),
       pendingSessions: (current.pendingSessions || []).filter((item) => item.clientEventId !== started.clientEventId),
     } : current)
-    if (started.afterConfirmation === 'another_contact' && started.nextContactId) {
+    const currentWorkspace = queryClient.getQueryData<CallingWorkspace>(workspaceKey)
+    const nextChoice = currentWorkspace?.phoneReadiness?.usableChoices.find((choice) => choice.contactId === started.nextContactId && choice.phoneKey === started.nextPhoneKey)
+      || preferredCallingChoice(currentWorkspace?.phoneReadiness, started.nextContactId)
+      || (started.confirmation && isPhoneIssueOutcome(started.confirmation.outcome) ? preferredCallingChoice(currentWorkspace?.phoneReadiness) : null)
+    if (started.afterConfirmation === 'another_contact' && started.nextContactId && (nextChoice?.contactId || !currentWorkspace?.phoneReadiness)) {
       setRetainedCandidate(started.candidate)
       setSelectedProspectId(started.prospectId)
-      setSelectedContactId(started.nextContactId)
-      const next = contacts.find((contact) => contact.id === started.nextContactId)
-      setSelectedPhone(next ? contactPhoneOptions(next).find((option) => option.href)?.number || '' : '')
+      setSelectedContactId(nextChoice?.contactId || started.nextContactId)
+      setSelectedPhone(nextChoice?.number || '')
       setActivityFilter('contact')
-      setAnnouncement('Call logged. Another contact is ready on this company; no call has started.')
+      setAnnouncement(started.confirmation && isPhoneIssueOutcome(started.confirmation.outcome) ? phoneIssueLabel(started.confirmation.outcome) + ' saved. Another number is ready on this company; no call has started.' : 'Call logged. Another contact is ready on this company; no call has started.')
     } else {
       rememberCompany({ candidate: started.candidate, contactId: started.contactId || null, phone: started.expectedPhone })
       const next = candidates.find((candidate) => candidate.prospect.id !== started.prospectId)
@@ -346,7 +374,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
         setSelectedPhone('')
         setActivityFilter('contact')
       }
-      setAnnouncement('Call logged. Next company ready.')
+      setAnnouncement(started.confirmation && isPhoneIssueOutcome(started.confirmation.outcome) ? phoneIssueLabel(started.confirmation.outcome) + ' saved. Next company ready.' : 'Call logged. Next company ready.')
     }
     resetForm()
     setFocusNext(true)
@@ -379,12 +407,13 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const busy = outcomeMutation.isPending || discardMutation.isPending
   const submissionLocked = busy || Boolean(session?.confirmation)
   const startCall = (event: MouseEvent<HTMLAnchorElement>, contact = selectedContact, number = phone) => {
-    if (!activeCandidate || !contact || !buildTelHref(number) || sessionRef.current || busy) { event.preventDefault(); return }
+    const choice = readiness?.usableChoices.find((option) => option.contactId === contact?.id && option.number === number)
+    if (!activeCandidate || !contact || !choice || sessionRef.current || busy) { event.preventDefault(); return }
     selectContact(contact)
     const started: MobileCallSession = {
       brokerId, clientEventId: newClientEventId(), prospectId: activeCandidate.prospect.id,
-      expectedPhone: number, startedAt: new Date().toISOString(),
-      candidate: activeCandidate, recorded: false,
+      expectedPhone: number, phoneKey: choice.phoneKey, startedAt: new Date().toISOString(),
+      candidate: { ...activeCandidate, phoneReadiness: readiness || undefined }, recorded: false,
       contactId: contact.id, contactSnapshot: { ...contact, additionalPhones: contact.additionalPhones.map((option) => ({ ...option })) },
     }
     persistSession(started)
@@ -401,9 +430,13 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
       ...(nextStep === 'keep' ? {} : { nextFollowUp: nextCallFollowUpIso(nextStep) }),
     }
     confirmationRef.current = confirmation
+    const nextChoice = isPhoneIssueOutcome(confirmation.outcome)
+      ? nextCallingChoice(readiness, started, completedContactIds)
+      : after === 'another_contact' && anotherContact ? preferredCallingChoice(readiness, anotherContact.id) : null
     const frozen = { ...started, confirmation,
-      afterConfirmation: started.afterConfirmation || after,
-      nextContactId: started.afterConfirmation ? started.nextContactId : after === 'another_contact' ? anotherContact?.id || null : null,
+      afterConfirmation: started.afterConfirmation || (isPhoneIssueOutcome(confirmation.outcome) ? nextChoice?.contactId ? 'another_contact' : 'next_company' : after),
+      nextContactId: started.afterConfirmation ? started.nextContactId : nextChoice?.contactId || null,
+      nextPhoneKey: started.afterConfirmation ? started.nextPhoneKey : nextChoice?.phoneKey || null,
     }
     persistSession(frozen)
     outcomeMutation.mutate({ started: frozen, confirmation })
@@ -415,7 +448,8 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const startedToday = progress.startedToday + pendingCredit
   const callTarget = Math.max(0, Math.trunc(Number(profile?.goals?.callsPerDay) || 0))
   const targetPercent = callTarget ? Math.min(100, (progress.confirmedToday / callTarget) * 100) : 0
-  const telHref = selectedContact && phone ? buildTelHref(phone) : null
+  const selectedPhoneOption = phoneOptions.find((option) => option.number === phone)
+  const telHref = selectedPhoneOption?.href || null
   const error = outcomeMutation.error || discardMutation.error || startMutation.error
   const upcoming = candidates.filter((candidate) => candidate.prospect.id !== activeCandidate?.prospect.id)
   const account = workspaceQuery.data?.prospect
@@ -486,7 +520,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
 
             <div className="border-t border-slate-100 px-4 py-3 sm:px-5">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                <div className="min-w-0 flex-1"><p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Calling contact</p><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><p className="break-words text-sm font-medium text-slate-800">{selectedName}</p>{phoneOptions.length > 1 ? <><label htmlFor="calling-phone" className="sr-only">Phone number for {selectedName}</label><select id="calling-phone" value={phone} disabled={Boolean(session)} onChange={(event) => setSelectedPhone(event.target.value)} className="min-h-11 max-w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:bg-slate-50">{phoneOptions.map((option) => <option key={option.number} value={option.number}>{option.label} · {option.number}{option.href ? '' : ' · check number'}</option>)}</select></> : phone ? <p className="min-h-8 content-center text-xs tabular-nums text-slate-600">{phone}</p> : null}</div></div>
+                <div className="min-w-0 flex-1"><p className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Calling contact</p><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><p className="break-words text-sm font-medium text-slate-800">{selectedName}</p>{phoneOptions.length > 1 ? <><label htmlFor="calling-phone" className="sr-only">Phone number for {selectedName}</label><select id="calling-phone" value={selectedPhoneOption?.phoneKey || ''} disabled={Boolean(session)} onChange={(event) => setSelectedPhone(phoneOptions.find((option) => option.phoneKey === event.target.value)?.number || '')} className="min-h-11 max-w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:bg-slate-50">{phoneOptions.map((option) => <option key={option.phoneKey} value={option.phoneKey} disabled={!option.href}>{option.label} · {option.number}{option.blockedReason ? ' · ' + phoneIssueLabel(option.blockedReason) : option.href ? '' : ' · check number'}</option>)}</select></> : phone ? <p className="min-h-8 content-center text-xs tabular-nums text-slate-600">{phone}{selectedPhoneOption?.blockedReason ? <span className="ml-2 text-amber-700">{phoneIssueLabel(selectedPhoneOption.blockedReason)}</span> : null}</p> : null}</div></div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
                 {session ? (
                   <Button className="h-11 shrink-0 gap-2 bg-emerald-700 px-4 text-sm font-semibold hover:bg-emerald-800" disabled={busy} onClick={() => confirm()}>{outcomeMutation.isPending ? 'Confirming...' : discardMutation.isPending ? 'Undoing...' : 'I called · next'}<ArrowRight aria-hidden="true" className="h-4 w-4" /></Button>
@@ -521,6 +555,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
                         <Button variant="outline" className="h-11 px-2 text-xs" disabled={submissionLocked} onClick={() => confirm('left_message')}>Voicemail</Button>
                         <Button variant="outline" className="h-11 px-2 text-xs" disabled={submissionLocked} onClick={() => confirm('contacted')}>Connected</Button>
                       </div></div>
+                      <div><p className="mb-2 text-xs text-slate-500">Log the attempt and stop using this number</p><div className="flex flex-wrap gap-2"><Button variant="outline" className="h-11 px-3 text-xs" disabled={submissionLocked} onClick={() => confirm('wrong_number')}>Wrong number</Button><Button variant="outline" className="h-11 px-3 text-xs" disabled={submissionLocked} onClick={() => confirm('disconnected')}>Disconnected</Button></div></div>
                       {session.confirmation ? <p className="text-xs text-slate-500">Retry will use your saved outcome and note. Follow-up: {session.confirmation.nextFollowUp === undefined ? 'keep existing' : session.confirmation.nextFollowUp === null ? 'none' : new Date(session.confirmation.nextFollowUp).toLocaleDateString('en-CA', { timeZone: 'America/Edmonton' })}.</p> : <div><p className="mb-2 text-xs font-semibold text-slate-500">Next follow-up · optional</p><div className="flex flex-wrap gap-2">{NEXT_STEPS.map((item) => <Button key={item.value} size="sm" variant={nextStep === item.value ? 'default' : 'outline'} aria-pressed={nextStep === item.value} disabled={submissionLocked} onClick={() => setNextStep(item.value)}>{item.label}</Button>)}</div></div>}
                     </div>
                   ) : null}
@@ -528,13 +563,14 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
               ) : null}
             </div>
             {workspaceQuery.isError ? <div role="alert" className="border-t border-slate-100 px-4 py-4"><p className="text-xs text-amber-800">Contacts could not be loaded.</p><Button variant="ghost" size="sm" onClick={() => workspaceQuery.refetch()}>Retry contacts</Button></div> : workspaceQuery.isLoading ? <p className="border-t border-slate-100 px-4 py-4 text-xs text-slate-500">Loading company workspace...</p> : <>
-              <CallingContacts key={activeCandidate.prospect.id} prospectId={activeCandidate.prospect.id} contacts={contacts} selectedId={session?.contactId || selectedContactId} selectedPhone={phone} locked={Boolean(session)} onSelect={selectContact} onDial={startCall} onSaved={(workspace, contactId) => {
+              <CallingContacts key={activeCandidate.prospect.id} prospectId={activeCandidate.prospect.id} contacts={contacts} selectedId={session?.contactId || selectedContactId} selectedPhone={phone} locked={Boolean(session)} readiness={readiness} onSelect={selectContact} onDial={startCall} onSaved={(workspace, contactId) => {
                 queryClient.setQueryData(workspaceKey, workspace)
                 void queryClient.invalidateQueries({ queryKey: ['/api/calling/workspace-activity', brokerId, activeCandidate.prospect.id] })
                 void queryClient.invalidateQueries({ queryKey: ['/api/calling/queue', brokerId] })
                 void queryClient.invalidateQueries({ queryKey: ['/api/prospects'] })
+                void queryClient.invalidateQueries({ queryKey: ['/api/calling/needs-number'] })
                 const saved = workspace.contacts.find((contact) => contact.id === contactId)
-                if (saved) selectContact(saved)
+                if (saved) selectContact(saved, workspace)
               }} />
               {account?.notes ? <details className="border-t border-slate-100 px-4 py-3 sm:px-5"><summary className="min-h-9 cursor-pointer text-xs font-medium text-slate-500">Company notes</summary><p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{account.notes}</p></details> : null}
               <CallingActivity rows={historyQuery.data?.activity || []} filter={activityFilter} onFilter={setActivityFilter} contactName={selectedName} unattributedCount={workspaceQuery.data?.unattributedActivityCount || 0} loading={activityFilter === 'contact' && Boolean(activityContactId) ? contactActivityQuery.isLoading : historyQuery.isLoading} error={historyQuery.isError} onRetry={() => historyQuery.refetch()} />
@@ -544,24 +580,29 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
           <section className="rounded-lg border border-slate-200 bg-white p-5 text-center"><Check className="mx-auto h-6 w-6 text-emerald-600" /><h2 className="mt-2 text-lg font-bold text-slate-950">You're through the queue</h2><p className="mt-2 text-sm text-slate-500">{skippedIds.size ? skippedIds.size + ' companies skipped for now.' : progress.confirmedToday ? progress.confirmedToday + ' calls confirmed today. Good progress.' : 'No prospects with a saved phone number are ready.'}</p><div className="mt-4 flex flex-wrap justify-center gap-2"><Button variant="ghost" className="h-11 gap-1 text-xs text-slate-500" aria-label="Previous company" disabled={!previousCompanies.length} onClick={previousCompany}><ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />Previous</Button>{skippedIds.size ? <Button variant="outline" onClick={revisitSkipped}>Revisit skipped companies</Button> : null}<Button variant="outline" onClick={() => { setCompletedIds(new Set()); setSkippedIds(new Set()); setIncludeCalledToday(true) }}>Show contacts called today</Button></div></section>
         ) : null}
 
+        <aside className="min-w-0 space-y-4 xl:sticky xl:top-4">
         {activeCandidate || upcoming.length ? (
-          <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white xl:sticky xl:top-4" aria-label="Next companies">
+          <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Next companies">
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><h2 className="text-sm font-semibold text-slate-800">Calling queue</h2><span className="text-[11px] text-slate-500">{queueQuery.data?.totalEligible ?? candidates.length} in queue</span></div>
             <ol className="divide-y divide-slate-100 xl:max-h-[calc(100dvh-14rem)] xl:overflow-y-auto">
-              {upcoming.map((candidate, index) => (
+              {upcoming.map((candidate, index) => {
+                const choice = preferredCallingChoice(candidate.phoneReadiness)
+                return (
                 <li key={candidate.prospect.id} className={cn(index >= 5 && !showAllCompanies && 'hidden xl:block')}><button type="button" className="flex w-full items-start gap-3 px-4 py-4 text-left transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-600 disabled:cursor-default disabled:opacity-60" aria-label={'Select company ' + companyName(candidate)} disabled={Boolean(session)} onClick={() => selectCompany(candidate)}>
                   <span className="mt-0.5 w-4 shrink-0 text-xs tabular-nums text-slate-400">{index + 1}</span>
-                  <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-800">{companyName(candidate)}</p><p className="mt-0.5 truncate text-[11px] text-slate-500">{candidate.contact.name ? candidate.contact.name + ' · ' : ''}{candidate.contact.phone}</p></div>
+                  <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-800">{companyName(candidate)}</p><p className="mt-0.5 truncate text-[11px] text-slate-500">{choice?.contactName ? choice.contactName + ' · ' : ''}{choice?.number || 'Number unavailable'}</p></div>
                   <span className="mt-0.5 max-w-[35%] text-right text-[10px] leading-4 text-slate-500">{candidate.reasons[0] || 'Ready'}</span>
                 </button>
                 </li>
-              ))}
+              )})}
             </ol>
             {upcoming.length > 5 ? <Button variant="ghost" className="m-2 h-11 text-xs text-slate-500 xl:hidden" aria-expanded={showAllCompanies} onClick={() => setShowAllCompanies((value) => !value)}>{showAllCompanies ? 'Show fewer companies' : 'View all companies'}</Button> : null}
             {!upcoming.length ? <p className="px-4 py-6 text-xs text-slate-500">This is the last company in your queue.</p> : null}
             <div className="flex items-start gap-2 border-t border-slate-100 bg-slate-50/60 px-4 py-3 text-[11px] leading-5 text-slate-500"><Building2 className="mt-1 h-3.5 w-3.5 shrink-0" /><p>Select a company to prepare the next call. Calls count toward your goal when you log them.</p></div>
           </section>
         ) : null}
+        <NeedsNumberList onSelect={reviewNumber} locked={Boolean(session)} />
+        </aside>
         </div>
       </main>
     </div>

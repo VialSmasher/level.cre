@@ -28,6 +28,7 @@ import {
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { NeedsNumberList } from '@/features/calling/NeedsNumberList'
 import { PropertyEvidenceImportDialog } from '@/components/PropertyEvidenceImportDialog'
 import { MarketMemoryPreviewDialog } from '@/components/MarketMemoryPreviewDialog'
 import { PropertyMemoryReviewCard } from '@/features/property-memory/PropertyMemoryReviewCard'
@@ -849,6 +850,7 @@ export default function DailyDeskPage() {
     queryClient.invalidateQueries({ queryKey: ['/api/email/inbound/config'] })
     queryClient.invalidateQueries({ queryKey: ['/api/stats/header'] })
     queryClient.invalidateQueries({ queryKey: ['/api/automation/activity-pulse'] })
+    queryClient.invalidateQueries({ queryKey: ['/api/calling/needs-number'] })
     queryClient.invalidateQueries({ queryKey: ['property-memory'] })
   }
 
@@ -1340,6 +1342,8 @@ export default function DailyDeskPage() {
                 </Link>
               </Button>
             </section>
+
+            <NeedsNumberList />
 
             <section className="hidden">
               <div className="flex items-center gap-2">
