@@ -1,5 +1,5 @@
 import type { CallingContact, CallingPhoneChoice, CallingWorkspace, CallQueueCandidate } from '@/lib/mobileCalling'
-import { buildTelHref } from '@/lib/mobileCalling'
+import { buildTelHref, preferredCallingChoice } from '@/lib/mobileCalling'
 
 export type MapPhoneEntry = {
   prospectId: string; contactId?: string; contactName?: string | null; email?: string | null; company: string | null
@@ -20,19 +20,50 @@ export function mapCompanyName(workspace: CallingWorkspace) {
   return workspace.prospect.businessName || workspace.contacts.find((contact) => contact.isPrimary)?.company || workspace.prospect.name || 'Map prospect'
 }
 
+export function mapChoiceKey(choice: CallingPhoneChoice) {
+  return `${choice.contactId || ''}:${choice.phoneKey}`
+}
+
+/** Missing email recipients require an explicit alternate selection. */
+export function mapCallingChoice(workspace: CallingWorkspace | undefined, selectedKey = ''): CallingPhoneChoice | null {
+  const readiness = workspace?.phoneReadiness
+  const selected = readiness?.usableChoices.find((choice) => mapChoiceKey(choice) === selectedKey)
+  return selected || (readiness?.status === 'ready' ? preferredCallingChoice(readiness) : null)
+}
+
 export function mapCallCandidate(workspace: CallingWorkspace, choice: CallingPhoneChoice): CallQueueCandidate {
   const target = workspace.contacts.find((contact) => contact.id === choice.contactId) || workspace.contacts.find((contact) => contact.isPrimary)
   return {
     id: workspace.prospect.id, priorityScore: 0, priority: 'medium', reasons: ['Selected from map'],
     prospect: { ...workspace.prospect, name: workspace.prospect.name || workspace.prospect.businessName || 'Map prospect' },
-    contact: { name: workspace.contacts.find((contact) => contact.isPrimary)?.name || null, company: mapCompanyName(workspace), phone: choice.number, email: target?.email || null },
+    contact: { name: target?.name || choice.contactName || null, company: mapCompanyName(workspace), phone: choice.number, phoneType: choice.phoneType, email: target?.email || null },
     listingTitles: [], recentActivity: workspace.activity.map(({ id, type, outcome, occurredAt, notes }) => ({ id, type, outcome, occurredAt, notes })),
     phoneReadiness: workspace.phoneReadiness,
   }
 }
 
 export function directMapContacts(workspace: CallingWorkspace): CallingContact[] {
-  return workspace.contacts.filter((contact) => !contact.archivedAt && (contact.name || contact.email) && contact.name !== 'Company main line')
+  const nameKey = (value: string | null | undefined) => (value || '').normalize('NFKC').toLowerCase().replace(/[\p{P}\p{Z}\s]+/gu, ' ').trim()
+  return workspace.contacts.filter((contact) => {
+    const name = nameKey(contact.name)
+    return !contact.archivedAt && Boolean(name)
+      && !/^(?:company (?:main line|switchboard)|main line|switchboard|reception|general (?:enquiries|inquiries)|office|contact|unknown)$/.test(name)
+      && ![contact.company, workspace.prospect.businessName, workspace.prospect.name].some((company) => nameKey(company) === name)
+      && !/\b(?:incorporated|inc|limited|ltd|llc|corporation|corp)\b/.test(name)
+  })
+}
+
+/** Saved company lines are account context; only person choices establish dialing readiness. */
+export function mapPhoneEntryMatchesWorkspace(workspace: CallingWorkspace, entry: MapPhoneEntry, contactId?: string): boolean {
+  if (!contactId || workspace.prospect.id !== entry.prospectId) return false
+  const phoneKey = mapPhoneKey(entry.contactPhone)
+  if (!phoneKey) return false
+  if (entry.phoneEvidence.kind === 'company_main') {
+    const saved = workspace.contacts.find((contact) => contact.id === contactId && !contact.archivedAt
+      && !contact.isPrimary && contact.name === 'Company main line')
+    return Boolean(saved?.phone && mapPhoneKey(saved.phone) === phoneKey)
+  }
+  return entry.contactId === contactId && Boolean(workspace.phoneReadiness?.usableChoices.some((choice) => choice.contactId === contactId && choice.phoneKey === phoneKey))
 }
 
 export function buildMapPhoneEntry(workspace: CallingWorkspace, kind: MapPhoneEntry['phoneEvidence']['kind'], contactId: string, number: string, observedAt = new Date().toISOString()): MapPhoneEntry {

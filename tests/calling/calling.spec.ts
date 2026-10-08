@@ -84,7 +84,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     isPrimary: false, name, company: candidates[0].contact.company, phone: `(780) 555-010${index + 2}`,
     email: null, title: index === 0 ? 'Operations' : null, additionalPhones: [], archivedAt: null,
   });
-  if (options.missingEmailPrimary) { firstRoster[0].phone = null; firstRoster[0].additionalPhones = []; firstRoster[0].email = 'morgan@example.test'; }
+  if (options.missingEmailPrimary) { firstRoster[0].phone = null; firstRoster[0].additionalPhones = []; firstRoster[0].email = 'morgan@example.test'; firstRoster.splice(2); }
   if (options.mobileFirst) firstRoster[0].email = 'morgan@example.test';
   if (options.mainLineOnly) {
     firstRoster[0].phone = null; firstRoster[0].additionalPhones = [];
@@ -452,26 +452,48 @@ test('map target picker selects a different canonical person without dialing and
   expect(scenario.legacyCallWrites).toHaveLength(0);
 });
 
-test('map chooses a labeled company main line when the named primary has no usable number', async ({ page }) => {
+test('map keeps company mainline as context while the email recipient needs a number', async ({ page }) => {
   const scenario = await installCallingScenario(page, { map: true, mainLineOnly: true });
   const control = mapCalling(page);
-  const call = control.getByRole('link', { name: 'Call Company main line at (780) 555-0102', exact: true });
-  await expect(call).toBeVisible();
-  await expect(control.getByRole('link', { name: /Call Morgan Lee/ })).toHaveCount(0);
-  await call.click();
-  await expect.poll(() => scenario.starts.length).toBe(1);
-  expect(scenario.starts[0]).toMatchObject({ contactId: scenario.roster.get('calling-prospect-1')![1].id, expectedPhone: '(780) 555-0102' });
-  expect(scenario.confirmations).toHaveLength(0);
-  expect(scenario.roster.get('calling-prospect-1')![0]).toMatchObject({ name: 'Morgan Lee', phone: null });
+  await expect(control.getByRole('button', { name: 'Add number', exact: true })).toBeVisible();
+  await expect(control.getByRole('link', { name: /Call / })).toHaveCount(0);
+  expect(scenario.readiness('calling-prospect-1').status).toBe('needs_number');
+  expect(scenario.roster.get('calling-prospect-1')![1]).toMatchObject({ name: 'Company main line', phone: '(780) 555-0102' });
+  expect(scenario.starts).toHaveLength(0); expect(scenario.confirmations).toHaveLength(0);
+  expect(await dialHrefs(page)).toEqual([]);
 });
 
-test('map company-line save preserves country code and extension and waits for acknowledgement before a separate dial click', async ({ page }, testInfo) => {
+test('map requires explicit alternate selection when its emailed contact has no number and Calls deep link retains that contact', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { map: true, missingEmailPrimary: true });
+  const rows = scenario.roster.get('calling-prospect-1')!;
+  rows.splice(2); // Only one other saved person is available.
+  await navigateWithinApp(page, '/app/calls?prospectId=calling-prospect-1');
+  await expect(page.getByRole('button', { name: 'Select contact Morgan Lee', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('link', { name: 'Call Rowan Singh', exact: true })).toHaveCount(0);
+  await navigateWithinApp(page, '/app?prospectId=calling-prospect-1');
+  const control = mapCalling(page);
+  await expect(control.getByRole('button', { name: 'Add number', exact: true })).toBeVisible();
+  await expect(control.getByRole('link', { name: /Call / })).toHaveCount(0);
+  await control.getByRole('button', { name: 'Calling options', exact: true }).click();
+  const picker = page.getByRole('combobox', { name: 'Call target', exact: true });
+  await expect(picker).toHaveValue('');
+  const alternate = scenario.readiness('calling-prospect-1').usableChoices[0];
+  await picker.selectOption(rows[1].id + ':' + alternate.phoneKey);
+  await page.keyboard.press('Escape');
+  await control.getByRole('link', { name: 'Call Rowan Singh at (780) 555-0102', exact: true }).click();
+  await expect.poll(() => scenario.starts.length).toBe(1);
+  expect(scenario.starts[0]).toMatchObject({ contactId: rows[1].id, expectedPhone: '(780) 555-0102' });
+  await expect(pendingMapCall(page)).toContainText('Rowan Singh');
+  expect(scenario.confirmations).toHaveLength(0);
+});
+
+test('map company-line save acknowledges saved context without enabling a call or giving credit', async ({ page }, testInfo) => {
   const scenario = await installCallingScenario(page, { map: true, missingPhone: true, delayedContactSave: true });
   const control = mapCalling(page);
   await expect(page.getByText('Drawing tools are still loading', { exact: true })).toBeHidden();
   await control.getByRole('button', { name: 'Add number', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Add a phone number', exact: true });
-  await expect(dialog.getByRole('combobox', { name: 'Number type', exact: true })).toHaveValue('company_main');
+  await expect(dialog.getByRole('combobox', { name: 'Number type', exact: true })).toHaveValue('contact_direct');
   await dialog.getByRole('combobox', { name: 'Number type', exact: true }).selectOption('company_main');
   const enteredNumber = '+1 (780) 555-0123 ext. 47';
   await dialog.getByRole('textbox', { name: 'Phone number', exact: true }).fill(enteredNumber);
@@ -488,17 +510,14 @@ test('map company-line save preserves country code and extension and waits for a
   scenario.releaseContactSave();
   await expect(dialog).toHaveCount(0);
   const canonical = parseBusinessPhone(enteredNumber)!;
-  const call = control.getByRole('link', { name: `Call Company main line at ${canonical.number}`, exact: true });
-  await expect(call).toHaveAttribute('href', canonical.dialHref);
+  await expect(control.getByRole('link', { name: /Call / })).toHaveCount(0);
+  await expect(control.getByRole('button', { name: 'Add number', exact: true })).toBeVisible();
   expect(scenario.roster.get('calling-prospect-1')!).toHaveLength(2);
   expect(scenario.roster.get('calling-prospect-1')![0]).toMatchObject({ name: 'Morgan Lee', phone: null, isPrimary: true });
-  expect(scenario.starts).toHaveLength(0); expect(scenario.progress().confirmedToday).toBe(0);
-  await call.click();
-  await expect.poll(() => scenario.starts.length).toBe(1);
-  expect(scenario.starts[0]).toMatchObject({ expectedPhone: canonical.number, contactId: scenario.roster.get('calling-prospect-1')![1].id });
-  await pendingMapCall(page).getByRole('button', { name: 'I called', exact: true }).click();
-  await expect(pendingMapCall(page)).toHaveCount(0);
-  expect(scenario.confirmations).toHaveLength(1);
+  expect(scenario.roster.get('calling-prospect-1')![1]).toMatchObject({ name: 'Company main line', phone: canonical.number });
+  expect(scenario.starts).toHaveLength(0); expect(scenario.confirmations).toHaveLength(0);
+  expect(scenario.progress().confirmedToday).toBe(0);
+  expect(await dialHrefs(page)).toEqual([]);
   expect(scenario.legacyCallWrites).toHaveLength(0);
   await expect(page.getByTestId('asset-profile')).toHaveAttribute('data-asset-id', 'calling-prospect-1');
 });

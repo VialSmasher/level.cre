@@ -10,8 +10,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useCallingSession } from '@/features/calling/CallingSessionProvider'
 import { apiRequest } from '@/lib/queryClient'
-import { preferredCallingChoice, type CallingWorkspace } from '@/lib/mobileCalling'
-import { buildMapPhoneEntry, directMapContacts, mapCallCandidate, mapCompanyName, mapPhoneKey, mapPhoneSaveError, type MapPhoneEntry } from '@/lib/mapCalling'
+import { type CallingWorkspace } from '@/lib/mobileCalling'
+import { buildMapPhoneEntry, directMapContacts, mapCallCandidate, mapCallingChoice, mapChoiceKey, mapCompanyName, mapPhoneEntryMatchesWorkspace, mapPhoneSaveError, type MapPhoneEntry } from '@/lib/mapCalling'
 
 type Props = { prospect: Prospect; compact?: boolean; disabled?: boolean; beforePhoneSave?: () => Promise<boolean>; onPhoneSaved?: (workspace: CallingWorkspace) => void }
 
@@ -35,8 +35,8 @@ export function MapCallControl({ prospect, compact = false, disabled = false, be
   useEffect(() => { setSelectedKey(''); setEditorOpen(false); setOptionsOpen(false) }, [prospect.id])
   const workspace = query.data
   const choices = workspace?.phoneReadiness?.usableChoices || []
-  const choiceKey = (choice: typeof choices[number]) => `${choice.contactId || ''}:${choice.phoneKey}`
-  const choice = choices.find((item) => choiceKey(item) === selectedKey) || preferredCallingChoice(workspace?.phoneReadiness)
+  const choiceKey = mapChoiceKey
+  const choice = mapCallingChoice(workspace, selectedKey)
   const contact = workspace?.contacts.find((item) => item.id === choice?.contactId) || workspace?.contacts.find((item) => item.isPrimary) || null
   const targetName = contact?.name || choice?.contactName || (workspace ? mapCompanyName(workspace) : prospect.businessName || prospect.contactCompany || 'saved contact')
   const locked = disabled || query.isError || query.isFetching || !calling.recoveryReady || Boolean(calling.session) || calling.busy
@@ -54,7 +54,7 @@ export function MapCallControl({ prospect, compact = false, disabled = false, be
   const options = workspace && !query.isError ? <Popover open={optionsOpen} onOpenChange={setOptionsOpen}>
     <PopoverTrigger asChild><Button type="button" variant="ghost" className="h-8 w-5 p-0 text-slate-500" aria-label="Calling options" disabled={locked}><ChevronDown className="h-3 w-3" /></Button></PopoverTrigger>
     <PopoverContent data-map-call-overlay side="top" align="start" className="z-[150] w-64 space-y-3 p-3">
-      {choices.length > 1 ? <div><Label htmlFor={`map-target-${compact ? 'footer' : 'contact'}-${prospect.id}`} className="text-xs">Call target</Label><select id={`map-target-${compact ? 'footer' : 'contact'}-${prospect.id}`} value={choice ? choiceKey(choice) : ''} onChange={(event) => setSelectedKey(event.target.value)} className="mt-1 min-h-9 w-full rounded border border-slate-200 bg-white px-2 text-xs">{choices.map((item) => <option key={choiceKey(item)} value={choiceKey(item)}>{item.contactName || 'Company contact'} · {item.label} · {item.number}</option>)}</select></div> : null}
+      {choices.length > 1 || (!choice && choices.length > 0) ? <div><Label htmlFor={`map-target-${compact ? 'footer' : 'contact'}-${prospect.id}`} className="text-xs">Call target</Label><select id={`map-target-${compact ? 'footer' : 'contact'}-${prospect.id}`} value={choice ? choiceKey(choice) : ''} onChange={(event) => setSelectedKey(event.target.value)} className="mt-1 min-h-9 w-full rounded border border-slate-200 bg-white px-2 text-xs">{!choice ? <option value="" disabled>Choose an alternate contact</option> : null}{choices.map((item) => <option key={choiceKey(item)} value={choiceKey(item)}>{item.contactName || 'Company contact'} · {item.label} · {item.number}</option>)}</select></div> : null}
       {choice ? <p className="break-words text-xs text-slate-600">{targetName}<br /><span className="tabular-nums">{choice.number}</span></p> : null}
       <Button type="button" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => { setOptionsOpen(false); setEditorOpen(true) }}><Plus className="h-3 w-3" />Add number</Button>
       <Link href={`/app/calls?prospectId=${encodeURIComponent(prospect.id)}`} className="block text-xs text-blue-700 hover:underline">Review contacts in Calls</Link>
@@ -64,9 +64,9 @@ export function MapCallControl({ prospect, compact = false, disabled = false, be
   return <div role="group" aria-label={compact ? 'Map calling' : 'Map contact calling'} className={compact ? 'inline-flex shrink-0 items-center' : 'space-y-1.5 rounded-md border border-slate-200 bg-slate-50/60 p-2.5'}>
     {!compact && workspace ? <p className="truncate text-xs font-medium text-slate-800">{targetName}</p> : null}
     <div className="flex items-center gap-1">{action}{options}{!compact && choice ? <span className="min-w-0 truncate text-[11px] tabular-nums text-slate-500">{choice.number}</span> : null}</div>
-    {!compact ? <p className="text-[11px] text-slate-500">{query.isError ? 'Calling details could not be loaded.' : calling.session ? 'Confirm the pending call below, or finish it in Calls.' : disabled ? 'Waiting for your changes to save.' : choice ? 'Opens your dialer. Confirm after trying the call.' : 'Save a direct number or company line.'}</p> : null}
+    {!compact ? <p className="text-[11px] text-slate-500">{query.isError ? 'Calling details could not be loaded.' : calling.session ? 'Confirm the pending call below, or finish it in Calls.' : disabled ? 'Waiting for your changes to save.' : choice ? 'Opens your dialer. Confirm after trying the call.' : 'Save this contact’s mobile or direct office number.'}</p> : null}
     {query.isError && !compact ? <Button type="button" variant="ghost" className="h-7 px-0 text-xs" onClick={() => void query.refetch()}>Retry calling details</Button> : null}
-    {editorOpen && workspace ? <MapNumberEditor key={prospect.id} workspace={workspace} selectedContactId={choice ? contact?.id : undefined} beforeSave={beforePhoneSave} onClose={() => setEditorOpen(false)} onSaved={(saved, contactId) => {
+    {editorOpen && workspace ? <MapNumberEditor key={prospect.id} workspace={workspace} selectedContactId={contact?.id} beforeSave={beforePhoneSave} onClose={() => setEditorOpen(false)} onSaved={(saved, contactId) => {
       queryClient.setQueryData(key, saved)
       const supplied = saved.phoneReadiness?.usableChoices.find((item) => item.contactId === contactId)
       if (supplied) setSelectedKey(choiceKey(supplied))
@@ -79,8 +79,9 @@ export function MapCallControl({ prospect, compact = false, disabled = false, be
 
 function MapNumberEditor({ workspace, selectedContactId, beforeSave, onSaved, onClose }: { workspace: CallingWorkspace; selectedContactId?: string; beforeSave?: () => Promise<boolean>; onSaved: (saved: CallingWorkspace, contactId?: string) => void; onClose: () => void }) {
   const contacts = directMapContacts(workspace)
-  const [kind, setKind] = useState<MapPhoneEntry['phoneEvidence']['kind']>(contacts.some((contact) => contact.id === selectedContactId) ? 'contact_direct' : 'company_main')
-  const [contactId, setContactId] = useState(contacts.find((contact) => contact.id === selectedContactId)?.id || contacts[0]?.id || '')
+  const initialContact = contacts.find((contact) => contact.id === selectedContactId) || contacts.find((contact) => contact.isPrimary) || contacts[0]
+  const [kind, setKind] = useState<MapPhoneEntry['phoneEvidence']['kind']>(initialContact ? 'contact_direct' : 'company_main')
+  const [contactId, setContactId] = useState(initialContact?.id || '')
   const [number, setNumber] = useState('')
   const [frozen, setFrozen] = useState<MapPhoneEntry | null>(null)
   const [validation, setValidation] = useState('')
@@ -91,7 +92,7 @@ function MapNumberEditor({ workspace, selectedContactId, beforeSave, onSaved, on
       const result = (await response.json()).results?.find((item: { prospectId: string }) => item.prospectId === entry.prospectId)
       if (!result || !['applied', 'unchanged'].includes(result.status)) throw new Error(mapPhoneSaveError(result?.reason || 'unknown'))
       const saved = await (await apiRequest('GET', `/api/calling/prospects/${encodeURIComponent(entry.prospectId)}/workspace`)).json() as CallingWorkspace
-      if (!saved.phoneReadiness?.usableChoices.some((choice) => choice.contactId === result.contactId && choice.phoneKey === mapPhoneKey(entry.contactPhone))) throw new Error('The number was saved, but its calling details still need to refresh. Retry without changing the number.')
+      if (!mapPhoneEntryMatchesWorkspace(saved, entry, result.contactId)) throw new Error('The number was saved, but its calling details still need to refresh. Retry without changing the number.')
       return { saved, contactId: result.contactId as string | undefined }
     },
     onSuccess: ({ saved, contactId }) => onSaved(saved, contactId),
