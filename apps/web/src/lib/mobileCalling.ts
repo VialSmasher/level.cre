@@ -11,6 +11,7 @@ export type MobileCallOutcome =
 
 export type MobileCallSession = {
   brokerId: string
+  origin?: 'calls' | 'map'
   clientEventId: string
   prospectId: string
   expectedPhone: string
@@ -26,6 +27,41 @@ export type MobileCallSession = {
   confirmation?: { outcome: MobileCallOutcome; notes: string; nextFollowUp?: string | null }
 }
 
+export type CallConfirmationContinuation = {
+  afterConfirmation?: 'next_company' | 'another_contact'
+  nextContactId?: string | null
+  nextPhoneKey?: string | null
+}
+
+/** Freeze the exact owned workspace choice before native link activation. */
+export function createMobileCallSession(
+  brokerId: string, candidate: CallQueueCandidate, contact: CallingContact, choice: CallingPhoneChoice,
+  identity = { clientEventId: `call-${crypto.randomUUID()}`, startedAt: new Date().toISOString() },
+): MobileCallSession | null {
+  if (!brokerId || contact.archivedAt || contact.prospectId !== candidate.prospect.id || choice.contactId !== contact.id) return null
+  const usable = candidate.phoneReadiness?.usableChoices.find((option) => option.contactId === contact.id
+    && option.phoneKey === choice.phoneKey && option.number === choice.number && option.dialHref === choice.dialHref)
+  if (!usable?.dialHref) return null
+  return {
+    brokerId, ...identity, prospectId: candidate.prospect.id,
+    expectedPhone: usable.number, phoneKey: usable.phoneKey, recorded: false,
+    candidate: structuredClone(candidate), contactId: contact.id, contactSnapshot: structuredClone(contact),
+  }
+}
+
+/** Retries preserve the first confirmation and its continuation, even across views. */
+export function freezeCallConfirmation(
+  session: MobileCallSession, confirmation: NonNullable<MobileCallSession['confirmation']>,
+  continuation?: CallConfirmationContinuation,
+): MobileCallSession {
+  if (session.confirmation) return session
+  return {
+    ...session, origin: continuation ? 'calls' : 'map', confirmation: { ...confirmation },
+    afterConfirmation: continuation?.afterConfirmation || 'next_company',
+    nextContactId: continuation?.nextContactId || null,
+    nextPhoneKey: continuation?.nextPhoneKey || null,
+  }
+}
 export type PhoneIssueOutcome = 'wrong_number' | 'disconnected'
 
 export type CallingPhoneChoice = {
@@ -139,6 +175,33 @@ export type CallQueueResponse = {
   progress: CallingProgress; pendingSessions: PendingCallSession[]
 }
 
+/** Identity comparison only. Server readiness remains the authority for dialing. */
+export function callingPhoneKey(number: string): string | null {
+  const match = /^([+\d\s().-]+?)(?:\s*(?:extension|ext\.?|x|#|;ext=|[,;])\s*(\d{1,8}))?$/i.exec(number.trim())
+  if (!match || number.length > 80 || /[\r\n]/.test(number) || !/^\+?\d+$/.test(match[1].replace(/[\s().-]/g, ''))) return null
+  const digits = match[1].replace(/\D/g, '')
+  if (digits.length < 10 || digits.length > 15) return null
+  return `${digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits}:${match[2] || ''}`
+}
+
+/** Recover the frozen server target without depending on a current contact edit. */
+export function restorePendingCallSession(brokerId: string, pending: PendingCallSession): MobileCallSession {
+  const candidate = structuredClone(pending.candidate)
+  candidate.contact.phone = typeof candidate.contact.phone === 'string' ? candidate.contact.phone : ''
+  candidate.prospect.name = candidate.prospect.name || candidate.prospect.businessName || candidate.contact.company || 'Selected company'
+  const contact = pending.contactSnapshot ? structuredClone(pending.contactSnapshot) : null
+  const choice = candidate.phoneReadiness?.usableChoices.find((option) => (option.contactId === (pending.contactId || null)
+    || (!option.contactId && contact?.isPrimary)) && option.number === pending.phoneSnapshot)
+  const key = callingPhoneKey(pending.phoneSnapshot)
+  const matchesFrozenPhone = key && contact && [contact.phone, ...contact.additionalPhones.map((option) => option.number)]
+    .some((number) => number && callingPhoneKey(number) === key)
+  return {
+    brokerId, origin: 'map', clientEventId: pending.clientEventId, prospectId: pending.prospectId,
+    expectedPhone: pending.phoneSnapshot, startedAt: pending.callStartedAt, recorded: true,
+    candidate, contactId: pending.contactId, contactSnapshot: contact,
+    ...(choice || matchesFrozenPhone ? { phoneKey: choice?.phoneKey || key! } : {}),
+  }
+}
 export function callSessionStorageKey(brokerId: string) {
   return `level-cre-active-call:v2:${brokerId}`
 }
@@ -211,6 +274,7 @@ export function parseStoredCallSession(value: string | null, brokerId: string): 
   try {
     const parsed = JSON.parse(value) as Partial<MobileCallSession>
     if (parsed.brokerId !== brokerId || !brokerId) return null
+    if (parsed.origin !== undefined && !['calls', 'map'].includes(parsed.origin)) return null
     if (typeof parsed.clientEventId !== 'string' || typeof parsed.prospectId !== 'string'
       || typeof parsed.expectedPhone !== 'string' || typeof parsed.startedAt !== 'string') return null
     if (!parsed.clientEventId || !parsed.prospectId || !buildTelHref(parsed.expectedPhone)) return null
@@ -231,7 +295,8 @@ export function parseStoredCallSession(value: string | null, brokerId: string): 
       const frozenChoice = parsed.candidate.phoneReadiness?.usableChoices.find((choice) => (choice.contactId === contact.id || (!choice.contactId && contact.isPrimary)) && choice.phoneKey === parsed.phoneKey && choice.number === parsed.expectedPhone)
       if (contact.id !== parsed.contactId || contact.prospectId !== parsed.prospectId || !Array.isArray(contact.additionalPhones)
         || contact.additionalPhones.some((phone) => typeof phone.label !== 'string' || typeof phone.number !== 'string')
-        || (!frozenChoice && !contactPhoneOptions(contact).some((phone) => phone.number === parsed.expectedPhone))) return null
+        || (!frozenChoice && !contactPhoneOptions(contact).some((phone) => phone.number === parsed.expectedPhone
+          || Boolean(callingPhoneKey(parsed.expectedPhone!) && callingPhoneKey(phone.number) === callingPhoneKey(parsed.expectedPhone!))))) return null
     }
     if (parsed.afterConfirmation !== undefined && !['next_company', 'another_contact'].includes(parsed.afterConfirmation)) return null
     if (parsed.nextContactId !== undefined && parsed.nextContactId !== null && typeof parsed.nextContactId !== 'string') return null

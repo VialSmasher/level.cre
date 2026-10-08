@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { blockConfirmedPhone, buildTelHref, callSessionStorageKey, contactPhoneOptions, nextCallingChoice, preferredCallingChoice, nextCallFollowUpIso, nextUncalledContact, parseStoredCallSession, type CallingContact, type CallingPhoneReadiness } from './mobileCalling'
+import { blockConfirmedPhone, buildTelHref, createMobileCallSession, freezeCallConfirmation, restorePendingCallSession, callSessionStorageKey, contactPhoneOptions, nextCallingChoice, preferredCallingChoice, nextCallFollowUpIso, nextUncalledContact, parseStoredCallSession, type CallQueueCandidate, type CallingContact, type CallingPhoneReadiness } from './mobileCalling'
 
 test('tap-to-call keeps only dialable phone characters', () => {
   assert.equal(buildTelHref('+1 (780) 555-0100'), 'tel:+17805550100')
@@ -126,4 +126,101 @@ test('stored call sessions restore only with complete attribution evidence', () 
   assert.equal(parseStoredCallSession(JSON.stringify({ prospectId: 'prospect-1' }), 'broker-1'), null)
   assert.equal(parseStoredCallSession('not-json', 'broker-1'), null)
   assert.notEqual(callSessionStorageKey('broker-1'), callSessionStorageKey('broker-2'))
+})
+
+function sessionCandidate(): CallQueueCandidate {
+  return { id: 'call:prospect-1', priorityScore: 1, priority: 'medium', reasons: ['Owned record'],
+    contact: { name: primary.name, company: primary.company, email: primary.email, phone: primary.phone! },
+    prospect: { id: 'prospect-1', name: 'Test company', status: 'prospect', businessName: 'Test company',
+      address: null, followUpDueDate: null, lastContactDate: null }, listingTitles: [], recentActivity: [],
+    phoneReadiness: structuredClone(readiness) }
+}
+
+test('shared start freezes the canonical contact, phone and account independently of later edits', () => {
+  const candidate = sessionCandidate()
+  const contact = structuredClone(primary)
+  const choice = candidate.phoneReadiness!.usableChoices[1]
+  const session = createMobileCallSession('broker-1', candidate, contact, choice, {
+    clientEventId: 'call-frozen-map', startedAt: '2026-10-08T18:00:00Z',
+  })!
+  assert.equal(session.expectedPhone, '780-555-0101')
+  assert.equal(session.phoneKey, choice.phoneKey)
+  candidate.prospect.name = 'Changed account'
+  candidate.phoneReadiness!.usableChoices[1].number = '780-555-0199'
+  contact.name = 'Different person'
+  contact.additionalPhones[0].number = '780-555-0198'
+  assert.equal(session.candidate.prospect.name, 'Test company')
+  assert.equal(session.contactSnapshot?.name, 'Morgan')
+  assert.equal(session.contactSnapshot?.additionalPhones[0].number, '780-555-0101')
+  assert.equal(session.candidate.phoneReadiness?.usableChoices[1].number, '780-555-0101')
+  assert.equal(parseStoredCallSession(JSON.stringify(session), 'broker-1')?.clientEventId, 'call-frozen-map')
+  assert.equal(parseStoredCallSession(JSON.stringify(session), 'broker-2'), null)
+})
+
+test('shared start rejects absent or blocked readiness and mismatched contact or phone identity', () => {
+  const candidate = sessionCandidate()
+  const choice = candidate.phoneReadiness!.usableChoices[0]
+  assert.ok(createMobileCallSession('broker-1', candidate, primary, choice))
+  assert.equal(createMobileCallSession('', candidate, primary, choice), null)
+  assert.equal(createMobileCallSession('broker-1', { ...candidate, phoneReadiness: undefined }, primary, choice), null)
+  const blocked = { ...candidate, phoneReadiness: blockConfirmedPhone(candidate.phoneReadiness!, { contactId: primary.id, expectedPhone: primary.phone!, phoneKey: choice.phoneKey }, 'wrong_number') }
+  assert.equal(createMobileCallSession('broker-1', blocked, primary, choice), null)
+  assert.equal(createMobileCallSession('broker-1', candidate, { ...primary, prospectId: 'foreign-record' }, choice), null)
+  assert.equal(createMobileCallSession('broker-1', candidate, { ...primary, archivedAt: '2026-10-08' }, choice), null)
+  assert.equal(createMobileCallSession('broker-1', candidate, primary, { ...choice, contactId: 'another-contact' }), null)
+  assert.equal(createMobileCallSession('broker-1', candidate, primary, { ...choice, number: '780-555-0199' }), null)
+  assert.equal(createMobileCallSession('broker-1', candidate, primary, { ...choice, dialHref: 'tel:7805550199' }), null)
+})
+
+test('cross-view confirmation retry keeps first outcome, note, follow-up and alternate intent', () => {
+  const candidate = sessionCandidate()
+  const session = createMobileCallSession('broker-1', candidate, primary, candidate.phoneReadiness!.usableChoices[0])!
+  const frozen = freezeCallConfirmation({ ...session, origin: 'map' }, { outcome: 'wrong_number', notes: 'Verified wrong recipient', nextFollowUp: null }, {
+    afterConfirmation: 'another_contact', nextContactId: 'contact-2', nextPhoneKey: '17805550101',
+  })
+  const retryFromAnotherView = freezeCallConfirmation(frozen, { outcome: 'contacted', notes: 'Different draft', nextFollowUp: '2026-10-09T12:00:00Z' })
+  assert.equal(retryFromAnotherView, frozen)
+  assert.equal(frozen.confirmation?.outcome, 'wrong_number')
+  assert.equal(frozen.confirmation?.notes, 'Verified wrong recipient')
+  assert.equal(frozen.confirmation?.nextFollowUp, null)
+  assert.equal(frozen.nextContactId, 'contact-2')
+  assert.equal(frozen.afterConfirmation, 'another_contact')
+  assert.equal(frozen.origin, 'calls')
+  assert.equal(frozen.clientEventId, session.clientEventId)
+})
+
+test('map confirmation preserves an omitted follow-up and never invents a second call', () => {
+  const candidate = sessionCandidate()
+  const session = createMobileCallSession('broker-1', candidate, primary, candidate.phoneReadiness!.usableChoices[0])!
+  const frozen = freezeCallConfirmation(session, { outcome: 'attempted', notes: '' })
+  assert.equal(Object.hasOwn(frozen.confirmation!, 'nextFollowUp'), false)
+  assert.equal(frozen.origin, 'map')
+  assert.equal(frozen.nextContactId, null)
+  assert.equal(frozen.nextPhoneKey, null)
+  assert.equal(frozen.clientEventId, session.clientEventId)
+  assert.equal(frozen.expectedPhone, session.expectedPhone)
+})
+
+test('server-recovered normalized extension retains the saved outcome and note on another reload', () => {
+  const candidate = sessionCandidate()
+  // The real server snapshot contains scalar account fields, not readiness. A
+  // company line can be callable even while the legacy primary phone is null.
+  delete candidate.phoneReadiness
+  candidate.contact.phone = null as unknown as string
+  const contact = { ...structuredClone(primary), phone: '780-555-0100;ext=204', additionalPhones: [] }
+  const recovered = restorePendingCallSession('broker-1', {
+    clientEventId: 'call-server-extension', eventId: 'saved-server-event', prospectId: 'prospect-1',
+    callStartedAt: '2026-10-08T18:00:00Z', phoneSnapshot: '780-555-0100 ext 204',
+    candidate, contactId: contact.id, contactSnapshot: contact,
+  })
+  assert.equal(recovered.phoneKey, '7805550100:204')
+  assert.equal(recovered.candidate.contact.phone, '')
+  const frozen = freezeCallConfirmation(recovered, { outcome: 'no_answer', notes: 'Keep the switchboard extension.', nextFollowUp: null })
+  const reloaded = parseStoredCallSession(JSON.stringify(frozen), 'broker-1')
+  assert.ok(reloaded)
+  assert.deepEqual(reloaded.confirmation, frozen.confirmation)
+  assert.equal(reloaded.contactId, contact.id)
+  assert.equal(reloaded.expectedPhone, '780-555-0100 ext 204')
+  assert.equal(parseStoredCallSession(JSON.stringify({ ...frozen, expectedPhone: '780-555-0100 ext 205' }), 'broker-1'), null)
+  assert.equal(parseStoredCallSession(JSON.stringify(frozen), 'broker-2'), null)
 })

@@ -8,6 +8,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { queryClient } from "./lib/queryClient";
 import { TelemetryProvider } from '@/contexts/TelemetryContext';
 import { AuthProvider } from "@/contexts/AuthContext";
+import { CallingSessionProvider } from '@/features/calling/CallingSessionProvider';
+import { PendingCallBar } from '@/features/calling/PendingCallBar';
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/AppLayout";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
@@ -458,12 +460,15 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <CallingSessionProvider>
         <TelemetryProvider>
         <TooltipProvider>
           <Toaster />
           <Router />
+          <PendingCallBar />
         </TooltipProvider>
         </TelemetryProvider>
+        </CallingSessionProvider>
       </AuthProvider>
     </QueryClientProvider>
   );
