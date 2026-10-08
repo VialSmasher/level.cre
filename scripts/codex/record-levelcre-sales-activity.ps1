@@ -93,7 +93,7 @@ function Test-LevelCreLegacyMapPhone {
     if ($null -eq $Evidence -or $Evidence.kind -ne 'contact_direct') { return $false }
     $observedAtValue = [DateTimeOffset]::MinValue
     if (-not [DateTimeOffset]::TryParse([string]$Evidence.observedAt, [ref]$observedAtValue) -or $observedAtValue -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) { return $false }
-    $mainNumber = $PhoneValue.Trim() -replace '(?i)\s*(?:;ext=|ext(?:ension)?\.?|x|#)\s*\d{1,10}\s*$', ''
+    $mainNumber = $PhoneValue.Trim() -replace '(?i)\s*(?:;ext=|ext(?:ension)?\.?|x|#)\s*\d{1,8}\s*$', ''
     if ($mainNumber -notmatch '^\+?[\d\s().-]+$') { return $false }
     $digitCount = ($mainNumber -replace '\D', '').Length
     return $digitCount -ge 10 -and $digitCount -le 15
