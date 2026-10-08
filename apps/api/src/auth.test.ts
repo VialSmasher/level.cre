@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { requireAuth, requireBrokerAuth, requireMarketRecordProposalAuth, requireSalesActivityAuth } from './auth'
+import { SignJWT } from 'jose'
+import { getUserId, legacyAgentRouteAllowed, phoneEnrichmentRouteAllowed, requireAuth, requireBrokerAuth, requireMarketRecordProposalAuth, requireSalesActivityAuth } from './auth'
 
 function requestWithSalesKey(token: string) {
   return {
@@ -175,4 +176,118 @@ test('scoped market-record credentials cannot cross the broker approval gate', a
     if (previousUserId === undefined) delete process.env.MARKET_RECORD_AGENT_USER_ID
     else process.env.MARKET_RECORD_AGENT_USER_ID = previousUserId
   }
+})
+
+const phoneEnrichmentEndpoints = [
+  { method: 'GET', path: '/api/agent/phone-enrichment/context' },
+  { method: 'POST', path: '/api/agent/phone-enrichment/batch' },
+] as const
+
+async function withPhoneEnrichmentAuthEnvironment(action: () => Promise<void>) {
+  const fixture = {
+    SALES_ACTIVITY_AGENT_API_KEY: 'phone-enrichment-sales-key',
+    SALES_ACTIVITY_AGENT_USER_ID: 'sales-credential-owner',
+    SALES_ACTIVITY_AGENT_EMAIL: 'sales-owner@example.test',
+    INTEL_AGENT_API_KEY: 'unrelated-intel-key',
+    INTEL_AGENT_USER_ID: 'intel-credential-owner',
+    SUPABASE_JWT_SECRET: 'phone-enrichment-jwt-test-secret-with-sufficient-length',
+    SUPABASE_URL: 'https://phone-enrichment-test.supabase.co',
+    VITE_SUPABASE_URL: 'https://phone-enrichment-test.supabase.co',
+  }
+  const previous = new Map(Object.keys(fixture).map(key => [key, process.env[key]]))
+  Object.assign(process.env, fixture)
+  try { await action() } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}
+
+test('phone enrichment exceptions require verified sales scope and exact endpoint methods', () => {
+  for (const endpoint of phoneEnrichmentEndpoints) {
+    assert.equal(phoneEnrichmentRouteAllowed(endpoint.method, endpoint.path), true)
+    assert.equal(legacyAgentRouteAllowed(endpoint.method, endpoint.path), false)
+    assert.equal(legacyAgentRouteAllowed(endpoint.method, endpoint.path, true), true)
+  }
+  for (const endpoint of [
+    { method: 'POST', path: '/api/agent/phone-enrichment/context' },
+    { method: 'GET', path: '/api/agent/phone-enrichment/batch' },
+    { method: 'PATCH', path: '/api/agent/phone-enrichment/batch' },
+    { method: 'POST', path: '/api/agent/phone-enrichment/batch/foreign-record' },
+    { method: 'GET', path: '/api/agent/phone-enrichment/context/' },
+    { method: 'GET', path: '/api/agent/phone-enrichment/context-other' },
+  ]) {
+    assert.equal(phoneEnrichmentRouteAllowed(endpoint.method, endpoint.path), false)
+    assert.equal(legacyAgentRouteAllowed(endpoint.method, endpoint.path, true), false)
+  }
+  assert.equal(legacyAgentRouteAllowed('GET', '/api/prospects'), true)
+  assert.equal(legacyAgentRouteAllowed('PATCH', '/api/prospects/some-record'), false)
+})
+
+test('phone enrichment binds header and bearer sales credentials to the configured owner', async () => {
+  await withPhoneEnrichmentAuthEnvironment(async () => {
+    for (const [index, endpoint] of phoneEnrichmentEndpoints.entries()) {
+      const request = {
+        ...requestWithSalesKey('phone-enrichment-sales-key'), ...endpoint,
+        body: { userId: 'foreign-body-owner', actor: { userId: 'foreign-body-owner' } },
+        query: { userId: 'foreign-query-owner' },
+        user: { id: 'untrusted-preexisting-owner' },
+      } as any
+      if (index === 1) request.headers = { authorization: 'Bearer phone-enrichment-sales-key' }
+      const response = responseRecorder()
+      let nextCalled = false
+      await requireSalesActivityAuth(request, response, () => { nextCalled = true })
+      assert.equal(nextCalled, true)
+      assert.equal(getUserId(request), 'sales-credential-owner')
+      assert.equal(request.user.email, 'sales-owner@example.test')
+      assert.equal(request.user.role, 'sales_activity_agent')
+    }
+  })
+})
+
+test('phone enrichment rejects Intel-only, invalid sales and unsupported scoped methods before a handler', async () => {
+  await withPhoneEnrichmentAuthEnvironment(async () => {
+    for (const endpoint of phoneEnrichmentEndpoints) {
+      for (const headers of [
+        { 'x-levelcre-agent-key': 'unrelated-intel-key' },
+        { authorization: 'Bearer unrelated-intel-key' },
+        { 'x-levelcre-sales-key': 'wrong-sales-key' },
+        {},
+      ]) {
+        const request = { ...endpoint, headers, app: { get: () => 'production' }, body: { userId: 'sales-credential-owner' } } as any
+        const response = responseRecorder()
+        let handlerCalled = false
+        await requireSalesActivityAuth(request, response, () => { handlerCalled = true })
+        assert.equal(handlerCalled, false)
+        assert.ok(response.statusCode === 401 || response.statusCode === 403)
+        assert.equal(request.user, undefined)
+      }
+    }
+    const request = { ...requestWithSalesKey('phone-enrichment-sales-key'), method: 'POST', path: '/api/agent/phone-enrichment/context' }
+    const response = responseRecorder()
+    let handlerCalled = false
+    await requireSalesActivityAuth(request, response, () => { handlerCalled = true })
+    assert.equal(handlerCalled, false)
+    assert.equal(response.statusCode, 403)
+  })
+})
+
+test('phone enrichment accepts a verified broker JWT and uses its subject instead of body owner', async () => {
+  await withPhoneEnrichmentAuthEnvironment(async () => {
+    const token = await new SignJWT({ email: 'signed-broker@example.test' })
+      .setProtectedHeader({ alg: 'HS256' }).setSubject('signed-broker-owner')
+      .setIssuer('https://phone-enrichment-test.supabase.co/auth/v1')
+      .setIssuedAt().setExpirationTime('5m')
+      .sign(new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET!))
+    for (const endpoint of phoneEnrichmentEndpoints) {
+      const request = { ...endpoint, headers: { authorization: 'Bearer ' + token }, app: { get: () => 'production' }, body: { userId: 'foreign-body-owner' } } as any
+      const response = responseRecorder()
+      let handlerCalled = false
+      await requireSalesActivityAuth(request, response, () => { handlerCalled = true })
+      assert.equal(handlerCalled, true)
+      assert.equal(getUserId(request), 'signed-broker-owner')
+      assert.equal(request.user.email, 'signed-broker@example.test')
+    }
+  })
 })

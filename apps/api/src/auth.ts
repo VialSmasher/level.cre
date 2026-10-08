@@ -1,4 +1,13 @@
-export function legacyAgentRouteAllowed(method: string, path: string): boolean {
+const PHONE_ENRICHMENT_PREFIX = '/api/agent/phone-enrichment';
+
+export function phoneEnrichmentRouteAllowed(method: string, path: string): boolean {
+  return (method === 'GET' && path === PHONE_ENRICHMENT_PREFIX + '/context')
+    || (method === 'POST' && path === PHONE_ENRICHMENT_PREFIX + '/batch');
+}
+
+export function legacyAgentRouteAllowed(method: string, path: string, verifiedSalesCredential = false): boolean {
+  // Only the sales middleware enables this exception after validating its credential.
+  if (path.startsWith(PHONE_ENRICHMENT_PREFIX)) return verifiedSalesCredential && phoneEnrichmentRouteAllowed(method, path);
   if (path.startsWith('/api/intel/')) return true
   if (method === 'GET') return ['/api/prospects', '/api/automation/', '/api/agent/sales-activity/imports', '/api/activity-events'].some(route => path === route || (route.endsWith('/') && path.startsWith(route)))
   return method === 'POST' && ['/api/agent/sales-activity/batch', '/api/agent/sales-prospect-maps/batch', '/api/agent/activity-events/batch', '/api/agent/market-record-proposals', '/api/agent/opportunity-proposals', '/api/agent/entity-resolution', '/api/agent/runs'].includes(path)
@@ -201,6 +210,9 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 export async function requireSalesActivityAuth(req: Request, res: Response, next: NextFunction) {
   const salesAgentUser = getConfiguredSalesActivityAgent(req)
   if (salesAgentUser) {
+    if (req.path?.startsWith(PHONE_ENRICHMENT_PREFIX) && !legacyAgentRouteAllowed(req.method, req.path, true)) {
+      return res.status(403).json({ message: 'Use the scoped phone enrichment endpoint.' })
+    }
     ;(req as any).user = {
       id: salesAgentUser.id,
       email: salesAgentUser.email,

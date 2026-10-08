@@ -127,3 +127,6 @@ artifacts/ux-benchmark/
 # Private calling rehearsal data and generated browser evidence
 work/calling-simulation/
 work/calling-playwright/
+
+# Private broker-owned phone research, snapshots and backfill receipts
+work/phone-enrichment/

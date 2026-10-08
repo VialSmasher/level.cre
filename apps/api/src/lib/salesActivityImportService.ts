@@ -10,6 +10,7 @@ import {
   type NormalizedSalesActivity,
 } from './salesActivityImport';
 import { ProspectReferenceError, requireActiveOwnedProspect } from './prospectReferenceService';
+import { applyProspectPhoneEnrichment, PhoneEnrichmentError, type PhoneEnrichmentResult } from './phoneEnrichmentService';
 
 type Queryable = Pick<Pool | PoolClient, 'query'>;
 class DeliveryConflict extends Error {
@@ -112,6 +113,7 @@ export type SalesActivityImportResult = {
   error?: string;
   code?: string;
   canonicalProspectId?: string;
+  phoneEnrichment?: PhoneEnrichmentResult;
 };
 
 export type SalesActivityImportSummary = {
@@ -252,7 +254,7 @@ async function upsertSalesActivityImport(
         END,
         confidence = GREATEST(public.sales_activity_imports.confidence, EXCLUDED.confidence),
         interaction_id = COALESCE(public.sales_activity_imports.interaction_id, EXCLUDED.interaction_id),
-        raw_payload = EXCLUDED.raw_payload,
+        raw_payload = public.sales_activity_imports.raw_payload || EXCLUDED.raw_payload,
         updated_at = now()
       RETURNING id, interaction_id, match_status, prospect_id
     `,
@@ -424,6 +426,7 @@ export async function importSalesActivityBatch(params: {
       let match: { matchStatus: string; matchReason: string; confidence: number };
       let importRow: { id: string; interaction_id: string | null; match_status: string; prospect_id: string | null };
       let existing: { id: string; interaction_id: string | null } | null;
+      let phoneEnrichment: PhoneEnrichmentResult | undefined;
       try {
         await client.query('BEGIN');
         resolved = await resolveSalesActivityProspect(client, params.userId, activity, { lock: true });
@@ -475,6 +478,20 @@ export async function importSalesActivityBatch(params: {
         );
         importRow = upserted.row;
         existing = upserted.existing;
+        if (activity.contactPhone || activity.phoneCaptureIssue) {
+          if (match.matchStatus === 'matched' && resolved.prospectId && importRow.prospect_id === resolved.prospectId && !capturedProspectConflict) {
+            try {
+              phoneEnrichment = await applyProspectPhoneEnrichment({db:client,userId:params.userId,input:{
+                prospectId:resolved.prospectId,contactId:activity.contactId,contactName:activity.contactName,email:activity.email,
+                company:activity.company,contactPhone:activity.contactPhone,phoneEvidence:activity.phoneEvidence,
+              }});
+            } catch (error) {
+              if (!(error instanceof PhoneEnrichmentError)) throw error;
+              phoneEnrichment={prospectId:resolved.prospectId,status:'needs_review',reason:error.code,evidence:activity.phoneEvidence};
+            }
+          } else phoneEnrichment={prospectId:resolved.prospectId || '',status:'needs_review',reason:'unmatched_or_conflicting_prospect',evidence:activity.phoneEvidence};
+          await client.query(`UPDATE public.sales_activity_imports SET raw_payload=raw_payload || $3::jsonb WHERE id=$1 AND user_id=$2`,[importRow.id,params.userId,JSON.stringify({phoneEnrichment})]);
+        }
         await client.query('COMMIT');
       } catch (error) {
         await client.query('ROLLBACK');
@@ -644,6 +661,7 @@ export async function importSalesActivityBatch(params: {
         matchReason: interactionId ? (resolved.matchReason || match.matchReason) : match.matchReason,
         interactionId,
         duplicate: Boolean(existing || duplicateInteraction),
+        ...(phoneEnrichment ? {phoneEnrichment} : {}),
       });
     } catch (error: any) {
       summary.errors += 1;

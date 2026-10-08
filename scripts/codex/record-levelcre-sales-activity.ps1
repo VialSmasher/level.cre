@@ -9,6 +9,16 @@ param(
     [string] $Company,
     [string] $Email,
     [string] $ContactPhone,
+    [ValidateSet("contact_direct", "company_main")]
+    [string] $PhoneKind,
+    [ValidateSet("company_website", "email_signature", "broker_confirmed", "zoominfo", "official_directory")]
+    [string] $PhoneSource,
+    [ValidateLength(0, 2000)]
+    [string] $PhoneEvidenceUrl,
+    [ValidateLength(0, 500)]
+    [string] $PhoneEvidenceId,
+    [string] $PhoneObservedAt,
+    [switch] $PhoneVerified,
     [string] $Subject,
     [string] $Notes,
     [string] $ProspectId,
@@ -40,6 +50,54 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+function Get-LevelCrePhoneEvidence {
+    if (-not $PhoneVerified.IsPresent) { return $null }
+    if ([string]::IsNullOrWhiteSpace($ContactPhone) -or [string]::IsNullOrWhiteSpace($PhoneKind) -or [string]::IsNullOrWhiteSpace($PhoneSource) -or [string]::IsNullOrWhiteSpace($PhoneObservedAt)) {
+        throw "Verified phone capture requires ContactPhone, PhoneKind, PhoneSource, and the original PhoneObservedAt."
+    }
+    $observedAtValue = [DateTimeOffset]::MinValue
+    if ($PhoneObservedAt -notmatch '^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$' -or -not [DateTimeOffset]::TryParse($PhoneObservedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$observedAtValue)) {
+        throw "PhoneObservedAt must be the original ISO-8601 timestamp with a timezone offset or Z."
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PhoneEvidenceUrl)) {
+        $evidenceUri = $null
+        if (-not [Uri]::TryCreate($PhoneEvidenceUrl, [UriKind]::Absolute, [ref]$evidenceUri) -or $evidenceUri.Scheme -notin @('http', 'https') -or -not [string]::IsNullOrEmpty($evidenceUri.UserInfo)) {
+            throw "PhoneEvidenceUrl must be an HTTP(S) evidence page without embedded credentials."
+        }
+    }
+    if ($PhoneSource -in @('company_website', 'official_directory') -and [string]::IsNullOrWhiteSpace($PhoneEvidenceUrl)) {
+        throw "This phone source requires its public PhoneEvidenceUrl."
+    }
+    if ($PhoneSource -eq 'zoominfo' -and [string]::IsNullOrWhiteSpace($PhoneEvidenceUrl) -and [string]::IsNullOrWhiteSpace($PhoneEvidenceId)) {
+        throw "ZoomInfo phone evidence requires its source PhoneEvidenceUrl or stable PhoneEvidenceId."
+    }
+    if ($PhoneSource -eq 'email_signature' -and [string]::IsNullOrWhiteSpace($PhoneEvidenceId)) {
+        throw "Email signature phone evidence requires the stable source message/provider PhoneEvidenceId."
+    }
+    $evidence = [ordered]@{
+        kind = $PhoneKind
+        source = $PhoneSource
+        observedAt = $PhoneObservedAt
+        verified = $true
+    }
+    if (-not [string]::IsNullOrWhiteSpace($PhoneEvidenceUrl)) { $evidence['url'] = $PhoneEvidenceUrl }
+    if (-not [string]::IsNullOrWhiteSpace($PhoneEvidenceId)) { $evidence['providerId'] = $PhoneEvidenceId }
+    return $evidence
+}
+
+function Test-LevelCreLegacyMapPhone {
+    param([string] $PhoneValue, $Evidence)
+    # The separate legacy map intake has no phone kind. Never label a company
+    # main line, an unsupported number, or future evidence as a person's direct.
+    if ($null -eq $Evidence -or $Evidence.kind -ne 'contact_direct') { return $false }
+    $observedAtValue = [DateTimeOffset]::MinValue
+    if (-not [DateTimeOffset]::TryParse([string]$Evidence.observedAt, [ref]$observedAtValue) -or $observedAtValue -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) { return $false }
+    $mainNumber = $PhoneValue.Trim() -replace '(?i)\s*(?:;ext=|ext(?:ension)?\.?|x|#)\s*\d{1,10}\s*$', ''
+    if ($mainNumber -notmatch '^\+?[\d\s().-]+$') { return $false }
+    $digitCount = ($mainNumber -replace '\D', '').Length
+    return $digitCount -ge 10 -and $digitCount -le 15
+}
 
 function Get-StableActivityId {
     param([string] $Seed)
@@ -294,6 +352,7 @@ $activity = $null
 $mapCandidate = $null
 $mapQueueWarning = $null
 if (-not $FlushOnly.IsPresent) {
+    $phoneEvidence = Get-LevelCrePhoneEvidence
     if ([string]::IsNullOrWhiteSpace($ExternalActivityId)) {
         $ExternalActivityId = Get-StableActivityId -Seed (@($Status, $ActivityType, $Email, $Subject, $ActivityAt) -join "|")
     }
@@ -320,6 +379,7 @@ if (-not $FlushOnly.IsPresent) {
         addressConfidence = $AddressConfidence
         addressVerified = $AddressVerified.IsPresent
     }
+    if ($null -ne $phoneEvidence) { $activity["phoneEvidence"] = $phoneEvidence }
 
     if ($AddressVerified.IsPresent -and $Status -eq "sent") {
         $mapLatitude = ConvertTo-Coordinate -Value $Latitude -Minimum -90 -Maximum 90
@@ -341,7 +401,6 @@ if (-not $FlushOnly.IsPresent) {
                 company = $Company
                 contactName = $Contact
                 contactEmail = $Email
-                contactPhone = $ContactPhone
                 websiteUrl = $WebsiteUrl
                 address = $Address
                 latitude = $mapLatitude
@@ -354,6 +413,7 @@ if (-not $FlushOnly.IsPresent) {
                 verified = $true
                 notes = "Verified during Codex sales follow-up research."
             }
+            if (Test-LevelCreLegacyMapPhone -PhoneValue $ContactPhone -Evidence $phoneEvidence) { $mapCandidate["contactPhone"] = $ContactPhone }
             Add-ToMapOutbox -Candidate $mapCandidate
         }
     }

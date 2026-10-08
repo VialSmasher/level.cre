@@ -1,4 +1,5 @@
 import { ProspectContactError, ProspectContactCreateSchema, ProspectContactUpdateSchema, getCallingWorkspace, createProspectContact, updateProspectContact } from './lib/prospectContactService';
+import { PhoneEnrichmentBatchSchema, PhoneEnrichmentError, getPhoneEnrichmentContext, enrichProspectPhoneBatch } from './lib/phoneEnrichmentService';
 import { getTelemetryInsights } from './lib/telemetryInsights';
 import { inboundWebhookAuthorized } from './lib/inboundWebhookAuth';
 import { ingestionRateLimit, ingestionTrace, RunReceiptSchema, recordRunReceipt, listRunReceipts } from './lib/automationTelemetry';
@@ -4885,6 +4886,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(await getTelemetryInsights(pool, getUserId(req)));
     } catch (error) { next(error); }
   });
+  app.get('/api/agent/phone-enrichment/context', requireSalesActivityAuth, async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    try {
+      if (isDemo(req)) return res.status(403).json({ message: 'Phone enrichment is unavailable in demo mode.' });
+      const parsed = z.object({
+        limit: z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().min(1).max(1000)).optional(),
+      }).strict().safeParse(req.query);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid phone enrichment context query', error: parsed.error.errors });
+      const userId = getUserId(req);
+      const context = await getPhoneEnrichmentContext({ pool, userId, limit: parsed.data.limit });
+      res.json({
+        actor: { userId, email: (req as any).user?.email || null, role: (req as any).user?.role || 'broker' },
+        ...context,
+      });
+    } catch (error) {
+      if (error instanceof PhoneEnrichmentError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error exporting private phone enrichment context:', error);
+      res.status(500).json({ message: 'Failed to load phone enrichment context' });
+    }
+  });
+
+  app.post('/api/agent/phone-enrichment/batch', requireSalesActivityAuth, ingestionLimit, async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    try {
+      if (isDemo(req)) return res.status(403).json({ message: 'Phone enrichment is unavailable in demo mode.' });
+      const parsed = PhoneEnrichmentBatchSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid phone enrichment batch', error: parsed.error.errors });
+      const result = await enrichProspectPhoneBatch({ pool, userId: getUserId(req), input: parsed.data });
+      res.json({ ...result, requestId: res.locals.requestId });
+    } catch (error) {
+      if (error instanceof PhoneEnrichmentError) return res.status(error.status).json({ message: error.message, code: error.code });
+      console.error('Error enriching owned prospect phones:', error);
+      res.status(500).json({ message: 'Failed to enrich prospect phones' });
+    }
+  });
+
   app.get('/api/agent/mapping-coverage', requireSalesActivityAuth, ingestionLimit, async (req, res, next) => {
     try {
       if (isDemo(req)) return res.json({ groups: [] });
