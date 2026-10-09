@@ -8,6 +8,14 @@ param(
     [string] $Contact,
     [string] $Company,
     [string] $Email,
+    [ValidateSet("matched_sent_items", "matched_inbox")]
+    [string] $EmailVerification,
+    [ValidateLength(0, 500)]
+    [string] $EmailEvidenceId,
+    [string] $EmailObservedAt,
+    [string] $ContactId,
+    [ValidateLength(0, 2048)]
+    [string] $ExpectedEmailContactJson,
     [string] $ContactPhone,
     [ValidateSet("contact_direct", "company_main")]
     [string] $PhoneKind,
@@ -52,6 +60,78 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$script:emailEvidenceWarning = $null
+$script:emailTargetInvalid = $false
+
+function Get-LevelCreEmailEvidence {
+    $script:emailEvidenceWarning = $null
+    $script:emailTargetInvalid = $false
+    if ([string]::IsNullOrWhiteSpace($EmailVerification) -and [string]::IsNullOrWhiteSpace($EmailEvidenceId) -and [string]::IsNullOrWhiteSpace($EmailObservedAt)) { return $null }
+    if ($ActivityType -ne 'email' -or $Status -notin @('sent','received') -or $Source -notin @('outlook_sync','codex_followup')) {
+        $script:emailEvidenceWarning = 'unsupported_email_activity'; return $null
+    }
+    $expectedVerification = if ($Status -eq 'sent') { 'matched_sent_items' } else { 'matched_inbox' }
+    if ($EmailVerification -cne $expectedVerification) { $script:emailEvidenceWarning = 'email_verification_direction_mismatch'; return $null }
+    if ([string]::IsNullOrWhiteSpace($ExternalActivityId) -or [string]::IsNullOrWhiteSpace($EmailEvidenceId) -or $EmailEvidenceId.Trim() -cne $ExternalActivityId.Trim()) {
+        $script:emailEvidenceWarning = 'email_provider_identity_mismatch'; return $null
+    }
+    if ($Email -notmatch '^[^\s@]+@[^\s@]+\.[^\s@]+$') { $script:emailEvidenceWarning = 'email_counterparty_missing'; return $null }
+    $observedValue = [DateTimeOffset]::MinValue; $activityValue = [DateTimeOffset]::MinValue
+    $isoPattern = '^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$'
+    if ($EmailObservedAt -notmatch $isoPattern -or $ActivityAt -notmatch $isoPattern -or
+        -not [DateTimeOffset]::TryParse($EmailObservedAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$observedValue) -or
+        -not [DateTimeOffset]::TryParse($ActivityAt, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$activityValue) -or
+        $observedValue.UtcTicks -ne $activityValue.UtcTicks -or $observedValue -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) {
+        $script:emailEvidenceWarning = 'email_original_timestamp_mismatch'; return $null
+    }
+    return [ordered]@{ source='outlook_desktop'; verification=$EmailVerification; providerMessageId=$ExternalActivityId.Trim(); observedAt=$observedValue.ToUniversalTime().ToString('o') }
+}
+
+function Get-LevelCreExpectedEmailContact {
+    if ([string]::IsNullOrWhiteSpace($ExpectedEmailContactJson)) {
+        if ($ProspectId -or $ContactId) { $script:emailTargetInvalid=$true; $script:emailEvidenceWarning='fresh_email_contact_snapshot_required' }
+        return $null
+    }
+    try {
+        if ([string]::IsNullOrWhiteSpace($ProspectId)) { throw 'owned_target_required' }
+        if ($ContactId) { $contactGuid=[guid]::Empty; if (-not [guid]::TryParse($ContactId,[ref]$contactGuid)) { throw 'invalid_contact_id' } }
+        $snapshot = $ExpectedEmailContactJson | ConvertFrom-Json
+        if ($null -eq $snapshot -or $snapshot -is [array] -or $snapshot -is [string]) { throw 'invalid_snapshot' }
+        $names=@($snapshot.PSObject.Properties.Name)
+        if ($names.Count -ne 4 -or @($names | Where-Object { $_ -cnotin @('name','email','phone','company') }).Count) { throw 'invalid_snapshot_keys' }
+        foreach ($name in @('name','email','phone','company')) {
+            $value=$snapshot.$name
+            if ($null -ne $value -and $value -isnot [string]) { throw 'invalid_snapshot_value' }
+            if ($null -ne $value -and $value.Length -gt $(if ($name -eq 'email') {320} elseif ($name -eq 'phone') {80} else {240})) { throw 'snapshot_value_too_long' }
+        }
+        return [ordered]@{name=$snapshot.name;email=$snapshot.email;phone=$snapshot.phone;company=$snapshot.company}
+    } catch {
+        $script:emailTargetInvalid=$true; $script:emailEvidenceWarning='invalid_email_contact_snapshot'; return $null
+    }
+}
+
+function Get-LevelCreEmailSummary {
+    param([object[]]$ResultRows=@(), [switch]$SummaryRows)
+    $byActivity=[ordered]@{}; $index=0
+    foreach ($row in $ResultRows) {
+        $emailResult = if ($SummaryRows) { $row } else { Get-LevelCreReceiptValue $row 'emailEnrichment' }
+        if ($null -eq $emailResult) { continue }
+        $externalId=[string](Get-LevelCreReceiptValue $row 'externalActivityId' '')
+        $source=[string](Get-LevelCreReceiptValue $row 'source' '')
+        $key=if ($externalId) { "$source|$externalId" } else { "missing-id:$index" }
+        $status=[string](Get-LevelCreReceiptValue $emailResult 'status' '')
+        $reason=[string](Get-LevelCreReceiptValue $emailResult 'reason' '')
+        if ($status -eq 'not_requested') { $status = 'skipped' }
+        if ($status -notin @('applied','unchanged','needs_review','error','skipped')) {
+            $status='unconfirmed'; if (-not $reason) { $reason='unrecognized_email_verdict' }
+        }
+        $byActivity[$key]=[pscustomobject]@{externalActivityId=$externalId;source=$source;prospectId=[string](Get-LevelCreReceiptValue $emailResult 'prospectId' '');contactId=[string](Get-LevelCreReceiptValue $emailResult 'contactId' '');status=$status;reason=$reason}
+        $index++
+    }
+    $rows=@($byActivity.Values)
+    [pscustomobject]@{reported=$rows.Count;applied=@($rows|Where-Object status -eq 'applied').Count;unchanged=@($rows|Where-Object status -eq 'unchanged').Count;needsReview=@($rows|Where-Object status -eq 'needs_review').Count;errors=@($rows|Where-Object status -eq 'error').Count;skipped=@($rows|Where-Object status -eq 'skipped').Count;unconfirmed=@($rows|Where-Object status -eq 'unconfirmed').Count;results=$rows}
+}
+
 
 function Get-LevelCrePhoneEvidence {
     if (-not $PhoneVerified.IsPresent) { return $null }
@@ -290,7 +370,7 @@ function Flush-Outbox {
     $snapshot = @(Get-OutboxSnapshot $Path)
     $cooldown = @(Get-OutboxSnapshot "$Path.retry-after.jsonl")
     if ($cooldown.Count -and [DateTimeOffset]::Parse([string](Get-ItemValue $cooldown[0] 'retryAt')) -gt [DateTimeOffset]::UtcNow) {
-        return [pscustomobject]@{ applied = 0; rejected = 0; needsReview = 0; queued = $snapshot.Count; blocked = $false; warning = 'Waiting for the server retry interval.'; phoneEnrichment = Get-LevelCrePhoneSummary @() }
+        return [pscustomobject]@{ applied = 0; rejected = 0; needsReview = 0; queued = $snapshot.Count; blocked = $false; warning = 'Waiting for the server retry interval.'; phoneEnrichment = Get-LevelCrePhoneSummary @(); emailEnrichment = Get-LevelCreEmailSummary @(); emailEvidenceWarning = $script:emailEvidenceWarning }
     }
     $applied = 0; $rejected = 0; $needsReview = 0; $blocked = $false; $warning = $null
     $offset = 0
@@ -364,7 +444,7 @@ function Flush-Outbox {
             } else { break }
         }
     }
-    [pscustomobject]@{ applied = $applied; rejected = $rejected; needsReview = $needsReview; queued = @(Get-OutboxSnapshot $Path).Count; blocked = $blocked; warning = $warning; phoneEnrichment = Get-LevelCrePhoneSummary $phoneResultRows }
+    [pscustomobject]@{ applied = $applied; rejected = $rejected; needsReview = $needsReview; queued = @(Get-OutboxSnapshot $Path).Count; blocked = $blocked; warning = $warning; phoneEnrichment = Get-LevelCrePhoneSummary $phoneResultRows; emailEnrichment = Get-LevelCreEmailSummary $phoneResultRows; emailEvidenceWarning = $script:emailEvidenceWarning }
 }
 
 
@@ -413,6 +493,10 @@ $mapCandidate = $null
 $mapQueueWarning = $null
 if (-not $FlushOnly.IsPresent) {
     $phoneEvidence = Get-LevelCrePhoneEvidence
+    # Optional identity evidence is validated before fallback IDs are synthesized.
+    $emailEvidence = Get-LevelCreEmailEvidence
+    $expectedEmailContact = if ($null -ne $emailEvidence) { Get-LevelCreExpectedEmailContact } else { $null }
+    if ($script:emailTargetInvalid) { $emailEvidence = $null }
     if ([string]::IsNullOrWhiteSpace($ExternalActivityId)) {
         $ExternalActivityId = Get-StableActivityId -Seed (@($Status, $ActivityType, $Email, $Subject, $ActivityAt) -join "|")
     }
@@ -440,6 +524,13 @@ if (-not $FlushOnly.IsPresent) {
         addressVerified = $AddressVerified.IsPresent
     }
     if ($null -ne $phoneEvidence) { $activity["phoneEvidence"] = $phoneEvidence }
+    if ($null -ne $emailEvidence) {
+        $activity["emailEvidence"] = $emailEvidence
+        if ($null -ne $expectedEmailContact) {
+            $activity["expectedEmailContact"] = $expectedEmailContact
+            if ($ContactId) { $activity["contactId"] = $ContactId }
+        }
+    }
 
     if ($AddressVerified.IsPresent -and $Status -eq "sent") {
         $mapLatitude = ConvertTo-Coordinate -Value $Latitude -Minimum -90 -Maximum 90
@@ -509,6 +600,8 @@ try {
         flushed = $activityDelivery.applied; mapFlushed = $mapDelivery.applied
         activityOutboxRemaining = $activityDelivery.queued; mapOutboxRemaining = $mapDelivery.queued
         phoneEnrichment = Get-LevelCrePhoneSummary -ResultRows @($activityDelivery.phoneEnrichment.results + $mapDelivery.phoneEnrichment.results) -SummaryRows
+        emailEnrichment = Get-LevelCreEmailSummary -ResultRows @($activityDelivery.emailEnrichment.results + $mapDelivery.emailEnrichment.results) -SummaryRows
+        emailEvidenceWarning = $script:emailEvidenceWarning
         needsReview = $receipt.needsReview; errors = $rejected; receiptPending = $receiptPending
         activityMessage = $activityDelivery.warning; mapMessage = $mapDelivery.warning
         rejectedOutbox = "$OutboxPath.rejected.jsonl"; mapRejectedOutbox = "$MapOutboxPath.rejected.jsonl"

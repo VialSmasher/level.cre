@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from 'react'
+import { useRef, useState, type MouseEvent } from 'react'
 import { Pencil, Phone, Plus, UserRound, X } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
@@ -53,7 +53,8 @@ export function CallingContacts({ prospectId, contacts, selectedId, selectedPhon
   )
 }
 
-function ContactEditor({ prospectId, contact, existingIds, onClose, onSaved }: { prospectId: string; contact: CallingContact | null; existingIds: string[]; onClose: () => void; onSaved: (workspace: CallingWorkspace, contactId?: string) => void }) {
+export function ContactEditor({ prospectId, contact, existingIds, focusEmail = false, onClose, onSaved }: { prospectId: string; contact: CallingContact | null; existingIds: string[]; focusEmail?: boolean; onClose: () => void; onSaved: (workspace: CallingWorkspace, contactId?: string) => void }) {
+  const emailInput = useRef<HTMLInputElement>(null)
   const [name, setName] = useState(contact?.name || '')
   const [title, setTitle] = useState(contact?.title || '')
   const [company, setCompany] = useState(contact?.company || '')
@@ -77,12 +78,12 @@ function ContactEditor({ prospectId, contact, existingIds, onClose, onSaved }: {
       onSaved(workspace, selected)
     },
   })
-  return <Dialog open onOpenChange={(open) => { if (!open && !save.isPending) onClose() }}><DialogContent className="max-h-[85dvh] max-w-lg overflow-y-auto rounded-lg">
+  return <Dialog open onOpenChange={(open) => { if (!open && !save.isPending) onClose() }}><DialogContent className="max-h-[85dvh] max-w-lg overflow-y-auto rounded-lg" onOpenAutoFocus={(event) => { if (focusEmail) { event.preventDefault(); emailInput.current?.focus() } }}>
     <DialogHeader><DialogTitle>{contact ? 'Edit contact' : 'Add contact'}</DialogTitle><DialogDescription>Save a private contact on this company record.</DialogDescription></DialogHeader>
     <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); if ((contact?.isPrimary || name.trim()) && !save.isPending) save.mutate() }}>
-      <div><Label htmlFor="contact-name">Name</Label><Input id="contact-name" autoFocus value={name} onChange={(event) => setName(event.target.value)} required={!contact?.isPrimary} maxLength={240} disabled={save.isPending} /></div>
+      <div><Label htmlFor="contact-name">Name</Label><Input id="contact-name" autoFocus={!focusEmail} value={name} onChange={(event) => setName(event.target.value)} required={!contact?.isPrimary} maxLength={240} disabled={save.isPending} /></div>
       <div className="grid grid-cols-2 gap-3"><div><Label htmlFor="contact-title">Title</Label><Input id="contact-title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={240} disabled={save.isPending} /></div><div><Label htmlFor="contact-company">Company</Label><Input id="contact-company" value={company} onChange={(event) => setCompany(event.target.value)} maxLength={240} disabled={save.isPending} /></div></div>
-      <div><Label htmlFor="contact-email">Email</Label><Input id="contact-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} disabled={save.isPending} /></div>
+      <div><Label htmlFor="contact-email">Email</Label><Input ref={emailInput} id="contact-email" type="email" autoFocus={focusEmail} value={email} onChange={(event) => setEmail(event.target.value)} maxLength={320} disabled={save.isPending} /></div>
       <div><Label htmlFor="contact-phone">Phone</Label><Input id="contact-phone" type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} maxLength={80} disabled={save.isPending} /></div>
       {additionalPhones.map((item, index) => <div key={index} className="flex items-end gap-2"><div className="w-24"><Label htmlFor={'phone-label-' + index}>Label</Label><Input id={'phone-label-' + index} value={item.label} maxLength={40} disabled={save.isPending} onChange={(event) => setAdditionalPhones((items) => items.map((value, row) => row === index ? { ...value, label: event.target.value } : value))} /></div><div className="min-w-0 flex-1"><Label htmlFor={'phone-number-' + index}>Number</Label><Input id={'phone-number-' + index} type="tel" value={item.number} minLength={item.number ? 3 : undefined} maxLength={80} disabled={save.isPending} onChange={(event) => setAdditionalPhones((items) => items.map((value, row) => row === index ? { ...value, number: event.target.value } : value))} /></div><Button type="button" variant="ghost" size="icon" aria-label={'Remove additional phone ' + (index + 1)} disabled={save.isPending} onClick={() => setAdditionalPhones((items) => items.filter((_, row) => row !== index))}><X className="h-4 w-4" /></Button></div>)}
       {additionalPhones.length < 5 ? <Button type="button" variant="ghost" className="h-9 px-0 text-xs" disabled={save.isPending} onClick={() => setAdditionalPhones((items) => [...items, { label: 'Mobile', number: '' }])}>Add another phone number</Button> : null}

@@ -8,7 +8,8 @@ This is the Level CRE bridge for Codex-led sales work. It is intentionally conse
 2. Confirmed `sent` and `received` email activity can create a `contact_interactions` row automatically. Received mail is recorded as an inbound outcome: it earns no XP, does not count toward production, and does not create an automatic 14-day follow-up.
 3. Automatic interaction creation requires either:
    - a provided `prospectId` that belongs to the user, or
-   - an exact match against an existing prospect `contact_email`.
+   - an exact match against an existing saved contact email, or
+   - a verified missing-email fill for one exact active owned person and company, as described below.
 4. Do not create fake prospects or map pins from email-only contacts.
 5. Unmatched sent or received activity stays in `needs_review`.
 6. `hold`, `low_priority`, and `skipped` rows stay in the ledger as `ignored`.
@@ -16,6 +17,20 @@ This is the Level CRE bridge for Codex-led sales work. It is intentionally conse
 8. Prefer the RFC `internetMessageId` as `external_activity_id`. Outlook desktop scans should read MAPI `PR_INTERNET_MESSAGE_ID`; use the provider's stable message ID only when the RFC ID is unavailable.
 9. Existing interactions are detected by `source_provider = 'codex'` and the canonical `source_message_id` selected during reconciliation.
 10. A confirmed operating address may travel with the activity as metadata, but map creation is handled by the separate verified sales-prospect map batch.
+
+## Verified missing-email capture
+
+Outlook reconciliation can record activity and fill a blank email on an existing contact in the same import transaction. It never replaces a saved address or creates a prospect/contact from email-only evidence. Matching saved emails return `unchanged`; a different saved address, shared email, uncertain match, pending call, or stale snapshot returns `needs_review`. Genuine activity still follows the usual recording path.
+
+Supply `emailEvidence: {source: "outlook_desktop", verification: "matched_sent_items" | "matched_inbox", providerMessageId, observedAt}` only for an independently verified actual sent or received message. The opaque provider identity must agree with the activity identity or its server-retained reconciled identity. `observedAt` and `activityAt` must be the same original instant. Drafts, queued sends, synthetic IDs, and unsupported evidence cannot fill contacts.
+
+An automatic target requires an exact existing full person name and independently verified company context, with only one active owned match. Explicit owned `prospectId`/`contactId` may identify a previously established target; the recorder requires a fresh `expectedEmailContact: {name,email,phone,company}` snapshot for that route. The server revalidates ownership, identity, saved fields and pending calls before writing. Do not guess company names, strip location suffixes, infer addresses from domains, or copy a candidate's company to force a match.
+
+Contact identity changes retain the old roster version and create the new version; attribution uses the returned contact ID. Historical call snapshots, phone fields, titles, other contacts, XP and queue credit are preserved. Enrichment alone earns no credit and creates no activity. Receipt metadata pins the original observation and applied result so retries cannot redirect enrichment to a different person.
+
+The per-row response includes `emailEnrichment` separately from activity acceptance and phone enrichment. Its status is `applied`, `unchanged`, `needs_review` or `not_requested`, with a reason and verified evidence. Claim an address saved only after owned-record readback. Never send or record another email to repair enrichment.
+
+The repository recorder accepts `-EmailVerification`, `-EmailEvidenceId`, `-EmailObservedAt`, `-ContactId`, and `-ExpectedEmailContactJson`. Invalid optional evidence is reported as a warning while valid activity is retained. New messages prefer RFC Internet Message-ID; augmenting an existing receipt preserves its established ID and original timestamp. The evening automation must use the upgraded repository recorder and these fields, rather than relying on activity acceptance alone.
 
 ## Endpoints
 

@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { normalizePhoneCapture, type PhoneEvidence } from './phoneEnrichmentService';
+import { normalizeEmailCapture, type VerifiedEmailEvidence, type ExpectedEmailContact } from './emailEnrichmentService';
 
 export const SALES_ACTIVITY_STATUSES = [
   'sent',
@@ -29,6 +30,9 @@ export type NormalizedSalesActivity = {
   contactPhone: string | null;
   phoneEvidence: PhoneEvidence | null;
   phoneCaptureIssue: string | null;
+  emailEvidence?: VerifiedEmailEvidence | null;
+  emailCaptureIssue?: string | null;
+  expectedEmailContact?: ExpectedEmailContact;
   company: string | null;
   email: string | null;
   emailDomain: string | null;
@@ -230,6 +234,7 @@ export function normalizeSalesActivityInput(
   );
   const email = normalizeEmail(getAlias(input, ['email', 'Email', 'contactEmail', 'contact_email']));
   const phoneCapture = normalizePhoneCapture(input);
+  const emailCapture = normalizeEmailCapture(input);
   const partial: Omit<NormalizedSalesActivity, 'externalActivityId'> = {
     source,
     runId,
@@ -239,6 +244,7 @@ export function normalizeSalesActivityInput(
     contactName: normalizeString(getAlias(input, ['contactName', 'contact_name', 'contact', 'Contact', 'DisplayName'])),
     contactId: normalizeString(getAlias(input, ['contactId','contact_id'])),
     ...phoneCapture,
+    ...emailCapture,
     company: normalizeString(getAlias(input, ['company', 'Company', 'contactCompany', 'contact_company'])),
     email,
     emailDomain: extractEmailDomain(email),
@@ -285,6 +291,9 @@ export function normalizeSalesActivityInput(
       ...(partial.contactId ? {contactId:partial.contactId} : {}),
       ...(partial.contactPhone ? {contactPhone:partial.contactPhone,phoneEvidence:partial.phoneEvidence} : {}),
       ...(partial.phoneCaptureIssue ? {phoneCaptureIssue:partial.phoneCaptureIssue} : {}),
+      ...(partial.emailEvidence ? {emailEvidence:partial.emailEvidence} : {}),
+      ...(partial.emailCaptureIssue ? {emailCaptureIssue:partial.emailCaptureIssue} : {}),
+      ...(partial.expectedEmailContact ? {expectedEmailContact:partial.expectedEmailContact} : {}),
       company: partial.company,
       email: partial.email,
       subject: partial.subject,
