@@ -9,7 +9,7 @@ import { VoiceDictationButton } from '@/components/VoiceDictationButton'
 import { useAuth } from '@/contexts/AuthContext'
 import { useProfile } from '@/hooks/useProfile'
 import { apiRequest } from '@/lib/queryClient'
-import { CallingContacts, contactName } from '@/features/calling/CallingContacts'
+import { CallingContacts, ContactEditor, contactName } from '@/features/calling/CallingContacts'
 import { useCallingSession } from '@/features/calling/CallingSessionProvider'
 import { CallingActivity } from '@/features/calling/CallingActivity'
 import { NeedsNumberList } from '@/features/calling/NeedsNumberList'
@@ -55,6 +55,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const sessionRef = useRef(session)
   sessionRef.current = session
   const observedResolution = useRef(0)
+  const savedContactSelection = useRef<{ prospectId: string; contactId: string } | null>(null)
   const nameRef = useRef<HTMLHeadingElement>(null)
   const [focusNext, setFocusNext] = useState(false)
   const [requestedProspectId] = useState(() => new URLSearchParams(window.location.search).get('prospectId'))
@@ -75,6 +76,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const [notes, setNotes] = useState(() => session?.confirmation?.notes || '')
   const [nextStep, setNextStep] = useState<'keep' | NextCallStep>('keep')
   const [announcement, setAnnouncement] = useState('')
+  const [emailEditor, setEmailEditor] = useState<{ contact: CallingContact; existingIds: string[] } | null>(null)
   const queueKey = ['/api/calling/queue', brokerId, includeCalledToday] as const
   const queueQuery = useQuery<CallQueueResponse>({
     queryKey: queueKey,
@@ -141,7 +143,13 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
 
   useEffect(() => {
     if (!prospectId || session || !workspaceQuery.data) return
-    const current = contacts.find((contact) => contact.id === selectedContactId)
+    // Cache notifications can arrive after local selection. Hold a just-saved
+    // replacement identity until the returned roster is visible to this render.
+    const intended = savedContactSelection.current
+    const saved = intended?.prospectId === prospectId ? contacts.find((contact) => contact.id === intended.contactId) : null
+    if (intended?.prospectId === prospectId && !saved) return
+    if (saved) savedContactSelection.current = null
+    const current = saved || contacts.find((contact) => contact.id === selectedContactId)
     const primary = contacts.find((contact) => contact.id === workspaceQuery.data?.primaryContactId)
     const preferred = preferredCallingChoice(readiness)
     const defaultContact = readiness?.missingPrimaryContactNumber && readiness.primaryEmailTarget ? primary : contacts.find((contact) => contact.id === preferred?.contactId)
@@ -166,6 +174,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   }
 
   const prepareCompany = (visit: CompanyVisit) => {
+    savedContactSelection.current = null
     // Pin the viewed company across queue refreshes, including a previously logged company.
     setRetainedCandidate(visit.candidate)
     setSelectedProspectId(visit.candidate.prospect.id)
@@ -315,6 +324,23 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
 
   const busy = calling.busy
   const submissionLocked = busy || Boolean(session?.confirmation)
+  const emailEditLocked = Boolean(session) || busy || !calling.recoveryReady || workspaceQuery.isError || !selectedContact
+  const editSelectedEmail = () => {
+    if (emailEditLocked || sessionRef.current || !selectedContact || selectedContact.prospectId !== prospectId) return
+    setEmailEditor({ contact: structuredClone(selectedContact), existingIds: contacts.map((contact) => contact.id) })
+  }
+  const onContactSaved = (workspace: CallingWorkspace, contactId?: string) => {
+    const savedProspectId = workspace.prospect.id
+    const saved = workspace.contacts.find((contact) => contact.id === contactId && !contact.archivedAt)
+    if (saved && savedProspectId === prospectId && !sessionRef.current) savedContactSelection.current = { prospectId: savedProspectId, contactId: saved.id }
+    queryClient.setQueryData(['/api/calling/workspace', brokerId, savedProspectId], workspace)
+    void queryClient.invalidateQueries({ queryKey: ['/api/calling/workspace-activity', brokerId, savedProspectId] })
+    void queryClient.invalidateQueries({ queryKey: ['/api/calling/queue', brokerId] })
+    void queryClient.invalidateQueries({ queryKey: ['/api/calling/search', brokerId] })
+    void queryClient.invalidateQueries({ queryKey: ['/api/prospects'] })
+    void queryClient.invalidateQueries({ queryKey: ['/api/calling/needs-number'] })
+    if (saved && savedProspectId === prospectId) selectContact(saved, workspace)
+  }
   const startCall = (event: MouseEvent<HTMLAnchorElement>, contact = selectedContact, number = phone) => {
     const choice = readiness?.usableChoices.find((option) => option.contactId === contact?.id && option.number === number)
     if (!activeCandidate || !contact || !choice || sessionRef.current || busy) { event.preventDefault(); return }
@@ -420,7 +446,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
             <div className="border-t border-blue-100/70 px-4 py-3 sm:px-6">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                 <div className="min-w-0 flex-1"><p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Calling contact</p><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><p className="break-words text-sm font-medium text-slate-900 sm:text-base">{selectedName}</p>{phoneOptions.length > 1 ? <><label htmlFor="calling-phone" className="sr-only">Phone number for {selectedName}</label><select id="calling-phone" value={selectedPhoneOption?.phoneKey || ''} disabled={Boolean(session)} onChange={(event) => setSelectedPhone(phoneOptions.find((option) => option.phoneKey === event.target.value)?.number || '')} className="min-h-11 max-w-full rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:bg-slate-50">{phoneOptions.map((option) => <option key={option.phoneKey} value={option.phoneKey} disabled={!option.href}>{option.label} · {option.number}{option.blockedReason ? ' · ' + phoneIssueLabel(option.blockedReason) : option.href ? '' : ' · check number'}</option>)}</select></> : phone ? <p className="min-h-8 content-center text-sm tabular-nums text-slate-600 sm:text-base">{phone}{selectedPhoneOption?.blockedReason ? <span className="ml-2 text-amber-700">{phoneIssueLabel(selectedPhoneOption.blockedReason)}</span> : null}</p> : null}</div>
-                  {email ? <a href={email.href} aria-label={'Email ' + selectedName + ' at ' + email.email} title="Opens your default email app" className="mt-1 inline-flex min-h-9 max-w-full items-center gap-1.5 rounded text-xs text-blue-700 underline-offset-2 hover:text-blue-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 sm:text-sm"><Mail aria-hidden="true" className="h-3.5 w-3.5 shrink-0" /><span className="min-w-0 break-all">{email.email}</span></a> : <p className="mt-1 text-xs text-slate-500">{selectedContact?.email ? 'Check this contact’s saved email address' : 'No email saved for this contact'}</p>}
+                  {email ? <a href={email.href} aria-label={'Email ' + selectedName + ' at ' + email.email} title="Opens your default email app" className="mt-1 inline-flex min-h-9 max-w-full items-center gap-1.5 rounded text-xs text-blue-700 underline-offset-2 hover:text-blue-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 sm:text-sm"><Mail aria-hidden="true" className="h-3.5 w-3.5 shrink-0" /><span className="min-w-0 break-all">{email.email}</span></a> : <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1"><p className="text-xs text-slate-500">{selectedContact?.email ? 'Check this contact’s saved email address' : 'No email saved for this contact'}</p>{selectedContact ? <Button variant="ghost" className="h-11 gap-1.5 px-2 text-xs text-blue-700 hover:bg-blue-50 hover:text-blue-800" aria-label={(selectedContact.email ? 'Edit email for ' : 'Add email for ') + selectedName} disabled={emailEditLocked} onClick={editSelectedEmail}><Mail aria-hidden="true" className="h-3.5 w-3.5" />{selectedContact.email ? 'Edit email' : 'Add email'}</Button> : null}{session ? <p className="basis-full text-xs text-slate-500">Finish or undo this call to edit the email.</p> : null}</div>}
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
                 {session ? (
@@ -465,15 +491,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
               ) : null}
             </div>
             {workspaceQuery.isError ? <div role="alert" className="border-t border-slate-100 px-4 py-4"><p className="text-xs text-amber-800">Contacts could not be loaded.</p><Button variant="ghost" size="sm" onClick={() => workspaceQuery.refetch()}>Retry contacts</Button></div> : workspaceQuery.isLoading ? <p className="border-t border-slate-100 px-4 py-4 text-xs text-slate-500">Loading company workspace...</p> : <>
-              <CallingContacts key={activeCandidate.prospect.id} prospectId={activeCandidate.prospect.id} contacts={contacts} selectedId={session?.contactId || selectedContactId} selectedPhone={phone} locked={Boolean(session)} readiness={readiness} onSelect={selectContact} onDial={startCall} onSaved={(workspace, contactId) => {
-                queryClient.setQueryData(workspaceKey, workspace)
-                void queryClient.invalidateQueries({ queryKey: ['/api/calling/workspace-activity', brokerId, activeCandidate.prospect.id] })
-                void queryClient.invalidateQueries({ queryKey: ['/api/calling/queue', brokerId] })
-                void queryClient.invalidateQueries({ queryKey: ['/api/prospects'] })
-                void queryClient.invalidateQueries({ queryKey: ['/api/calling/needs-number'] })
-                const saved = workspace.contacts.find((contact) => contact.id === contactId)
-                if (saved) selectContact(saved, workspace)
-              }} />
+              <CallingContacts key={activeCandidate.prospect.id} prospectId={activeCandidate.prospect.id} contacts={contacts} selectedId={session?.contactId || selectedContactId} selectedPhone={phone} locked={Boolean(session)} readiness={readiness} onSelect={selectContact} onDial={startCall} onSaved={onContactSaved} />
               {account?.notes ? <details className="border-t border-blue-100/70 px-4 py-3 sm:px-6"><summary className="min-h-9 cursor-pointer text-xs font-medium text-slate-500">Company notes</summary><p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{account.notes}</p></details> : null}
               <CallingActivity rows={historyQuery.data?.activity || []} filter={activityFilter} onFilter={setActivityFilter} contactName={selectedName} unattributedCount={workspaceQuery.data?.unattributedActivityCount || 0} loading={activityFilter === 'contact' && Boolean(activityContactId) ? contactActivityQuery.isLoading : historyQuery.isLoading} error={historyQuery.isError} onRetry={() => historyQuery.refetch()} />
             </>}
@@ -507,6 +525,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
         </aside>
         </div>
       </main>
+      {emailEditor ? <ContactEditor key={emailEditor.contact.id} prospectId={emailEditor.contact.prospectId} contact={emailEditor.contact} existingIds={emailEditor.existingIds} focusEmail onClose={() => setEmailEditor(null)} onSaved={(workspace, contactId) => { onContactSaved(workspace, contactId); setEmailEditor(null) }} /> : null}
     </div>
   )
 }

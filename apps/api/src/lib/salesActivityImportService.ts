@@ -9,6 +9,8 @@ import {
   shouldCreateInteractionFromSalesActivity,
   type NormalizedSalesActivity,
 } from './salesActivityImport';
+import { enrichEmailFromCanonicalReceipt, emailEnrichmentMetadata, publicEmailEnrichment, lockSalesActivityReceipt, type CanonicalEmailEnrichmentResult } from './salesActivityEmailEnrichment';
+import type { EmailEnrichmentResult } from './emailEnrichmentService';
 import { ProspectReferenceError, requireActiveOwnedProspect } from './prospectReferenceService';
 import { applyProspectPhoneEnrichment, normalizePhoneCapture, PhoneEnrichmentError, type PhoneEnrichmentResult } from './phoneEnrichmentService';
 
@@ -116,6 +118,7 @@ export type SalesActivityImportResult = {
   code?: string;
   canonicalProspectId?: string;
   phoneEnrichment?: PhoneEnrichmentResult;
+  emailEnrichment?: EmailEnrichmentResult;
   contactResolution?: SalesActivityContactAttribution;
   contactAttribution?: SalesActivityContactAttribution;
 };
@@ -307,6 +310,8 @@ async function updateSalesActivityImportInteraction(params: {
   const client = await params.pool.connect();
   try {
     await client.query('BEGIN');
+    const receiptIdentity = await client.query('SELECT source,external_activity_id FROM public.sales_activity_imports WHERE id=$1 AND user_id=$2', [params.importId,params.userId]);
+    if (receiptIdentity.rows[0]) await lockSalesActivityReceipt(client,params.userId,receiptIdentity.rows[0].source,receiptIdentity.rows[0].external_activity_id);
     await requireActiveOwnedProspect({
       db: client,
       userId: params.userId,
@@ -407,7 +412,14 @@ export async function importSalesActivityBatch(params: {
       });
       normalizedSuccessfully = true;
       requestedIdentity = { source: activity.source, externalActivityId: activity.externalActivityId };
-      if (params.findDuplicateSalesActivityImport) {
+      // Augment an established verified provider receipt in place. Historic
+      // duplicate captures can have rounded timestamps; choosing their other
+      // identity would discard this receipt's exact evidence and event binding.
+      const exactEmailReceipt = activity.emailEvidence?.providerMessageId === activity.externalActivityId
+        ? await params.pool.query('SELECT id FROM public.sales_activity_imports WHERE user_id=$1 AND source=$2 AND external_activity_id=$3 LIMIT 1',
+          [params.userId,activity.source,activity.externalActivityId])
+        : null;
+      if (params.findDuplicateSalesActivityImport && !exactEmailReceipt?.rows.length) {
         try {
           const duplicateImport = await params.findDuplicateSalesActivityImport(activity);
           if (duplicateImport) {
@@ -448,11 +460,15 @@ export async function importSalesActivityBatch(params: {
       let importRow: { id: string; interaction_id: string | null; match_status: string; prospect_id: string | null };
       let existing: { id: string; interaction_id: string | null } | null;
       let phoneEnrichment: PhoneEnrichmentResult | undefined;
+      let emailEnrichment: CanonicalEmailEnrichmentResult | undefined;
       let contactResolution: SalesActivityContactAttribution | undefined;
       let recordedContactAttribution: SalesActivityContactAttribution | undefined;
       try {
         await client.query('BEGIN');
-        resolved = await resolveSalesActivityProspect(client, params.userId, activity, { lock: true });
+        await lockSalesActivityReceipt(client, params.userId, activity.source, activity.externalActivityId);
+        emailEnrichment = await enrichEmailFromCanonicalReceipt({db:client,userId:params.userId,activity,capturedProspectId:capturedEmailInteraction?.prospectId});
+        const enrichedProspectId = emailEnrichment && ['applied','unchanged'].includes(emailEnrichment.status) ? emailEnrichment.prospectId : null;
+        resolved = await resolveSalesActivityProspect(client, params.userId, enrichedProspectId ? {...activity,prospectId:enrichedProspectId} : activity, { lock: true });
         capturedProspectConflict = Boolean(
           capturedEmailInteraction
           && resolved.prospectId
@@ -501,6 +517,8 @@ export async function importSalesActivityBatch(params: {
         );
         importRow = upserted.row;
         existing = upserted.existing;
+        if (emailEnrichment) await client.query('UPDATE public.sales_activity_imports SET raw_payload=raw_payload || $3::jsonb WHERE id=$1 AND user_id=$2',
+          [importRow.id,params.userId,JSON.stringify(emailEnrichmentMetadata(emailEnrichment))]);
         if (activity.contactPhone || activity.phoneCaptureIssue) {
           if (match.matchStatus === 'matched' && resolved.prospectId && importRow.prospect_id === resolved.prospectId && !capturedProspectConflict) {
             try {
@@ -518,7 +536,7 @@ export async function importSalesActivityBatch(params: {
         // Attribute only the actual retained account binding, never a retry's new target.
         if (match.matchStatus === 'matched' && resolved.prospectId && importRow.prospect_id === resolved.prospectId
           && !capturedProspectConflict && activity.activityType === 'email' && shouldCreateInteractionFromSalesActivity(activity)) {
-          contactResolution = await resolveSalesActivityContact({ db: client, userId: params.userId, prospectId: resolved.prospectId, activity });
+          contactResolution = await resolveSalesActivityContact({ db: client, userId: params.userId, prospectId: resolved.prospectId, activity: emailEnrichment?.contactId && ['applied','unchanged'].includes(emailEnrichment.status) ? {...activity,contactId:emailEnrichment.contactId} : activity });
           await client.query(`UPDATE public.sales_activity_imports SET raw_payload=raw_payload || $3::jsonb WHERE id=$1 AND user_id=$2`,
             [importRow.id, params.userId, JSON.stringify({ contactResolution })]);
         }
@@ -695,6 +713,7 @@ export async function importSalesActivityBatch(params: {
         interactionId,
         duplicate: Boolean(existing || duplicateInteraction),
         ...(phoneEnrichment ? {phoneEnrichment} : {}),
+        ...(emailEnrichment ? {emailEnrichment:publicEmailEnrichment(emailEnrichment)} : {}),
         ...(contactResolution ? {contactResolution} : {}),
         ...(recordedContactAttribution ? {contactAttribution:recordedContactAttribution} : {}),
       });
@@ -928,6 +947,20 @@ export async function reviewSalesActivityImport(params: {
   let linkedRow: Record<string, unknown> | null = null;
   try {
     await client.query('BEGIN');
+    await lockSalesActivityReceipt(client,params.userId,row.source,row.external_activity_id);
+    // Acquire receipt/email/prospect locks in the same order as scheduled sync.
+    const retainedReceipt = await client.query('SELECT raw_payload,source,external_activity_id,activity_status,activity_type,email,company,contact_name,subject,activity_at FROM public.sales_activity_imports WHERE id=$1 AND user_id=$2', [params.importId,params.userId]);
+    const emailReceipt = retainedReceipt.rows[0];
+    if (!emailReceipt) throw new SalesActivityReviewError(404, 'Sales activity import not found');
+    const retainedEmailActivity = normalizeSalesActivityInput({
+      ...(emailReceipt.raw_payload && typeof emailReceipt.raw_payload === 'object' ? emailReceipt.raw_payload : {}),
+      source:emailReceipt.source,externalActivityId:emailReceipt.external_activity_id,
+      activityStatus:emailReceipt.activity_status,activityType:emailReceipt.activity_type,email:emailReceipt.email,
+      company:emailReceipt.company,contactName:emailReceipt.contact_name,subject:emailReceipt.subject,activityAt:emailReceipt.activity_at,
+    });
+    if (emailReceipt.raw_payload?.reconciledIdentity) retainedEmailActivity.rawPayload.reconciledIdentity = emailReceipt.raw_payload.reconciledIdentity;
+    const emailEnrichment = await enrichEmailFromCanonicalReceipt({db:client,userId:params.userId,
+      activity:{...retainedEmailActivity,prospectId:prospect.id}});
     await requireActiveOwnedProspect({
       db: client,
       userId: params.userId,
@@ -995,8 +1028,14 @@ export async function reviewSalesActivityImport(params: {
       email: latestImport.email ?? row.email, company: latestImport.company ?? row.company,
       activityAt: latestImport.activity_at ?? row.activity_at,
     });
+    if (emailEnrichment) {
+      await client.query('UPDATE public.sales_activity_imports SET raw_payload=raw_payload || $3::jsonb WHERE id=$1 AND user_id=$2',
+        [params.importId,params.userId,JSON.stringify(emailEnrichmentMetadata(emailEnrichment))]);
+      linkedRow = {...linkedRow,emailEnrichment:publicEmailEnrichment(emailEnrichment)};
+    }
     if (savedActivity.activityType === 'email' && shouldCreateInteractionFromSalesActivity(savedActivity)) {
-      const contactResolution = await resolveSalesActivityContact({ db: client, userId: params.userId, prospectId: prospect.id, activity: savedActivity });
+      const contactResolution = await resolveSalesActivityContact({ db: client, userId: params.userId, prospectId: prospect.id,
+        activity:emailEnrichment?.contactId && ['applied','unchanged'].includes(emailEnrichment.status) ? {...savedActivity,contactId:emailEnrichment.contactId} : savedActivity });
       if (interactionId) await fillSalesActivityContactAttribution({ db: client, userId: params.userId, prospectId: prospect.id,
         interactionId, activity: savedActivity, attribution: contactResolution });
       const contactAttribution = interactionId ? await readSalesActivityContactAttribution({db:client,userId:params.userId,

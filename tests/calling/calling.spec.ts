@@ -58,7 +58,7 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function installCallingScenario(page: Page, options: { startFailures?: number; confirmFailures?: number; lostConfirmationResponses?: number; selectedHistoryDelayMs?: number; workspaceDelayMs?: number; delayedStart?: boolean; rejectedStart?: boolean; unavailableDiscard?: boolean; discardFailures?: number; callsPerDay?: number; mainLineOnly?: boolean; missingEmailPrimary?: boolean; mobileFirst?: boolean; contactEmails?: 'all' | 'primary_only'; touchHistory?: boolean; savedSearch?: boolean; differentEmployer?: boolean; delayedSearchQuery?: string; delayedSelectionProspectId?: string; noAlternates?: boolean; map?: boolean; missingPhone?: boolean; delayedContactSave?: boolean; lostContactSaveResponses?: number } = {}) {
+async function installCallingScenario(page: Page, options: { startFailures?: number; confirmFailures?: number; lostConfirmationResponses?: number; selectedHistoryDelayMs?: number; workspaceDelayMs?: number; delayedStart?: boolean; rejectedStart?: boolean; unavailableDiscard?: boolean; discardFailures?: number; callsPerDay?: number; mainLineOnly?: boolean; missingEmailPrimary?: boolean; mobileFirst?: boolean; contactEmails?: 'all' | 'primary_only'; touchHistory?: boolean; savedSearch?: boolean; differentEmployer?: boolean; delayedSearchQuery?: string; delayedSelectionProspectId?: string; noAlternates?: boolean; map?: boolean; missingPhone?: boolean; delayedContactSave?: boolean; lostContactSaveResponses?: number; replaceContactIdentity?: boolean } = {}) {
   if (options.map) test.setTimeout(45_000); // Home's first lazy module compiles on a cold isolated Vite run.
   const starts: CallRequest[] = [];
   const confirmations: CallRequest[] = [];
@@ -127,7 +127,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
   }
   const readiness = (prospectId: string) => {
     const candidate = savedCandidates.find((candidate) => candidate.prospect.id === prospectId)!;
-    const contacts = roster.get(prospectId)!.filter((contact) => !contact.archivedAt);
+    const contacts = roster.get(prospectId)!.filter((contact) => !contact.archivedAt).sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary));
     const primary = contacts.find((contact) => contact.isPrimary)!;
     return derivePhoneReadiness({ ...candidate.prospect, contact_name: primary.name, contact_email: primary.email, contact_phone: primary.phone,
       ai_metadata: { phoneReadiness: { blocks: blocks.get(prospectId) || [] }, phoneEnrichment: { observations: options.mobileFirst ? [{contactId:primary.id,number:primary.phone,kind:'contact_direct',directNumberType:'office',status:'applied'}] : [] } } }, contacts);
@@ -169,7 +169,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
   });
   const workspace = (prospectId: string, contactId?: string | null) => {
     const candidate = savedCandidates.find((candidate) => candidate.prospect.id === prospectId)!;
-    const contacts = roster.get(prospectId)!.filter((contact) => !contact.archivedAt);
+    const contacts = roster.get(prospectId)!.filter((contact) => !contact.archivedAt).sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary));
     const activity = history.get(prospectId) || [];
     return { prospect: { ...candidate.prospect, notes: 'Existing account notes.', websiteUrl: null, buildingSf: null, lotSizeAcres: null, aiMetadata: null },
       contacts, primaryContactId: contacts.find((contact) => contact.isPrimary)!.id,
@@ -364,9 +364,19 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
       contactWrites.push({ method, prospectId: contactsMatch[1], contactId: contactsMatch[2], payload });
       mutationSequence.push('contact-save-request');
       await contactSaveGate;
-      const contact = roster.get(contactsMatch[1])!.find((contact) => contact.id === contactsMatch[2])!;
-      Object.assign(contact, payload);
-      if (payload.archived) contact.archivedAt = new Date().toISOString();
+      const contacts = roster.get(contactsMatch[1])!;
+      const contact = contacts.find((contact) => contact.id === contactsMatch[2])!;
+      if (options.replaceContactIdentity && Object.hasOwn(payload, 'email') && payload.email !== contact.email) {
+        // The API versions changed email identities: retain the prior snapshot
+        // as archived and return one replacement active contact on the account.
+        const replacement = { ...contact, ...payload, id: `00000000-0000-4000-8000-${String(700 + contacts.length).padStart(12, '0')}`, archivedAt: null };
+        contact.archivedAt = new Date().toISOString();
+        contact.isPrimary = false;
+        contacts.push(replacement);
+      } else {
+        Object.assign(contact, payload);
+        if (payload.archived) contact.archivedAt = new Date().toISOString();
+      }
       mutationSequence.push('contact-save-ack');
       return json(route, workspace(contactsMatch[1]));
     }
@@ -721,6 +731,181 @@ test('calling context recovers a frozen pending person without displaying the pr
   expect(scenario.progress()).toMatchObject({ startedToday: 1, confirmedToday: 0 });
 });
 
+test('calling email editor adds the exact primary address and cancel makes no changes', async ({ page }, testInfo) => {
+  const scenario = await installCallingScenario(page, { callsPerDay: 10, replaceContactIdentity: true });
+  const primary = structuredClone(scenario.roster.get('calling-prospect-1')![0]);
+  const add = page.getByRole('button', { name: 'Add email for Morgan Lee', exact: true });
+  await expect(add).toHaveText('Add email');
+  await expect(add).toBeEnabled();
+  const bounds = await add.boundingBox();
+  expect(bounds?.height).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: `work/calling-playwright/email-editor-${testInfo.project.name}-add.png` });
+  await add.click();
+  const editor = page.getByRole('dialog', { name: 'Edit contact', exact: true });
+  await expect(editor.getByLabel('Email', { exact: true })).toBeFocused();
+  await expect(editor.getByLabel('Name', { exact: true })).toHaveValue(primary.name);
+  await expect(editor.getByLabel('Company', { exact: true })).toHaveValue(primary.company!);
+  await expect(editor.getByLabel('Phone', { exact: true })).toHaveValue(primary.phone!);
+  await editor.getByLabel('Email', { exact: true }).fill('cancelled@calling.example.test');
+  await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(add).toBeEnabled();
+  expect(scenario.apiWrites).toEqual([]);
+  expect(scenario.roster.get('calling-prospect-1')![0]).toEqual(primary);
+
+  await add.click();
+  await expect(editor.getByLabel('Email', { exact: true })).toBeFocused();
+  await expect(editor.getByLabel('Email', { exact: true })).toHaveValue('');
+  await editor.getByLabel('Email', { exact: true }).fill(contactEmails.morgan);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: `work/calling-playwright/email-editor-${testInfo.project.name}-dialog.png` });
+  await editor.getByRole('button', { name: 'Save contact', exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(add).toHaveCount(0);
+  expect(scenario.contactWrites).toEqual([{ method: 'PATCH', prospectId: primary.prospectId, contactId: primary.id,
+    payload: { name: primary.name, title: primary.title, company: primary.company, email: contactEmails.morgan, phone: primary.phone, additionalPhones: primary.additionalPhones } }]);
+  const savedPrimary = scenario.roster.get('calling-prospect-1')!.find((contact) => !contact.archivedAt && contact.isPrimary)!;
+  expect(savedPrimary.id).not.toBe(primary.id);
+  expect(savedPrimary).toEqual({ ...primary, id: savedPrimary.id, email: contactEmails.morgan });
+  expect(scenario.roster.get('calling-prospect-1')!.find((contact) => contact.id === primary.id)).toEqual({ ...primary, isPrimary: false, archivedAt: expect.any(String) });
+  await expect(page.getByRole('button', { name: 'Select contact Morgan Lee', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const mail = emailAction(page, primary.name, contactEmails.morgan);
+  await expect(mail).toHaveAttribute('href', 'mailto:morgan.lee%2Bcre@calling.example.test');
+  await page.screenshot({ path: `work/calling-playwright/email-editor-${testInfo.project.name}-saved.png` });
+  const writesBeforeEmail = scenario.apiWrites.length;
+  const queueReadsBeforeEmail = scenario.queueReads.length;
+  await mail.click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Select contact Morgan Lee', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('calls-started-today')).toHaveText('0');
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText('0');
+  await expect(page.getByRole('progressbar', { name: 'Daily call target', exact: true })).toHaveAttribute('aria-valuenow', '0');
+  expect(scenario.apiWrites).toHaveLength(writesBeforeEmail);
+  expect(scenario.apiWrites.map((write) => ({ method: write.method, path: write.path }))).toEqual([{ method: 'PATCH', path: `/api/calling/prospects/${primary.prospectId}/contacts/${primary.id}` }]);
+  expect(scenario.queueReads).toHaveLength(queueReadsBeforeEmail);
+  expect(scenario.starts).toHaveLength(0); expect(scenario.confirmations).toHaveLength(0); expect(scenario.discards).toHaveLength(0);
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0, connectedToday: 0 });
+  expect(await dialHrefs(page)).toEqual([]);
+  expect(await mailHrefs(page)).toEqual(['mailto:morgan.lee%2Bcre@calling.example.test']);
+});
+
+test('calling email editor saves the selected secondary address without changing the primary', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { contactEmails: 'primary_only', callsPerDay: 10, replaceContactIdentity: true });
+  const primary = structuredClone(scenario.roster.get('calling-prospect-1')![0]);
+  const rowan = structuredClone(scenario.roster.get('calling-prospect-1')![1]);
+  await page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true }).click();
+  await expect(emailAction(page, primary.name, primary.email!)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Add email for Rowan Singh', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: 'Edit contact', exact: true });
+  await expect(editor.getByLabel('Email', { exact: true })).toBeFocused();
+  await expect(editor.getByLabel('Name', { exact: true })).toHaveValue(rowan.name);
+  await expect(editor.getByLabel('Title', { exact: true })).toHaveValue(rowan.title!);
+  await expect(editor.getByLabel('Phone', { exact: true })).toHaveValue(rowan.phone!);
+  await editor.getByLabel('Email', { exact: true }).fill(contactEmails.rowan);
+  await editor.getByRole('button', { name: 'Save contact', exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  const mail = emailAction(page, rowan.name, contactEmails.rowan);
+  await expect(mail).toHaveAttribute('href', 'mailto:rowan.singh@calling.example.test');
+  expect(scenario.contactWrites).toEqual([{ method: 'PATCH', prospectId: rowan.prospectId, contactId: rowan.id,
+    payload: { name: rowan.name, title: rowan.title, company: rowan.company, email: contactEmails.rowan, phone: rowan.phone, additionalPhones: rowan.additionalPhones } }]);
+  expect(scenario.roster.get('calling-prospect-1')![0]).toEqual(primary);
+  const savedRowan = scenario.roster.get('calling-prospect-1')!.find((contact) => !contact.archivedAt && contact.name === rowan.name)!;
+  expect(savedRowan.id).not.toBe(rowan.id);
+  expect(savedRowan).toEqual({ ...rowan, id: savedRowan.id, email: contactEmails.rowan });
+  expect(scenario.roster.get('calling-prospect-1')!.find((contact) => contact.id === rowan.id)).toEqual({ ...rowan, archivedAt: expect.any(String) });
+  await page.getByRole('button', { name: 'View all contacts', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const writesBeforeEmail = scenario.apiWrites.length;
+  await mail.click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('calls-started-today')).toHaveText('0');
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText('0');
+  expect(scenario.apiWrites).toHaveLength(writesBeforeEmail);
+  expect(scenario.starts).toHaveLength(0); expect(scenario.confirmations).toHaveLength(0); expect(scenario.discards).toHaveLength(0);
+  expect(await mailHrefs(page)).toEqual(['mailto:rowan.singh@calling.example.test']);
+  await page.getByRole('button', { name: 'Select contact Morgan Lee', exact: true }).click();
+  await expect(emailAction(page, primary.name, primary.email!)).toHaveAttribute('href', 'mailto:morgan.lee%2Bcre@calling.example.test');
+});
+
+test('calling email editor repairs an invalid saved address without composing hidden recipients', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { callsPerDay: 10 });
+  const primary = scenario.roster.get('calling-prospect-1')![0];
+  const invalidEmail = 'morgan.lee@calling.example.test?bcc=other@calling.example.test';
+  primary.email = invalidEmail;
+  await page.reload();
+  const edit = page.getByRole('button', { name: 'Edit email for Morgan Lee', exact: true });
+  await expect(edit).toHaveText('Edit email');
+  await expect(page.getByRole('region', { name: 'Current call', exact: true }).locator('a[href^="mailto:"]')).toHaveCount(0);
+  await edit.click();
+  const editor = page.getByRole('dialog', { name: 'Edit contact', exact: true });
+  await expect(editor.getByLabel('Email', { exact: true })).toBeFocused();
+  await expect(editor.getByLabel('Email', { exact: true })).toHaveValue(invalidEmail);
+  await editor.getByLabel('Email', { exact: true }).fill(contactEmails.morgan);
+  await editor.getByRole('button', { name: 'Save contact', exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  expect(scenario.contactWrites).toHaveLength(1);
+  expect(scenario.contactWrites[0]).toMatchObject({ method: 'PATCH', prospectId: primary.prospectId, contactId: primary.id, payload: { email: contactEmails.morgan } });
+  const mail = emailAction(page, primary.name, contactEmails.morgan);
+  await expect(mail).toHaveAttribute('href', 'mailto:morgan.lee%2Bcre@calling.example.test');
+  const writesBeforeEmail = scenario.apiWrites.length;
+  await mail.click();
+  expect(await mailHrefs(page)).toEqual(['mailto:morgan.lee%2Bcre@calling.example.test']);
+  expect(scenario.apiWrites).toHaveLength(writesBeforeEmail);
+  expect(scenario.starts).toHaveLength(0); expect(scenario.confirmations).toHaveLength(0); expect(scenario.discards).toHaveLength(0);
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText('0');
+});
+
+test('calling email editor is disabled for a frozen pending contact until the call is undone', async ({ page }) => {
+  const scenario = await installCallingScenario(page, { contactEmails: 'primary_only', callsPerDay: 10 });
+  const rowan = scenario.roster.get('calling-prospect-1')![1];
+  await page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true }).click();
+  const add = page.getByRole('button', { name: 'Add email for Rowan Singh', exact: true });
+  await expect(add).toBeEnabled();
+  await dial(page, rowan.name);
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await expect(add).toBeDisabled();
+  await expect(page.getByText('Finish or undo this call to edit the email.', { exact: true })).toBeVisible();
+  expect(scenario.sessions.get(scenario.starts[0].clientEventId)?.contactSnapshot?.email).toBeNull();
+  // A roster repair from another session must not alter the in-progress call's
+  // selected identity or unlock editing of its frozen missing-email snapshot.
+  rowan.email = 'rowan-invalid-address';
+  await page.reload();
+  await expect(page.getByText('Call started', { exact: true })).toBeVisible();
+  await expect(add).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Edit email for Rowan Singh', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Current call', exact: true }).locator('a[href^="mailto:"]')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Edit contact', exact: true })).toHaveCount(0);
+  expect(scenario.contactWrites).toEqual([]);
+  expect(await mailHrefs(page)).toEqual([]);
+  expect(scenario.confirmations).toHaveLength(0);
+  await page.getByRole('button', { name: "Didn't call", exact: true }).click();
+  const edit = page.getByRole('button', { name: 'Edit email for Rowan Singh', exact: true });
+  await expect(edit).toBeEnabled();
+  await expect(page.getByText('Finish or undo this call to edit the email.', { exact: true })).toHaveCount(0);
+  await edit.click();
+  const editor = page.getByRole('dialog', { name: 'Edit contact', exact: true });
+  await expect(editor.getByLabel('Email', { exact: true })).toBeFocused();
+  await expect(editor.getByLabel('Email', { exact: true })).toHaveValue(rowan.email);
+  await editor.getByLabel('Email', { exact: true }).fill(contactEmails.rowan);
+  await editor.getByRole('button', { name: 'Save contact', exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  const mail = emailAction(page, rowan.name, contactEmails.rowan);
+  await expect(mail).toBeVisible();
+  expect(scenario.contactWrites).toHaveLength(1);
+  expect(scenario.contactWrites[0]).toMatchObject({ method: 'PATCH', prospectId: rowan.prospectId, contactId: rowan.id, payload: { email: contactEmails.rowan } });
+  const writesBeforeEmail = scenario.apiWrites.length;
+  await mail.click();
+  await expect(page.getByRole('heading', { name: 'Calling Company 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Select contact Rowan Singh', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('calls-started-today')).toHaveText('0');
+  await expect(page.getByTestId('calls-confirmed-today')).toHaveText('0');
+  expect(scenario.apiWrites).toHaveLength(writesBeforeEmail);
+  expect(scenario.confirmations).toHaveLength(0); expect(scenario.discards).toHaveLength(1);
+  expect(scenario.progress()).toMatchObject({ startedToday: 0, confirmedToday: 0, connectedToday: 0 });
+  expect(await mailHrefs(page)).toEqual(['mailto:rowan.singh@calling.example.test']);
+});
 test('calling email switches with the selected person and has no activity, credit or queue effects', async ({ page }, testInfo) => {
   const scenario = await installCallingScenario(page, { contactEmails: 'all', callsPerDay: 10 });
   const morgan = emailAction(page, 'Morgan Lee', contactEmails.morgan);

@@ -401,5 +401,175 @@ test('confirmed email sync attributes exact saved people using disposable Postgr
       }
       assert.equal(storageCalls,calls);assert.equal(await count('skill_activities'),xp);
     });
+    const originalEmailAt = '2026-10-08T10:15:00.000Z';
+    const proof = (id: string, verification: 'matched_sent_items' | 'matched_inbox' = 'matched_sent_items') => ({
+      source:'outlook_desktop', verification, providerMessageId:id, observedAt:originalEmailAt,
+    });
+    const emailReceipt = (id: string, extra: any = {}) => activity(id, { email:'primary.observed@example.test',
+      contactName:'Email Primary', company:'Verified company', prospectId:'account', activityAt:originalEmailAt,
+      emailEvidence:proof(id), subject:'Original verified email receipt', ...extra });
+    const syncEmail = (input: any) => sync(input.externalActivityId, input);
+    const contactRow = async (id: string) => (await db.query<any>('SELECT * FROM prospect_contacts WHERE id=$1',[id])).rows[0];
+    const snapshot = (contact: any) => ({ name:contact.name, email:contact.email, phone:contact.phone, company:contact.company });
+    let primaryReceipt:any; let primaryBefore:any; let primaryFilledId='';
+    let secondaryReceipt:any; let secondaryBefore:any; let secondaryFilledId='';
+
+    await t.test('verified receipt fills an existing blank primary email and attributes only its returned identity at the original date', async () => {
+      await db.query("UPDATE prospects SET contact_name='Email Primary',contact_company='Verified company',contact_email=NULL WHERE id='account'");
+      const initial=await workspace();primaryBefore=initial.contacts.find((contact)=>contact.id===initial.primaryContactId)!;
+      primaryReceipt=emailReceipt('provider-primary-blank', {contactId:primaryBefore.id,expectedEmailContact:snapshot(primaryBefore),body:'Private body must stay outside CRM',html:'Private HTML must stay outside CRM',attachments:['Private.pdf']});
+      const prospects=await count('prospects');const interactions=await count('contact_interactions');const xp=await count('skill_activities');
+      const imported=await syncEmail(primaryReceipt);assert.equal(imported.errors,0);assert.equal(imported.createdInteractions,1);
+      assert.equal(imported.results[0].emailEnrichment?.status,'applied');
+      primaryFilledId=imported.results[0].emailEnrichment!.contactId!;assert.notEqual(primaryFilledId,primaryBefore.id);
+      assert.equal(imported.results[0].emailEnrichment?.previousContactId,primaryBefore.id);
+      const filled=await contactRow(primaryFilledId);assert.equal(filled.email,'primary.observed@example.test');assert.equal(filled.name,primaryBefore.name);assert.equal(filled.phone,primaryBefore.phone);
+      assert.ok((await contactRow(primaryBefore.id)).archived_at);
+      const scalar=(await db.query<any>("SELECT contact_email FROM prospects WHERE id='account'")).rows[0];assert.equal(scalar.contact_email,filled.email);
+      const interaction=await row(primaryReceipt.externalActivityId);assert.equal(interaction.date,originalEmailAt);assert.equal(interaction.source_metadata.contactId,primaryFilledId);
+      assert.equal(interaction.source_metadata.contactSnapshot.email,filled.email);assert.equal(interaction.source_metadata.contactSnapshot.name,'Email Primary');
+      assert.equal(interaction.source_metadata.direction,'outbound');assert.equal(interaction.source_metadata.evidenceStatus,'confirmed');
+      const retained=(await db.query<any>('SELECT raw_payload FROM sales_activity_imports WHERE external_activity_id=$1',[primaryReceipt.externalActivityId])).rows[0].raw_payload;
+      assert.equal(retained.body,undefined);assert.equal(retained.html,undefined);assert.equal(retained.attachments,undefined);
+      assert.deepEqual(retained.emailEvidence,proof(primaryReceipt.externalActivityId));
+      assert.equal(await count('prospects'),prospects);assert.equal(await count('contact_interactions'),interactions+1);assert.equal(await count('skill_activities'),xp+1);
+      assert.equal((await db.query<any>("SELECT source_metadata FROM contact_interactions WHERE id='old-history'")).rows[0].source_metadata.contactId,undefined);
+    });
+    await t.test('verified receipt replay retains the new primary identity without another interaction or XP', async () => {
+      const stored=await row(primaryReceipt.externalActivityId);const contacts=await count('prospect_contacts');const interactions=await count('contact_interactions');const xp=await count('skill_activities');const calls=storageCalls;
+      for(let attempt=0;attempt<2;attempt++) {
+        const replay=await syncEmail(primaryReceipt);assert.equal(replay.errors,0);assert.equal(replay.createdInteractions,0);
+        assert.equal(replay.results[0].emailEnrichment?.status,'unchanged');assert.equal(replay.results[0].emailEnrichment?.contactId,primaryFilledId);
+        assert.deepEqual(await row(primaryReceipt.externalActivityId),stored);
+      }
+      assert.equal((await workspace()).primaryContactId,primaryFilledId);assert.equal(await count('prospect_contacts'),contacts);
+      assert.equal(await count('contact_interactions'),interactions);assert.equal(await count('skill_activities'),xp);assert.equal(storageCalls,calls);
+    });
+    await t.test('verified inbox receipt fills a blank secondary only and replay earns no sent credit', async () => {
+      const added=await createProspectContact({pool,userId:'owner',prospectId:'account',input:{name:'Email Secondary',company:'Secondary employer',phone:'780-555-0180',title:'Operations',additionalPhones:[{label:'Mobile',number:'780-555-0181'}]}});
+      secondaryBefore=added.contacts.find((contact)=>contact.name==='Email Secondary')!;
+      secondaryReceipt=emailReceipt('provider-secondary-inbox',{status:'received',email:'secondary.observed@example.test',contactName:secondaryBefore.name,company:secondaryBefore.company,contactId:secondaryBefore.id,expectedEmailContact:snapshot(secondaryBefore),emailEvidence:proof('provider-secondary-inbox','matched_inbox')});
+      const primary=await contactRow(primaryFilledId);const xp=await count('skill_activities');const prospects=await count('prospects');
+      const imported=await syncEmail(secondaryReceipt);assert.equal(imported.errors,0);assert.equal(imported.createdInteractions,1);assert.equal(imported.results[0].emailEnrichment?.status,'applied');
+      secondaryFilledId=imported.results[0].emailEnrichment!.contactId!;assert.notEqual(secondaryFilledId,secondaryBefore.id);
+      const filled=await contactRow(secondaryFilledId);assert.equal(filled.email,secondaryReceipt.email);assert.equal(filled.title,secondaryBefore.title);assert.deepEqual(filled.additional_phones,secondaryBefore.additionalPhones);
+      const interaction=await row(secondaryReceipt.externalActivityId);assert.equal(interaction.date,originalEmailAt);assert.equal(interaction.source_metadata.contactId,secondaryFilledId);assert.equal(interaction.source_metadata.direction,'inbound');
+      assert.deepEqual(await contactRow(primaryFilledId),primary);assert.equal(await count('prospects'),prospects);assert.equal(await count('skill_activities'),xp);
+      const contacts=await count('prospect_contacts');const interactions=await count('contact_interactions');const calls=storageCalls;
+      const replay=await syncEmail(secondaryReceipt);assert.equal(replay.createdInteractions,0);assert.equal(replay.results[0].emailEnrichment?.status,'unchanged');
+      assert.equal(replay.results[0].emailEnrichment?.contactId,secondaryFilledId);assert.deepEqual(await row(secondaryReceipt.externalActivityId),interaction);
+      assert.equal(await count('prospect_contacts'),contacts);assert.equal(await count('contact_interactions'),interactions);assert.equal(await count('skill_activities'),xp);assert.equal(storageCalls,calls);
+    });
+    await t.test('a later verified different address stays reviewable while the original saved email and identities remain intact', async () => {
+      const contact=await contactRow(secondaryFilledId);const contacts=await count('prospect_contacts');const interactions=await count('contact_interactions');const xp=await count('skill_activities');
+      const input=emailReceipt('provider-secondary-different',{status:'received',email:'different.secondary@example.test',contactName:contact.name,company:contact.company,contactId:contact.id,expectedEmailContact:snapshot(contact),emailEvidence:proof('provider-secondary-different','matched_inbox')});
+      const imported=await syncEmail(input);assert.equal(imported.errors,0);assert.equal(imported.results[0].emailEnrichment?.status,'needs_review');
+      assert.equal(imported.results[0].emailEnrichment?.reason,'existing_email_conflict');assert.deepEqual(await contactRow(secondaryFilledId),contact);
+      assert.equal(await count('prospect_contacts'),contacts);assert.equal(await count('contact_interactions'),interactions+1);assert.equal((await row(input.externalActivityId)).date,originalEmailAt);assert.equal(await count('skill_activities'),xp);
+    });
+    await t.test('duplicate receipt mutations and repeated altered-person retries cannot fill another saved contact', async () => {
+      const added=await createProspectContact({pool,userId:'owner',prospectId:'account',input:{name:'Receipt Hijack Target',company:'Verified company',phone:'780-555-0182'}});
+      const target=added.contacts.find((contact)=>contact.name==='Receipt Hijack Target')!;const untouched=await contactRow(target.id);
+      const frozen=await row(primaryReceipt.externalActivityId);const contacts=await count('prospect_contacts');const interactions=await count('contact_interactions');const xp=await count('skill_activities');const calls=storageCalls;
+      const hijack={contactName:target.name,contactId:target.id,email:'hijack.target@example.test',expectedEmailContact:snapshot(target)};
+      for(const extra of [hijack,hijack,{company:'Altered company'},{prospectId:'other-account'},
+        {emailEvidence:proof('altered-provider-message')},{emailEvidence:proof(primaryReceipt.externalActivityId,'matched_inbox')}]) {
+        const imported=await syncEmail({...primaryReceipt,...extra});
+        if(!imported.errors) assert.equal(imported.results[0].emailEnrichment?.status,'needs_review');
+        assert.deepEqual(await contactRow(target.id),untouched);assert.deepEqual(await row(primaryReceipt.externalActivityId),frozen);
+        assert.equal(await count('prospect_contacts'),contacts);assert.equal(await count('contact_interactions'),interactions);assert.equal(await count('skill_activities'),xp);assert.equal(storageCalls,calls);
+      }
+      assert.equal((await contactRow(primaryFilledId)).email,'primary.observed@example.test');
+    });
+    await t.test('invalid, draft and missing-verification evidence never fill a saved blank contact', async () => {
+      const variations=[{email:'invalid@example.test?bcc=other@example.test'},
+        {emailEvidence:{source:'outlook_desktop',providerMessageId:'missing-verification',observedAt:originalEmailAt}},
+        {status:'draft'}, {emailEvidence:undefined}];
+      for(const [index,extra] of variations.entries()) {
+        const added=await createProspectContact({pool,userId:'owner',prospectId:'account',input:{name:'Unsafe Email Contact '+index,company:'Verified company',phone:'780-555-0183'}});
+        const target=added.contacts.find((contact)=>contact.name==='Unsafe Email Contact '+index)!;const saved=await contactRow(target.id);const contacts=await count('prospect_contacts');
+        const id='provider-unsafe-email-'+index;const input=emailReceipt(id,{email:'unsafe.'+index+'@example.test',contactName:target.name,contactId:target.id,expectedEmailContact:snapshot(target),...extra});
+        const imported=await syncEmail(input);assert.equal(imported.errors,0);assert.deepEqual(await contactRow(target.id),saved);assert.equal(await count('prospect_contacts'),contacts);
+        assert.notEqual(imported.results[0].emailEnrichment?.status,'applied');
+        if(extra.status==='draft') {assert.equal(imported.createdInteractions,0);assert.equal(await row(id),undefined);}
+      }
+    });
+    await t.test('an old unmatched exact receipt can fill a fresh explicit blank target with its snapshot and original source date', async () => {
+      const input=emailReceipt('provider-old-unmatched',{email:'late.verified@example.test',contactName:'Late Email Contact',company:'Unrecorded employer',prospectId:null,contactId:null});
+      const prospects=await count('prospects');const interactions=await count('contact_interactions');const xp=await count('skill_activities');
+      const first=await syncEmail(input);assert.equal(first.errors,0);assert.equal(first.needsReview,1);assert.equal(first.createdInteractions,0);assert.equal(await row(input.externalActivityId),undefined);
+      const added=await createProspectContact({pool,userId:'owner',prospectId:'account',input:{name:input.contactName,company:input.company,phone:'780-555-0184'}});
+      const target=added.contacts.find((contact)=>contact.name===input.contactName)!;
+      const resolved=await syncEmail({...input,prospectId:'account',contactId:target.id,expectedEmailContact:snapshot(target)});
+      assert.equal(resolved.errors,0);assert.equal(resolved.results[0].emailEnrichment?.status,'applied');assert.equal(resolved.createdInteractions,1);
+      const filledId=resolved.results[0].emailEnrichment!.contactId!;assert.notEqual(filledId,target.id);assert.equal((await contactRow(filledId)).email,input.email);
+      const interaction=await row(input.externalActivityId);assert.equal(interaction.date,originalEmailAt);assert.equal(interaction.source_message_id,input.externalActivityId);assert.equal(interaction.source_metadata.contactId,filledId);
+      assert.equal(await count('prospects'),prospects);assert.equal(await count('contact_interactions'),interactions+1);assert.equal(await count('skill_activities'),xp+1);
+      const contacts=await count('prospect_contacts');const replay=await syncEmail({...input,prospectId:'account',contactId:target.id,expectedEmailContact:snapshot(target)});
+      assert.equal(replay.createdInteractions,0);assert.equal(replay.results[0].emailEnrichment?.status,'unchanged');assert.deepEqual(await row(input.externalActivityId),interaction);
+      assert.equal(await count('prospect_contacts'),contacts);assert.equal(await count('contact_interactions'),interactions+1);assert.equal(await count('skill_activities'),xp+1);
+    });
+    await t.test('manual review replays retained canonical provider proof after a pending call clears without recreating the interaction', async () => {
+      const added=await createProspectContact({pool,userId:'owner',prospectId:'account',input:{name:'Pending Review Contact',company:'Verified company',phone:'780-555-0185'}});
+      const target=added.contacts.find((contact)=>contact.name==='Pending Review Contact')!;
+      const pending={clientEventId:'email-review-pending-call',prospectId:'account',contactId:target.id,expectedPhone:target.phone!};
+      await recordMobileCallStart({pool,userId:'owner',input:pending});
+      const providerId='provider-pending-email-review';const canonicalId='canonical-pending-email-review';
+      const input=emailReceipt(providerId,{email:'pending.review@example.test',contactName:target.name,company:target.company,contactId:target.id,expectedEmailContact:snapshot(target)});
+      const imported=await importSalesActivityBatch({pool,storage,userId:'owner',payload:SalesActivityBatchSchema.parse({source:'outlook_sync',activities:[input]}),
+        findDuplicateSalesActivityImport:async()=>({source:'outlook_sync',externalActivityId:canonicalId,interactionId:null,prospectId:'account',matchStatus:'needs_review'})});
+      assert.equal(imported.errors,0);assert.equal(imported.createdInteractions,1);assert.equal(imported.results[0].emailEnrichment?.reason,'pending_call');
+      assert.equal((await contactRow(target.id)).email,null);
+      const retained=(await db.query<any>('SELECT raw_payload FROM sales_activity_imports WHERE external_activity_id=$1',[canonicalId])).rows[0].raw_payload;
+      assert.equal(retained.reconciledIdentity.externalActivityId,providerId);assert.equal(retained.emailEvidence.providerMessageId,providerId);
+      const stored=await row(canonicalId);assert.equal(stored.date,originalEmailAt);assert.equal(stored.source_metadata.contactId,undefined);
+      await discardMobileCallStart({pool,userId:'owner',input:{clientEventId:pending.clientEventId,prospectId:pending.prospectId,contactId:target.id}});
+      const contacts=await count('prospect_contacts');const interactions=await count('contact_interactions');const xp=await count('skill_activities');const calls=storageCalls;
+      const review={pool,storage,userId:'owner',importId:imported.results[0].importId!,decision:{action:'link' as const,prospectId:'account'}};
+      const linked:any=await reviewSalesActivityImport(review);assert.equal(linked.emailEnrichment?.status,'applied');
+      const filledId=linked.emailEnrichment.contactId;assert.notEqual(filledId,target.id);assert.equal((await contactRow(filledId)).email,input.email);
+      const attributed=await row(canonicalId);assert.equal(attributed.source_metadata.contactId,filledId);assert.equal(attributed.date,originalEmailAt);assert.equal(attributed.id,stored.id);
+      assert.deepEqual({...attributed,source_metadata:stored.source_metadata},stored);
+      assert.equal(await count('contact_interactions'),interactions);assert.equal(await count('skill_activities'),xp);assert.equal(storageCalls,calls);assert.equal(await count('prospect_contacts'),contacts+1);
+      const replay:any=await reviewSalesActivityImport(review);assert.equal(replay.emailEnrichment?.status,'unchanged');assert.equal(replay.emailEnrichment.contactId,filledId);
+      assert.deepEqual(await row(canonicalId),attributed);assert.equal(await count('contact_interactions'),interactions);assert.equal(await count('skill_activities'),xp);assert.equal(storageCalls,calls);assert.equal(await count('prospect_contacts'),contacts+1);
+    });
+    await t.test('exact retained desktop receipt keeps its precise timestamp instead of reconciling to an older rounded connector receipt', async () => {
+      const added=await createProspectContact({pool,userId:'owner',prospectId:'account',input:{name:'Precise Receipt Contact',company:'Verified company',phone:'780-555-0186'}});
+      const target=added.contacts.find((contact)=>contact.name==='Precise Receipt Contact')!;
+      const connectorId='connector-rounded-email-receipt';const desktopId='desktop-exact-email-receipt';
+      const roundedAt='2026-10-08T10:15:00.000Z';const preciseAt='2026-10-08T10:15:00.827Z';
+      const base={email:'precise.receipt@example.test',contactName:target.name,company:target.company,contactId:target.id,emailEvidence:undefined};
+      const connector=emailReceipt(connectorId,{...base,activityAt:roundedAt});
+      const desktop=emailReceipt(desktopId,{...base,activityAt:preciseAt});
+      const payload=(input:any)=>SalesActivityBatchSchema.parse({source:'outlook_sync',createInteractions:false,activities:[input]});
+      for(const input of [connector,desktop]) {
+        const seeded=await importSalesActivityBatch({pool,storage,userId:'owner',payload:payload(input)});
+        assert.equal(seeded.errors,0);assert.equal(seeded.createdInteractions,0);
+      }
+      const receipt=async(id:string)=>(await db.query<any>('SELECT * FROM sales_activity_imports WHERE user_id=$1 AND source=$2 AND external_activity_id=$3',['owner','outlook_sync',id])).rows[0];
+      const connectorBefore=await receipt(connectorId);const desktopBefore=await receipt(desktopId);
+      assert.equal(new Date(connectorBefore.activity_at).toISOString(),roundedAt);assert.equal(new Date(desktopBefore.activity_at).toISOString(),preciseAt);
+      const retainedIds=(await db.query('SELECT id,source,external_activity_id FROM sales_activity_imports ORDER BY id')).rows;
+      const contacts=await count('prospect_contacts');const prospects=await count('prospects');const interactions=await count('contact_interactions');const xp=await count('skill_activities');const calls=storageCalls;
+      let finderCalls=0;
+      const replay=(input:any)=>importSalesActivityBatch({pool,storage,userId:'owner',payload:payload(input),findDuplicateSalesActivityImport:async()=>{
+        finderCalls++;return {source:'outlook_sync',externalActivityId:connectorId,interactionId:null,prospectId:'account',matchStatus:'matched'};
+      }});
+      const verified={...desktop,emailEvidence:{...proof(desktopId),observedAt:preciseAt},expectedEmailContact:snapshot(target)};
+      const filled=await replay(verified);assert.equal(filled.errors,0);assert.equal(filled.createdInteractions,0);assert.equal(filled.results[0].emailEnrichment?.status,'applied',JSON.stringify(filled.results[0].emailEnrichment));
+      assert.equal(filled.results[0].importId,desktopBefore.id);assert.equal(finderCalls,0);
+      const filledId=filled.results[0].emailEnrichment!.contactId!;assert.notEqual(filledId,target.id);assert.equal((await contactRow(filledId)).email,desktop.email);
+      const repeated=await replay(verified);assert.equal(repeated.errors,0);assert.equal(repeated.createdInteractions,0);assert.equal(repeated.results[0].emailEnrichment?.status,'unchanged');assert.equal(repeated.results[0].emailEnrichment?.contactId,filledId);
+      const alteredAt='2026-10-08T10:15:00.900Z';
+      const altered=await replay({...verified,activityAt:alteredAt,emailEvidence:{...verified.emailEvidence,observedAt:alteredAt}});
+      assert.equal(altered.errors,0);assert.equal(altered.results[0].emailEnrichment?.status,'needs_review');assert.equal(finderCalls,0);
+      assert.deepEqual(await receipt(connectorId),connectorBefore);
+      const exact=await receipt(desktopId);assert.equal(exact.id,desktopBefore.id);assert.equal(new Date(exact.activity_at).toISOString(),preciseAt);
+      assert.deepEqual((await db.query('SELECT id,source,external_activity_id FROM sales_activity_imports ORDER BY id')).rows,retainedIds);
+      assert.equal((await contactRow(filledId)).email,desktop.email);assert.equal(await count('prospect_contacts'),contacts+1);
+      assert.equal(await count('prospects'),prospects);assert.equal(await count('contact_interactions'),interactions);assert.equal(await count('skill_activities'),xp);assert.equal(storageCalls,calls);
+      assert.equal(await row(connectorId),undefined);assert.equal(await row(desktopId),undefined);
+    });
   } finally { await db.close(); }
 });
