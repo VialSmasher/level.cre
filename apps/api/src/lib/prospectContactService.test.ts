@@ -534,5 +534,42 @@ test('confirmed email sync attributes exact saved people using disposable Postgr
       const replay:any=await reviewSalesActivityImport(review);assert.equal(replay.emailEnrichment?.status,'unchanged');assert.equal(replay.emailEnrichment.contactId,filledId);
       assert.deepEqual(await row(canonicalId),attributed);assert.equal(await count('contact_interactions'),interactions);assert.equal(await count('skill_activities'),xp);assert.equal(storageCalls,calls);assert.equal(await count('prospect_contacts'),contacts+1);
     });
+    await t.test('exact retained desktop receipt keeps its precise timestamp instead of reconciling to an older rounded connector receipt', async () => {
+      const added=await createProspectContact({pool,userId:'owner',prospectId:'account',input:{name:'Precise Receipt Contact',company:'Verified company',phone:'780-555-0186'}});
+      const target=added.contacts.find((contact)=>contact.name==='Precise Receipt Contact')!;
+      const connectorId='connector-rounded-email-receipt';const desktopId='desktop-exact-email-receipt';
+      const roundedAt='2026-10-08T10:15:00.000Z';const preciseAt='2026-10-08T10:15:00.827Z';
+      const base={email:'precise.receipt@example.test',contactName:target.name,company:target.company,contactId:target.id,emailEvidence:undefined};
+      const connector=emailReceipt(connectorId,{...base,activityAt:roundedAt});
+      const desktop=emailReceipt(desktopId,{...base,activityAt:preciseAt});
+      const payload=(input:any)=>SalesActivityBatchSchema.parse({source:'outlook_sync',createInteractions:false,activities:[input]});
+      for(const input of [connector,desktop]) {
+        const seeded=await importSalesActivityBatch({pool,storage,userId:'owner',payload:payload(input)});
+        assert.equal(seeded.errors,0);assert.equal(seeded.createdInteractions,0);
+      }
+      const receipt=async(id:string)=>(await db.query<any>('SELECT * FROM sales_activity_imports WHERE user_id=$1 AND source=$2 AND external_activity_id=$3',['owner','outlook_sync',id])).rows[0];
+      const connectorBefore=await receipt(connectorId);const desktopBefore=await receipt(desktopId);
+      assert.equal(new Date(connectorBefore.activity_at).toISOString(),roundedAt);assert.equal(new Date(desktopBefore.activity_at).toISOString(),preciseAt);
+      const retainedIds=(await db.query('SELECT id,source,external_activity_id FROM sales_activity_imports ORDER BY id')).rows;
+      const contacts=await count('prospect_contacts');const prospects=await count('prospects');const interactions=await count('contact_interactions');const xp=await count('skill_activities');const calls=storageCalls;
+      let finderCalls=0;
+      const replay=(input:any)=>importSalesActivityBatch({pool,storage,userId:'owner',payload:payload(input),findDuplicateSalesActivityImport:async()=>{
+        finderCalls++;return {source:'outlook_sync',externalActivityId:connectorId,interactionId:null,prospectId:'account',matchStatus:'matched'};
+      }});
+      const verified={...desktop,emailEvidence:{...proof(desktopId),observedAt:preciseAt},expectedEmailContact:snapshot(target)};
+      const filled=await replay(verified);assert.equal(filled.errors,0);assert.equal(filled.createdInteractions,0);assert.equal(filled.results[0].emailEnrichment?.status,'applied',JSON.stringify(filled.results[0].emailEnrichment));
+      assert.equal(filled.results[0].importId,desktopBefore.id);assert.equal(finderCalls,0);
+      const filledId=filled.results[0].emailEnrichment!.contactId!;assert.notEqual(filledId,target.id);assert.equal((await contactRow(filledId)).email,desktop.email);
+      const repeated=await replay(verified);assert.equal(repeated.errors,0);assert.equal(repeated.createdInteractions,0);assert.equal(repeated.results[0].emailEnrichment?.status,'unchanged');assert.equal(repeated.results[0].emailEnrichment?.contactId,filledId);
+      const alteredAt='2026-10-08T10:15:00.900Z';
+      const altered=await replay({...verified,activityAt:alteredAt,emailEvidence:{...verified.emailEvidence,observedAt:alteredAt}});
+      assert.equal(altered.errors,0);assert.equal(altered.results[0].emailEnrichment?.status,'needs_review');assert.equal(finderCalls,0);
+      assert.deepEqual(await receipt(connectorId),connectorBefore);
+      const exact=await receipt(desktopId);assert.equal(exact.id,desktopBefore.id);assert.equal(new Date(exact.activity_at).toISOString(),preciseAt);
+      assert.deepEqual((await db.query('SELECT id,source,external_activity_id FROM sales_activity_imports ORDER BY id')).rows,retainedIds);
+      assert.equal((await contactRow(filledId)).email,desktop.email);assert.equal(await count('prospect_contacts'),contacts+1);
+      assert.equal(await count('prospects'),prospects);assert.equal(await count('contact_interactions'),interactions);assert.equal(await count('skill_activities'),xp);assert.equal(storageCalls,calls);
+      assert.equal(await row(connectorId),undefined);assert.equal(await row(desktopId),undefined);
+    });
   } finally { await db.close(); }
 });

@@ -412,7 +412,14 @@ export async function importSalesActivityBatch(params: {
       });
       normalizedSuccessfully = true;
       requestedIdentity = { source: activity.source, externalActivityId: activity.externalActivityId };
-      if (params.findDuplicateSalesActivityImport) {
+      // Augment an established verified provider receipt in place. Historic
+      // duplicate captures can have rounded timestamps; choosing their other
+      // identity would discard this receipt's exact evidence and event binding.
+      const exactEmailReceipt = activity.emailEvidence?.providerMessageId === activity.externalActivityId
+        ? await params.pool.query('SELECT id FROM public.sales_activity_imports WHERE user_id=$1 AND source=$2 AND external_activity_id=$3 LIMIT 1',
+          [params.userId,activity.source,activity.externalActivityId])
+        : null;
+      if (params.findDuplicateSalesActivityImport && !exactEmailReceipt?.rows.length) {
         try {
           const duplicateImport = await params.findDuplicateSalesActivityImport(activity);
           if (duplicateImport) {
