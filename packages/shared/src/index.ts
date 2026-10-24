@@ -5,4 +5,5 @@ export * from './brokerageMemory';
 export * from './propertyInventory';
 export * from './propertyClassification';
 export * from './propertyLink';
+export * from './propertyGis';
 

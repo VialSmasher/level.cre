@@ -61,6 +61,7 @@ import path from 'path';
 import { XP_VALUES, actionForInteractionType, xpForInteractionType } from './lib/gamification';
 import { ProspectReferenceError, requireActiveOwnedProspect } from './lib/prospectReferenceService';
 import { registerIndustrialIntelRoutes } from './modules/industrial-intel/registerRoutes';
+import { registerPropertyGisRoutes } from './modules/property-gis/registerRoutes';
 import {
   buildDataQualityReview,
   buildFollowUpReview,
@@ -7796,6 +7797,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GIS requests finish before Intel's write-capable agent audit middleware.
+  registerPropertyGisRoutes(app, pool);
   registerIndustrialIntelRoutes(app);
 
   const httpServer = createServer(app);

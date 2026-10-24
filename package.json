@@ -17,6 +17,7 @@
     "build:web": "npm --workspace @apps/web run build",
     "build:api": "npm --workspace @apps/api run build",
     "test:web": "npm --workspace @apps/web run test",
+    "test:gis": "node --import tsx --test apps/api/src/modules/property-gis/*.test.ts apps/web/src/features/property-gis/*.test.ts",
     "test:ux": "playwright test --config playwright.config.ts",
     "test:ux:map": "playwright test --config playwright.map.config.ts",
     "test:ux:all": "npm-run-all --sequential test:ux test:ux:map",

@@ -1,0 +1,12 @@
+# Local research, browser evidence and release scratch output are never deployment inputs.
+work/
+.artifacts/
+.release/
+artifacts/
+# Never upload environment backups or local credentials, even if historically tracked.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+.agents/
+.codex/

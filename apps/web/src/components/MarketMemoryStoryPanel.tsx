@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, Building2, CheckCircle2, ExternalLink, FileCheck2, GitMerge, Link2, LoaderCircle, MapPin, Scale, ShieldCheck, X } from 'lucide-react'
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
@@ -21,6 +21,7 @@ type Props = {
   onCompareDuplicates?: () => void
   onWorkProspect?: () => void
   isActionPending?: boolean
+  siteInformation?: ReactNode
 }
 
 function cleanDate(value: string | null) {
@@ -76,6 +77,7 @@ export function MarketMemoryStoryPanel({
   onCompareDuplicates,
   onWorkProspect,
   isActionPending = false,
+  siteInformation,
 }: Props) {
   const [activeTab, setActiveTab] = useState('property')
   const titleId = useId()
@@ -148,6 +150,7 @@ export function MarketMemoryStoryPanel({
         </div>
         <ScrollArea className="min-h-0 flex-1">
           <TabsContent value="property" className="mt-0">
+            {siteInformation}
             <MarketMemoryEvidence anchor={anchor} onReviewContact={() => setActiveTab('contact')} />
           </TabsContent>
           <TabsContent value="contact" className="space-y-3 px-4 py-4 text-xs leading-5">

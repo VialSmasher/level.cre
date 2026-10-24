@@ -15,6 +15,9 @@ import { CSVUploader } from '@/components/CSVUploader';
 import { MarketMemoryLayerControl, type MarketMemoryLayer } from '@/components/MarketMemoryLayerControl';
 import { MarketMemoryPreviewDialog } from '@/components/MarketMemoryPreviewDialog';
 import { MarketMemoryStoryPanel, MarketMemoryEvidence } from '@/components/MarketMemoryStoryPanel';
+import { DossierSiteInformation } from '@/features/property-gis/DossierSiteInformation';
+import { SiteParcelOverlay } from '@/features/property-gis/SiteParcelOverlay';
+import { approvedStandaloneSiteAnchor, boundaryForProperty, dossierAnchorForProspect, type SiteBoundarySelection } from '@/features/property-gis/siteSelection';
 import { applyMemoryClassification, memoryClassificationTarget } from '@/features/property-memory/classification';
 import { DeveloperSettings } from '@/components/DeveloperSettings';
 import { GamificationToast } from '@/components/GamificationToast';
@@ -112,6 +115,7 @@ const DEFAULT_CENTER = { lat: 53.5461, lng: -113.4938 }; // Edmonton
 const DEFAULT_ZOOM = 11;
 const EMPTY_PROSPECTS: Prospect[] = [];
 const EMPTY_MARKET_MEMORY_ANCHORS: MarketMemoryAnchor[] = [];
+const PROPERTY_GIS_PREVIEW_ENABLED = ['1', 'true'].includes(String(import.meta.env.VITE_PROPERTY_GIS_PREVIEW_ENABLED || ''));
 const DEMO_MAP_RESET_VERSION = '2026-06-terradraw-clean-map-v1';
 const DEMO_MAP_RESET_KEY = 'levelcre:demoMapResetVersion';
 
@@ -374,6 +378,7 @@ export default function HomePage() {
   const duplicateLookupRequestRef = useRef(0);
   const [marketMemoryPreview, setMarketMemoryPreview] = useState<CurrentProjectsMarketMemoryPreview | null>(null);
   const [selectedMarketMemoryAnchor, setSelectedMarketMemoryAnchor] = useState<MarketMemoryAnchor | null>(null);
+  const [siteBoundary, setSiteBoundary] = useState<SiteBoundarySelection | null>(null);
   const [propertyMemoryReviewOpen, setPropertyMemoryReviewOpen] = useState(false);
   const [prospectMergeGroup, setProspectMergeGroup] = useState<ProspectMergeCandidateGroup | null>(null);
   const marketMemoryFocusReturnRef = useRef<HTMLElement | null>(null);
@@ -817,6 +822,29 @@ export default function HomePage() {
   const selectedProspectMemoryAnchors = selectedProspect
     ? composedMapItemByProspectId.get(selectedProspect.id)?.memoryAnchors || EMPTY_MARKET_MEMORY_ANCHORS
     : EMPTY_MARKET_MEMORY_ANCHORS;
+  const selectedSiteProspect = selectedProspect
+    ? composedMapItemByProspectId.get(selectedProspect.id)?.prospect || selectedProspect
+    : null;
+  const selectedSiteAnchor = PROPERTY_GIS_PREVIEW_ENABLED && !propertyMemoryReviewOpen && !prospectMergeGroup
+    ? selectedMarketMemoryAnchor
+      ? approvedStandaloneSiteAnchor(selectedMarketMemoryAnchor)
+      : isEditPanelOpen
+        ? dossierAnchorForProspect(selectedProspectMemoryAnchors, selectedSiteProspect?.id || null)
+        : null
+    : null;
+  // Include the saved point so an edited pin cannot retain a previous parcel preview.
+  const selectedSiteKey = selectedSiteAnchor?.persistence?.dossierId
+    ? `${selectedSiteAnchor.persistence.dossierId}:${selectedProspect?.id || selectedSiteAnchor.id}:${JSON.stringify(selectedSiteProspect?.geometry?.type === 'Point' ? selectedSiteProspect.geometry.coordinates : null)}:${selectedSiteProspect?.locationLat ?? selectedSiteAnchor.latitude}:${selectedSiteProspect?.locationLng ?? selectedSiteAnchor.longitude}`
+    : null;
+  const selectedSiteBoundary = boundaryForProperty(siteBoundary, selectedSiteKey);
+  const selectedSiteInformation = selectedSiteAnchor?.persistence?.dossierId && selectedSiteKey ? (
+    <DossierSiteInformation
+      key={selectedSiteKey}
+      dossierId={selectedSiteAnchor.persistence.dossierId}
+      propertyKey={selectedSiteKey}
+      onBoundaryChange={setSiteBoundary}
+    />
+  ) : undefined;
 
   // Lifecycle status, pursuit type, and geography are independent map filters.
   const inventoryByProspectId = useMemo(() => new Map(prospects.map(prospect => [prospect.id, getPropertyInventory(prospect)])), [prospects]);
@@ -2394,6 +2422,7 @@ export default function HomePage() {
           }}
         >
           {/* Render Prospects */}
+          {selectedSiteBoundary ? <SiteParcelOverlay candidate={selectedSiteBoundary} /> : null}
           <MapOverlayLayer
             renderableProspects={renderableProspects}
             terraMode={terraMode}
@@ -2585,10 +2614,12 @@ export default function HomePage() {
             queryClient.setQueryData<Prospect[]>(['/api/prospects'], items => items?.map(merge));
             void queryClient.invalidateQueries({queryKey:['/api/prospects']});
           }}
-          evidenceContent={selectedProspectMemoryAnchors.length ? <details className="rounded-lg border border-slate-200 bg-slate-50">
+          evidenceContent={selectedProspectMemoryAnchors.length ? <>
+            {selectedSiteInformation}
+            <details className="rounded-lg border border-slate-200 bg-slate-50">
             <summary className="cursor-pointer p-3 text-xs font-semibold">Linked property evidence ({selectedProspectMemoryAnchors.length})</summary>
             {selectedProspectMemoryAnchors.map(anchor => <MarketMemoryEvidence key={anchor.persistence?.importItemId || anchor.persistence?.dossierId || anchor.id} anchor={anchor} />)}
-          </details> : undefined}
+          </details></> : undefined}
           prospect={selectedProspect}
           saveStatus={prospectSaveStatus}
           beforePhoneSave={() => flushHomeQueuedSave(selectedProspect.id)}
@@ -2726,6 +2757,7 @@ export default function HomePage() {
       {selectedMarketMemoryAnchor && !propertyMemoryReviewOpen && !prospectMergeGroup ? (
         <MarketMemoryStoryPanel
           anchor={selectedMarketMemoryAnchor}
+          siteInformation={selectedSiteInformation}
           onClassificationSaved={(saved) => {
             const target = memoryClassificationTarget(saved);
             if (!target) return;

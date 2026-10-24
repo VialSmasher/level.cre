@@ -30,7 +30,7 @@ Contact identity changes retain the old roster version and create the new versio
 
 The per-row response includes `emailEnrichment` separately from activity acceptance and phone enrichment. Its status is `applied`, `unchanged`, `needs_review` or `not_requested`, with a reason and verified evidence. Claim an address saved only after owned-record readback. Never send or record another email to repair enrichment.
 
-The repository recorder accepts `-EmailVerification`, `-EmailEvidenceId`, `-EmailObservedAt`, `-ContactId`, and `-ExpectedEmailContactJson`. Invalid optional evidence is reported as a warning while valid activity is retained. New messages prefer RFC Internet Message-ID; augmenting an existing receipt preserves its established ID and original timestamp. The evening automation must use the upgraded repository recorder and these fields, rather than relying on activity acceptance alone.
+The repository recorder accepts `-EmailVerification`, `-EmailEvidenceId`, `-EmailObservedAt`, `-ContactId`, and `-ExpectedEmailContactJson`. Invalid optional evidence is reported as a warning while valid activity is retained. New messages prefer RFC Internet Message-ID; augmenting an existing receipt preserves its established ID and original timestamp. Verified augmentation prefers an already-retained exact owned source/provider receipt before cross-provider reconciliation, so an older rounded capture cannot replace its precise evidence. Interaction and event deduplication still apply. The evening automation must use the upgraded repository recorder and these fields, rather than relying on activity acceptance alone.
 
 ## Endpoints
 

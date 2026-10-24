@@ -15,6 +15,7 @@ public/
 .cache/
 out/
 .parcel-cache/
+.artifacts/gis-preview-dist/
 
 # Runtime data
 pids

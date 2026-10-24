@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "incremental": false
+  },
+  "include": ["apps/web/src/features/property-gis/**/*", "vite.gis-preview.config.ts"],
+  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"]
+}

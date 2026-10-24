@@ -82,7 +82,7 @@ export async function apiRequest(
   method: string,
   url: string,
   data?: unknown | undefined,
-  options: Pick<RequestInit, 'keepalive'> = {},
+  options: Pick<RequestInit, 'keepalive' | 'signal'> = {},
 ): Promise<Response> {
   const demoResult = getDemoApiResult(method, url, data);
   if (demoResult?.handled) return demoJsonResponse(demoResult);
