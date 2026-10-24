@@ -177,3 +177,10 @@ html, body, #root {
 .gmnoprint div {
   font-family: var(--font-sans) !important;
 }
+
+/* Keep a useful map above the sheet while explicitly inspecting a parcel. */
+@media (max-width: 767px) {
+  [data-testid="asset-profile"]:has([data-property-gis-boundary-visible="true"]) {
+    max-height: 44dvh;
+  }
+}

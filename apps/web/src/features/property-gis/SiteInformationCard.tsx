@@ -3,6 +3,7 @@ import { ExternalLink, LoaderCircle, MapPin, ScanLine } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSiteInformation, type SiteInformationLoader } from './useSiteInformation'
 import type { SiteBoundarySelection } from './siteSelection'
+import { useParcelCallInset } from './useParcelCallInset'
 
 type Props = {
   propertyKey: string
@@ -20,6 +21,7 @@ function displayDate(value: string | null | undefined, sourceCalendarDate = fals
 export function SiteInformationCard({ propertyKey, load, onBoundaryChange }: Props) {
   const state = useSiteInformation(load)
   const { info, candidate, loading, error, showBoundary } = state
+  const { sectionRef, inset } = useParcelCallInset(Boolean(showBoundary && candidate))
 
   useEffect(() => {
     onBoundaryChange(showBoundary && candidate ? { propertyKey, candidate } : null)
@@ -27,7 +29,7 @@ export function SiteInformationCard({ propertyKey, load, onBoundaryChange }: Pro
   useEffect(() => () => onBoundaryChange(null), [onBoundaryChange])
 
   return (
-    <section aria-label="Site information" className="border-t border-slate-200 px-4 py-3">
+    <section ref={sectionRef} aria-label="Site information" data-property-gis-boundary-visible={Boolean(showBoundary && candidate)} className="border-t border-slate-200 px-4 py-3">
       <div className="flex items-center justify-between gap-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900"><ScanLine className="h-4 w-4 text-blue-700" aria-hidden />Site information</h3>
         {info ? <span className="rounded bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600">Not linked</span> : null}
@@ -100,6 +102,7 @@ export function SiteInformationCard({ propertyKey, load, onBoundaryChange }: Pro
       {!candidate ? <Button type="button" variant={info ? 'ghost' : 'outline'} size="sm" className={`mt-2 min-h-11 text-xs ${info ? 'text-slate-600' : 'w-full'}`} disabled={loading} onClick={() => void state.refresh()}>
         {error ? 'Retry' : info ? 'Refresh' : 'Check parcel'}
       </Button> : null}
+      {inset > 0 ? <div aria-hidden="true" data-property-gis-call-clearance style={{ height: inset }} /> : null}
     </section>
   )
 }

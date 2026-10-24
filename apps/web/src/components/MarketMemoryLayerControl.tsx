@@ -35,7 +35,7 @@ export function MarketMemoryLayerControl({ anchors, visibleLayers, onOpenPreview
 
   const pendingCount = anchors.filter((anchor) => anchor.persistence?.state === 'pending').length
   const panel = (
-    <div className="w-64 rounded-lg border border-slate-200 bg-white/95 shadow-xl backdrop-blur-sm">
+    <div data-property-gis-occluder className="w-64 rounded-lg border border-slate-200 bg-white/95 shadow-xl backdrop-blur-sm">
       <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2.5">
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
@@ -88,6 +88,7 @@ export function MarketMemoryLayerControl({ anchors, visibleLayers, onOpenPreview
           onClick={() => setMobileOpen((open) => !open)}
           aria-expanded={mobileOpen}
           aria-label="Toggle brokerage memory controls"
+          data-property-gis-occluder
         >
           <Layers3 className="h-4 w-4 text-blue-700" />
           Memory

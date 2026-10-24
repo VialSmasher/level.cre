@@ -3,6 +3,16 @@ import type { SiteParcelCandidate } from './siteSelection'
 export type ViewportRect = { left: number; top: number; width: number; height: number }
 export type ParcelBounds = { north: number; south: number; east: number; west: number }
 
+/** Space needed to scroll the last action clear of a floating call card. */
+export function bottomOverlayInset(viewport: ViewportRect, overlays: ViewportRect[], gutter = 12): number {
+  const bottom = viewport.top + viewport.height
+  return overlays.reduce((inset, overlay) => {
+    const overlaps = overlay.left < viewport.left + viewport.width && overlay.left + overlay.width > viewport.left
+      && overlay.top < bottom && overlay.top + overlay.height > viewport.top
+    return overlaps ? Math.max(inset, Math.min(viewport.height, bottom - overlay.top) + gutter) : inset
+  }, 0)
+}
+
 /** Read all rings and parts without changing the municipality's geometry. */
 export function parcelBounds(boundary: SiteParcelCandidate['boundary']): ParcelBounds | null {
   const polygons = boundary.type === 'Polygon' ? [boundary.coordinates] : boundary.coordinates
@@ -67,7 +77,7 @@ export function parcelViewportFit(bounds: ParcelBounds, map: ViewportRect, panel
 /** Only measured, displayed panels count; desktop preview already reduces canvas width. */
 export function measureParcelViewport(element: HTMLElement) {
   const map = element.getBoundingClientRect()
-  const panels = Array.from(element.ownerDocument.querySelectorAll<HTMLElement>('[data-testid="asset-profile"], [data-property-gis-panel]'))
+  const panels = Array.from(element.ownerDocument.querySelectorAll<HTMLElement>('[data-testid="asset-profile"], [data-property-gis-panel], [data-property-gis-occluder], [aria-label="Pending map call"]'))
     .filter(panel => panel.getClientRects().length > 0)
     .map(panel => panel.getBoundingClientRect())
   return { map, panels }
