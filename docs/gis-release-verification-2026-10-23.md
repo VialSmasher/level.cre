@@ -2,13 +2,13 @@
 
 Date: October 23, 2026
 
-Status: locally verified release candidate, feature off by default. Not deployed. No production database writes, migrations, flags or imports were performed. Authenticated staging verification remains outstanding.
+Status: API deployment `018099c0-6b68-4673-a146-726acfbe0c0b` is successful with GIS disabled. The production-target frontend candidate is READY but is not assigned to `level-cre.vercel.app`. Existing startup schema checks ran; all four checksummed migrations were already applied. No GIS data imports, broker record edits, or feature-flag changes were performed. Authenticated main-map verification is blocked at the protected deployment sign-in.
 
 ## Authoritative checkout
 
 Use `C:/Users/patri/.codex/worktrees/gis-readonly-release/level.cre` for the next release step. The earlier prototype in `C:/Users/patri/Documents/GitHub/level.cre` is on an older, heavily modified baseline and must not be deployed wholesale.
 
-This isolated managed worktree starts at `1bcf864a9fd7135f8df7b2b2dffad6120a8b21cd`, the Git SHA reported by the latest ready production Vercel deployment (`dpl_59NkqFrcncBE84LPkYLfzsoUWXBn`). That deployment was a redeploy; metadata is not proof that every uploaded file equals the commit. Compare deployed backend/frontend versions again before rollout. No release commit or push was made.
+This isolated managed worktree starts at `1bcf864a9fd7135f8df7b2b2dffad6120a8b21cd`, the Git SHA reported by the existing live frontend (`dpl_59NkqFrcncBE84LPkYLfzsoUWXBn`). The verified-email-receipt correction from the newer live API commit `4b117619a3ecc4fd4859188ffe8caa16fcb74792` was preserved before release. The exact deployable implementation is commit `7df308dc0317d8f22a2e744dd170df2f6912b29e` on local branch `codex/gis-readonly-release-2026-10-23`. No branch push or merge was made.
 
 The surgical integration preserves the newer Property / Contact / Activity tabs, classification controls, long-held registration evidence, and canonical property/occupant model.
 
@@ -60,7 +60,7 @@ Images 01-09 are intermediate audit evidence, not the final release appearance. 
 
 ## Gemini Argon review
 
-Review conversation: https://gemini.google.com/app/45a87b5a0e4c990c
+Review conversation, verified from the open Argon tab: https://gemini.google.com/app/b1e301c3aa379d3d
 
 Only four public-sample screenshots (04, 05, 06, 08) and product context were shared. No client files, CRM screenshots, contact data, tokens or private dossier data were uploaded.
 
@@ -72,7 +72,7 @@ Pushed back: its exact occlusion percentages/pixel positions were not valid meas
 
 - GIS regression suite: **61/61 passed**.
 - Existing web suite: **173/173 passed**.
-- Existing API suite: **328/328 passed** under the exact-version x64 runtime described below.
+- Existing API suite: **329/329 passed** after preserving the newer live correction, under the exact-version x64 runtime described below. The earlier pre-graft run was 328/328.
 - API TypeScript check: passed.
 - Focused GIS UI/config TypeScript check: passed.
 - Main web build with `VITE_PROPERTY_GIS_PREVIEW_ENABLED=1`: passed.
@@ -88,6 +88,21 @@ Run the API test script with that Node from `apps/api`; set `ESBUILD_BINARY_PATH
 
 Dependency audit reported 31 existing advisories (2 critical, 19 high, 9 moderate, 1 low). Critical proxy-addr2.0.7's subnet path is not used by the app's numeric `trust proxy=1` configuration; no req.ip/req.ips consumers were found. Critical shell-quote1.8.3 was in development/optional tooling, not a GIS request-to-shell path. This is limited triage, not a claim the entire dependency tree is safe. Schedule a separately tested dependency-maintenance pass; no blind audit fix or major upgrades were mixed into GIS.
 
+## Deployment receipt and remaining gate
+
+Story: select an existing owned property on the main map, request its municipal parcel, resolve its saved canonical location, retrieve public municipal evidence, and display a separate preview boundary with source-backed area/zoning without saving or moving the property.
+
+- Exact package: `C:/Users/patri/Documents/GitHub/level.cre/work/gis-release-audit/release-7df308d`, 448 source files, 8,389,457 bytes. Content SHA256 `ff207251961571f403caa10c0ac5bd9c1fc88712de73ef4fdfcc24ee1423cab6`. All source bytes and migration hashes were rechecked before upload.
+- Railway API: `018099c0-6b68-4673-a146-726acfbe0c0b`, SUCCESS. The minimal readiness gate waits for `/health` (120 seconds); inherited build/start commands were retained. Startup reports all four migrations already applied and migrations current. `/health` and `/api/version` return 200; the latter has commit:null because this is a local source upload.
+- Disabled GIS routes: GET site-information and POST parcel-match/preview both return 404 with private/no-store. Unauthenticated `/api/prospects` returns 401. `PROPERTY_GIS_PREVIEW_ENABLED` remains absent/off.
+- Vercel candidate: `dpl_CLweyE1a89shtwWSoiR5ng84Ag3p`, READY, production target built with `VITE_PROPERTY_GIS_PREVIEW_ENABLED=1`, using `--skip-domain`. URL: https://level-57dvuu5om-livingstonpatrick1-gmailcoms-projects.vercel.app/app . Build logs confirm success in 33 seconds, including the 118.41 KB home chunk.
+- `level-cre.vercel.app` was independently checked after the candidate completed and still points to `dpl_59NkqFrcncBE84LPkYLfzsoUWXBn`. The CLI assigned its auxiliary project alias to the candidate; the canonical app was not promoted.
+- Source provenance warning: Vercel auto-detected the parent original workspace's Git metadata (`300b9f0`), not the exported source. Do not use that inherited metadata as the candidate baseline. The uploaded `_release-manifest.json` source UID `f8e3ee4af1423dc9a5d758d8c0c4f9bc0ef8dac1` exactly matches the local manifest SHA1, whose recorded source commit is `7df308d`; custom release metadata was also supplied.
+- Browser boundary: the exact candidate URL redirects to Vercel sign-in. The normal authenticated CLI request did not pass protection. Auto-review refused the connector's temporary bypass-link method because it needs separate authorization. No access-control settings were changed, no temporary link was created by that refused call, and no workaround was attempted. The candidate tab is left at sign-in for Patrick.
+- Required next input: Patrick signs into Vercel and Level CRE in the candidate tab, or explicitly approves a narrowly scoped temporary Vercel access link (which still does not replace Level CRE authentication). Then enable the backend for the read-only authenticated canary, perform the main-map checks below, and only then promote the frontend. Do not treat this as completed end-to-end production verification.
+
+The implementation is read-only; durable parcel linking, approval storage and agent proposal scopes remain later work. The rollout receipt and exporter are also saved in the original workspace's `work/gis-release-audit/`.
+
 ## Release gates and next safe step
 
 ### October 23 authorized rollout preparation
@@ -102,11 +117,11 @@ A feature-disabled backend rollout followed by an explicitly labelled, authentic
 
 The earlier staging recommendation below is superseded by this verified feature-level rollout plan. The authenticated Google Maps checks remain mandatory. Known nonblocking limits: changing Property/Contact/Activity tabs clears the preview, and very tall mobile panels may leave too little visible map for a full boundary fit.
 
-1. Confirm an isolated backend/database/auth environment. Vercel's existing `/api` rewrite targets production Railway even for frontend previews. Do not call that staging.
-2. Review backend startup before deploying: npm prestart runs migrations, and normal route registration can ensure/create tables. No full app server was started against a live database during this task.
-3. Rehearse an approved existing standalone dossier and a linked canonical-property/occupant case in the authenticated main app. Confirm actual Google Maps padding, no point changes, correct tenant scope, source failures, closing/tab switching, manual pan, and expired-session retry. The public mobile frame is not proof of the full production panel geometry.
-4. Recheck source/deployment parity and the migration plan, then obtain rollout direction. Flags remain off by default: backend `PROPERTY_GIS_PREVIEW_ENABLED=1`, frontend `VITE_PROPERTY_GIS_PREVIEW_ENABLED=1` only in the approved environment.
-5. Broker-reviewed parcel linking, idempotent decision storage, historical snapshots and narrow agent read/proposal scopes remain later work. Do not bulk-import or represent the preview as durable enrichment.
+1. Resolve the protected-deployment/browser sign-in boundary without weakening access controls. Deployment is already authorized; only additional access-link authority, if chosen, is outstanding.
+2. Recheck current deployment state before continuing. Vercel's existing `/api` rewrite targets production Railway even for the candidate. Do not call that isolated staging.
+3. Enable the backend only for the controlled read-only main-app canary. Rehearse an approved existing standalone dossier and a linked canonical-property/occupant case. Confirm actual Google Maps padding, no point changes, correct tenant scope, source failures, rapid asset switching/closing, Property/Contact/Activity tabs, manual pan, and expired-session retry. The public mobile frame is not proof of the full production panel geometry.
+4. Promote only after these checks pass. Preserve the recorded rollback targets and feature flags; record the exact promoted deployment and confirm the main alias afterward.
+5. Do not bulk-import or represent the preview as durable enrichment.
 
 ## Local run
 
