@@ -5,12 +5,21 @@ export type ParcelBounds = { north: number; south: number; east: number; west: n
 
 /** Space needed to scroll the last action clear of a floating call card. */
 export function bottomOverlayInset(viewport: ViewportRect, overlays: ViewportRect[], gutter = 12): number {
+  if (viewport.width <= 0 || viewport.height <= 0 || !Object.values(viewport).every(Number.isFinite)) return 0
   const bottom = viewport.top + viewport.height
   return overlays.reduce((inset, overlay) => {
     const overlaps = overlay.left < viewport.left + viewport.width && overlay.left + overlay.width > viewport.left
       && overlay.top < bottom && overlay.top + overlay.height > viewport.top
     return overlaps ? Math.max(inset, Math.min(viewport.height, bottom - overlay.top) + gutter) : inset
   }, 0)
+}
+
+/** Bound clearance to the visible outer profile, never its intrinsic contents. */
+export function profileCallInset(profile: ViewportRect, overlays: ViewportRect[], viewportHeight: number, viewportTop = 0): number {
+  if (!Number.isFinite(viewportHeight) || !Number.isFinite(viewportTop) || viewportHeight <= 0) return 0
+  const top = Math.max(profile.top, viewportTop)
+  const bottom = Math.min(profile.top + profile.height, viewportTop + viewportHeight)
+  return bottomOverlayInset({ left: profile.left, top, width: profile.width, height: Math.max(0, bottom - top) }, overlays)
 }
 
 /** Read all rings and parts without changing the municipality's geometry. */

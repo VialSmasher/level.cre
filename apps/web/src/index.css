@@ -182,5 +182,20 @@ html, body, #root {
 @media (max-width: 767px) {
   [data-testid="asset-profile"]:has([data-property-gis-boundary-visible="true"]) {
     max-height: 44dvh;
+    display: block;
+    overflow-y: auto;
+    scroll-padding-top: 5rem;
+  }
+  [data-testid="asset-profile"]:has([data-property-gis-boundary-visible="true"]) [data-property-gis-profile-header] {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: white;
+  }
+  [data-testid="asset-profile"]:has([data-property-gis-boundary-visible="true"]) [data-property-gis-story-tabs] {
+    display: block;
+  }
+  [data-testid="asset-profile"]:has([data-property-gis-boundary-visible="true"]) [data-property-gis-story-scroll] {
+    overflow: visible;
   }
 }

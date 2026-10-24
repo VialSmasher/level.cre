@@ -26,15 +26,25 @@ test('standalone Escape closes through onClose only after child overlays have ha
 
 test('memory classification remains inside scrollable property content, after site information', () => {
   const panel = read('../../components/MarketMemoryStoryPanel.tsx')
-  const scroll = panel.indexOf('<ScrollArea')
+  const scroll = panel.indexOf('<div ref={bodyRef} data-property-gis-story-scroll')
   const site = panel.indexOf('{siteInformation}', scroll)
   const classification = panel.indexOf('<MemoryClassificationPicker', scroll)
   assert.ok(scroll >= 0 && site > scroll && classification > site)
 })
 
+test('switching memory assets resets both native scrollers and the tab without resetting on ordinary renders', () => {
+  const panel = read('../../components/MarketMemoryStoryPanel.tsx')
+  assert.match(panel, /useEffect\(\(\) => \{\s*setActiveTab\('property'\)\s*if \(profileRef\.current\) profileRef\.current\.scrollTop = 0\s*if \(bodyRef\.current\) bodyRef\.current\.scrollTop = 0\s*titleRef\.current\?\.focus\(\{ preventScroll: true \}\)\s*\}, \[anchor\.id, anchor\.persistence\?\.state\]\)/)
+  assert.match(panel, /<aside\s+ref=\{profileRef\}/)
+  assert.match(panel, /<div ref=\{bodyRef\} data-property-gis-story-scroll/)
+})
+
 test('call clearance observes layout without camera or call mutations', () => {
   const hook = read('./useParcelCallInset.ts')
   assert.match(hook, /new ResizeObserver\(measure\)/)
+  assert.match(hook, /profile\.getBoundingClientRect\(\)/)
+  assert.match(hook, /observer\.observe\(profile\)/)
+  assert.doesNotMatch(hook, /data-radix-scroll-area-viewport|observer\.observe\(viewport\)/)
   assert.match(hook, /observer\.disconnect\(\)/)
   assert.doesNotMatch(hook, /moveCamera|setView|panTo|setZoom|calling\.|\.confirm\(|\.discard\(/)
   const overlay = read('./SiteParcelOverlay.tsx')

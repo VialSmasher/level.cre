@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { bottomOverlayInset, measureParcelViewport, parcelBounds, parcelViewportFit, visibleMapRect, type ViewportRect } from './parcelViewport'
+import { bottomOverlayInset, measureParcelViewport, parcelBounds, parcelViewportFit, profileCallInset, visibleMapRect, type ViewportRect } from './parcelViewport'
 
 const boundary = { type: 'Polygon' as const, coordinates: [[[-113.574, 53.577], [-113.572, 53.577], [-113.572, 53.579], [-113.574, 53.579], [-113.574, 53.577]]] as [number, number][][] }
 const bounds = parcelBounds(boundary)!
@@ -58,6 +58,28 @@ test('pending-call clearance lets the last action scroll above the card without 
   assert.equal(bottomOverlayInset(viewport, []), 0)
   // At maximum scroll the last button bottom has at least 12px above the call.
   assert.equal(viewport.top + viewport.height - bottomOverlayInset(viewport, [call]), call.top - 12)
+})
+
+test('actual mobile profile clearance converges independently of an expanding intrinsic scroller', () => {
+  const profile = { left: 8, top: 464.6458, width: 374, height: 371.3542 }
+  const call = { left: 12, top: 623.1667, width: 366, height: 140.8333 }
+  const expected = 836 - call.top + 12
+  let intrinsicHeight = 124998.94
+  for (let frame = 0; frame < 100; frame++) {
+    // The former Radix viewport expanded with the spacer. Its height is not an
+    // input to the new measurement, so repeated ResizeObserver delivery settles.
+    const measured = profileCallInset(profile, [call], 844)
+    assert.ok(Math.abs(measured - expected) < 0.0001)
+    assert.ok(measured <= profile.height + 12)
+    intrinsicHeight += measured
+  }
+  assert.ok(intrinsicHeight > 124998.94)
+  const navSafeProfile = { ...profile, top: profile.top - 64 }
+  assert.ok(Math.abs(profileCallInset(navSafeProfile, [call], 844) - (expected - 64)) < 0.0001)
+  assert.ok(profileCallInset(profile, [call], 700) <= 700 - call.top + 12)
+  assert.equal(profileCallInset(profile, [call], 400), 0)
+  assert.equal(profileCallInset(profile, [call], NaN), 0)
+  assert.equal(bottomOverlayInset({ ...profile, height: 0 }, [call]), 0)
 })
 
 test('viewport measurement includes displayed control boxes and call card, not invisible desktop duplicates', () => {
