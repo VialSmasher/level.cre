@@ -2,7 +2,7 @@
 
 Date: October 23, 2026
 
-Status: API deployment `018099c0-6b68-4673-a146-726acfbe0c0b` is successful with GIS disabled. The production-target frontend candidate is READY but is not assigned to `level-cre.vercel.app`. Existing startup schema checks ran; all four checksummed migrations were already applied. No GIS data imports, broker record edits, or feature-flag changes were performed. Authenticated main-map verification is blocked at the protected deployment sign-in.
+Status: API deployment `018099c0-6b68-4673-a146-726acfbe0c0b` is successful with GIS disabled. The production-target frontend candidate is READY but is not assigned to `level-cre.vercel.app`. Existing startup schema checks ran; all four checksummed migrations were already applied. No GIS data imports, broker record edits, or feature-flag changes were performed. Patrick approved the exact candidate's 30-minute Vercel access link, which works. Authenticated main-map verification is now blocked by Level CRE's OAuth callback returning to the old canonical deployment instead of the candidate.
 
 ## Authoritative checkout
 
@@ -104,6 +104,16 @@ Story: select an existing owned property on the main map, request its municipal 
 The implementation is read-only; durable parcel linking, approval storage and agent proposal scopes remain later work. The rollout receipt and exporter are also saved in the original workspace's `work/gis-release-audit/`.
 
 ## Release gates and next safe step
+
+### Follow-up: approved temporary access and OAuth callback gate
+
+Patrick explicitly approved a 30-minute access link for candidate `dpl_CLweyE1a89shtwWSoiR5ng84Ag3p` only and reaffirmed promotion after successful map testing. The deployment-specific shareable link was created with TTL1800; expiry is Unix1792815631 (04:20:31UTC, October24). Its capability token is deliberately not saved here or in the repository. No project-wide protection setting was changed.
+
+The candidate opened successfully through Vercel protection. The normal Continue with Google flow selected Patrick's existing account and requested `https://level-57dvuu5om-livingstonpatrick1-gmailcoms-projects.vercel.app/auth/callback`. Supabase returned instead to `https://level-cre.vercel.app/`, then the existing authenticated Today page. Reopening the candidate still shows its sign-in page, so there is no authenticated candidate session and no valid main-map acceptance yet.
+
+Source `AuthContext.tsx` correctly uses the current origin plus `/auth/callback`. This points to a missing/mismatched Supabase redirect allowlist entry, but the configuration could not be inspected: the connected Supabase tool denied access to live project `glgeqzgyvefcelzmdnte`. No alternative privileged credential, session transfer, manual OAuth-code transfer, or auth-setting workaround was attempted.
+
+Next authority needed: permission and appropriate project access to inspect the live Supabase URL configuration and, if missing, temporarily add only that exact candidate callback URL, removing it after verification. Do not add wildcard origins or change the production Site URL. Keep the GIS backend disabled and main frontend alias unchanged until this auth boundary and then the actual map checks pass.
 
 ### October 23 authorized rollout preparation
 
