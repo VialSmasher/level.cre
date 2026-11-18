@@ -251,7 +251,8 @@ async function upsertSalesActivityImport(
         email_domain = EXCLUDED.email_domain,
         subject = EXCLUDED.subject,
         notes = EXCLUDED.notes,
-        activity_at = CASE WHEN public.sales_activity_imports.activity_status IN ('sent', 'received')
+        activity_at = CASE WHEN $22::boolean THEN EXCLUDED.activity_at
+          WHEN public.sales_activity_imports.activity_status IN ('sent', 'received')
           THEN COALESCE(public.sales_activity_imports.activity_at, EXCLUDED.activity_at) ELSE EXCLUDED.activity_at END,
         prospect_id = COALESCE(public.sales_activity_imports.prospect_id, EXCLUDED.prospect_id),
         listing_id = COALESCE(public.sales_activity_imports.listing_id, EXCLUDED.listing_id),
@@ -291,6 +292,12 @@ async function upsertSalesActivityImport(
       match.confidence,
       interactionId,
       JSON.stringify(activity.rawPayload),
+      // Explicit reconciliation only, using proof for this exact provider message.
+      Boolean(activity.rawPayload.reconcileVerifiedTimestamp === true && activity.activityAt
+        && activity.activityType === 'email'
+        && activity.emailEvidence?.providerMessageId === activity.externalActivityId
+        && ((activity.activityStatus === 'sent' && activity.direction === 'outbound' && activity.emailEvidence?.verification === 'matched_sent_items')
+          || (activity.activityStatus === 'received' && activity.direction === 'inbound' && activity.emailEvidence?.verification === 'matched_inbox'))),
     ],
   );
   return { row: result.rows[0], existing: existingRow };

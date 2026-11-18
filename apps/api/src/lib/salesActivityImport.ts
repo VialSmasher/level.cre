@@ -293,6 +293,7 @@ export function normalizeSalesActivityInput(
       ...(partial.contactPhone ? {contactPhone:partial.contactPhone,phoneEvidence:partial.phoneEvidence} : {}),
       ...(partial.phoneCaptureIssue ? {phoneCaptureIssue:partial.phoneCaptureIssue} : {}),
       ...(partial.emailEvidence ? {emailEvidence:partial.emailEvidence} : {}),
+      ...(input.reconcileVerifiedTimestamp === true ? { reconcileVerifiedTimestamp: true } : {}),
       ...(partial.emailCaptureIssue ? {emailCaptureIssue:partial.emailCaptureIssue} : {}),
       ...(partial.expectedEmailContact ? {expectedEmailContact:partial.expectedEmailContact} : {}),
       company: partial.company,

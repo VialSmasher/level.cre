@@ -873,3 +873,40 @@ test('a matched activity with pursuit context automatically links the prospect t
     userId: 'user-1',
   }]);
 });
+
+
+test('timestamp reconciliation requires explicit opt-in and exact direction-safe Outlook proof', async () => {
+  for (const entry of [
+    { status: 'sent', verification: 'matched_sent_items', optIn: true, id: '<message@example.com>', expected: true },
+    { status: 'received', verification: 'matched_inbox', optIn: true, id: '<message@example.com>', expected: true },
+    { status: 'sent', verification: 'matched_sent_items', optIn: false, id: '<message@example.com>', expected: false },
+    { status: 'sent', verification: 'matched_inbox', optIn: true, id: '<message@example.com>', expected: false },
+    { status: 'received', verification: 'matched_sent_items', optIn: true, id: '<message@example.com>', expected: false },
+    { status: 'sent', verification: 'matched_sent_items', optIn: true, id: '<different@example.com>', expected: false },
+    { status: 'sent', verification: null, optIn: true, id: '<message@example.com>', expected: false },
+  ]) {
+    let timestampOptIn: unknown;
+    const pool = transactionalPool(async (sql: string, params?: unknown[]) => {
+      if (sql.includes('SELECT id, interaction_id') && sql.includes('sales_activity_imports')) return { rows: [{ id: 'existing', interaction_id: null }] };
+      if (sql.includes('INSERT INTO public.sales_activity_imports')) {
+        assert.match(sql, /activity_at = CASE WHEN \$22::boolean THEN EXCLUDED.activity_at/);
+        timestampOptIn = params?.[21];
+        return { rows: [{ id: 'existing', interaction_id: null, match_status: 'needs_review', prospect_id: null }] };
+      }
+      return { rows: [], rowCount: 0 };
+    });
+    const result = await importSalesActivityBatch({ pool, userId: 'owner',
+      storage: { createContactInteraction: async () => { throw new Error('No new interaction permitted'); } },
+      payload: SalesActivityBatchSchema.parse({ createInteractions: false, source: 'outlook_sync', activities: [{
+        externalActivityId: '<message@example.com>', status: entry.status, activityType: 'email',
+        email: 'person@example.com', subject: 'Facility', activityAt: '2026-10-06T19:00:00Z',
+        reconcileVerifiedTimestamp: entry.optIn,
+        ...(entry.verification ? { emailEvidence: { source: 'outlook_desktop', verification: entry.verification,
+          providerMessageId: entry.id, observedAt: '2026-11-18T19:10:00Z' } } : {}),
+      }] }),
+    });
+    assert.equal(result.errors, 0);
+    assert.equal(timestampOptIn, entry.expected, JSON.stringify(entry));
+    assert.equal(result.createdInteractions, 0);
+  }
+});

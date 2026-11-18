@@ -27,3 +27,7 @@ unmatched evidence for review rather than creating a prospect or pin from email.
 Distinct RFC Message-IDs must remain separate during sales-import and interaction
 reconciliation even when the recipient, subject and 15-minute window match.
 The legacy subject/time fallback remains available for opaque historic provider IDs.
+
+Historical timestamp correction uses explicit reconcileVerifiedTimestamp=true
+only with valid Outlook proof for the same provider message and direction.
+Ordinary retries retain the existing immutable import timestamp.
