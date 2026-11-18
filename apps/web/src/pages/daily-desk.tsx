@@ -41,6 +41,7 @@ import {
   type ProspectMergeDialogCandidate,
 } from '@/features/prospect-merge/ProspectMergeDialog'
 import { PageHeader } from '@/components/ui/page-header'
+import { DeskCodexSync } from '@/components/DeskCodexSync'
 import {
   Select,
   SelectContent,
@@ -904,6 +905,7 @@ export default function DailyDeskPage() {
           actions={(
             <>
             {generatedAt ? <span className="hidden text-xs text-slate-600 sm:inline">Updated {generatedAt}</span> : null}
+            <DeskCodexSync onSettled={refresh} />
             <Button variant="outline" size="sm" onClick={refresh} disabled={isLoading}>
               <RefreshCw className={cn('h-4 w-4', isLoading && 'animate-spin')} />
               Refresh

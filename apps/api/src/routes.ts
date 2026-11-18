@@ -62,6 +62,7 @@ import { XP_VALUES, actionForInteractionType, xpForInteractionType } from './lib
 import { ProspectReferenceError, requireActiveOwnedProspect } from './lib/prospectReferenceService';
 import { registerIndustrialIntelRoutes } from './modules/industrial-intel/registerRoutes';
 import { registerPropertyGisRoutes } from './modules/property-gis/registerRoutes';
+import { registerDeskSync } from './modules/desk-sync/registerRoutes';
 import {
   buildDataQualityReview,
   buildFollowUpReview,
@@ -7798,6 +7799,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // GIS requests finish before Intel's write-capable agent audit middleware.
+  registerDeskSync(app, pool);
   registerPropertyGisRoutes(app, pool);
   registerIndustrialIntelRoutes(app);
 
