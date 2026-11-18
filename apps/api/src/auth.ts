@@ -1,5 +1,16 @@
 const PHONE_ENRICHMENT_PREFIX = '/api/agent/phone-enrichment';
 
+const SALES_ACTIVITY_READ_ROUTES = new Set([
+  '/api/automation/sales-brief',
+  '/api/automation/activity-pulse',
+  '/api/agent/sales-activity/imports',
+  '/api/activity-events',
+]);
+
+export function salesActivityReadRouteAllowed(method: string, path: string): boolean {
+  return method === 'GET' && SALES_ACTIVITY_READ_ROUTES.has(path);
+}
+
 export function phoneEnrichmentRouteAllowed(method: string, path: string): boolean {
   return (method === 'GET' && path === PHONE_ENRICHMENT_PREFIX + '/context')
     || (method === 'POST' && path === PHONE_ENRICHMENT_PREFIX + '/batch')
@@ -174,6 +185,21 @@ export function getUserId(req: Request): string {
 
 // Middleware for routes that need authentication but allow demo mode
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  // Reuse the existing sales credential only for these owner-filtered read handlers.
+  // No general agent key, broker approval, or mutation permission is granted here.
+  const salesReadUser = salesActivityReadRouteAllowed(req.method, req.path)
+    ? getConfiguredSalesActivityAgent(req)
+    : null
+  if (salesReadUser) {
+    ;(req as any).user = {
+      id: salesReadUser.id,
+      email: salesReadUser.email,
+      role: 'sales_activity_agent',
+      agentName: salesReadUser.agentName,
+    }
+    return next()
+  }
+
   const agentUser = getConfiguredAgentUser(req)
   if (agentUser) {
     if (!legacyAgentRouteAllowed(req.method, req.path)) return res.status(403).json({ message: 'Use a scoped agent endpoint or broker authentication.' })
