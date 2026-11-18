@@ -23,3 +23,7 @@ Reconciliation must compare the original provider message IDs across both ledger
 then distinguish human replies, automatic replies, nondelivery and later outbound
 messages. A failed read is unknown, not evidence of missing activity. Retain
 unmatched evidence for review rather than creating a prospect or pin from email.
+
+Distinct RFC Message-IDs must remain separate during sales-import and interaction
+reconciliation even when the recipient, subject and 15-minute window match.
+The legacy subject/time fallback remains available for opaque historic provider IDs.

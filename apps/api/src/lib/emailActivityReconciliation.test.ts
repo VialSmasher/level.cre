@@ -445,3 +445,39 @@ test('reuses a native Outlook inbox interaction for the same received provider e
     prospectId: 'prospect-1',
   });
 });
+
+
+test('distinct RFC message IDs never merge adjacent sales receipts or interactions', async () => {
+  const activity = normalizeSalesActivityInput({
+    source: 'outlook_sync', externalActivityId: '<rail-reply@example.com>', status: 'sent',
+    activityType: 'email', email: 'greg@example.com', subject: 'Re: Property rail',
+    activityAt: '2026-10-06T19:08:14.642Z',
+  });
+  const rows = [{
+    id: 'opening', source: 'codex_followup', external_activity_id: '<opening@example.com>',
+    interaction_id: 'opening-interaction', prospect_id: 'prospect-1', match_status: 'matched',
+    subject: 'Property rail', email: 'greg@example.com', activity_at: '2026-10-06T18:54:17.372Z',
+  }];
+  const pool = { query: async () => ({ rows }) } as any;
+  assert.equal(await findMatchingSalesActivityImport({ pool, userId: 'owner', activity }), null);
+  assert.equal(await findMatchingSalesActivityInteraction({ pool, userId: 'owner', activity }), null);
+});
+
+test('same RFC message ID reconciles across sources and legacy opaque IDs still match', async () => {
+  for (const candidateId of ['<RAIL-REPLY@EXAMPLE.COM>', 'rail-reply@example.com', 'legacy-desktop-entry']) {
+    const activity = normalizeSalesActivityInput({
+      source: 'outlook_sync', externalActivityId: '<rail-reply@example.com>', status: 'sent',
+      activityType: 'email', email: 'greg@example.com', subject: 'Re: Property rail',
+      activityAt: '2026-10-06T19:08:14.642Z',
+    });
+    const pool = { query: async () => ({ rows: [{
+      id: 'receipt', source: 'codex_followup', external_activity_id: candidateId,
+      interaction_id: 'interaction-1', prospect_id: 'prospect-1', match_status: 'matched',
+      subject: 'Property rail', email: 'greg@example.com', activity_at: '2026-10-06T19:08:00Z',
+    }] }) } as any;
+    assert.ok(await findMatchingSalesActivityImport({ pool, userId: 'owner', activity }), candidateId);
+    assert.deepEqual(await findMatchingSalesActivityInteraction({ pool, userId: 'owner', activity }), {
+      interactionId: 'interaction-1', prospectId: 'prospect-1',
+    });
+  }
+});

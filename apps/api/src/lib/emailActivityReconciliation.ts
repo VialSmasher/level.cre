@@ -39,6 +39,18 @@ function isReconcilableSalesActivitySource(source: string): boolean {
   );
 }
 
+// Distinct RFC Message-IDs identify different messages even within one fast reply thread.
+// Older connector/desktop IDs can still use the conservative legacy time/subject match.
+function providerMessageIdsConflict(left: string | null | undefined, right: string | null | undefined): boolean {
+  const normalize = (value: string | null | undefined): string | null => {
+    const candidate = String(value || '').trim().replace(/^<|>$/g, '').toLowerCase();
+    return /^[^<>\s@]+@[^<>\s@]+$/.test(candidate) ? candidate : null;
+  };
+  const leftId = normalize(left);
+  const rightId = normalize(right);
+  return Boolean(leftId && rightId && leftId !== rightId);
+}
+
 export function normalizeEmailActivitySubject(value: string | null | undefined): string {
   let normalized = String(value || '').trim().toLowerCase();
   while (/^(?:re|fw|fwd)\s*:\s*/i.test(normalized)) {
@@ -274,6 +286,7 @@ export async function findMatchingSalesActivityInteraction(params: {
     `
       SELECT
         candidate.interaction_id,
+        candidate.external_activity_id,
         candidate.prospect_id,
         candidate.subject,
         candidate.email,
@@ -309,7 +322,7 @@ export async function findMatchingSalesActivityInteraction(params: {
     ],
   );
 
-  const matching = rows.find((row) => isSameEmailActivity(
+  const matching = rows.find((row) => !providerMessageIdsConflict(activity.externalActivityId, row.external_activity_id) && isSameEmailActivity(
     { subject: activity.subject, counterpartyEmails: [activity.email], occurredAt },
     { subject: row.subject, counterpartyEmails: [row.email], occurredAt: row.activity_at },
   ));
@@ -380,7 +393,7 @@ export async function findMatchingSalesActivityImport(params: {
     ],
   );
 
-  const matching = rows.find((row) => isSameEmailActivity(
+  const matching = rows.find((row) => !providerMessageIdsConflict(activity.externalActivityId, row.external_activity_id) && isSameEmailActivity(
     { subject: activity.subject, counterpartyEmails: [activity.email], occurredAt },
     { subject: row.subject, counterpartyEmails: [row.email], occurredAt: row.activity_at },
   ));
