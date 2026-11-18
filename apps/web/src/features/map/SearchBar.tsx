@@ -621,7 +621,7 @@ export function SearchBar({
   };
 
   return (
-    <div className="relative w-full sm:w-[min(72vw,520px)]">
+    <div data-property-gis-occluder className="relative w-full sm:w-[min(72vw,520px)]">
       <div className="flex h-12 items-center gap-2 rounded-md border border-slate-300 bg-white px-2 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
         <Search className="ml-1 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
         <input

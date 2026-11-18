@@ -3,6 +3,25 @@ import type { SiteParcelCandidate } from './siteSelection'
 export type ViewportRect = { left: number; top: number; width: number; height: number }
 export type ParcelBounds = { north: number; south: number; east: number; west: number }
 
+/** Space needed to scroll the last action clear of a floating call card. */
+export function bottomOverlayInset(viewport: ViewportRect, overlays: ViewportRect[], gutter = 12): number {
+  if (viewport.width <= 0 || viewport.height <= 0 || !Object.values(viewport).every(Number.isFinite)) return 0
+  const bottom = viewport.top + viewport.height
+  return overlays.reduce((inset, overlay) => {
+    const overlaps = overlay.left < viewport.left + viewport.width && overlay.left + overlay.width > viewport.left
+      && overlay.top < bottom && overlay.top + overlay.height > viewport.top
+    return overlaps ? Math.max(inset, Math.min(viewport.height, bottom - overlay.top) + gutter) : inset
+  }, 0)
+}
+
+/** Bound clearance to the visible outer profile, never its intrinsic contents. */
+export function profileCallInset(profile: ViewportRect, overlays: ViewportRect[], viewportHeight: number, viewportTop = 0): number {
+  if (!Number.isFinite(viewportHeight) || !Number.isFinite(viewportTop) || viewportHeight <= 0) return 0
+  const top = Math.max(profile.top, viewportTop)
+  const bottom = Math.min(profile.top + profile.height, viewportTop + viewportHeight)
+  return bottomOverlayInset({ left: profile.left, top, width: profile.width, height: Math.max(0, bottom - top) }, overlays)
+}
+
 /** Read all rings and parts without changing the municipality's geometry. */
 export function parcelBounds(boundary: SiteParcelCandidate['boundary']): ParcelBounds | null {
   const polygons = boundary.type === 'Polygon' ? [boundary.coordinates] : boundary.coordinates
@@ -67,7 +86,7 @@ export function parcelViewportFit(bounds: ParcelBounds, map: ViewportRect, panel
 /** Only measured, displayed panels count; desktop preview already reduces canvas width. */
 export function measureParcelViewport(element: HTMLElement) {
   const map = element.getBoundingClientRect()
-  const panels = Array.from(element.ownerDocument.querySelectorAll<HTMLElement>('[data-testid="asset-profile"], [data-property-gis-panel]'))
+  const panels = Array.from(element.ownerDocument.querySelectorAll<HTMLElement>('[data-testid="asset-profile"], [data-property-gis-panel], [data-property-gis-occluder], [aria-label="Pending map call"]'))
     .filter(panel => panel.getClientRects().length > 0)
     .map(panel => panel.getBoundingClientRect())
   return { map, panels }

@@ -8,7 +8,6 @@ import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { AssetProfileTabs } from '@/features/map/AssetProfileTabs'
 import { MemoryClassificationPicker } from '@/features/property-memory/MemoryClassificationPicker'
 import { registrationHistory } from '@level-cre/shared'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import type { MarketMemoryAnchor, MarketMemoryLegalIdentity } from '@/lib/currentProjectsMarketMemory'
 import { PROSPECT_TYPE_META } from '@level-cre/shared/schema'
 
@@ -82,14 +81,31 @@ export function MarketMemoryStoryPanel({
   const [activeTab, setActiveTab] = useState('property')
   const titleId = useId()
   const titleRef = useRef<HTMLHeadingElement>(null)
+  const profileRef = useRef<HTMLElement>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
   const meta = storyMeta(anchor)
   const assetKind = anchor.persistence?.state === 'pending' ? 'memory_item' : anchor.persistence?.state === 'approved' ? 'dossier' : 'local_preview'
   const assetId = assetKind === 'memory_item' ? anchor.persistence?.importItemId : assetKind === 'dossier' ? anchor.persistence?.dossierId : anchor.id
 
 
   useEffect(() => {
+    setActiveTab('property')
+    if (profileRef.current) profileRef.current.scrollTop = 0
+    if (bodyRef.current) bodyRef.current.scrollTop = 0
     titleRef.current?.focus({ preventScroll: true })
   }, [anchor.id, anchor.persistence?.state])
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      // A child menu/dialog owns Escape first; the pending call itself is untouched.
+      if (document.querySelector('[data-map-call-overlay], [role="dialog"], [role="alertdialog"], [role="menu"][data-state="open"], [role="listbox"][data-state="open"]')) return
+      event.preventDefault()
+      onClose()
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [onClose])
 
   const primaryAction = onCompareDuplicates
     ? { label: 'Compare', Icon: GitMerge, onClick: onCompareDuplicates }
@@ -113,11 +129,12 @@ export function MarketMemoryStoryPanel({
 
   return (
     <aside
+      ref={profileRef}
       aria-labelledby={titleId}
       data-testid="asset-profile" data-asset-kind={assetKind} data-asset-id={assetId}
-      className="absolute bottom-2 left-2 right-2 z-[80] flex max-h-[74dvh] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl md:bottom-auto md:left-auto md:right-0 md:top-0 md:h-[90vh] md:max-h-[90vh] md:w-80 md:rounded-none md:border-y-0 md:border-r-0 md:border-l"
+      className="absolute bottom-[calc(4rem+env(safe-area-inset-bottom)+0.5rem)] left-2 right-2 z-[80] flex max-h-[74dvh] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl md:bottom-auto md:left-auto md:right-0 md:top-0 md:h-[90vh] md:max-h-[90vh] md:w-80 md:rounded-none md:border-y-0 md:border-r-0 md:border-l"
     >
-      <div className="border-b border-slate-200 px-4 py-3">
+      <div data-property-gis-profile-header className="shrink-0 border-b border-slate-200 px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap gap-1.5">
@@ -143,14 +160,16 @@ export function MarketMemoryStoryPanel({
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col">
-        <div className="space-y-4 border-b border-slate-100 px-4 py-3">
+      <Tabs data-property-gis-story-tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col">
+        <div className="shrink-0 border-b border-slate-100 px-4 py-3">
           <AssetProfileTabs />
-          <MemoryClassificationPicker key={anchor.persistence?.importItemId || anchor.persistence?.dossierId || anchor.id} anchor={anchor} onSaved={onClassificationSaved} />
         </div>
-        <ScrollArea className="min-h-0 flex-1">
+        <div ref={bodyRef} data-property-gis-story-scroll className="min-h-0 flex-1 overflow-y-auto">
           <TabsContent value="property" className="mt-0">
             {siteInformation}
+            <div className="border-b border-slate-100 px-4 py-3">
+              <MemoryClassificationPicker key={anchor.persistence?.importItemId || anchor.persistence?.dossierId || anchor.id} anchor={anchor} onSaved={onClassificationSaved} />
+            </div>
             <MarketMemoryEvidence anchor={anchor} onReviewContact={() => setActiveTab('contact')} />
           </TabsContent>
           <TabsContent value="contact" className="space-y-3 px-4 py-4 text-xs leading-5">
@@ -170,7 +189,7 @@ export function MarketMemoryStoryPanel({
             </div>
             {onWorkProspect ? <Button size="sm" variant="outline" onClick={onWorkProspect}>Open linked activity</Button> : null}
           </TabsContent>
-        </ScrollArea>
+        </div>
       </Tabs>
 
       {primaryAction ? (

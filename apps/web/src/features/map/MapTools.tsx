@@ -30,7 +30,7 @@ export function MapTools({
 
   // Wire these to your actual handlers as props or context
   return (
-    <div className="flex w-fit max-w-full items-center gap-0.5 overflow-x-auto rounded-md border border-slate-300 bg-white p-1 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
+    <div data-property-gis-occluder className="flex w-fit max-w-full items-center gap-0.5 overflow-x-auto rounded-md border border-slate-300 bg-white p-1 shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
       <button
         type="button"
         aria-label={mapType === 'hybrid' ? 'Show road map' : 'Show aerial map'}
