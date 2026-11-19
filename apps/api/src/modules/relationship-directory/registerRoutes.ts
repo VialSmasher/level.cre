@@ -1,45 +1,14 @@
 import type { Express, Request, Response, RequestHandler } from 'express';
 import type { Pool } from 'pg';
 import { z } from 'zod';
-import { getUserId, requireBrokerAuth, requireAccountIntelligenceAuth } from '../../auth';
+import { getUserId, requireBrokerAuth, requireAccountIntelligenceAuth, requireRelationshipMaintenanceAuth } from '../../auth';
+import { contactSnapshot, MaintenanceSchema, maintainDirectory } from './maintenance';
 import { coverage, FindingSchema, recordFinding, reviewFinding } from './findings';
 import { getCallingWorkspace, ProspectContactError } from '../../lib/prospectContactService';
 import { resolveCanonicalProspect, ProspectMergeServiceError } from '../../lib/prospectMergeService';
 import { industrialIntelAgentManifest } from '../industrial-intel/agentManifest';
-const text = (length: number) => z.string().trim().max(length).default('');
-const url = z.union([z.literal(''), z.string().url().max(2000).refine(value => {
-        try {
-            const parsed = new URL(value);
-            return parsed.protocol === 'https:' && !parsed.username && !parsed.password;
-        }
-        catch {
-            return false;
-        }
-    }, 'Use an HTTPS link.')]).default('');
-export const BrokerSchema = z.object({
-    name: z.string().trim().min(1).max(240),
-    firm: z.string().trim().min(1).max(240),
-    office: text(240),
-    email: z.union([z.literal(''), z.string().trim().email().max(320)]).default(''),
-    phone: text(80),
-    linkedinUrl: url.refine(value => {
-        try {
-            return !value || /(^|\.)linkedin\.com$/i.test(new URL(value).hostname);
-        }
-        catch {
-            return false;
-        }
-    }, 'Use a LinkedIn profile URL.'),
-    sourceUrl: url, notes: text(4000),
-    version: z.number().int().min(0), archived: z.boolean().default(false),
-}).strict();
-export const RelationshipSchema = z.object({
-    brokerId: z.string().uuid(), prospectId: z.string().min(1).max(240),
-    status: z.enum(['unverified', 'active', 'historical', 'ended']),
-    scope: text(500), notes: text(4000), sourceUrl: url,
-    learnedOn: z.string().date(), version: z.number().int().min(0),
-    archived: z.boolean().default(false),
-}).strict();
+import { BrokerSchema, RelationshipSchema } from './schemas';
+export { BrokerSchema, RelationshipSchema } from './schemas';
 const brokerColumns = `id, name, firm, office, email, phone, linkedin_url AS "linkedinUrl",
   source_url AS "sourceUrl", notes, version, archived`;
 const relationshipColumns = `r.id, r.broker_id AS "brokerId", r.prospect_id AS "prospectId",
@@ -72,7 +41,7 @@ export function registerRelationshipDirectory(app: Express, pool: Pool) {
     const base = '/api/desk/directory';
     const agentBase = '/api/intel/directory';
     app.get(agentBase + '/manifest', requireAccountIntelligenceAuth, handle(async (_req,res) => {
-      res.json(industrialIntelAgentManifest.capabilities.companyRelationships);
+      res.json({...industrialIntelAgentManifest.capabilities.companyRelationships,ownerId:getUserId(_req),maintenanceEnabled:process.env.ACCOUNT_INTELLIGENCE_AGENT_WRITE_ENABLED==='true'});
     }));
     const readAuth: RequestHandler = (req,res,next) => req.path.startsWith(agentBase)
       ? requireAccountIntelligenceAuth(req,res,next) : requireBrokerAuth(req,res,next);
@@ -113,7 +82,7 @@ export function registerRelationshipDirectory(app: Express, pool: Pool) {
         ) SELECT id,prospect_id AS "sourceProspectId",payload,status,created_at AS "createdAt"
           FROM public.directory_findings WHERE user_id=$1 AND prospect_id IN (SELECT id FROM aliases) AND status='observed' ORDER BY created_at`,
           [owner,resolved.canonicalProspectId]);
-        res.json({ ...workspace, relationships: links.rows, findings: findings.rows,
+        res.json({ ...workspace, contacts:workspace.contacts.map(c=>({...c,snapshotToken:contactSnapshot(c)})), relationships: links.rows, findings: findings.rows,
           coverage: coverage(workspace.contacts),
           reasoningRules: ['A director role establishes a recorded legal connection only. Verify property decision authority separately.',
             'Apply each relationship only to its recorded company, geography, date and scope.',
@@ -135,6 +104,15 @@ export function registerRelationshipDirectory(app: Express, pool: Pool) {
       const parsed = FindingSchema.safeParse(req.body)
       if (!parsed.success) return res.status(400).json({message:'Findings need a contact, source, date and valid company context.',issues:parsed.error.flatten()})
       return res.json(await recordFinding(pool,owner,parsed.data))
+    }))
+    app.post(agentBase + '/maintain', requireRelationshipMaintenanceAuth, handle(async(req,res,owner)=>{
+      const parsed=MaintenanceSchema.safeParse(req.body)
+      if(!parsed.success) return res.status(400).json({message:'Provide a sourced, dated relationship change using the maintenance contract.',issues:parsed.error.flatten()})
+      return res.json(await maintainDirectory(pool,owner,parsed.data))
+    }))
+    app.get(agentBase + '/changes', requireAccountIntelligenceAuth, handle(async(_req,res,owner)=>{
+      const changes=await pool.query('SELECT external_key AS "externalKey",request,before_record AS "beforeRecord",result,created_at AS "createdAt" FROM public.directory_changes WHERE user_id=$1 ORDER BY created_at DESC,id DESC LIMIT 100',[owner])
+      res.json({changes:changes.rows})
     }))
     app.post(base + '/findings/:id/review', requireBrokerAuth, handle(async (req,res,owner) => {
       const parsed = z.object({decision:z.enum(['accepted','rejected'])}).strict().safeParse(req.body)

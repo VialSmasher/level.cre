@@ -1,0 +1,42 @@
+[CmdletBinding()]
+param(
+  [ValidateSet('Manifest','Search','Company','Broker','Changes','Maintain','Finding')][string]$Action='Manifest',
+  [string]$Query,
+  [string]$Id,
+  [string]$BodyFile
+)
+Set-StrictMode -Version Latest
+$ErrorActionPreference='Stop'
+$configPath=Join-Path $env:USERPROFILE '.codex/secrets/levelcre-relationships.json'
+if(!(Test-Path -LiteralPath $configPath)){throw 'Private relationship access is not configured for this Windows profile.'}
+$config=Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+$base='https://levelcre-production.up.railway.app'
+if($config.baseUrl -ne $base){throw 'Unexpected relationship API origin.'}
+Add-Type -AssemblyName System.Security
+$bytes=[Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($config.encryptedApiKey),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
+$headers=@{Authorization='Bearer '+[Text.Encoding]::UTF8.GetString($bytes)}
+try {
+  $manifest=Invoke-RestMethod -Uri "$base/api/intel/directory/manifest" -Headers $headers -TimeoutSec 30
+  if($manifest.ownerId -ne $config.userId){throw 'Relationship credential identity mismatch. Stop and reconnect the intended owner.'}
+  $path=switch($Action){
+    Manifest {'/manifest'}
+    Search {'/search?search='+[Uri]::EscapeDataString($Query)}
+    Company {if(!$Id){throw 'Company ID is required.'};'/companies/'+[Uri]::EscapeDataString($Id)+'/brief'}
+    Broker {if(!$Id){throw 'Broker ID is required.'};'/brokers/'+[Uri]::EscapeDataString($Id)+'/brief'}
+    Changes {'/changes'}
+    Maintain {if(!$manifest.maintenanceEnabled){throw 'Owner-authorized maintenance is disabled.'};'/maintain'}
+    Finding {'/findings'}
+  }
+  if($Action -eq 'Manifest'){$manifest | ConvertTo-Json -Depth 40}
+  elseif($Action -in @('Maintain','Finding')){
+    if(!$BodyFile){throw 'A UTF-8 JSON BodyFile is required.'}
+    $body=[IO.File]::ReadAllText((Resolve-Path -LiteralPath $BodyFile),[Text.UTF8Encoding]::new($false,$true))
+    $null=$body | ConvertFrom-Json
+    Invoke-RestMethod -Method Post -Uri ($base+'/api/intel/directory'+$path) -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 30 | ConvertTo-Json -Depth 40
+  }else{
+    Invoke-RestMethod -Uri ($base+'/api/intel/directory'+$path) -Headers $headers -TimeoutSec 30 | ConvertTo-Json -Depth 40
+  }
+} finally {
+  [Array]::Clear($bytes,0,$bytes.Length)
+  $headers.Clear()
+}

@@ -12,6 +12,7 @@ const migrationNames = [
   '0022_desk_sync.sql',
   '0023_relationship_directory.sql',
   '0024_relationship_graph.sql',
+  '0025_relationship_maintenance.sql',
 ]
 
 async function main() {

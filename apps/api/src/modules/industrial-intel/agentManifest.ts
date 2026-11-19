@@ -42,6 +42,8 @@ export const industrialIntelAgentManifest = {
         { method: 'GET', path: '/api/intel/directory/companies/:id/brief', description: 'Read company contacts, role coverage and gaps, broker links, pending observations, source dates and reasoning rules.' },
         { method: 'GET', path: '/api/intel/directory/brokers/:id/brief', description: 'Follow a broker to connected company accounts, keeping historical status, date and geographic scope.' },
         { method: 'POST', path: '/api/intel/directory/findings', description: 'Stage a sourced contact or director observation with an idempotent externalKey, prospectId and contact.directoryContext. Never creates confirmed activity or a new prospect.' },
+        { method: 'POST', path: '/api/intel/directory/maintain', description: 'Opt-in owner-authorized maintenance with the dedicated account credential only. Body: externalKey, kind (contact|broker|relationship), evidence {kind: public_source|correspondence|broker_direction|corporate_search, reference, asOf, fact}; broker/relationship also require id and full versioned broker/relationship object; contact requires prospectId, contact {name,email?,company?,title?,directoryContext}, and contactId plus expectedSnapshot from snapshotToken for an update. No phone fields, archiving or reassignment. Existing person name/email cannot be replaced; use existing email/phone enrichment contracts. Read before writing, retain source and scope, then read back.' },
+        { method: 'GET', path: '/api/intel/directory/changes', description: 'Read the most recent 100 private maintenance changes, original evidence, prior values and result IDs.' },
         { method: 'POST', path: '/api/desk/directory/findings/:id/review', description: 'Broker JWT only. Save a finding to the company or dismiss it. Source evidence status is preserved.' },
       ],
       roles: ['real_estate', 'operations', 'facilities', 'finance', 'director', 'unknown'],
@@ -52,6 +54,7 @@ export const industrialIntelAgentManifest = {
         'A parent-company or historical broker assignment does not establish current representation of a local subsidiary.',
         'Keep inferred roles marked inferred. An inferred contact does not close a research gap.',
         'Findings are private observations until broker review. No automatic map pins, outreach, activity credits or opportunity stage changes.',
+        'Explicitly enabled maintenance can save sourced observations directly. Inferences and ambiguous identities remain findings; public biographies alone cannot establish active representation. Retry with the same externalKey and unchanged payload; a changed payload or stale version is a conflict, not permission to overwrite.',
       ],
     },
     brokerageMemory: {

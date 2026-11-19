@@ -16,7 +16,7 @@ test('directory persistence, ownership, validation, concurrent edits, and merged
     const quote = String.fromCharCode(96);
     await db.exec(fixture.split('const schema = ' + quote)[1].split(quote + ';')[0]);
     await db.exec('ALTER TABLE prospects ADD COLUMN merge_event_id varchar; CREATE TABLE prospect_merge_events(id varchar,preview_hash varchar)');
-    for (const migration of ['0021_prospect_contacts.sql', '0023_relationship_directory.sql','0024_relationship_graph.sql']) {
+    for (const migration of ['0021_prospect_contacts.sql', '0023_relationship_directory.sql','0024_relationship_graph.sql','0025_relationship_maintenance.sql']) {
         await db.exec(await readFile(new URL('../../../../../drizzle/' + migration, import.meta.url), 'utf8'));
     }
     let tail = Promise.resolve();
@@ -132,10 +132,49 @@ test('directory persistence, ownership, validation, concurrent edits, and merged
     assert.equal((await decide(pending2.id,'rejected')).status,200);
     assert.equal((await decide(pending2.id,'accepted')).status,409);
     const mergingFinding=await (await agent('/findings',{...finding,externalKey:'fixture-merged-director',contact:{...finding.contact,name:'Director Before Merge'}})).json();
+    const evidence={kind:'public_source',reference:'https://example.com/team',asOf:'2026-11-19',fact:'Published company team page identifies this person and role.'};
+    const maintenance={kind:'contact',externalKey:'maint-contact',prospectId:'account',evidence,contact:{name:'Sourced Facilities Lead',title:'Facilities Manager',directoryContext:{...context,roles:['facilities'],sourceType:'company_website',sourceRef:evidence.reference}}};
+    assert.equal((await agent('/maintain',maintenance)).status,403);
+    process.env.ACCOUNT_INTELLIGENCE_AGENT_WRITE_ENABLED='true';
+    t.after(()=>delete process.env.ACCOUNT_INTELLIGENCE_AGENT_WRITE_ENABLED);
+    assert.equal((await agent('/maintain',{...maintenance,userId:'foreign'})).status,400);
+    assert.equal((await agent('/maintain',{...maintenance,prospectId:'foreign-account'})).status,404);
+    assert.equal((await agent('/maintain',{...maintenance,contact:{...maintenance.contact,directoryContext:{...maintenance.contact.directoryContext,evidenceStatus:'inferred'}}})).status,400);
+    const savedMaintenance=await (await agent('/maintain',maintenance)).json();
+    assert.ok(savedMaintenance.id);
+    assert.equal((await (await agent('/maintain',maintenance)).json()).duplicate,true);
+    assert.equal((await agent('/maintain',{...maintenance,externalKey:'second-same-person'})).status,409);
+    assert.equal((await agent('/maintain',{...maintenance,evidence:{...evidence,fact:'Changed evidence'}})).status,409);
+    const freshMaintBrief=await (await agent('/companies/account/brief')).json();
+    const savedPerson=freshMaintBrief.contacts.find((c:any)=>c.id===savedMaintenance.id);
+    assert.equal(savedPerson.directoryContext.evidenceStatus,'observed');
+    const updateMaint={...maintenance,externalKey:'maint-contact-update',contactId:savedPerson.id,expectedSnapshot:savedPerson.snapshotToken,contact:{...maintenance.contact,title:'Director of Facilities'}};
+    assert.equal((await agent('/maintain',updateMaint)).status,200);
+    assert.equal((await agent('/maintain',{...updateMaint,externalKey:'stale-update'})).status,409);
+    const afterMaint=await (await agent('/companies/account/brief')).json();
+    const latestPerson=afterMaint.contacts.find((c:any)=>c.id===savedPerson.id);
+    assert.equal((await agent('/maintain',{...updateMaint,externalKey:'wrong-identity',expectedSnapshot:latestPerson.snapshotToken,contact:{...updateMaint.contact,name:'Someone else'}})).status,409);
+    const newBrokerId=randomUUID();
+    const saveBroker={kind:'broker',externalKey:'maint-broker',id:newBrokerId,evidence,broker:{name:'Sourced Broker',firm:'C&W',version:0}};
+    assert.equal((await agent('/maintain',saveBroker)).status,200);
+    assert.equal((await (await agent('/maintain',saveBroker)).json()).duplicate,true);
+    assert.equal((await agent('/maintain',{...saveBroker,id:randomUUID(),externalKey:'duplicate-broker'})).status,409);
+    const saveLink={kind:'relationship',externalKey:'maint-link',id:randomUUID(),evidence,relationship:{...link,brokerId:newBrokerId}};
+    assert.equal((await agent('/maintain',{...saveLink,relationship:{...saveLink.relationship,status:'active'}})).status,400);
+    assert.equal((await agent('/maintain',saveLink)).status,200);
+    assert.equal((await agent('/maintain',{...saveLink,externalKey:'foreign-link',id:randomUUID(),relationship:{...saveLink.relationship,prospectId:'foreign-account'}})).status,404);
+    assert.equal((await agent('/maintain',{...saveLink,externalKey:'stale-link',relationship:{...saveLink.relationship,status:'ended'}})).status,409);
+    process.env.MARKET_RECORD_AGENT_API_KEY=randomUUID();process.env.MARKET_RECORD_AGENT_USER_ID='owner';
+    assert.equal((await agent('/maintain',saveBroker,'Bearer '+process.env.MARKET_RECORD_AGENT_API_KEY)).status,403);
+    delete process.env.MARKET_RECORD_AGENT_API_KEY;delete process.env.MARKET_RECORD_AGENT_USER_ID;
+    const changes=await (await agent('/changes')).json();
+    assert.equal(changes.changes.length,4);
+    assert.equal(changes.changes.find((c:any)=>c.externalKey==='maint-contact-update').beforeRecord.title,'Facilities Manager');
+    assert.equal((await (await agent('/changes',undefined,foreign)).json()).changes.length,0);
     await db.exec("UPDATE prospects SET merged_into_prospect_id='other-account' WHERE id='account'");
     const merged = await (await call('/companies/account')).json();
     assert.equal(merged.prospect.id, 'other-account');
-    assert.equal(merged.relationships.length, 1);
+    assert.equal(merged.relationships.length, 2);
     assert.equal(merged.findings.length,1);
     assert.equal(merged.findings[0].sourceProspectId,'account');
     assert.equal((await decide(mergingFinding.id,'accepted')).status,200);
@@ -148,4 +187,5 @@ test('directory persistence, ownership, validation, concurrent edits, and merged
     await assert.rejects(db.query('SELECT * FROM directory_brokers'), /permission denied/);
     await assert.rejects(db.query('SELECT * FROM directory_relationships'), /permission denied/);
     await assert.rejects(db.query('SELECT * FROM directory_findings'), /permission denied/);
+    await assert.rejects(db.query('SELECT * FROM directory_changes'), /permission denied/);
 });

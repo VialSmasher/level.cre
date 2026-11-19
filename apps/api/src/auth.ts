@@ -297,6 +297,16 @@ export async function requireAccountIntelligenceAuth(req: Request, res: Response
   return requireBrokerAuth(req,res,next)
 }
 
+// Separate opt-in from read/propose access. Market and sales credentials cannot write this directory.
+export async function requireRelationshipMaintenanceAuth(req: Request, res: Response, next: NextFunction) {
+  const accountAgent = getConfiguredAccountIntelligenceAgent(req)
+  if (!accountAgent || process.env.ACCOUNT_INTELLIGENCE_AGENT_WRITE_ENABLED !== 'true') {
+    return res.status(403).json({message:'Owner-authorized relationship maintenance is not enabled for this credential.'})
+  }
+  ;(req as any).user = {...accountAgent, role:'account_intelligence_agent'}
+  return next()
+}
+
 export async function requireBrokerAuth(req: Request, res: Response, next: NextFunction) {
   const scopedAgent = getConfiguredAccountIntelligenceAgent(req) || getConfiguredMarketRecordAgent(req)
     || getConfiguredSalesActivityAgent(req)
