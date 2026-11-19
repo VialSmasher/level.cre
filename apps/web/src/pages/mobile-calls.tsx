@@ -11,7 +11,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { apiRequest } from '@/lib/queryClient'
 import { CallingContacts, ContactEditor, contactName } from '@/features/calling/CallingContacts'
 import { useCallingSession } from '@/features/calling/CallingSessionProvider'
-import { SavedNoteEditor, type NoteTarget } from '@/features/calling/SavedNoteEditor'
+import { RecordedCallNote, SavedNoteEditor, type NoteTarget } from '@/features/calling/SavedNoteEditor'
 import type { CallingActivity as ActivityRow } from '@/lib/mobileCalling'
 import { CallingActivity } from '@/features/calling/CallingActivity'
 import { NeedsNumberList } from '@/features/calling/NeedsNumberList'
@@ -46,6 +46,10 @@ function companyName(candidate: CallQueueCandidate) {
 export default function MobileCallsPage() {
   const { user, isDemoMode } = useAuth()
   const brokerId = isDemoMode ? 'demo-user' : user?.id
+  const params = new URLSearchParams(window.location.search)
+  const noteId = params.get('noteId')
+  const prospectId = params.get('prospectId')
+  if (brokerId && noteId && prospectId) return <RecordedCallNote key={brokerId+noteId} brokerId={brokerId} prospectId={prospectId} id={noteId}/>
   return brokerId ? <CallingDesk key={brokerId} brokerId={brokerId} /> : null
 }
 

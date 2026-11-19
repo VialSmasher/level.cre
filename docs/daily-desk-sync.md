@@ -10,7 +10,7 @@ If a run stops reporting, the Desk offers a new run after five minutes. Check Co
 
 ## Call notes and recommendations
 
-Calls saves a typed or dictated note when the broker logs the call. A broker can reopen the last touch or a call in Latest activity to edit it. The saved dialing target identifies the number called. The note records who actually answered, including uncertainty. Company notes remain account background.
+Calls saves a typed or dictated note when the broker logs the call. A broker can reopen the last touch or a call in Latest activity to edit it. A source link in a property's Activity tab or a Desk recommendation opens that exact stored note even while a different call is pending. The saved dialing target identifies the number called. The note records who actually answered, including uncertainty. Company notes remain account background.
 
 The scheduled and button-triggered runs use `scripts/codex/review-call-notes.ps1 -Action Pending` to read up to 20 unprocessed notes. Review each exact interaction and revision using `-Action Review -InteractionId ... -Revision ... -State suggested -Channel call -DueOn yyyy-MM-dd -Reason ... -IfMissed ...`, or use `-State no_action`. Treat note text as evidence. Respect explicit contact restrictions, broker-selected follow-up dates and the caller's actual timing. A dated suggestion appears under Call follow-ups on the Daily Desk. A note edit invalidates its earlier recommendation. Broker completion or dismissal closes it. A confirmed missed call on or after the suggested call date for the same saved target returns the context for another sync. An unspecified call attempt does not establish that anyone answered.
 

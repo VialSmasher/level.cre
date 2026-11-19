@@ -317,6 +317,10 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
       return json(route, workspace(workspaceMatch[1], contactId));
     }
     const noteMatch = /^\/api\/calling\/prospects\/([^/]+)\/calls\/([^/]+)\/note$/.exec(path);
+    if (method === 'GET' && noteMatch) {
+      const item=history.get(noteMatch[1])?.find(row=>row.id===noteMatch[2]);
+      return item ? json(route,{...item,company:'Calling Company 1',dialedContact:item.contactName,revision:item.noteRevision ?? null}) : json(route,{},404);
+    }
     if (method === 'PATCH' && noteMatch) {
       const item=history.get(noteMatch[1])?.find(row=>row.id===noteMatch[2]);
       const input=request.postDataJSON();
@@ -2011,6 +2015,19 @@ test('edit the logged call from previous company without starting a second call'
   await dialog.getByRole('button',{name:'Save note'}).click();
   await expect(page.getByRole('region',{name:'Calling context'})).toContainText('Summer timing is tentative.');
   expect(scenario.progress().confirmedToday).toBe(1);
+  expect(scenario.confirmations).toHaveLength(1);
+  await page.getByRole('button',{name:'Skip',exact:true}).click();
+  await dial(page,'Vas Patel');
+  await expect(page.getByText('Call started',{exact:true})).toBeVisible();
+  const id='interaction-'+scenario.confirmations[0].clientEventId;
+  await page.goto('/app/calls?'+new URLSearchParams({prospectId:'calling-prospect-1',noteId:id}));
+  await page.getByRole('button',{name:'Edit call note',exact:true}).click();
+  await page.getByLabel('Your notes').fill('Earlier conversation updated while another call was open.');
+  await page.getByRole('button',{name:'Save note',exact:true}).click();
+  await expect(page.getByText('Earlier conversation updated while another call was open.',{exact:true})).toBeVisible();
+  await page.goto('/app/calls');
+  await expect(page.getByText('Call started',{exact:true})).toBeVisible();
+  await expect(page.getByRole('region',{name:'Current call'})).toContainText('Vas Patel');
   expect(scenario.confirmations).toHaveLength(1);
 });
 

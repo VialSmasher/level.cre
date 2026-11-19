@@ -1,11 +1,36 @@
 import { useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { VoiceDictationButton } from '@/components/VoiceDictationButton'
 import { apiRequest } from '@/lib/queryClient'
+import { brokerCallDate } from '@/lib/mobileCalling'
 import type { CallingWorkspace } from '@/lib/mobileCalling'
+
+type SavedCall = {id:string; notes:string; revision:string|null; company:string; occurredAt:string; dialedContact:string|null}
+
+export function RecordedCallNote({brokerId,prospectId,id}:{brokerId:string;prospectId:string;id:string}) {
+  const [editing,setEditing] = useState(false)
+  const query = useQuery<SavedCall>({
+    queryKey:['/api/calling/note',brokerId,prospectId,id], retry:false,
+    queryFn:async()=>(await apiRequest('GET','/api/calling/prospects/'+encodeURIComponent(prospectId)+'/calls/'+encodeURIComponent(id)+'/note')).json(),
+  })
+  const row=query.data
+  return <main className="mx-auto max-w-2xl px-4 py-8">
+    <a href="/app/desk" className="text-sm text-blue-700">Back to Daily Desk</a>
+    <section className="mt-4 rounded-xl border border-blue-100 bg-white p-5">
+      <h1 className="text-xl font-semibold">{row?.company || 'Call note'}</h1>
+      {query.isLoading && <p role="status">Loading call note…</p>}
+      {query.isError && <p role="alert">This call note could not be loaded. <button onClick={()=>query.refetch()}>Retry</button></p>}
+      {row && <><p className="mt-1 text-sm text-slate-600">Call on {brokerCallDate(row.occurredAt)}{row.dialedContact && ' · Dialed contact: '+row.dialedContact}</p>
+        <p className="my-4 whitespace-pre-wrap break-words">{row.notes || 'This call has no note yet.'}</p>
+        <Button onClick={()=>setEditing(true)}>{row.notes ? 'Edit call note' : 'Add call note'}</Button>
+        {editing && <SavedNoteEditor target={{prospectId,company:row.company,notes:row.notes,call:{id,revision:row.revision,date:brokerCallDate(row.occurredAt)}}} brokerId={brokerId} onClose={()=>setEditing(false)}/>}
+      </>}
+    </section>
+  </main>
+}
 
 export type NoteTarget = {prospectId:string; company:string; notes:string; call?:{id:string; revision:string|null; date:string}}
 
@@ -25,7 +50,7 @@ export function SavedNoteEditor({target, brokerId, onClose}:{target:NoteTarget; 
         original.call ? {notes:value,expectedRevision:original.call.revision} : {notes:value,expectedNotes:original.notes})
       await Promise.all([
         ['/api/calling/workspace',brokerId,target.prospectId], ['/api/calling/workspace-activity',brokerId,target.prospectId],
-        ['/api/desk/call-follow-ups',brokerId], ['/api/calling/queue',brokerId], ['/api/interactions'], ['/api/prospects'],
+        ['/api/calling/note',brokerId,target.prospectId], ['/api/desk/call-follow-ups',brokerId], ['/api/calling/queue',brokerId], ['/api/interactions'], ['/api/prospects'],
       ].map(queryKey=>client.invalidateQueries({queryKey})))
       onClose()
     } catch (e) {
@@ -36,10 +61,13 @@ export function SavedNoteEditor({target, brokerId, onClose}:{target:NoteTarget; 
   const reload = async () => {
     setBusy(true)
     try {
-      const workspace: CallingWorkspace = await (await apiRequest('GET',base+'/workspace')).json()
-      const row = target.call && workspace.activity.find(item=>item.id===target.call!.id)
-      if (target.call && !row) throw new Error('Missing call')
-      setOriginal({...target,notes:row ? row.notes : workspace.prospect.notes || '',call:row && target.call ? {...target.call,revision:row.noteRevision || null} : undefined})
+      if (target.call) {
+        const row: SavedCall = await (await apiRequest('GET',base+'/calls/'+encodeURIComponent(target.call.id)+'/note')).json()
+        setOriginal({...target,notes:row.notes,call:{...target.call,revision:row.revision}})
+      } else {
+        const workspace: CallingWorkspace = await (await apiRequest('GET',base+'/workspace')).json()
+        setOriginal({...target,notes:workspace.prospect.notes || ''})
+      }
       setConflict(false)
       setError('Compare your draft with the saved version below before saving.')
     } catch { setError('Could not load the saved version. Your draft is still here.') }

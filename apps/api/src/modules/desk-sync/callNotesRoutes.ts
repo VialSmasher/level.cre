@@ -2,7 +2,7 @@ import type { Express, Request, Response, RequestHandler } from 'express'
 import type { Pool } from 'pg'
 import { z } from 'zod'
 import { getUserId, requireBrokerAuth, requireSalesActivityAuth } from '../../auth'
-import { editCallNote, finishCallSuggestion, interpretation, interpretCallNote, noteEdit, pendingCallNotes, suggestedCalls } from '../../lib/callNotes'
+import { editCallNote, finishCallSuggestion, interpretation, interpretCallNote, noteEdit, pendingCallNotes, readCallNote, suggestedCalls } from '../../lib/callNotes'
 
 const handle = (action: (req:Request, res:Response, owner:string)=>Promise<unknown>):RequestHandler =>
   (req,res,next) => {
@@ -17,6 +17,9 @@ const handle = (action: (req:Request, res:Response, owner:string)=>Promise<unkno
   }
 
 export function registerCallNotes(app:Express, db:Pool) {
+  app.get('/api/calling/prospects/:prospectId/calls/:id/note',requireBrokerAuth,handle(async(req,res,owner)=>{
+    res.json(await readCallNote(db,owner,req.params.prospectId,req.params.id))
+  }))
   app.patch('/api/calling/prospects/:prospectId/calls/:id/note',requireBrokerAuth,handle(async(req,res,owner)=>{
     res.json(await editCallNote(db,owner,req.params.prospectId,req.params.id,noteEdit.parse(req.body)))
   }))

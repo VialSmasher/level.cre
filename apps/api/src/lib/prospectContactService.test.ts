@@ -9,7 +9,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { createProspectContact, getCallingWorkspace, updateProspectContact, ProspectContactCreateSchema, ProspectContactUpdateSchema } from './prospectContactService';
 import { recordMobileCallStart, recordMobileCallOutcome, discardMobileCallStart, getMobileCallingProgress, listMobileCallQueue } from './mobileCallingService';
 
-import { editCallNote, finishCallSuggestion, interpretCallNote, pendingCallNotes, suggestedCalls } from './callNotes';
+import { editCallNote, finishCallSuggestion, interpretCallNote, pendingCallNotes, suggestedCalls, readCallNote } from './callNotes';
 
 test('logged notes stay tied to their original call across edits, sync replays and a later missed call', async () => {
   const {pool,db,workspace,count}=await harness();
@@ -23,6 +23,8 @@ test('logged notes stay tied to their original call across edits, sync replays a
     assert.equal((await pendingCallNotes(pool,'owner')).rows.length,0);
     const notes='A different person answered. A summer window is possible.';
     const saved=await editCallNote(pool,'owner','account',id,{notes,expectedRevision:null});
+    assert.equal((await readCallNote(pool,'owner','account',id)).notes,notes);
+    await assert.rejects(readCallNote(pool,'foreign','account',id),/not found/);
     assert.deepEqual(await editCallNote(pool,'owner','account',id,{notes,expectedRevision:null}),saved);
     await assert.rejects(editCallNote(pool,'foreign','account',id,{notes:'other',expectedRevision:null}),/not found/);
     await assert.rejects(editCallNote(pool,'owner','account',id,{notes:'stale',expectedRevision:null}),/changed/);

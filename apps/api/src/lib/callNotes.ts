@@ -34,6 +34,12 @@ const fields = `i.id, i.prospect_id AS "prospectId", COALESCE(NULLIF(p.business_
   e.occurred_at AS "occurredAt", i.outcome, i.notes, i.source_metadata->>'contactId' AS "contactId",
   i.source_metadata->'contactSnapshot'->>'name' AS "dialedContact", ${revision} AS revision`
 
+export async function readCallNote(db:Pool, owner:string, prospectId:string, id:string) {
+  const {rows:[row]} = await db.query(`SELECT ${fields} ${verified} AND i.id=$2 AND i.prospect_id=$3`,[owner,id,prospectId])
+  if (!row) throw Object.assign(new Error('Logged call not found.'),{status:404})
+  return row
+}
+
 export function pendingCallNotes(db: Pool, owner: string) {
   return db.query(`SELECT ${fields}, i.next_follow_up AS "manualFollowUp",
     i.source_metadata->'followUpSelected' AS "followUpSelected", p.follow_up_due_date AS "accountFollowUp",

@@ -603,6 +603,7 @@ export function ProspectEditPanel({
                           {readableInteractionValue(interaction.outcome)}
                           {interaction.sourceProvider ? ` / ${readableInteractionValue(interaction.sourceProvider)}` : ' / Manual'}
                         </p>
+                        {interaction.type === 'call' && interaction.sourceProvider === 'level_cre_mobile' && <a href={'/app/calls?'+new URLSearchParams({prospectId:prospect.id,noteId:interaction.id})} className="inline-block py-1 text-xs text-blue-700">{interaction.notes ? 'Edit call note' : 'Add call note'}</a>}
                         {interaction.notes ? <p className="mt-1 line-clamp-3 text-[11px] leading-4 text-gray-600">{interaction.notes}</p> : null}
                         {interaction.nextFollowUp ? (
                           <p className="mt-1.5 flex items-center gap-1 text-[10px] font-medium text-amber-700">
