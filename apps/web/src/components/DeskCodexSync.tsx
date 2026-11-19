@@ -30,7 +30,7 @@ function describe(run?: Run | null) {
   const r = run.result
   if (run.state === 'failed') return `Sync failed. ${r ? reasons[r.reason] : ''}`
   if (!r) return ''
-  return [run.state === 'complete' ? 'Complete' : 'Partially synced', `${r.recorded} recorded`,
+  return [run.state === 'complete' ? 'Complete' : 'Partially synced', `${r.recorded} reconciled`,
     `${r.needsReview} for review`, r.queued ? `${r.queued} queued` : '', reasons[r.reason]].filter(Boolean).join(' · ')
 }
 
