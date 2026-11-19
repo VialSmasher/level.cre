@@ -700,7 +700,7 @@ test('calling context labels account fallback with the actual person and replace
   await dial(page, 'Casey Davis');
   await expect(page.getByText('Call started', { exact: true })).toBeVisible();
   await expect(context).toContainText('Latest account activity · Rowan Singh');
-  await expect(page.getByRole('textbox', {name:'Call note',exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox', {name:'New call note',exact:true})).toBeVisible();
   const note = 'Asked to call back after their lease review.';
   await page.getByRole('textbox').fill(note);
   await page.getByRole('button', { name: 'I called · next', exact: true }).click();
@@ -1388,6 +1388,19 @@ test('confirmed bad-number replay keeps alternate intent while its workspace is 
   expect(await page.evaluate(() => (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs)).toEqual([]);
 });
 
+test('refresh keeps the skipped companies, selected contact and previous position for this tab', async({page})=>{
+  const scenario=await installCallingScenario(page);
+  await page.getByRole('button',{name:'Skip',exact:true}).click();
+  await expect(page.getByRole('link',{name:'Call Vas Patel',exact:true})).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('link',{name:'Call Vas Patel',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Select company Calling Company 1',exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'Previous company',exact:true}).click();
+  await expect(page.getByRole('link',{name:'Call Morgan Lee',exact:true})).toBeVisible();
+  expect(scenario.starts).toHaveLength(0);
+  expect(scenario.confirmations).toHaveLength(0);
+});
+
 test('manual notes survive navigation and retry without dialing, then advance on save', async({page})=>{
   const scenario=await installCallingScenario(page);
   const attempts:Record<string,unknown>[]=[];
@@ -1396,7 +1409,7 @@ test('manual notes survive navigation and retry without dialing, then advance on
     if (attempts.length===1) return route.abort('failed');
     await route.fulfill({json:{status:'confirmed',duplicate:true}});
   });
-  const box=page.getByRole('textbox',{name:'Call note',exact:true});
+  const box=page.getByRole('textbox',{name:'New call note',exact:true});
   await box.fill('summer maybe. call in feb');
   await page.getByRole('button',{name:'Skip',exact:true}).click();
   await expect(box).toHaveValue('');
@@ -1418,7 +1431,7 @@ test('manual notes survive navigation and retry without dialing, then advance on
 
 test('typing before the Call button keeps the same note through dial and confirmation', async({page})=>{
   const scenario=await installCallingScenario(page);
-  const box=page.getByRole('textbox',{name:'Call note',exact:true});
+  const box=page.getByRole('textbox',{name:'New call note',exact:true});
   await box.fill('Ask about summer.');
   await dial(page);
   await expect(box).toHaveValue('Ask about summer.');
@@ -1433,7 +1446,7 @@ test('two clicks confirm a call and present the next contact without notes or sc
   const scenario = await installCallingScenario(page);
   await expect(page.getByText('Calls started', { exact: true })).toBeVisible();
   await expect(page.getByText('Calls logged', { exact: true })).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Call note', exact:true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'New call note', exact:true })).toBeVisible();
   await dial(page);
   await expect.poll(() => scenario.progress().startedToday).toBe(1);
   await expect(page.getByTestId('calls-started-today')).toHaveText('1');
@@ -1544,7 +1557,7 @@ test('retry preserves the selected outcome and original note, follow-up, and cal
   const scenario = await installCallingScenario(page, { confirmFailures: 1 });
   await dial(page);
   await expect.poll(() => scenario.progress().startedToday).toBe(1);
-  await expect(page.getByRole('textbox', {name:'Call note',exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox', {name:'New call note',exact:true})).toBeVisible();
   await page.getByRole('textbox').fill('Original note from this call.');
   await page.getByRole('button', { name: 'More options', exact: true }).click();
   await page.getByRole('button', { name: 'Tomorrow', exact: true }).click();
@@ -1568,7 +1581,7 @@ test('refresh retains a failed explicit confirmation instead of changing it to a
   const scenario = await installCallingScenario(page, { confirmFailures: 1 });
   await dial(page);
   await expect.poll(() => scenario.progress().startedToday).toBe(1);
-  await expect(page.getByRole('textbox', {name:'Call note',exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox', {name:'New call note',exact:true})).toBeVisible();
   await page.getByRole('textbox').fill('Keep this exact note across refresh.');
   await page.getByRole('button', { name: 'More options', exact: true }).click();
   await page.getByRole('button', { name: 'Tomorrow', exact: true }).click();
@@ -1577,7 +1590,7 @@ test('refresh retains a failed explicit confirmation instead of changing it to a
   const first = scenario.confirmations[0];
   await page.reload();
   await expect.poll(() => scenario.starts.length).toBe(2);
-  await expect(page.getByRole('textbox', {name:'Call note',exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox', {name:'New call note',exact:true})).toBeVisible();
   await expect(page.getByRole('textbox')).toBeDisabled();
   await expect(page.getByRole('textbox')).toHaveValue('Keep this exact note across refresh.');
   await page.getByRole('button', { name: 'I called · next', exact: true }).click();
@@ -1988,7 +2001,7 @@ test('Previous returns a confirmed company with its saved history without anothe
   const scenario = await installCallingScenario(page);
   await dial(page);
   await expect(page.getByText('Call started', { exact: true })).toBeVisible();
-  await expect(page.getByRole('textbox', {name:'Call note',exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox', {name:'New call note',exact:true})).toBeVisible();
   await page.getByRole('textbox').fill('Confirmed this company exactly once.');
   await page.getByRole('button', { name: 'I called · next', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
@@ -2043,14 +2056,14 @@ test('pending calls clearly block Previous, Skip and queue navigation until reso
 test('edit the logged call from previous company without starting a second call', async ({page})=>{
   const scenario=await installCallingScenario(page);
   await dial(page);
-  const noteBox=page.getByRole('textbox',{name:'Call note',exact:true});
+  const noteBox=page.getByRole('textbox',{name:'New call note',exact:true});
   await noteBox.fill('Asked for the saved contact. Someone else answered.');
   await page.reload();
   await expect(noteBox).toHaveValue('Asked for the saved contact. Someone else answered.');
   await page.getByRole('button',{name:'I called · next',exact:true}).click();
   await expect(page.getByRole('link',{name:'Call Vas Patel',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Previous company',exact:true}).click();
-  await page.getByRole('button',{name:'Edit call note',exact:true}).click();
+  await page.getByRole('region',{name:'Calling context'}).getByRole('button',{name:/Edit .* call note/}).click();
   const dialog=page.getByRole('dialog');
   await dialog.getByLabel('Your notes').fill('Someone else answered. Summer timing is tentative.');
   await dialog.getByRole('button',{name:'Save note'}).click();
@@ -2076,7 +2089,7 @@ test('unsaved notes and follow-up options reset before calling another company',
   const scenario = await installCallingScenario(page);
   await dial(page);
   await expect(page.getByText('Call started', { exact: true })).toBeVisible();
-  await expect(page.getByRole('textbox', {name:'Call note',exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox', {name:'New call note',exact:true})).toBeVisible();
   await page.getByRole('textbox').fill('Unsaved note belongs only to company one.');
   await page.getByRole('button', { name: 'More options', exact: true }).click();
   await page.getByRole('button', { name: 'Tomorrow', exact: true }).click();
@@ -2087,9 +2100,9 @@ test('unsaved notes and follow-up options reset before calling another company',
   await expect(page.getByRole('link', { name: 'Call Vas Patel', exact: true })).toBeVisible();
   await dial(page, 'Vas Patel');
   await expect(page.getByText('Call started', { exact: true })).toBeVisible();
-  await expect(page.getByRole('textbox', {name:'Call note',exact:true})).toHaveValue('');
+  await expect(page.getByRole('textbox', {name:'New call note',exact:true})).toHaveValue('');
   await expect(page.getByRole('button', { name: 'More options', exact: true })).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.getByRole('textbox', {name:'Call note',exact:true})).toBeVisible();
+  await expect(page.getByRole('textbox', {name:'New call note',exact:true})).toBeVisible();
   await expect(page.getByRole('textbox')).toHaveValue('');
   await page.getByRole('button', { name: 'More options', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Keep existing', exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -2109,6 +2122,8 @@ test('finishing a skipped pass offers an explicit revisit and Previous without a
     await page.getByRole('button', { name: 'Skip', exact: true }).click();
   }
   const revisit = page.getByRole('button', { name: 'Revisit skipped companies', exact: true });
+  await expect(revisit).toBeVisible();
+  await page.reload();
   await expect(revisit).toBeVisible();
   await expect(page.getByRole('button', { name: 'Previous company', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Previous company', exact: true }).click();

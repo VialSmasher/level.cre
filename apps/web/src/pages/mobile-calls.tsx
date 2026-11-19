@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils'
 import { callingEmailLink } from '@/lib/callingEmail'
 import { CallingContext } from '@/features/calling/CallingContext'
 import { CallingSearch } from '@/features/calling/CallingSearch'
+import { readCallingPosition, saveCallingPosition, type CallingVisit } from '@/lib/callingPosition'
 import { searchedCallingCandidate } from '@/lib/callingSearch'
 
 type CompanyVisit = { candidate: CallQueueCandidate; contactId: string | null; phone: string }
@@ -63,7 +64,16 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const savedContactSelection = useRef<{ prospectId: string; contactId: string } | null>(null)
   const nameRef = useRef<HTMLHeadingElement>(null)
   const [focusNext, setFocusNext] = useState(false)
-  const [requestedProspectId] = useState(() => new URLSearchParams(window.location.search).get('prospectId'))
+  const [resume] = useState(()=>readCallingPosition(brokerId))
+  const [navigationDay] = useState(()=>brokerCallDate(new Date()))
+  const [entry] = useState(()=>{
+    const params=new URLSearchParams(window.location.search)
+    const id=params.get('prospectId')
+    if (!id) return resume?.current
+    return {prospectId:id,contactId:params.get('contactId'),phone:resume?.current?.prospectId===id ? resume.current.phone : ''}
+  })
+  const requestedProspectId = entry?.prospectId
+  const navigationVersion = useRef(0)
   const requestedRecordHandled = useRef(!requestedProspectId || Boolean(session))
   const [selectedProspectId, setSelectedProspectId] = useState<string | null>(null)
   const [retainedCandidate, setRetainedCandidate] = useState<CallQueueCandidate | null>(null)
@@ -72,10 +82,10 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const [completedContactIds, setCompletedContactIds] = useState<Set<string>>(() => new Set())
   const [activityFilter, setActivityFilter] = useState<'account' | 'contact'>('contact')
   const [showAllCompanies, setShowAllCompanies] = useState(false)
-  const [completedIds, setCompletedIds] = useState<Set<string>>(() => new Set())
-  const [skippedIds, setSkippedIds] = useState<Set<string>>(() => new Set())
-  const [previousCompanies, setPreviousCompanies] = useState<CompanyVisit[]>([])
-  const [includeCalledToday, setIncludeCalledToday] = useState(false)
+  const [completedIds, setCompletedIds] = useState<Set<string>>(() => new Set(resume?.completed))
+  const [skippedIds, setSkippedIds] = useState<Set<string>>(() => new Set(resume?.skipped))
+  const [previousCompanies, setPreviousCompanies] = useState<CallingVisit[]>(resume?.previous || [])
+  const [includeCalledToday, setIncludeCalledToday] = useState(!!resume?.includeCalledToday)
   const [showOptions, setShowOptions] = useState(false)
   const [noteTarget,setNoteTarget] = useState<NoteTarget | null>(null)
   const notes = session?.confirmation?.notes ?? session?.draftNote ?? ''
@@ -132,7 +142,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     if (!workspace) return
     requestedRecordHandled.current = true
     const primary = workspace.contacts.find((contact) => contact.id === workspace.primaryContactId)
-    const contactParam = new URLSearchParams(window.location.search).get('contactId')
+    const contactParam = entry?.contactId
     const requestedContact = workspace.contacts.find(contact => contact.id === contactParam && !contact.archivedAt)
     const preferred = workspace.phoneReadiness?.status === 'ready' ? preferredCallingChoice(workspace.phoneReadiness,requestedContact?.id) : null
     const candidate = queueQuery.data?.rows.find((row) => row.prospect.id === workspace.prospect.id) || {
@@ -145,8 +155,23 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     setRetainedCandidate(candidate)
     setSelectedProspectId(workspace.prospect.id)
     setSelectedContactId(requestedContact?.id || preferred?.contactId || workspace.primaryContactId)
-    setSelectedPhone(preferred?.number || '')
+    setSelectedPhone(entry?.phone || preferred?.number || '')
   }, [requestedWorkspaceQuery.data, session])
+
+  // Restore the live owned workspace, never an old copy of its notes or roster.
+  useEffect(()=>{
+    if (!requestedRecordHandled.current || !queueQuery.data || (prospectId && !selectedContact)) return
+    const current=prospectId ? {prospectId, contactId:selectedContact?.id || null, phone} : null
+    saveCallingPosition(brokerId,{current,previous:previousCompanies,skipped:Array.from(skippedIds),completed:Array.from(completedIds),includeCalledToday},navigationDay)
+    const url=new URL(window.location.href)
+    if (url.searchParams.has('prospectId')) {
+      if (current) url.searchParams.set('prospectId',current.prospectId)
+      else url.searchParams.delete('prospectId')
+      if (current?.contactId) url.searchParams.set('contactId',current.contactId)
+      else url.searchParams.delete('contactId')
+      if (url.href!==window.location.href) window.history.replaceState(window.history.state,'',url.href)
+    }
+  },[brokerId,prospectId,selectedContact?.id,phone,previousCompanies,skippedIds,completedIds,includeCalledToday,queueQuery.data,navigationDay])
 
   useEffect(() => {
     if (!prospectId || session || !workspaceQuery.data) return
@@ -176,11 +201,13 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   }
 
   const rememberCompany = (visit: CompanyVisit) => {
-    setPreviousCompanies((visits) => visits.at(-1)?.candidate.prospect.id === visit.candidate.prospect.id
-      ? [...visits.slice(0, -1), visit] : [...visits, visit])
+    const saved={prospectId:visit.candidate.prospect.id,contactId:visit.contactId,phone:visit.phone}
+    setPreviousCompanies(visits=>[...(visits.at(-1)?.prospectId===saved.prospectId ? visits.slice(0,-1) : visits),saved].slice(-100))
   }
 
   const prepareCompany = (visit: CompanyVisit) => {
+    requestedRecordHandled.current = true
+    navigationVersion.current++
     savedContactSelection.current = null
     // Pin the viewed company across queue refreshes, including a previously logged company.
     setRetainedCandidate(visit.candidate)
@@ -219,6 +246,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
 
   const skipCompany = () => {
     if (sessionRef.current || !activeCandidate) return
+    navigationVersion.current++
     rememberCompany({ candidate: activeCandidate, contactId: selectedContactId, phone })
     setSkippedIds((ids) => new Set(ids).add(activeCandidate.prospect.id))
     const next = candidates.find((candidate) => candidate.prospect.id !== activeCandidate.prospect.id)
@@ -232,17 +260,35 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     setAnnouncement('Company skipped for now. No call was logged.')
   }
 
-  const previousCompany = () => {
+  const previousCompany = async () => {
     if (sessionRef.current) return
     const previous = previousCompanies.at(-1)
     if (!previous) return
-    setPreviousCompanies((visits) => visits.slice(0, -1))
-    prepareCompany(previous)
+    const version=++navigationVersion.current
+    let candidate=queueQuery.data?.rows.find(row=>row.prospect.id===previous.prospectId)
+    if (!candidate) {
+      try {
+        const workspace=await queryClient.fetchQuery<CallingWorkspace>({
+          queryKey:['/api/calling/workspace',brokerId,previous.prospectId],
+          queryFn:async()=>(await apiRequest('GET','/api/calling/prospects/'+encodeURIComponent(previous.prospectId)+'/workspace')).json(),
+        })
+        const contact=workspace.contacts.find(row=>row.id===previous.contactId && !row.archivedAt) || workspace.contacts.find(row=>row.isPrimary && !row.archivedAt)
+        if (!contact) throw new Error('Unavailable')
+        candidate=searchedCallingCandidate(workspace,contact)
+      } catch {
+        if (version===navigationVersion.current) setAnnouncement('Previous company could not be loaded.')
+        return
+      }
+    }
+    if (sessionRef.current || version!==navigationVersion.current) return
+    setPreviousCompanies(visits=>visits.slice(0,-1))
+    prepareCompany({...previous,candidate})
     setAnnouncement('Previous company ready. No call has started.')
   }
 
   const revisitSkipped = () => {
     if (sessionRef.current) return
+    navigationVersion.current++
     setSkippedIds(new Set())
     setRetainedCandidate(null)
     setSelectedProspectId(null)
@@ -430,7 +476,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
           </div>
         ) : null}
 
-        {requestedWorkspaceQuery.isError && !activeCandidate ? <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">This record could not be loaded. <Button variant="outline" className="ml-2" onClick={() => requestedWorkspaceQuery.refetch()}>Retry record</Button></div> : null}
+        {requestedWorkspaceQuery.isError && !requestedRecordHandled.current && !activeCandidate ? <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">This record could not be loaded. <Button variant="outline" className="ml-2" onClick={() => requestedWorkspaceQuery.refetch()}>Retry record</Button><Button variant="ghost" onClick={()=>{ requestedRecordHandled.current=true; setAnnouncement('Continuing the call queue.') }}>Continue queue</Button></div> : null}
         {requestedWorkspaceQuery.isLoading || queueQuery.isLoading && !activeCandidate ? <p className="py-8 text-center text-sm text-slate-500">Finding your next call...</p> : null}
         {queueQuery.isError && !activeCandidate ? (
           <div className="rounded-lg border border-slate-200 bg-white p-5 text-center"><p className="font-semibold">Call queue unavailable</p><Button className="mt-3" variant="outline" onClick={() => queueQuery.refetch()}>Try again</Button></div>
@@ -505,7 +551,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
               <CallingActivity onEdit={editCallNote} rows={historyQuery.data?.activity || []} filter={activityFilter} onFilter={setActivityFilter} contactName={selectedName} unattributedCount={workspaceQuery.data?.unattributedActivityCount || 0} loading={activityFilter === 'contact' && Boolean(activityContactId) ? contactActivityQuery.isLoading : historyQuery.isLoading} error={historyQuery.isError} onRetry={() => historyQuery.refetch()} />
             </>}
           </section>
-        ) : !queueQuery.isLoading && !queueQuery.isError ? (
+        ) : requestedRecordHandled.current && !queueQuery.isLoading && !queueQuery.isError ? (
           <section className="rounded-lg border border-slate-200 bg-white p-5 text-center xl:col-start-1 xl:row-start-1 xl:row-span-2"><Check className="mx-auto h-6 w-6 text-emerald-600" /><h2 className="mt-2 text-lg font-bold text-slate-950">You're through the queue</h2><p className="mt-2 text-sm text-slate-500">{skippedIds.size ? skippedIds.size + ' companies skipped for now.' : progress.confirmedToday ? progress.confirmedToday + ' calls confirmed today. Good progress.' : 'No prospects with a saved phone number are ready.'}</p><div className="mt-4 flex flex-wrap justify-center gap-2"><Button variant="ghost" className="h-11 gap-1 text-xs text-slate-500" aria-label="Previous company" disabled={!previousCompanies.length} onClick={previousCompany}><ArrowLeft aria-hidden="true" className="h-3.5 w-3.5" />Previous</Button>{skippedIds.size ? <Button variant="outline" onClick={revisitSkipped}>Revisit skipped companies</Button> : null}<Button variant="outline" onClick={() => { setCompletedIds(new Set()); setSkippedIds(new Set()); setIncludeCalledToday(true) }}>Show contacts called today</Button></div></section>
         ) : null}
 

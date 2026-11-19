@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { VoiceDictationButton } from '@/components/VoiceDictationButton'
+import { brokerCallDate } from '@/lib/mobileCalling'
 import { apiRequest } from '@/lib/queryClient'
 import { useCallingSession } from './CallingSessionProvider'
 
@@ -98,10 +99,10 @@ export function CallNotePanel({brokerId,prospectId,contactId,onLogged}:{
   }
   return <section aria-label="Call note" className="mt-3">
     <div className="mb-1 flex items-center justify-between gap-2">
-      <label htmlFor="call-note" className="text-sm font-semibold text-slate-800">Call note</label>
+      <label htmlFor="call-note" className="text-sm font-semibold text-slate-800">New call note <span className="ml-1 text-xs font-normal text-slate-500">{new Intl.DateTimeFormat('en-CA',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'}).format(new Date(brokerCallDate(session?.startedAt || new Date())+'T12:00:00Z'))}</span></label>
       <VoiceDictationButton className="h-7 w-8 p-0" disabled={locked} onTranscript={text=>change(current=>(current.trimEnd()+' '+text).trimStart())}/>
     </div>
-    <Textarea id="call-note" rows={2} className="h-14 min-h-14 resize-y text-sm" value={value}
+    <Textarea id="call-note" aria-label="New call note" rows={2} className="h-14 min-h-14 resize-y text-sm" value={value}
       placeholder="Type a quick note here, even if you dialed on your phone."
       maxLength={2000} disabled={locked} onChange={event=>change(event.target.value)} />
     <p className="mt-1 text-xs text-slate-500">Evening sync tidies your wording and suggests a follow-up.</p>

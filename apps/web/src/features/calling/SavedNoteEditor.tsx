@@ -77,7 +77,7 @@ export function SavedNoteEditor({target, brokerId, onClose}:{target:NoteTarget; 
   const label = target.call ? 'Call note' : 'Company background'
   return <Dialog open onOpenChange={open=>{if (!open && !busy) onClose()}}>
     <DialogContent className="max-w-lg"><DialogTitle>{label}</DialogTitle>
-      <DialogDescription>{target.company}{target.call ? ' · '+target.call.date : ''}</DialogDescription>
+      <DialogDescription>{target.company}{target.call ? ' · Call recorded '+target.call.date : ''}</DialogDescription>
       <div className="flex items-center justify-between"><label htmlFor="saved-call-note" className="text-sm font-medium">Your notes</label>
         <VoiceDictationButton disabled={busy} onTranscript={text=>setValue(current=>(current.trimEnd()+' '+text).trimStart().slice(0,target.call ? 2000 : 20000))}/></div>
       <Textarea id="saved-call-note" autoFocus value={value} rows={5} maxLength={target.call ? 2000 : 20000} disabled={busy} onChange={e=>setValue(e.target.value)}/>
