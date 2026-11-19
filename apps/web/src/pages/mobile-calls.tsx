@@ -4,8 +4,7 @@ import { ArrowLeft, ArrowRight, Building2, Check, CircleCheck, ChevronDown, MapP
 import { Link } from 'wouter'
 
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { VoiceDictationButton } from '@/components/VoiceDictationButton'
+import { CallNotePanel, manualDraftKey, readCallDraft, storeCallDraft } from '@/features/calling/CallNotePanel'
 import { useAuth } from '@/contexts/AuthContext'
 import { useProfile } from '@/hooks/useProfile'
 import { apiRequest } from '@/lib/queryClient'
@@ -257,7 +256,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     setNextStep('keep')
   }
 
-  const completeCall = (started: MobileCallSession) => {
+  const completeCall = (started: Pick<MobileCallSession, 'prospectId'|'contactId'|'expectedPhone'|'candidate'|'nextContactId'|'nextPhoneKey'|'confirmation'|'afterConfirmation'>) => {
     setSkippedIds((ids) => {
       const remaining = new Set(ids)
       remaining.delete(started.prospectId)
@@ -310,6 +309,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
         setCompletedIds((ids) => new Set(ids).add(started.prospectId))
         setAnnouncement('Record unavailable. Local call attempt cleared.')
       } else {
+        if (started.contactId && started.draftNote) storeCallDraft(manualDraftKey(brokerId,started.prospectId,started.contactId),{text:started.draftNote,outcome:'attempted'})
         prepareCompany({ candidate: started.candidate, contactId: started.contactId || null, phone: started.expectedPhone })
         setAnnouncement('Call start undone. This company is still selected.')
       }
@@ -345,10 +345,17 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const startCall = (event: MouseEvent<HTMLAnchorElement>, contact = selectedContact, number = phone) => {
     const choice = readiness?.usableChoices.find((option) => option.contactId === contact?.id && option.number === number)
     if (!activeCandidate || !contact || !choice || sessionRef.current || busy) { event.preventDefault(); return }
+    const draftKey = manualDraftKey(brokerId,activeCandidate.prospect.id,contact.id)
+    const draft = readCallDraft(draftKey)
+    if (draft.submission) { event.preventDefault(); setAnnouncement('Retry the pending note save before dialing this contact.'); return }
     selectContact(contact)
     const started = calling.start({ ...activeCandidate, phoneReadiness: readiness || undefined }, contact, choice, 'calls')
     if (!started) { event.preventDefault(); return }
     sessionRef.current = started
+    if (draft.text) {
+      calling.setDraftNote(started.clientEventId,draft.text)
+      storeCallDraft(draftKey,null)
+    }
     setAnnouncement(`Starting a call to ${contactName(contact)}.`)
     // Native link activation stays synchronous; the shared provider saves this click.
   }
@@ -464,6 +471,9 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
                 </div>
               </div>
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs"><p className="text-slate-500">{session ? session.confirmation && session.afterConfirmation === 'another_contact' ? 'Retry will log this call and prepare another contact on this company.' : 'Confirm after trying the call.' : 'Opens your dialer.'}</p>{session ? <p className={cn('font-medium', Boolean(calling.startError) ? 'text-amber-700' : 'text-emerald-700')}>{session.recorded ? 'Call started' : Boolean(calling.startError) ? 'Call start not recorded' : 'Saving call start...'}</p> : null}</div>
+              <CallNotePanel key={JSON.stringify([prospectId,selectedContact?.id,session?.clientEventId])}
+                brokerId={brokerId} prospectId={activeCandidate.prospect.id} contactId={selectedContact?.id || null}
+                onLogged={()=>completeCall({candidate:activeCandidate,prospectId:activeCandidate.prospect.id,contactId:selectedContact?.id,expectedPhone:phone})}/>
               <CallingContext onEdit={editCallNote} contactId={activityContactId} contactName={selectedName} contactRows={contactActivityQuery.data?.activity || []} accountRows={workspaceQuery.data?.activity || []} loading={activityContactId ? contactActivityQuery.isLoading : workspaceQuery.isLoading} error={activityContactId ? contactActivityQuery.isError : workspaceQuery.isError} />
               {!telHref && !session && !workspaceQuery.isLoading && !workspaceQuery.isError ? <p className="mt-2 text-xs leading-4 text-amber-700">This contact needs one dialable number. Select another contact, edit the number, or skip for now.</p> : null}
 
@@ -475,10 +485,6 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
                     <Button variant="ghost" className="h-9 px-2 text-xs" onClick={() => setShowOptions((value) => !value)} aria-expanded={showOptions} aria-controls="call-options">More options<ChevronDown className="ml-1 h-3.5 w-3.5" /></Button>
                     {anotherContact && !session.confirmation ? <Button variant="ghost" className="h-11 px-2 text-xs text-slate-600" aria-label="Log & try another contact" disabled={submissionLocked} onClick={() => confirm('attempted', 'another_contact')}>Log &amp; try another contact<ArrowRight className="ml-1.5 h-3.5 w-3.5" /></Button> : null}
                   </div>
-                    <div id="call-notes" className="mt-2">
-                      <div className="mb-2 flex items-center justify-between"><label htmlFor="call-note" className="text-xs font-semibold text-slate-700">Call note</label><VoiceDictationButton disabled={submissionLocked} onTranscript={(text) => calling.setDraftNote(session.clientEventId,current => current ? current.trimEnd() + ' ' + text : text)} /></div>
-                      <Textarea id="call-note" value={notes} onChange={(event) => calling.setDraftNote(session.clientEventId,event.target.value)} maxLength={2000} rows={3} placeholder="Who answered? What did they say about the property or timing?" disabled={submissionLocked} />
-                    </div>
                   {showOptions ? (
                     <div id="call-options" className="mt-3 space-y-3">
                       <div><p className="mb-2 text-xs font-semibold text-slate-500">Choose an outcome and move on</p><div className="grid grid-cols-3 gap-2">
@@ -495,7 +501,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
             </div>
             {workspaceQuery.isError ? <div role="alert" className="border-t border-slate-100 px-4 py-4"><p className="text-xs text-amber-800">Contacts could not be loaded.</p><Button variant="ghost" size="sm" onClick={() => workspaceQuery.refetch()}>Retry contacts</Button></div> : workspaceQuery.isLoading ? <p className="border-t border-slate-100 px-4 py-4 text-xs text-slate-500">Loading company workspace...</p> : <>
               <CallingContacts key={activeCandidate.prospect.id} prospectId={activeCandidate.prospect.id} contacts={contacts} selectedId={session?.contactId || selectedContactId} selectedPhone={phone} locked={Boolean(session)} readiness={readiness} onSelect={selectContact} onDial={startCall} onSaved={onContactSaved} />
-              {account ? <details className="border-t border-blue-100/70 px-4 py-3 sm:px-6"><summary className="min-h-9 cursor-pointer text-xs font-medium text-slate-500">Company notes</summary><p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{account.notes}</p><Button size="sm" variant="ghost" className="text-blue-700" onClick={()=>setNoteTarget({prospectId:account.id,company:account.businessName || account.name,notes:account.notes || ''})}>{account.notes ? 'Edit company notes' : 'Add company notes'}</Button></details> : null}
+              {account ? <details className="border-t border-blue-100/70 px-4 py-3 sm:px-6"><summary className="min-h-9 cursor-pointer text-xs font-medium text-slate-500">Company background</summary><p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{account.notes}</p><Button size="sm" variant="ghost" className="text-blue-700" onClick={()=>setNoteTarget({prospectId:account.id,company:account.businessName || account.name,notes:account.notes || ''})}>{account.notes ? 'Edit company background' : 'Add company background'}</Button></details> : null}
               <CallingActivity onEdit={editCallNote} rows={historyQuery.data?.activity || []} filter={activityFilter} onFilter={setActivityFilter} contactName={selectedName} unattributedCount={workspaceQuery.data?.unattributedActivityCount || 0} loading={activityFilter === 'contact' && Boolean(activityContactId) ? contactActivityQuery.isLoading : historyQuery.isLoading} error={historyQuery.isError} onRetry={() => historyQuery.refetch()} />
             </>}
           </section>

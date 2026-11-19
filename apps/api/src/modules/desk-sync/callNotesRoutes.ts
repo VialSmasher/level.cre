@@ -2,7 +2,8 @@ import type { Express, Request, Response, RequestHandler } from 'express'
 import type { Pool } from 'pg'
 import { z } from 'zod'
 import { getUserId, requireBrokerAuth, requireSalesActivityAuth } from '../../auth'
-import { editCallNote, finishCallSuggestion, interpretation, interpretCallNote, noteEdit, pendingCallNotes, readCallNote, suggestedCalls } from '../../lib/callNotes'
+import { recordMobileCallOutcome } from '../../lib/mobileCallingService'
+import { cleanCallNote, cleanup, editCallNote, finishCallSuggestion, interpretation, interpretCallNote, noteEdit, pendingCallNotes, readCallNote, suggestedCalls } from '../../lib/callNotes'
 
 const handle = (action: (req:Request, res:Response, owner:string)=>Promise<unknown>):RequestHandler =>
   (req,res,next) => {
@@ -17,6 +18,15 @@ const handle = (action: (req:Request, res:Response, owner:string)=>Promise<unkno
   }
 
 export function registerCallNotes(app:Express, db:Pool) {
+  app.post('/api/calling/prospects/:prospectId/manual-call',requireBrokerAuth,handle(async(req,res,owner)=>{
+    const input = z.object({
+      clientEventId:z.string().uuid(), contactId:z.string().uuid(), occurredAt:z.string().datetime({offset:true}),
+      notes:z.string().trim().min(1).max(2000), outcome:z.enum(['attempted','contacted','no_answer','left_message']),
+    }).strict().parse(req.body)
+    res.json(await recordMobileCallOutcome({pool:db,userId:owner,manual:true,input:{
+      ...input,clientEventId:'manual-'+input.clientEventId,prospectId:req.params.prospectId,expectedPhone:'',
+    }}))
+  }))
   app.get('/api/calling/prospects/:prospectId/calls/:id/note',requireBrokerAuth,handle(async(req,res,owner)=>{
     res.json(await readCallNote(db,owner,req.params.prospectId,req.params.id))
   }))
@@ -48,6 +58,9 @@ export function registerCallNotes(app:Express, db:Pool) {
   app.get(agent,requireSalesActivityAuth,workerOnly,handle(async(_req,res,owner)=>{
     const {rows}=await pendingCallNotes(db,owner)
     res.json({rows:rows.slice(0,20),more:rows.length>20})
+  }))
+  app.post(agent+'/:id/cleanup',requireSalesActivityAuth,workerOnly,handle(async(req,res,owner)=>{
+    res.json(await cleanCallNote(db,owner,req.params.id,cleanup.parse(req.body)))
   }))
   app.post(agent+'/:id/review',requireSalesActivityAuth,workerOnly,handle(async(req,res,owner)=>{
     res.json(await interpretCallNote(db,owner,req.params.id,interpretation.parse(req.body)))

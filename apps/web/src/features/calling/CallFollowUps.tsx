@@ -7,7 +7,7 @@ import { apiRequest } from '@/lib/queryClient'
 import { brokerCallDate } from '@/lib/mobileCalling'
 
 type FollowUp = {
-  id:string; prospectId:string; company:string; contactId:string|null; notes:string; occurredAt:string; revision:string
+  id:string; prospectId:string; company:string; contactId:string|null; notes:string; cleanedNote?:string|null; occurredAt:string; revision:string
   recommendation:{channel:'call'|'email';dueOn:string;reason:string;ifMissed:string}
 }
 const path='/api/desk/call-follow-ups'
@@ -42,7 +42,7 @@ export function CallFollowUps() {
         <time dateTime={rec.dueOn} className={rec.dueOn<=today?'text-xs font-semibold text-amber-800':'text-xs text-slate-600'}>{rec.dueOn<=today?'Due':'Upcoming'} · {date}</time></div>
         <p className="mt-1 text-sm"><strong>{rec.channel==='call'?'Suggested call':'Suggested email'}</strong> · {rec.reason}</p>
         {rec.ifMissed && <p className="mt-1 text-xs text-slate-600">If you miss them · {rec.ifMissed}</p>}
-        <details className="mt-2 text-xs text-slate-600"><summary className="cursor-pointer">Call note · {brokerCallDate(row.occurredAt)}</summary><p className="mt-2 whitespace-pre-wrap break-words">{row.notes}</p><a className="inline-block py-2 text-blue-700" href={'/app/calls?'+new URLSearchParams({prospectId:row.prospectId,noteId:row.id})}>Open call note</a></details>
+        <details className="mt-2 text-xs text-slate-600"><summary className="cursor-pointer">Call note · {brokerCallDate(row.occurredAt)}</summary><p className="mt-2 whitespace-pre-wrap break-words">{row.cleanedNote || row.notes}</p><a className="inline-block py-2 text-blue-700" href={'/app/calls?'+new URLSearchParams({prospectId:row.prospectId,noteId:row.id})}>Open call note</a></details>
         <div className="mt-2 flex flex-wrap items-center gap-3"><Link href={'/app/calls?'+params} className="text-sm font-medium text-blue-700">Open in Calls</Link>
         <Button variant="ghost" size="sm" disabled={finish.isPending} onClick={()=>finish.mutate({row,state:'done'})}>Done</Button>
         <Button variant="ghost" size="sm" disabled={finish.isPending} onClick={()=>finish.mutate({row,state:'dismissed'})}>Dismiss</Button></div>

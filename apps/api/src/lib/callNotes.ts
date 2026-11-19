@@ -20,6 +20,11 @@ export const interpretation = z.object({
   decision: z.discriminatedUnion('state', [proposed, z.object({ state: z.literal('no_action') }).strict()]),
 }).strict()
 
+export const cleanup = z.object({
+  revision: z.string().uuid(),
+  text: z.string().trim().min(1).max(2000),
+}).strict()
+
 // The provider and canonical receipt together distinguish a logged call from imported history.
 const verified = `
   FROM public.contact_interactions i
@@ -30,9 +35,13 @@ const verified = `
     AND p.merged_into_prospect_id IS NULL`
 const revision = "i.source_metadata->>'callNoteRevision'"
 const review = "i.source_metadata->'callNoteReview'"
+const cleaned = "i.source_metadata->'callNoteCleanup'"
+const needsCleanup = `(${cleaned}->>'revision') IS DISTINCT FROM (${revision})`
+const needsReview = `(${review}->>'revision') IS DISTINCT FROM (${revision})`
 const fields = `i.id, i.prospect_id AS "prospectId", COALESCE(NULLIF(p.business_name,''),p.name) AS company,
   e.occurred_at AS "occurredAt", i.outcome, i.notes, i.source_metadata->>'contactId' AS "contactId",
-  i.source_metadata->'contactSnapshot'->>'name' AS "dialedContact", ${revision} AS revision`
+  i.source_metadata->'contactSnapshot'->>'name' AS "dialedContact", ${revision} AS revision,
+  CASE WHEN ${cleaned}->>'revision'=${revision} THEN ${cleaned}->>'text' END AS "cleanedNote"`
 
 export async function readCallNote(db:Pool, owner:string, prospectId:string, id:string) {
   const {rows:[row]} = await db.query(`SELECT ${fields} ${verified} AND i.id=$2 AND i.prospect_id=$3`,[owner,id,prospectId])
@@ -43,9 +52,10 @@ export async function readCallNote(db:Pool, owner:string, prospectId:string, id:
 export function pendingCallNotes(db: Pool, owner: string) {
   return db.query(`SELECT ${fields}, i.next_follow_up AS "manualFollowUp",
     i.source_metadata->'followUpSelected' AS "followUpSelected", p.follow_up_due_date AS "accountFollowUp",
-    i.source_metadata->'callNoteLastTouch' AS "laterCall", i.source_metadata->'callNotePreviousPlan' AS "priorPlan", ${review} AS "previousDecision"
+    i.source_metadata->'callNoteLastTouch' AS "laterCall", i.source_metadata->'callNotePreviousPlan' AS "priorPlan", ${review} AS "previousDecision",
+    ${needsCleanup} AS "needsCleanup", ${needsReview} AS "needsReview"
     ${verified} AND ${revision} IS NOT NULL AND btrim(i.notes)<>''
-      AND (${review}->>'revision') IS DISTINCT FROM (${revision})
+      AND (${needsReview} OR ${needsCleanup})
     ORDER BY e.occurred_at, i.id LIMIT 21`, [owner])
 }
 
@@ -68,7 +78,7 @@ export async function editCallNote(pool: Pool, owner: string, prospectId: string
       if (row.revision !== input.expectedRevision) throw conflict()
       row.revision = randomUUID()
       await client.query(`UPDATE public.contact_interactions SET notes=$3,
-        source_metadata=(COALESCE(source_metadata,'{}'::jsonb) - 'callNoteReview') ||
+        source_metadata=(COALESCE(source_metadata,'{}'::jsonb) - 'callNoteReview' - 'callNoteCleanup') ||
           jsonb_build_object('callNoteRevision',$4::text) WHERE user_id=$1 AND id=$2`, [owner,id,input.notes,row.revision])
       await client.query(`UPDATE public.activity_events SET summary=$3, updated_at=now() WHERE user_id=$1 AND id=$2`,
         [owner,row.event_id,outcomeSummary(row.outcome as MobileCallOutcome,input.notes)])
@@ -91,6 +101,17 @@ export async function interpretCallNote(db: Pool, owner: string, id: string, inp
     RETURNING i.id, ${review} AS decision`, [owner,id,input.revision,JSON.stringify(decision)])
   if (!result.rows[0]) throw conflict()
   return result.rows[0]
+}
+
+export async function cleanCallNote(db: Pool, owner: string, id: string, input: z.infer<typeof cleanup>) {
+  const {rows} = await db.query(`UPDATE public.contact_interactions i SET source_metadata =
+    jsonb_set(i.source_metadata, '{callNoteCleanup}', $4::jsonb)
+    WHERE i.user_id=$1 AND i.id=$2 AND ${revision}=$3 AND btrim(i.notes)<>''
+      AND i.id IN (SELECT i.id ${verified} AND i.id=$2)
+      AND (${needsCleanup} OR ${cleaned}=$4::jsonb)
+    RETURNING i.id, ${cleaned}->>'text' AS "cleanedNote"`, [owner,id,input.revision,JSON.stringify(input)])
+  if (!rows.length) throw conflict()
+  return rows[0]
 }
 
 export async function finishCallSuggestion(db: Pool, owner: string, id: string, version: string, state:'done'|'dismissed') {

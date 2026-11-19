@@ -1388,11 +1388,52 @@ test('confirmed bad-number replay keeps alternate intent while its workspace is 
   expect(await page.evaluate(() => (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs)).toEqual([]);
 });
 
+test('manual notes survive navigation and retry without dialing, then advance on save', async({page})=>{
+  const scenario=await installCallingScenario(page);
+  const attempts:Record<string,unknown>[]=[];
+  await page.route('**/api/calling/prospects/*/manual-call',async route=>{
+    attempts.push(route.request().postDataJSON());
+    if (attempts.length===1) return route.abort('failed');
+    await route.fulfill({json:{status:'confirmed',duplicate:true}});
+  });
+  const box=page.getByRole('textbox',{name:'Call note',exact:true});
+  await box.fill('summer maybe. call in feb');
+  await page.getByRole('button',{name:'Skip',exact:true}).click();
+  await expect(box).toHaveValue('');
+  await page.getByRole('button',{name:'Previous company',exact:true}).click();
+  await expect(box).toHaveValue('summer maybe. call in feb');
+  await page.getByLabel('Manual call outcome').selectOption('contacted');
+  await page.getByRole('button',{name:'Log call & save note'}).click();
+  await expect(page.getByRole('button',{name:'Retry save'})).toBeVisible();
+  await page.reload();
+  await expect(box).toBeDisabled();
+  await page.getByRole('button',{name:'Retry save'}).click();
+  await expect(page.getByRole('link',{name:'Call Vas Patel',exact:true})).toBeVisible();
+  expect(attempts).toHaveLength(2);
+  expect(attempts[1]).toEqual(attempts[0]);
+  expect(attempts[0]).toMatchObject({outcome:'contacted',notes:'summer maybe. call in feb'});
+  expect(scenario.starts).toHaveLength(0);
+  await expect(box).toHaveValue('');
+});
+
+test('typing before the Call button keeps the same note through dial and confirmation', async({page})=>{
+  const scenario=await installCallingScenario(page);
+  const box=page.getByRole('textbox',{name:'Call note',exact:true});
+  await box.fill('Ask about summer.');
+  await dial(page);
+  await expect(box).toHaveValue('Ask about summer.');
+  await box.fill('May need space in summer.');
+  await page.getByRole('button',{name:'I called · next',exact:true}).click();
+  await expect(page.getByRole('link',{name:'Call Vas Patel',exact:true})).toBeVisible();
+  expect(scenario.confirmations[0].notes).toBe('May need space in summer.');
+  await expect(box).toHaveValue('');
+});
+
 test('two clicks confirm a call and present the next contact without notes or scheduling', async ({ page }) => {
   const scenario = await installCallingScenario(page);
   await expect(page.getByText('Calls started', { exact: true })).toBeVisible();
   await expect(page.getByText('Calls logged', { exact: true })).toBeVisible();
-  await expect(page.getByRole('textbox')).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Call note', exact:true })).toBeVisible();
   await dial(page);
   await expect.poll(() => scenario.progress().startedToday).toBe(1);
   await expect(page.getByTestId('calls-started-today')).toHaveText('1');

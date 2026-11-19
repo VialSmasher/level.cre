@@ -1,13 +1,14 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Pending','Review')][string]$Action = 'Pending',
+    [ValidateSet('Pending','Review','Cleanup')][string]$Action = 'Pending',
     [Guid]$InteractionId,
     [Guid]$Revision,
     [ValidateSet('suggested','no_action')][string]$State,
     [ValidateSet('call','email')][string]$Channel,
     [string]$DueOn,
     [string]$Reason,
-    [string]$IfMissed = ''
+    [string]$IfMissed = '',
+    [string]$CleanedNote
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -21,6 +22,12 @@ $base = 'https://levelcre-production.up.railway.app/api/agent/desk-sync/call-not
 $headers = @{'x-levelcre-sales-key' = $callKey}
 if ($Action -eq 'Pending') {
     Invoke-RestMethod -Method Get -Uri $base -Headers $headers -TimeoutSec 30 -MaximumRedirection 0 | ConvertTo-Json -Depth 12
+    return
+}
+if ($Action -eq 'Cleanup') {
+    if (-not $InteractionId -or -not $Revision -or [string]::IsNullOrWhiteSpace($CleanedNote)) { throw 'Cleanup needs the exact call ID, revision and cleaned note.' }
+    $body = @{revision=$Revision.ToString(); text=$CleanedNote} | ConvertTo-Json -Compress
+    Invoke-RestMethod -Method Post -Uri "$base/$InteractionId/cleanup" -Headers $headers -TimeoutSec 30 -MaximumRedirection 0 -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | ConvertTo-Json -Depth 8
     return
 }
 if (-not $InteractionId -or -not $Revision -or -not $State) { throw 'Review needs the exact call ID, revision and decision.' }

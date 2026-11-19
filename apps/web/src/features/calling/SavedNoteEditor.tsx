@@ -8,7 +8,7 @@ import { apiRequest } from '@/lib/queryClient'
 import { brokerCallDate } from '@/lib/mobileCalling'
 import type { CallingWorkspace } from '@/lib/mobileCalling'
 
-type SavedCall = {id:string; notes:string; revision:string|null; company:string; occurredAt:string; dialedContact:string|null}
+type SavedCall = {id:string; notes:string; cleanedNote?:string|null; revision:string|null; company:string; occurredAt:string; dialedContact:string|null}
 
 export function RecordedCallNote({brokerId,prospectId,id}:{brokerId:string;prospectId:string;id:string}) {
   const [editing,setEditing] = useState(false)
@@ -24,7 +24,8 @@ export function RecordedCallNote({brokerId,prospectId,id}:{brokerId:string;prosp
       {query.isLoading && <p role="status">Loading call note…</p>}
       {query.isError && <p role="alert">This call note could not be loaded. <button onClick={()=>query.refetch()}>Retry</button></p>}
       {row && <><p className="mt-1 text-sm text-slate-600">Call on {brokerCallDate(row.occurredAt)}{row.dialedContact && ' · Dialed contact: '+row.dialedContact}</p>
-        <p className="my-4 whitespace-pre-wrap break-words">{row.notes || 'This call has no note yet.'}</p>
+        <p className="my-4 whitespace-pre-wrap break-words">{row.cleanedNote || row.notes || 'This call has no note yet.'}</p>
+        {row.cleanedNote && row.cleanedNote !== row.notes && <details className="mb-3 text-sm text-slate-600"><summary className="cursor-pointer">Original wording</summary><p className="mt-2 whitespace-pre-wrap break-words">{row.notes}</p></details>}
         <Button onClick={()=>setEditing(true)}>{row.notes ? 'Edit call note' : 'Add call note'}</Button>
         {editing && <SavedNoteEditor target={{prospectId,company:row.company,notes:row.notes,call:{id,revision:row.revision,date:brokerCallDate(row.occurredAt)}}} brokerId={brokerId} onClose={()=>setEditing(false)}/>}
       </>}
@@ -73,14 +74,14 @@ export function SavedNoteEditor({target, brokerId, onClose}:{target:NoteTarget; 
     } catch { setError('Could not load the saved version. Your draft is still here.') }
     finally { setBusy(false) }
   }
-  const label = target.call ? 'Call note' : 'Company notes'
+  const label = target.call ? 'Call note' : 'Company background'
   return <Dialog open onOpenChange={open=>{if (!open && !busy) onClose()}}>
     <DialogContent className="max-w-lg"><DialogTitle>{label}</DialogTitle>
       <DialogDescription>{target.company}{target.call ? ' · '+target.call.date : ''}</DialogDescription>
       <div className="flex items-center justify-between"><label htmlFor="saved-call-note" className="text-sm font-medium">Your notes</label>
         <VoiceDictationButton disabled={busy} onTranscript={text=>setValue(current=>(current.trimEnd()+' '+text).trimStart().slice(0,target.call ? 2000 : 20000))}/></div>
       <Textarea id="saved-call-note" autoFocus value={value} rows={5} maxLength={target.call ? 2000 : 20000} disabled={busy} onChange={e=>setValue(e.target.value)}/>
-      {target.call && <p className="text-xs text-slate-500">Evening sync reads this note for a follow-up.</p>}
+      {target.call && <p className="text-xs text-slate-500">Evening sync tidies your wording and suggests a follow-up.</p>}
       {error && <p role="alert" className="text-sm text-amber-800">{error}</p>}
       {original !== target && <p className="whitespace-pre-wrap text-sm">Currently saved · {original.notes || '(empty)'}</p>}
       <div className="flex justify-end gap-2"><Button variant="ghost" disabled={busy} onClick={onClose}>Cancel</Button>

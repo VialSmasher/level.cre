@@ -32,6 +32,6 @@ export function callingTouchLabel(activity: CallingActivity) {
 }
 
 export function callingTouchNote(activity: CallingActivity) {
-  const text = (activity.type === 'email' && activity.subject?.trim() ? activity.subject : activity.notes || '').replace(/\s+/g, ' ').trim()
+  const text = (activity.type === 'email' && activity.subject?.trim() ? activity.subject : activity.cleanedNote || activity.notes || '').replace(/\s+/g, ' ').trim()
   return text.length > 200 ? text.slice(0, 197).trimEnd() + '…' : text
 }

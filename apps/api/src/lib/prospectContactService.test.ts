@@ -9,7 +9,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { createProspectContact, getCallingWorkspace, updateProspectContact, ProspectContactCreateSchema, ProspectContactUpdateSchema } from './prospectContactService';
 import { recordMobileCallStart, recordMobileCallOutcome, discardMobileCallStart, getMobileCallingProgress, listMobileCallQueue } from './mobileCallingService';
 
-import { editCallNote, finishCallSuggestion, interpretCallNote, pendingCallNotes, suggestedCalls, readCallNote } from './callNotes';
+import { cleanCallNote, editCallNote, finishCallSuggestion, interpretCallNote, pendingCallNotes, suggestedCalls, readCallNote } from './callNotes';
 
 test('logged notes stay tied to their original call across edits, sync replays and a later missed call', async () => {
   const {pool,db,workspace,count}=await harness();
@@ -37,6 +37,18 @@ test('logged notes stay tied to their original call across edits, sync replays a
     const proposal={revision:saved.revision,decision};
     await interpretCallNote(pool,'owner',id,proposal);
     await interpretCallNote(pool,'owner',id,proposal);
+    const cleanupOnly=(await pendingCallNotes(pool,'owner')).rows[0];
+    assert.equal(cleanupOnly.needsCleanup,true);
+    assert.equal(cleanupOnly.needsReview,false);
+    const tidy={revision:saved.revision,text:'Someone else answered. Summer timing is tentative.'};
+    await assert.rejects(cleanCallNote(pool,'foreign',id,tidy),/changed/);
+    await cleanCallNote(pool,'owner',id,tidy);
+    await cleanCallNote(pool,'owner',id,tidy);
+    const display=await readCallNote(pool,'owner','account',id);
+    assert.equal(display.notes,notes);
+    assert.equal(display.cleanedNote,tidy.text);
+    assert.equal((await suggestedCalls(pool,'owner')).rows[0].recommendation.dueOn,decision.dueOn);
+    assert.equal((await workspace()).activity.find(r=>r.id===id)?.cleanedNote,tidy.text);
     assert.equal((await pendingCallNotes(pool,'owner')).rows.length,0);
     assert.equal((await suggestedCalls(pool,'owner')).rows.length,1);
     assert.equal((await suggestedCalls(pool,'foreign')).rows.length,0);
@@ -53,9 +65,36 @@ test('logged notes stay tied to their original call across edits, sync replays a
     assert.equal((await suggestedCalls(pool,'owner')).rows.length,0);
     await assert.rejects(interpretCallNote(pool,'owner',id,{revision:retry.revision,decision}),/changed/);
     const revised=await editCallNote(pool,'owner','account',id,{notes:'No contact requested.',expectedRevision:retry.revision});
+    await assert.rejects(cleanCallNote(pool,'owner',id,tidy),/changed/);
+    assert.equal((await readCallNote(pool,'owner','account',id)).cleanedNote,null);
     await interpretCallNote(pool,'owner',id,{revision:revised.revision,decision:{state:'no_action'}});
+    await cleanCallNote(pool,'owner',id,{revision:revised.revision,text:'No contact requested.'});
     assert.equal((await pendingCallNotes(pool,'owner')).rows.length,0);
     assert.equal(await count('skill_activities'),2);
+  } finally {await db.close();}
+});
+
+test('manual phone note logs one broker-confirmed call without a dialer start or a verified number', async()=>{
+  const {pool,db,workspace,count}=await harness();
+  try {
+    const contactId=(await workspace()).primaryContactId;
+    const input={clientEventId:'manual-'+randomUUID(),prospectId:'account',contactId,expectedPhone:'',
+      occurredAt:new Date().toISOString(),outcome:'contacted' as const,notes:'summer maybe, check feb'};
+    await assert.rejects(recordMobileCallOutcome({pool,userId:'foreign',input,manual:true}),/not found/);
+    const first=await recordMobileCallOutcome({pool,userId:'owner',input,manual:true});
+    assert.equal((await recordMobileCallOutcome({pool,userId:'owner',input,manual:true})).interactionId,first.interactionId);
+    const progress=await getMobileCallingProgress({pool,userId:'owner'});
+    assert.deepEqual(progress.progress,{startedToday:0,confirmedToday:1,connectedToday:1});
+    assert.equal(await count('skill_activities'),1);
+    const row=(await pendingCallNotes(pool,'owner')).rows[0];
+    assert.equal(row.notes,input.notes);
+    assert.equal(row.contactId,contactId);
+    assert.equal(row.needsReview,true);
+    assert.equal(row.needsCleanup,true);
+    const event=(await db.query('SELECT phone, match_reason, source_metadata FROM activity_events')).rows[0] as any;
+    assert.equal(event.phone,null);
+    assert.equal(event.match_reason,'broker_confirmed_contact');
+    assert.equal(event.source_metadata.confirmationMethod,'broker_logged_manual_call');
   } finally {await db.close();}
 });
 

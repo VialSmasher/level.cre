@@ -374,7 +374,7 @@ async function lockSession(client: PoolClient, userId: string, clientEventId: st
   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify([CALLING_SOURCE, userId, clientEventId])]);
 }
 
-async function requireCallableProspect(client: PoolClient, userId: string, input: { prospectId: string; expectedPhone: string; contactId?: string }, frozenContact?: ProspectContact, requirePersonChoice = false) {
+async function requireCallableProspect(client: PoolClient, userId: string, input: { prospectId: string; expectedPhone: string; contactId?: string }, frozenContact?: ProspectContact, requirePersonChoice = false, manual = false) {
   const { rows } = await client.query(`
     SELECT id, name, status, address, contact_name, contact_email, contact_phone,
            contact_company, business_name, merged_into_prospect_id, follow_up_due_date,
@@ -407,8 +407,8 @@ async function requireCallableProspect(client: PoolClient, userId: string, input
       throw error;
     }
     if (!contact) throw new MobileCallingError({ message: 'Contact was not found on this record.', status: 404, code: 'contact_not_found' });
-    if (isPhoneBlocked(prospect, contact, input.expectedPhone)) throw new MobileCallingError({ message: 'This number was reported wrong or disconnected. Choose another number.', status: 409, code: 'phone_blocked' });
-    if (![contact.phone, ...contact.additionalPhones.map((item) => item.number)].some((phone) => phone && phonesMatch(input.expectedPhone, phone))) {
+    if (!manual && isPhoneBlocked(prospect, contact, input.expectedPhone)) throw new MobileCallingError({ message: 'This number was reported wrong or disconnected. Choose another number.', status: 409, code: 'phone_blocked' });
+    if (!manual && ![contact.phone, ...contact.additionalPhones.map((item) => item.number)].some((phone) => phone && phonesMatch(input.expectedPhone, phone))) {
       throw new MobileCallingError({ message: 'The contact phone number changed. Refresh before recording this call.', status: 409, code: input.contactId ? 'contact_phone_changed' : 'prospect_phone_changed' });
     }
     if (requirePersonChoice && !derivePhoneReadiness(prospect, contacts).usableChoices.some((choice) => choice.contactId === contact!.id && choice.phoneKey === businessPhoneKey(input.expectedPhone))) {
@@ -416,7 +416,7 @@ async function requireCallableProspect(client: PoolClient, userId: string, input
     }
   }
   return { ...prospect, contact_name: contact.name, contact_company: contact.company,
-    contact_email: contact.email, contact_phone: input.expectedPhone, calling_contact: contact, calling_account: prospect };
+    contact_email: contact.email, contact_phone: input.expectedPhone || null, calling_contact: contact, calling_account: prospect };
 }
 
 function candidateSnapshot(prospect: Record<string, any>, now: Date): MobileCallQueueCandidate {
@@ -606,6 +606,7 @@ export async function recordMobileCallOutcome(params: {
   pool: Pool;
   userId: string;
   input: MobileCallOutcomeInput;
+  manual?: boolean;
 }) {
   const client = await params.pool.connect();
   try {
@@ -625,7 +626,7 @@ export async function recordMobileCallOutcome(params: {
         return { duplicate: true, eventId: existing.id, interactionId: existing.interaction_id, prospectId: params.input.prospectId, status: 'confirmed' as const };
       }
     }
-    const prospect = await requireCallableProspect(client, params.userId, params.input, existing?.source_metadata?.contactSnapshot);
+    const prospect = await requireCallableProspect(client, params.userId, params.input, existing?.source_metadata?.contactSnapshot, false, params.manual);
     const occurredAt = params.input.occurredAt || new Date().toISOString();
     const eventId = existing?.id || randomUUID();
     const metadata = {
@@ -634,9 +635,9 @@ export async function recordMobileCallOutcome(params: {
       contactId: existing && !existing.source_metadata?.contactId ? null : prospect.calling_contact.id,
       contactSnapshot: existing && !existing.source_metadata?.contactId ? null : prospect.calling_contact,
       outcome: params.input.outcome,
-      confirmationMethod: params.input.outcome === 'attempted' ? 'broker_confirmed_call_attempt' : 'broker_selected_mobile_outcome',
+      confirmationMethod: params.manual ? 'broker_logged_manual_call' : params.input.outcome === 'attempted' ? 'broker_confirmed_call_attempt' : 'broker_selected_mobile_outcome',
       callStartedAt: existing?.source_metadata?.callStartedAt || params.input.callStartedAt || null,
-      phoneSnapshot: params.input.expectedPhone,
+      phoneSnapshot: params.input.expectedPhone || null,
       client: 'level_cre_responsive_web',
     };
     if (existing) {
@@ -657,7 +658,7 @@ export async function recordMobileCallOutcome(params: {
       ) VALUES (
         $1, $2, 'level_cre_mobile_calling', $3, $4, 'outbound',
         'confirmed', $5, $6, $7, $8, $9, $10, $11, 100, 'matched',
-        'broker_confirmed_prospect_and_phone', $12, $13::jsonb
+        $14, $12, $13::jsonb
       )
     `, [
       eventId,
@@ -673,6 +674,7 @@ export async function recordMobileCallOutcome(params: {
       prospect.address,
       params.input.prospectId,
       JSON.stringify(metadata),
+      params.manual ? 'broker_confirmed_contact' : 'broker_confirmed_prospect_and_phone',
     ]);
     }
 
@@ -720,7 +722,8 @@ export async function recordMobileCallOutcome(params: {
       params.input.notes,
       params.input.nextFollowUp === undefined ? null : params.input.nextFollowUp,
       params.input.clientEventId,
-      JSON.stringify({ activityEventId: eventId, contactId: metadata.contactId, contactSnapshot: metadata.contactSnapshot, phoneSnapshot: params.input.expectedPhone, outcome: params.input.outcome,
+      JSON.stringify({ activityEventId: eventId, contactId: metadata.contactId, contactSnapshot: metadata.contactSnapshot, phoneSnapshot: metadata.phoneSnapshot, outcome: params.input.outcome,
+        ...(params.manual ? {captureMethod: 'manual_phone'} : {}),
         ...(params.input.notes ? {callNoteRevision: interactionId, callNotePreviousPlan: previousPlan} : {}),
         ...(params.input.nextFollowUp !== undefined ? {followUpSelected: true} : {}),
       }),
@@ -737,7 +740,7 @@ export async function recordMobileCallOutcome(params: {
         id, user_id, event_id, entity_type, entity_id, role, confidence, metadata
       ) VALUES ($1, $2, $3, 'prospect', $4, 'broker_confirmed_subject', 100, $5::jsonb)
       ON CONFLICT (event_id, entity_type, entity_id, role) DO NOTHING
-    `, [randomUUID(), params.userId, eventId, params.input.prospectId, JSON.stringify({ phoneMatched: true })]);
+    `, [randomUUID(), params.userId, eventId, params.input.prospectId, JSON.stringify({ phoneMatched: !params.manual })]);
 
     if (params.input.outcome === 'wrong_number' || params.input.outcome === 'disconnected') {
       const state = readPhoneReadinessMetadata(prospect.calling_account);
