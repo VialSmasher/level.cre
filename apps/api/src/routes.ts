@@ -63,6 +63,7 @@ import { ProspectReferenceError, requireActiveOwnedProspect } from './lib/prospe
 import { registerIndustrialIntelRoutes } from './modules/industrial-intel/registerRoutes';
 import { registerPropertyGisRoutes } from './modules/property-gis/registerRoutes';
 import { registerDeskSync } from './modules/desk-sync/registerRoutes';
+import { registerRelationshipDirectory } from './modules/relationship-directory/registerRoutes';
 import {
   buildDataQualityReview,
   buildFollowUpReview,
@@ -7801,6 +7802,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // GIS requests finish before Intel's write-capable agent audit middleware.
   registerDeskSync(app, pool);
   registerPropertyGisRoutes(app, pool);
+  registerRelationshipDirectory(app, pool);
   registerIndustrialIntelRoutes(app);
 
   const httpServer = createServer(app);

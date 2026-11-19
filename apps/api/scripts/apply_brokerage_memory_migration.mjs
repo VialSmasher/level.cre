@@ -10,6 +10,7 @@ const migrationNames = [
   '0020_telemetry_hardening.sql',
   '0021_prospect_contacts.sql',
   '0022_desk_sync.sql',
+  '0023_relationship_directory.sql',
 ]
 
 async function main() {

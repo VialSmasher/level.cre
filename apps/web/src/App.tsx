@@ -17,6 +17,7 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 // rewrites dynamic imports correctly in all environments.
 const Home = lazy(() => import("./pages/home"));
 const DailyDesk = lazy(() => import("./pages/daily-desk"));
+const RelationshipDirectory = lazy(() => import("./pages/relationship-directory"));
 const Knowledge = lazy(() => import("./pages/knowledge"));
 const FollowUp = lazy(() => import("./pages/followup"));
 const MobileCalls = lazy(() => import("./pages/mobile-calls"));
@@ -237,6 +238,19 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
+      <Route path="/app/desk/relationships">
+        <ProtectedRoute>
+          <OnboardingCheck>
+            <AppLayout>
+              <RouteErrorBoundary>
+                <Suspense fallback={<Spinner />}>
+                  <RelationshipDirectory />
+                </Suspense>
+              </RouteErrorBoundary>
+            </AppLayout>
+          </OnboardingCheck>
+        </ProtectedRoute>
+      </Route>
       <Route path="/app/desk">
         <ProtectedRoute>
           <OnboardingCheck>

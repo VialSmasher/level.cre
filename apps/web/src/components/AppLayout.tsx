@@ -73,7 +73,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   }
 
   const primaryNav: NavItem[] = [
-    { label: 'Today', href: '/app/desk', icon: ListTodo, active: isActive('/app/desk') || isActive('/app/calls') },
+    { label: 'Today', href: '/app/desk', icon: ListTodo, active: location.startsWith('/app/desk') || isActive('/app/calls') },
     { label: 'Map', href: '/app', icon: Map, active: isActive('/app') },
     { label: 'Pursuits', shortLabel: 'Pursuits', href: '/app/workspaces', icon: Target, active: isActive('/app/workspaces') },
     { label: 'Activity', href: '/app/inbox', icon: Activity, active: isActive('/app/inbox') },
