@@ -57,7 +57,8 @@ test('memory classification survives replay, changed imports, approval and reset
     const itemId = changed.preview.anchors[0].persistence!.importItemId!
     assert.notEqual(itemId, firstId)
     assert.equal(changed.preview.anchors[0].propertyClassification?.classification, 'multi_tenant')
-    await assert.rejects(patchBrokerageMemoryClassification({ pool, userId: 'owner', kind: 'memory_item', id: firstId, propertyClassification: 'office' }), (error: unknown) => error instanceof BrokerageMemoryClassificationError && error.status === 409)
+    const earlier = await patchBrokerageMemoryClassification({ pool, userId: 'owner', kind: 'memory_item', id: firstId, propertyClassification: 'multi_tenant' })
+    assert.equal(earlier.propertyClassification?.classification, 'multi_tenant', 'Earlier pending items remain reviewable after a separate import')
     assert.deepEqual((await pg.query<any>('SELECT anchor_payload FROM brokerage_memory_items WHERE id=$1', [firstId])).rows[0].anchor_payload, before)
     assert.equal((await pg.query<any>('SELECT decision_metadata FROM brokerage_memory_items WHERE id=$1', [firstId])).rows[0].decision_metadata.keep, 'review note')
     assert.equal((await pg.query('SELECT * FROM prospects')).rows.length, 0)
