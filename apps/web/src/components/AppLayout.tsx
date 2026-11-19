@@ -13,6 +13,7 @@ import {
   LogOut,
   Map,
   MapPinned,
+  Network,
   Phone,
   Settings,
   Target,
@@ -73,7 +74,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   }
 
   const primaryNav: NavItem[] = [
-    { label: 'Today', href: '/app/desk', icon: ListTodo, active: location.startsWith('/app/desk') || isActive('/app/calls') },
+    { label: 'Today', href: '/app/desk', icon: ListTodo, active: (location.startsWith('/app/desk') && !location.startsWith('/app/desk/relationships')) || isActive('/app/calls') },
     { label: 'Map', href: '/app', icon: Map, active: isActive('/app') },
     { label: 'Pursuits', shortLabel: 'Pursuits', href: '/app/workspaces', icon: Target, active: isActive('/app/workspaces') },
     { label: 'Activity', href: '/app/inbox', icon: Activity, active: isActive('/app/inbox') },
@@ -83,6 +84,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   const secondaryNav = [
     { label: 'Calls', href: '/app/calls', icon: Phone },
     { label: 'Requirements', href: '/app/requirements', icon: ClipboardList },
+    { label: 'Relationships', href: '/app/desk/relationships', icon: Network },
     { label: 'Market memory', href: '/app/knowledge', icon: Database },
   ]
 
@@ -128,6 +130,9 @@ export function AppLayout({ children }: AppLayoutProps) {
           <p className="truncate text-sm font-medium text-slate-950">{profileLabel}</p>
           <p className="truncate text-xs text-slate-500">{user?.email}</p>
         </div>
+        <DropdownMenuItem asChild>
+          <Link href="/app/desk/relationships" className="w-full"><Network className="mr-2 h-4 w-4" />Relationships</Link>
+        </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link href="/track-record" className="w-full"><Trophy className="mr-2 h-4 w-4" />Track record</Link>
         </DropdownMenuItem>

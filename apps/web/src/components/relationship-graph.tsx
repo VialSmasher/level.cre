@@ -42,15 +42,15 @@ export function RelationshipGraph({detail, name, choose, addContact, addLink, in
   const contacts = detail.contacts || []
   const unknown = contacts.filter(c => c.name && !c.directoryContext?.roles?.some(role => role !== 'unknown'))
   const companyLine = contacts.find(c => !c.name && (c.phone || c.email))
-  const branchTop = Math.max(80,395-(100+relationships.length*90)/2)
-  const height = broker ? Math.max(720,relationships.length * 144 + 130) : Math.max(790,branchTop+100+relationships.length*90)
+  const branchTop = Math.max(80,395-(100+relationships.length*126)/2)
+  const height = broker ? Math.max(720,relationships.length * 144 + 130) : Math.max(790,branchTop+100+relationships.length*126)
   const centreY = broker ? height / 2 : 395
   const rootX = broker ? 175 : 386
   useEffect(() => setZoom(null),[detail.prospect?.id,broker?.id])
   useEffect(() => {
     if (!host.current) return
     host.current.scrollLeft = Math.max(0,(rootX+135)*scale-width/2)
-    host.current.scrollTop = Math.max(0,centreY*scale-host.current.clientHeight/2)
+    host.current.scrollTop = Math.max(0,width<640 ? (centreY-65)*scale-24 : centreY*scale-host.current.clientHeight/2)
   },[rootX,centreY,scale,width,detail.prospect?.id,broker?.id])
   return <section className="relationship-map" aria-label={name + ' relationship map'}>
     <div className="map-caption"><span><GitBranch size={15}/>{broker ? 'Broker → connected accounts' : 'Company → people & relationships'}</span><span>{width<900?'Scroll to explore':'Private workspace'}</span></div>
@@ -59,14 +59,14 @@ export function RelationshipGraph({detail, name, choose, addContact, addLink, in
         <div className="map-world" style={{width:1120,height,transform:`scale(${scale})`}}>
           <svg className="map-wires" width="1120" height={height} aria-hidden="true">
             {!broker && <>
-              {relationships.map((link,index) => <path key={link.id} d={`M386 395 C340 395 340 ${branchTop+94+index*90} 295 ${branchTop+94+index*90}`} className={link.status==='active'?'wire-current':'wire-broker'}/>)}
+              {relationships.map((link,index) => <path key={link.id} d={`M386 395 C340 395 340 ${branchTop+106+index*126} 295 ${branchTop+106+index*126}`} className={link.status==='active'?'wire-current':link.status==='unverified'?'wire-unverified':'wire-broker'}/>)}
               {contactRoles.map((role,index) => <path key={role.id} className={contacts.some(c=>c.directoryContext?.roles.includes(role.id)&&c.directoryContext.evidenceStatus!=='inferred')?'':'wire-unknown'} d={`M656 395 C730 395 716 ${94+index*140} 790 ${94+index*140}`}/>) }
               {!!unknown.length && <path d="M521 460 C521 505 521 505 521 550" className="wire-unknown"/>}
               <circle cx="656" cy="395" r="4"/><circle cx="386" cy="395" r="4"/>
             </>}
             {broker && relationships.map((link,index) => {
               const y = 114 + index*144
-              return <path key={link.id} className={link.status === 'active' ? 'wire-current' : 'wire-broker'} d={`M445 ${centreY} C595 ${centreY} 585 ${y} 735 ${y}`}/>
+              return <path key={link.id} className={link.status === 'active' ? 'wire-current' : link.status==='unverified'?'wire-unverified':'wire-broker'} d={`M445 ${centreY} C595 ${centreY} 585 ${y} 735 ${y}`}/>
             })}
           </svg>
           <div className="map-root" style={{left:rootX,top:centreY-65}}>
@@ -86,7 +86,8 @@ export function RelationshipGraph({detail, name, choose, addContact, addLink, in
               {!relationships.length && <p className="map-empty-note">No broker connection recorded yet.</p>}
               <div className="map-broker-list">{relationships.map(link => <div className="map-broker-node" key={link.id}>
                 <button className="map-person" onClick={() => choose('broker',link.brokerId)}><span><strong>{link.brokerName}</strong><small>{relationshipLabels[link.status]}</small></span><ChevronRight size={15}/></button>
-                <button className="map-evidence-link" onClick={() => inspectRelationship(link)}>Scope & evidence</button>
+                <p className="map-link-scope" title={link.scope}>Scope: {link.scope||'To verify'}</p>
+                <button className="map-evidence-link" onClick={() => inspectRelationship(link)}>Noted {link.learnedOn} · Evidence</button>
               </div>)}</div>
               <button className="map-add" onClick={addLink}><Plus size={13}/>Link a broker</button>
             </div>
@@ -110,7 +111,7 @@ export function RelationshipGraph({detail, name, choose, addContact, addLink, in
             <div className="map-account-heading" style={{left:735,top:19}}>CONNECTED ACCOUNTS <span>{relationships.length}</span></div>
             {relationships.map((link,index) => <section className="map-account" key={link.id} style={{left:735,top:60+index*144}}>
               <button className="map-person" onClick={() => choose('company',link.prospectId)}><span><strong>{link.companyName}</strong><small>{relationshipLabels[link.status]}</small></span><ChevronRight size={16}/></button>
-              <p>{link.scope || 'Scope to be confirmed'}</p><button className="map-evidence-link" onClick={() => inspectRelationship(link)}>Scope & evidence</button>
+              <p title={link.scope}>Scope: {link.scope || 'To verify'}</p><button className="map-evidence-link" onClick={() => inspectRelationship(link)}>Noted {link.learnedOn} · Evidence</button>
             </section>)}
             <button className="map-link-account" style={{left:735,top:72+relationships.length*144}} onClick={addLink}><Plus size={14}/>Link another account</button>
             <p className="map-broker-legend">Follow an account to its people and decision-making roles.</p>
@@ -118,6 +119,6 @@ export function RelationshipGraph({detail, name, choose, addContact, addLink, in
         </div>
       </div>
     </div>
-    <div className="map-footer"><div className="map-key"><span><i/>Recorded connection</span><span><i className="dashed"/>Past / unconfirmed</span></div><div className="map-controls"><button aria-label="Zoom out" disabled={zoomFactor<=.8} onClick={() => setZoom(Math.max(.8,zoomFactor-.2))}>−</button><button aria-label="Fit graph" onClick={() => setZoom(1)}><Focus size={14}/></button><button aria-label="Zoom in" disabled={zoomFactor>=4} onClick={() => setZoom(Math.min(4,zoomFactor+.2))}>+</button></div></div>
+    <div className="map-footer"><div className="map-key"><span><i/>Recorded connection</span><span><i className="dashed"/>Historical / ended</span><span><i className="unverified"/>To verify / missing</span></div><div className="map-controls"><button aria-label="Zoom out" disabled={zoomFactor<=.8} onClick={() => setZoom(Math.max(.8,zoomFactor-.2))}>−</button><button aria-label="Fit graph" onClick={() => setZoom(1)}><Focus size={14}/></button><button aria-label="Zoom in" disabled={zoomFactor>=4} onClick={() => setZoom(Math.min(4,zoomFactor+.2))}>+</button></div></div>
   </section>
 }

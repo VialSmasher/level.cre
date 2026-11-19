@@ -1,5 +1,13 @@
 # Daily Desk company relationship map
 
+## Sync verification and navigation iteration
+
+The November 19 live button run returned a partial receipt with 28 activity records and 11 items for review. It saved three sourced contact titles in the relationship journal: Don Clement at Mission Building Supplies, Ray at Proline, and Sean Demidovich at Waymarc. President titles were retained without inventing real estate authority. A ZoomInfo credit limit and a phone identity conflict remained unresolved; neither prevented the supported contact-title updates from being saved. No new email address was saved and the final activity outbox was empty.
+
+The follow-up iteration adds Relationships to desktop Tools and the mobile account menu, a company/broker navigation trail, visible relationship scope and learned dates, a source-backed Recent updates panel, clearer review controls and mobile graph positioning. Sync receipts separate relationship checks from saved changes. Counts come from durable owner-bound writes correlated to the exact run; the new worker/client attach that correlation automatically, without changing evidence identities. No new migration is required.
+
+Validation: 59 backend tests and four worker tests passed, plus the API TypeScript check and both builds. Simulations cover three concurrent identical writes, replay during a later run, stale edits, wrong-owner/run rejection, source-key conflicts, partial completion and receipt delivery retries without repeating the mailbox scan. Chrome review verified company-to-broker-to-account navigation, the return trail, the updates panel and 390-pixel mobile navigation/layout. Gemini reviewed before/after screenshots in two passes; verified suggestions were applied while retaining the graph. Its apparent desktop sidebar offset was a full-page screenshot artifact, not a browser layout defect.
+
 ## Hands-off maintenance rollout
 
 On November 19, 2026 Patrick authorized importing the reviewed mockup and maintaining the graph during company research and BD. API release `c68dfffbfc1e0f27395478ce3b2b7f94088c7aee` adds a separately enabled, owner-bound maintenance endpoint and private change journal. Railway deployment `f42f7359-f577-464f-a439-5d08fb23c023` serves this API. The existing website remains compatible and displays the imported records.

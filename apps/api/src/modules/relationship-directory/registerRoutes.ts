@@ -110,8 +110,11 @@ export function registerRelationshipDirectory(app: Express, pool: Pool) {
       if(!parsed.success) return res.status(400).json({message:'Provide a sourced, dated relationship change using the maintenance contract.',issues:parsed.error.flatten()})
       return res.json(await maintainDirectory(pool,owner,parsed.data))
     }))
-    app.get(agentBase + '/changes', requireAccountIntelligenceAuth, handle(async(_req,res,owner)=>{
-      const changes=await pool.query('SELECT external_key AS "externalKey",request,before_record AS "beforeRecord",result,created_at AS "createdAt" FROM public.directory_changes WHERE user_id=$1 ORDER BY created_at DESC,id DESC LIMIT 100',[owner])
+    app.get([agentBase + '/changes',base + '/changes'], readAuth, handle(async(_req,res,owner)=>{
+      const changes=await pool.query(`SELECT d.external_key AS "externalKey",d.request,d.before_record AS "beforeRecord",d.result,d.created_at AS "createdAt",
+        COALESCE(NULLIF(p.business_name,''),NULLIF(p.contact_company,''),p.name) AS "companyName"
+        FROM public.directory_changes d LEFT JOIN public.prospects p ON p.user_id=d.user_id AND p.id=COALESCE(d.request->>'prospectId',d.request->'relationship'->>'prospectId')
+        WHERE d.user_id=$1 ORDER BY d.created_at DESC,d.id DESC LIMIT 100`,[owner])
       res.json({changes:changes.rows})
     }))
     app.post(base + '/findings/:id/review', requireBrokerAuth, handle(async (req,res,owner) => {

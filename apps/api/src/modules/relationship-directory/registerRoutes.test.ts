@@ -16,7 +16,7 @@ test('directory persistence, ownership, validation, concurrent edits, and merged
     const quote = String.fromCharCode(96);
     await db.exec(fixture.split('const schema = ' + quote)[1].split(quote + ';')[0]);
     await db.exec('ALTER TABLE prospects ADD COLUMN merge_event_id varchar; CREATE TABLE prospect_merge_events(id varchar,preview_hash varchar)');
-    for (const migration of ['0021_prospect_contacts.sql', '0023_relationship_directory.sql','0024_relationship_graph.sql','0025_relationship_maintenance.sql']) {
+    for (const migration of ['0021_prospect_contacts.sql','0022_desk_sync.sql', '0023_relationship_directory.sql','0024_relationship_graph.sql','0025_relationship_maintenance.sql']) {
         await db.exec(await readFile(new URL('../../../../../drizzle/' + migration, import.meta.url), 'utf8'));
     }
     let tail = Promise.resolve();
@@ -156,7 +156,14 @@ test('directory persistence, ownership, validation, concurrent edits, and merged
     assert.equal((await agent('/maintain',{...updateMaint,externalKey:'wrong-identity',expectedSnapshot:latestPerson.snapshotToken,contact:{...updateMaint.contact,name:'Someone else'}})).status,409);
     const newBrokerId=randomUUID();
     const saveBroker={kind:'broker',externalKey:'maint-broker',id:newBrokerId,evidence,broker:{name:'Sourced Broker',firm:'C&W',version:0}};
-    assert.equal((await agent('/maintain',saveBroker)).status,200);
+    const syncId=randomUUID(),nextSyncId=randomUUID();
+    await db.query("INSERT INTO desk_sync(owner_id,request_id,state) VALUES('owner',$1,'running')",[syncId]);
+    assert.equal((await agent('/maintain',{...saveBroker,syncRequestId:randomUUID()})).status,409);
+    const concurrent=await Promise.all([1,2,3].map(async()=>{const r=await agent('/maintain',{...saveBroker,syncRequestId:syncId});assert.equal(r.status,200);return r.json()}));
+    assert.equal(concurrent.filter(r=>!r.duplicate).length,1);
+    assert.equal(concurrent.filter(r=>r.duplicate).length,2);
+    await db.query("UPDATE desk_sync SET request_id=$1 WHERE owner_id='owner'",[nextSyncId]);
+    assert.equal((await (await agent('/maintain',{...saveBroker,syncRequestId:nextSyncId})).json()).duplicate,true);
     assert.equal((await (await agent('/maintain',saveBroker)).json()).duplicate,true);
     assert.equal((await agent('/maintain',{...saveBroker,id:randomUUID(),externalKey:'duplicate-broker'})).status,409);
     const saveLink={kind:'relationship',externalKey:'maint-link',id:randomUUID(),evidence,relationship:{...link,brokerId:newBrokerId}};
@@ -170,6 +177,9 @@ test('directory persistence, ownership, validation, concurrent edits, and merged
     const changes=await (await agent('/changes')).json();
     assert.equal(changes.changes.length,4);
     assert.equal(changes.changes.find((c:any)=>c.externalKey==='maint-contact-update').beforeRecord.title,'Facilities Manager');
+    assert.equal(changes.changes.find((c:any)=>c.externalKey==='maint-broker').request.syncRequestId,syncId);
+    assert.equal((await call('/changes')).status,200);
+    assert.equal((await call('/changes','Bearer '+agentKey)).status,403);
     assert.equal((await (await agent('/changes',undefined,foreign)).json()).changes.length,0);
     await db.exec("UPDATE prospects SET merged_into_prospect_id='other-account' WHERE id='account'");
     const merged = await (await call('/companies/account')).json();

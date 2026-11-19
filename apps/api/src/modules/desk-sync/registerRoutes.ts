@@ -7,13 +7,15 @@ const brokerPath = '/api/desk/codex-sync'
 const workerPath = '/api/agent/desk-sync'
 const ticket = z.object({ requestId: z.string().uuid() }).strict()
 const count = z.number().int().min(0).max(1_000_000)
+const relationshipCheck=z.object({state:z.enum(['checked','partial','blocked','not_needed']),companiesReviewed:z.number().int().min(0).max(20)}).strict()
 const receipt = ticket.extend({
   state: z.enum(['complete', 'partial', 'failed']),
   recorded: count,
   needsReview: count,
   queued: count,
   reason: z.enum(['none', 'coverage', 'backlog', 'access', 'interrupted', 'other']),
-}).strict().refine(r => r.state !== 'complete' || (r.queued === 0 && r.reason === 'none'))
+  relationships:relationshipCheck.optional(),
+}).strict().refine(r => r.state !== 'complete' || (r.queued === 0 && r.reason === 'none' && (!r.relationships || ['checked','not_needed'].includes(r.relationships.state))))
 const stale = "desk_sync.state = 'running' AND desk_sync.updated_at < now() - interval '5 minutes'"
 
 function handle(fn: (req: Request, res: Response) => Promise<unknown>): RequestHandler {
@@ -85,11 +87,19 @@ export function registerDeskSync(app: Express, db: Pick<Pool, 'query'>) {
     const input = receipt.safeParse(req.body)
     if (!input.success) return res.sendStatus(400)
     const { requestId, state, ...result } = input.data
+    const owner=getUserId(req)
+    // Count only durable writes explicitly correlated to this run, never a time window or model estimate.
+    const evidence=await db.query(`SELECT
+      (SELECT count(*)::int FROM public.directory_changes WHERE user_id=$1 AND request->>'syncRequestId'=$2 AND request->>'kind'='contact') AS contacts,
+      (SELECT count(*)::int FROM public.directory_changes WHERE user_id=$1 AND request->>'syncRequestId'=$2 AND request->>'kind'='broker') AS brokers,
+      (SELECT count(*)::int FROM public.directory_changes WHERE user_id=$1 AND request->>'syncRequestId'=$2 AND request->>'kind'='relationship') AS links,
+      (SELECT count(*)::int FROM public.directory_findings WHERE user_id=$1 AND payload->>'syncRequestId'=$2 AND status='observed') AS "needsReview"`,[owner,requestId])
+    const savedResult={...result,relationships:{state:result.relationships?.state??'not_reported',companiesReviewed:result.relationships?.companiesReviewed??0,...evidence.rows[0]}}
     const { rowCount } = await db.query(`
       UPDATE public.desk_sync SET state = $3, result = $4::jsonb, updated_at = now(),
         last_success_at = CASE WHEN $3 = 'complete' THEN now() ELSE last_success_at END
       WHERE owner_id = $1 AND request_id = $2 AND state = 'running'`,
-      [getUserId(req), requestId, state, JSON.stringify(result)])
+      [owner, requestId, state, JSON.stringify(savedResult)])
     res.sendStatus(rowCount ? 204 : 409)
   }))
 }

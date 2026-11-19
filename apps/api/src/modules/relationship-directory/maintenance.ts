@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { BrokerSchema, RelationshipSchema } from './schemas'
 import { DirectoryContextSchema } from './context'
 import { createProspectContactWithClient, listProspectContacts, requireContactProspect } from '../../lib/prospectContactService'
+import { requireRunningDirectorySync, withoutSyncId } from './syncTracking'
 
 export function stable(value: any): string {
   if (Array.isArray(value)) return '['+value.map(stable).join(',')+']'
@@ -20,7 +21,7 @@ const evidence = z.object({
   reference:z.string().trim().min(1).max(2000), asOf:z.string().date(),
   fact:z.string().trim().min(1).max(2000),
 }).strict()
-const common = {externalKey:z.string().trim().min(1).max(240),evidence}
+const common = {externalKey:z.string().trim().min(1).max(240),evidence,syncRequestId:z.string().uuid().optional()}
 const context = DirectoryContextSchema.refine(c=>!!c.sourceRef && !!c.asOf && c.evidenceStatus!=='inferred',
   'Direct saves need attributable evidence and a date. Stage inferences as findings.')
 export const MaintenanceSchema = z.discriminatedUnion('kind',[
@@ -41,9 +42,10 @@ export async function maintainDirectory(pool:Pool,owner:string,input:z.infer<typ
   try {
     await client.query('BEGIN')
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))',['directory-maintenance:'+owner])
+    await requireRunningDirectorySync(client,owner,input.syncRequestId)
     const prior=await client.query('SELECT request,result FROM public.directory_changes WHERE user_id=$1 AND external_key=$2',[owner,input.externalKey])
     if(prior.rows[0]) {
-      if(stable(prior.rows[0].request)!==stable(input)) fail('This external key identifies different evidence. Use a new key for a new change.')
+      if(stable(withoutSyncId(prior.rows[0].request))!==stable(withoutSyncId(input))) fail('This external key identifies different evidence. Use a new key for a new change.')
       await client.query('COMMIT')
       return {...prior.rows[0].result,duplicate:true}
     }

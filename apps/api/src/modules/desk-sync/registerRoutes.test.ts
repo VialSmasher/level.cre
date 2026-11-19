@@ -12,6 +12,7 @@ test('Daily Desk requests are private, coalesced, claimed once, and recover afte
   const db = new PGlite()
   t.after(() => db.close())
   await db.exec(await readFile(new URL('../../../../../drizzle/0022_desk_sync.sql', import.meta.url), 'utf8'))
+  await db.exec('CREATE TABLE directory_changes(user_id varchar,request jsonb); CREATE TABLE directory_findings(user_id varchar,payload jsonb,status text)')
   const owner = randomUUID()
   const secret = randomUUID()
   const worker = { 'x-levelcre-sales-key': randomUUID() }
@@ -60,7 +61,11 @@ test('Daily Desk requests are private, coalesced, claimed once, and recover afte
   assert.equal((await get()).run.requestId, run.requestId)
   const finish = { ...ticket, state: 'complete', reason: 'none', recorded: 2, needsReview: 1, queued: 0 }
   assert.equal((await call(agent + 'finish', worker, { ...finish, queued: 2 })).status, 400)
+  assert.equal((await call(agent + 'finish', worker, { ...finish,relationships:{state:'blocked',companiesReviewed:0}})).status, 400)
+  await db.query('INSERT INTO directory_changes(user_id,request) VALUES($1,$2::jsonb),($1,$3::jsonb),($4,$2::jsonb)',[owner,JSON.stringify({kind:'contact',syncRequestId:ticket.requestId}),JSON.stringify({kind:'broker',syncRequestId:randomUUID()}),'foreign'])
+  await db.query('INSERT INTO directory_findings(user_id,payload,status) VALUES($1,$2::jsonb,$3)',[owner,JSON.stringify({syncRequestId:ticket.requestId}),'observed'])
   assert.equal((await call(agent + 'finish', worker, finish)).status, 204)
+  assert.deepEqual((await get()).run.result.relationships,{state:'not_reported',companiesReviewed:0,contacts:1,brokers:0,links:0,needsReview:1})
   assert.equal((await call(desk, broker, ticket)).status, 202)
   const last = (await get()).run.lastSuccessAt
   assert.ok(last)
@@ -71,6 +76,7 @@ test('Daily Desk requests are private, coalesced, claimed once, and recover afte
   await queue()
   assert.equal((await call(agent + 'finish', worker, { ...finish, ...next })).status, 409)
   const retry = (await (await call(agent + 'claim', worker, {})).json()).job
-  assert.equal((await call(agent + 'finish', worker, { ...finish, ...retry, state: 'partial', reason: 'coverage' })).status, 204)
+  assert.equal((await call(agent + 'finish', worker, { ...finish, ...retry, state: 'partial', reason: 'coverage',relationships:{state:'checked',companiesReviewed:3} })).status, 204)
+  assert.deepEqual((await get()).run.result.relationships,{state:'checked',companiesReviewed:3,contacts:0,brokers:0,links:0,needsReview:0})
   assert.equal((await get()).run.lastSuccessAt, last)
 })

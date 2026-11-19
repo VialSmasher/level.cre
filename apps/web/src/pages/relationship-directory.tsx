@@ -226,16 +226,22 @@ export default function RelationshipDirectory() {
   const [editor,setEditor] = useState<Editor|null>(null)
   const [inspection,setInspection] = useState<{kind:'contact'|'role'|'relationship'|'broker'|'research';value?:any}|null>(null)
   const [notice,setNotice] = useState('')
+  const [trail,setTrail] = useState<Array<{type:'company'|'broker';id:string;name:string}>>([])
+  const [updatesOpen,setUpdatesOpen] = useState(params.get('updates')==='1')
   const queryClient = useQueryClient()
   useEffect(() => { const timer=setTimeout(() => setDebounced(search),180); return () => clearTimeout(timer) },[search])
   useEffect(() => {setInspection(null);setNotice('')},[selectedId])
-  const directory = useQuery<Directory>({queryKey:[base,debounced],queryFn:() => request(base+'?search='+encodeURIComponent(debounced))})
+  const directory = useQuery<Directory>({queryKey:[base,'search',debounced],queryFn:() => request(base+'?search='+encodeURIComponent(debounced))})
   const path = base+(selectedBroker?'/brokers/':'/companies/')+encodeURIComponent(selectedId||'')
-  const detailQuery = useQuery<Detail>({queryKey:[base,'detail',path],queryFn:() => request(path),enabled:Boolean(selectedId)})
+  const detailQuery = useQuery<Detail>({queryKey:[base,'detail',path],queryFn:() => request(path),enabled:Boolean(selectedId),refetchOnWindowFocus:true,refetchInterval:30000})
+  const updates = useQuery<{changes:Array<{externalKey:string;createdAt:string;companyName:string|null;request:any;result:any;beforeRecord:any}>}>({
+    queryKey:[base,'changes'],queryFn:()=>request(base+'/changes'),enabled:updatesOpen,refetchOnWindowFocus:true,refetchInterval:updatesOpen?30000:false,
+  })
   const detail=detailQuery.data
   const broker=detail?.broker
   const name=broker?.name || detail?.prospect?.businessName || detail?.contacts?.find(c=>c.company)?.company || detail?.prospect?.name || ''
   const choose=(type:'company'|'broker',id:string) => {
+    if(selectedId && name && id!==selectedId) setTrail(items=>[...items,{type:selectedBroker?'broker' as const:'company' as const,id:selectedId,name}].slice(-4))
     setSearchOpen(false);setSearch('')
     navigate('/app/desk/relationships?'+type+'='+encodeURIComponent(id))
   }
@@ -276,11 +282,11 @@ export default function RelationshipDirectory() {
   return <div className="min-h-full bg-[#f5f7fa]">
     <div className="mx-auto w-full max-w-[1440px] px-4 py-5 sm:px-6 lg:px-8">
       <Link href="/app/desk" className="mb-4 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-blue-700"><ArrowLeft className="h-3.5 w-3.5"/>Daily Desk</Link>
-      <PageHeader label="Your network" title="Company relationships" description="Find a company. Follow the people, brokers and corporate connections around it." icon={Network} actions={<Button size="sm" variant="outline" onClick={()=>openBroker()}><Plus className="h-4 w-4"/>Add broker</Button>}/>
-      <div className="my-5 flex flex-wrap items-start gap-3">
+      <PageHeader className="gap-2 pb-3 sm:gap-4 sm:pb-5" label="Your network" title="Company relationships" description="Find a company. Follow the people, brokers and corporate connections around it." icon={Network} actions={<Button size="sm" variant="outline" onClick={()=>openBroker()}><Plus className="h-4 w-4"/>Add broker</Button>}/>
+      <div className="my-3 flex flex-wrap items-start gap-2 sm:my-5 sm:gap-3">
         <div className="relative min-w-0 flex-1 basis-full sm:basis-0">
           <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400"/>
-          <Input className="h-10 bg-white pl-10 pr-10" aria-label="Search companies, contacts or brokers" placeholder="Search a company, contact or broker…" value={search} onFocus={()=>setSearchOpen(true)} onKeyDown={e=>{if(e.key==='Escape')setSearchOpen(false)}} onChange={e=>{setSearch(e.target.value);setSearchOpen(true)}}/>
+          <Input className="h-10 bg-white pl-10 pr-10" aria-label="Search companies, contacts or brokers" placeholder="Company, contact or broker…" value={search} onFocus={()=>setSearchOpen(true)} onKeyDown={e=>{if(e.key==='Escape')setSearchOpen(false)}} onChange={e=>{setSearch(e.target.value);setSearchOpen(true)}}/>
           {searchOpen&&<button aria-label="Close search results" className="absolute right-3 top-3 text-slate-400" onClick={()=>setSearchOpen(false)}><X size={16}/></button>}
           {searchOpen&&<div className="absolute left-0 right-0 top-12 z-20 max-h-[420px] overflow-auto rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
             {directory.isLoading&&<p className="p-3 text-sm text-slate-500">Searching your directory…</p>}
@@ -296,8 +302,27 @@ export default function RelationshipDirectory() {
             {(directory.data?.moreCompanies||directory.data?.moreBrokers)&&<p className="p-3 text-xs text-slate-500">Search more specifically to narrow the first 100 results.</p>}
           </div>}
         </div>
-        {detail&&!broker&&<><Button className="h-10" variant="outline" onClick={()=>openContact()}><Plus size={15}/>Add contact</Button><Button className="h-10" variant="ghost" onClick={()=>setInspection({kind:'research'})}>Research gaps{detail.findings?.length?' · '+detail.findings.length+' to review':''}</Button></>}
+        {detail&&!broker&&<><Button className="h-10" variant="outline" onClick={()=>openContact()}><Plus size={15}/>Add contact</Button><Button className="h-10" variant="outline" onClick={()=>setInspection({kind:'research'})}>Research gaps</Button>{!!detail.findings?.length&&<Button className="h-10 text-violet-700" variant="outline" onClick={()=>setInspection({kind:'research'})}>Needs review · {detail.findings.length}</Button>}</>}
+        <Button className="h-10" variant="outline" onClick={()=>setUpdatesOpen(value=>!value)} aria-expanded={updatesOpen}>Recent updates</Button>
       </div>
+      {trail.length>0&&<nav aria-label="Relationship trail" className="mb-3 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+        {trail.map((item,index)=><span className="inline-flex items-center" key={index}><button className="min-h-10 px-2 text-blue-700 hover:underline" onClick={()=>{setTrail(items=>items.slice(0,index));setSearchOpen(false);navigate('/app/desk/relationships?'+item.type+'='+encodeURIComponent(item.id))}}>{item.name}</button><ArrowRight size={12}/></span>)}<span className="px-2 font-medium text-slate-700">{name}</span>
+      </nav>}
+      {updatesOpen&&<section aria-label="Recent relationship updates" className="mb-4 rounded-lg border border-slate-200 bg-white px-4 py-3">
+        <h2 className="text-sm font-semibold">Recent relationship updates</h2><p className="mt-1 text-xs text-slate-500">Saved by Codex with source evidence. Historical connections keep their original scope.</p>
+        {updates.isLoading&&<p className="mt-3 text-sm text-slate-500">Loading updates…</p>}
+        {updates.isError&&<p role="alert" className="mt-3 text-sm text-red-700">Updates could not be loaded. <button onClick={()=>updates.refetch()}>Retry</button></p>}
+        {updates.data?.changes.length===0&&<p className="mt-3 text-sm text-slate-500">No relationship changes recorded yet.</p>}
+        <div className="mt-2 max-h-72 divide-y divide-slate-100 overflow-y-auto">{updates.data?.changes.slice(0,20).map(change=>{
+          const r=change.request,companyId=r.prospectId||r.relationship?.prospectId
+          const label=r.contact?.name||r.broker?.name||change.companyName||'Broker connection'
+          return <div className="py-3" key={change.externalKey}><button className="min-h-8 text-left text-sm font-medium text-blue-700 hover:underline" onClick={()=>choose(companyId?'company':'broker',companyId||change.result.id)}>{label}</button>
+            <p className="text-xs text-slate-600">{r.kind==='contact'?'Contact':r.kind==='broker'?'Broker':'Account connection'} {change.beforeRecord?'updated':'added'}{r.relationship?' · '+statuses[r.relationship.status]:''}{r.contact&&change.companyName?' · '+change.companyName:''}</p>
+            <p className="mt-1 text-xs text-slate-500">Saved {new Date(change.createdAt).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} · Source {r.evidence.asOf}</p>
+            <details className="mt-1 text-xs text-slate-500"><summary className="cursor-pointer py-1">Source &amp; scope</summary><p className="mt-1 whitespace-pre-wrap leading-5">{r.evidence.fact}</p><p className="mt-1 break-words leading-5">{r.evidence.reference}</p></details>
+          </div>
+        })}</div>
+      </section>}
       {notice&&<p role="status" className="mb-3 text-xs text-emerald-700">{notice}</p>}
       {!selectedId&&<div className="flex min-h-[450px] flex-col items-center justify-center rounded-lg border border-slate-200 bg-white text-center"><Network className="h-10 w-10 text-blue-200"/><h2 className="mt-5 text-lg font-semibold">Start with a company</h2><p className="mt-2 max-w-md px-5 text-sm leading-6 text-slate-500">Search above to open its relationship map. Follow a broker to see the other accounts connected to them.</p><Button variant="outline" className="mt-5" onClick={()=>setSearchOpen(true)}><Search size={14}/>Find a company</Button></div>}
       {detailQuery.isLoading&&selectedId&&<p className="py-20 text-center text-sm text-slate-500">Opening relationship map…</p>}

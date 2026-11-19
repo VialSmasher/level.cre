@@ -7,7 +7,8 @@
 .map-wires { position:absolute; inset:0; pointer-events:none; }
 .map-wires path { stroke:#9eb6cf; stroke-width:1.5; fill:none; }
 .map-wires circle { fill:#5e87b5; }
-.map-wires .wire-broker,.map-wires .wire-unknown { stroke:#a2b0c1; stroke-dasharray:5 5; }
+.map-wires .wire-broker { stroke:#a2b0c1; stroke-dasharray:5 5; }
+.map-wires .wire-unknown,.map-wires .wire-unverified { stroke:#b6a273; stroke-dasharray:2 5; }
 .map-wires .wire-current { stroke:#6989ac; }
 .map-root { position:absolute; width:270px; min-height:130px; border-radius:9px; padding:20px 22px; background:#142e4e; color:white; box-shadow:0 7px 24px #1b35541a; }
 .map-root-label { display:flex; align-items:center; gap:7px; font-size:10px; color:#b0c6df; letter-spacing:.04em; }
@@ -25,7 +26,8 @@
 .cw-mark { font-size:11px; font-weight:700; color:#ad3946; background:#f6e9eb; border-radius:5px; padding:7px 6px; }
 .map-broker-list { display:flex; flex-direction:column; gap:10px; }
 .map-broker-node,.map-role,.map-account,.map-unclassified { background:#fff; border:1px solid #d7e1ec; border-radius:7px; box-shadow:0 2px 5px #1e395503; }
-.map-broker-node { padding:12px 14px 10px; min-height:80px; }
+.map-broker-node { padding:12px 14px 10px; height:116px; }
+.map-link-scope { font-size:10px; color:#72829a; margin-top:7px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .map-person { display:flex; width:100%; align-items:center; justify-content:space-between; gap:10px; text-align:left; font-size:12px; line-height:1.5; }
 .map-person strong { font-weight:600; }
 .map-person small { display:block; font-size:10px; color:#7e8a9b; font-weight:400; margin-top:3px; }
@@ -61,9 +63,10 @@
 .map-key { display:flex; align-items:center; gap:18px; font-size:10px; color:#8491a2; }
 .map-key span { display:flex; align-items:center; gap:6px; }
 .map-key i { display:inline-block; width:18px; border-top:1.5px solid #91aac5; }
-.map-key i.dashed { border-top-style:dashed; }
+.map-key i.dashed { border-top-style:dashed; border-color:#6f8098; }
+.map-key i.unverified { border-top:2px dotted #a58035; }
 .map-controls { display:flex; align-items:center; gap:5px; }
 .map-controls button { height:24px; width:27px; display:flex; align-items:center; justify-content:center; border:1px solid #e2e8ef; border-radius:4px; color:#6f8198; font-size:14px; }
 .map-controls button:disabled { opacity:.35; }
 @media(max-width:900px) { .map-viewport { max-height:420px; } }
-@media(max-width:640px) { .map-caption { padding:12px; font-size:10px; gap:8px; } .map-key { gap:9px; font-size:9px; } }
+@media(max-width:640px) { .map-caption { padding:12px; font-size:10px; gap:8px; } .map-key { gap:9px; font-size:9px; flex-wrap:wrap; } .map-controls button { min-width:44px; height:44px; } .map-person { min-height:40px; } .map-evidence-link { min-height:24px; } .map-footer { flex-wrap:wrap; } }

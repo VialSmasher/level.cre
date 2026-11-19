@@ -4,9 +4,11 @@ import { z } from 'zod'
 import { createProspectContactWithClient, ProspectContactCreateSchema } from '../../lib/prospectContactService'
 import { DirectoryContextSchema } from './context'
 import { resolveCanonicalProspect } from '../../lib/prospectMergeService'
+import { requireRunningDirectorySync, withoutSyncId } from './syncTracking'
 
 export const FindingSchema = z.object({
   externalKey: z.string().trim().min(1).max(240),
+  syncRequestId: z.string().uuid().optional(),
   prospectId: z.string().min(1).max(240),
   contact: ProspectContactCreateSchema.extend({
     directoryContext: DirectoryContextSchema.refine(value => Boolean(value.sourceRef && value.asOf), 'Agent observations need a source and date.'),
@@ -20,7 +22,8 @@ function stable(value: any): string {
 }
 
 export async function recordFinding(pool: Pool, owner: string, finding: z.infer<typeof FindingSchema>) {
-  const payload = {contact: {...finding.contact, directoryContext: {...finding.contact.directoryContext, evidenceStatus: finding.contact.directoryContext.evidenceStatus === 'inferred' ? 'inferred' : 'observed'}}}
+  await requireRunningDirectorySync(pool,owner,finding.syncRequestId)
+  const payload = {syncRequestId:finding.syncRequestId,contact: {...finding.contact, directoryContext: {...finding.contact.directoryContext, evidenceStatus: finding.contact.directoryContext.evidenceStatus === 'inferred' ? 'inferred' : 'observed'}}}
   const result = await pool.query(
     `INSERT INTO public.directory_findings(id,user_id,prospect_id,external_key,payload)
      SELECT $1::uuid,$2::varchar,$3::varchar,$4,$5::jsonb WHERE EXISTS(
@@ -31,7 +34,7 @@ export async function recordFinding(pool: Pool, owner: string, finding: z.infer<
   const existing = await pool.query('SELECT id,status,payload,prospect_id FROM public.directory_findings WHERE user_id=$1 AND external_key=$2',[owner,finding.externalKey])
   const row = existing.rows[0]
   if (!row) throw Object.assign(new Error('Company not found for this broker.'),{status:404})
-  if (row.prospect_id !== finding.prospectId || stable(row.payload) !== stable(payload)) {
+  if (row.prospect_id !== finding.prospectId || stable(withoutSyncId(row.payload)) !== stable(withoutSyncId(payload))) {
     throw Object.assign(new Error('This external key already identifies a different finding. Use a new key for new evidence.'),{status:409})
   }
   return {id:row.id,status:row.status,duplicate:true}

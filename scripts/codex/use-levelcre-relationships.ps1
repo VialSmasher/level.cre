@@ -31,7 +31,11 @@ try {
   elseif($Action -in @('Maintain','Finding')){
     if(!$BodyFile){throw 'A UTF-8 JSON BodyFile is required.'}
     $body=[IO.File]::ReadAllText((Resolve-Path -LiteralPath $BodyFile),[Text.UTF8Encoding]::new($false,$true))
-    $null=$body | ConvertFrom-Json
+    $payload=$body | ConvertFrom-Json
+    if($env:LEVELCRE_DIRECTORY_SYNC_REQUEST_ID){
+      $payload | Add-Member -NotePropertyName syncRequestId -NotePropertyValue $env:LEVELCRE_DIRECTORY_SYNC_REQUEST_ID -Force
+      $body=$payload | ConvertTo-Json -Depth 40 -Compress
+    }
     Invoke-RestMethod -Method Post -Uri ($base+'/api/intel/directory'+$path) -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 30 | ConvertTo-Json -Depth 40
   }else{
     Invoke-RestMethod -Uri ($base+'/api/intel/directory'+$path) -Headers $headers -TimeoutSec 30 | ConvertTo-Json -Depth 40

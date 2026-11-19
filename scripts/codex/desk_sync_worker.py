@@ -20,8 +20,14 @@ COUNTS = ["recorded", "needsReview", "queued"]
 FIELDS = {"state": {"type": "string", "enum": STATE},
           "reason": {"type": "string", "enum": REASON},
           **{key: {"type": "integer", "minimum": 0, "maximum": 1000000} for key in COUNTS}}
+RELATIONSHIP_STATES = ["checked", "partial", "blocked", "not_needed"]
+FIELDS["relationships"] = {"type": "object", "additionalProperties": False,
+    "properties": {"state": {"type": "string", "enum": RELATIONSHIP_STATES},
+                   "companiesReviewed": {"type": "integer", "minimum": 0, "maximum": 20}},
+    "required": ["state", "companiesReviewed"]}
 SCHEMA = {"type": "object", "properties": FIELDS, "additionalProperties": False, "required": list(FIELDS)}
-FAILURE = {"state": "failed", "reason": "interrupted", **dict.fromkeys(COUNTS, 0)}
+FAILURE = {"state": "failed", "reason": "interrupted", **dict.fromkeys(COUNTS, 0),
+           "relationships": {"state": "blocked", "companiesReviewed": 0}}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -59,10 +65,15 @@ def read_automation():
 
 
 def checked_result(result):
+    relationship = result.get("relationships") if isinstance(result, dict) else None
     if (not isinstance(result, dict) or result.keys() != FIELDS.keys()
             or result["state"] not in STATE or result["reason"] not in REASON
             or any(type(result[k]) is not int or not 0 <= result[k] <= 1000000 for k in COUNTS)
-            or (result["state"] == "complete" and (result["reason"] != "none" or result["queued"]))):
+            or not isinstance(relationship, dict) or relationship.keys() != {"state", "companiesReviewed"}
+            or relationship["state"] not in RELATIONSHIP_STATES
+            or type(relationship["companiesReviewed"]) is not int or not 0 <= relationship["companiesReviewed"] <= 20
+            or (result["state"] == "complete" and (result["reason"] != "none" or result["queued"]
+                or relationship["state"] not in ["checked", "not_needed"]))):
         raise ValueError("Invalid completion receipt")
     return result
 
@@ -83,7 +94,13 @@ def execute(post, ticket):
         "Return only the requested aggregate receipt. Use the verified activity results for counts. "
         "Use failed if the run could not proceed, partial for incomplete coverage, unavailable required "
         "steps or remaining outbox rows, and complete only after checking the final flush. "
-        "For failed or partial runs select the closest reason. Use none for a complete run."
+        "For failed or partial runs select the closest reason. Use none for a complete run. "
+        "Also return relationships.state and relationships.companiesReviewed. Use checked only after reviewing "
+        "the relevant existing company graphs and verifying any saves; not_needed only when no eligible company "
+        "was touched; partial for incomplete relationship work and blocked for unavailable access. "
+        "Do not count inferred/attempted writes as saved. The server derives saved relationship counts from its audit. "
+        "Use scripts/codex/use-levelcre-relationships.ps1 for all relationship writes; the inherited "
+        "LEVELCRE_DIRECTORY_SYNC_REQUEST_ID correlates those writes to this run. Do not remove it or add it to source keys."
     )
     with tempfile.TemporaryDirectory(prefix="levelcre-desk-") as directory:
         schema = Path(directory) / "receipt-schema.json"
@@ -96,7 +113,8 @@ def execute(post, ticket):
         with tempfile.TemporaryFile() as source:
             source.write(prompt.encode("utf-8"))
             source.seek(0)
-            child = subprocess.Popen(args, cwd=workspace, stdin=source,
+            child_env = {**os.environ, "LEVELCRE_DIRECTORY_SYNC_REQUEST_ID": ticket["requestId"]}
+            child = subprocess.Popen(args, cwd=workspace, stdin=source, env=child_env,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             try:
                 while True:
