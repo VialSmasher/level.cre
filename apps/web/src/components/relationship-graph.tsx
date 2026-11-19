@@ -40,8 +40,9 @@ export function RelationshipGraph({detail, name, choose, addContact, addLink, in
   const broker = detail.broker
   const relationships = detail.relationships
   const contacts = detail.contacts || []
-  const unknown = contacts.filter(c => c.name && !c.directoryContext?.roles?.some(role => role !== 'unknown'))
-  const companyLine = contacts.find(c => !c.name && (c.phone || c.email))
+  const isCompanyLine = (c:Contact) => !c.name || (!c.isPrimary && c.name === 'Company main line' && c.title === 'Company switchboard')
+  const unknown = contacts.filter(c => !isCompanyLine(c) && !c.directoryContext?.roles?.some(role => role !== 'unknown'))
+  const companyLine = contacts.find(c => isCompanyLine(c) && (c.phone || c.email))
   const branchTop = Math.max(80,395-(100+relationships.length*126)/2)
   const height = broker ? Math.max(720,relationships.length * 144 + 130) : Math.max(790,branchTop+100+relationships.length*126)
   const centreY = broker ? height / 2 : 395
