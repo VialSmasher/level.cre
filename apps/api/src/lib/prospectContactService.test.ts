@@ -74,6 +74,51 @@ test('logged notes stay tied to their original call across edits, sync replays a
   } finally {await db.close();}
 });
 
+test('a dated callback leads the queue on the Edmonton due day with its exact contact and source note',async()=>{
+  const {pool,db,workspace}=await harness();
+  try {
+    const contactId=(await workspace()).primaryContactId!;
+    const input={clientEventId:'manual-'+randomUUID(),prospectId:'account',contactId,expectedPhone:'',
+      occurredAt:'2026-11-19T22:13:00Z',outcome:'left_message' as const,notes:'left vm re building. renewed or moved?'};
+    const call=await recordMobileCallOutcome({pool,userId:'owner',manual:true,input});
+    const id=call.interactionId!;
+    const decision={state:'suggested' as const,channel:'call' as const,dueOn:'2026-12-03',reason:'Ask whether they renewed or moved.',ifMissed:'Try again in two weeks.'};
+    await interpretCallNote(pool,'owner',id,{revision:id,decision});
+    await cleanCallNote(pool,'owner',id,{revision:id,text:'Left a voicemail about the building. Asked whether they renewed or moved.'});
+    await db.exec(`INSERT INTO prospects(id,user_id,name,status,contact_name,contact_phone,follow_up_due_date)
+      SELECT 'backlog-'||n,'owner','Older account','contacted','Other Contact','780-555-0123','2025-01-01' FROM generate_series(1,32) n`);
+    await db.exec(`INSERT INTO contact_interactions(id,user_id,prospect_id,type,outcome,notes,date)
+      VALUES ('newer-email','owner','account','email','contacted','Unrelated recent email.','2026-12-02')`);
+    const queue=(when:string,limit=50,userId='owner')=>listMobileCallQueue({pool,userId,limit,now:new Date(when)});
+    const before=await queue('2026-12-03T06:59:59Z');
+    assert.ok(!before.rows.some(row=>row.prospect.id==='account'));
+    assert.equal(before.totalEligible,32);
+    const due=await queue('2026-12-03T07:00:00Z',1);
+    assert.equal(due.rows[0].prospect.id,'account');
+    assert.equal(due.rows[0].queueContactId,contactId);
+    assert.equal(due.rows[0].callback?.sourceCallId,id);
+    assert.equal(due.rows[0].callback?.note,'Left a voicemail about the building. Asked whether they renewed or moved.');
+    assert.equal(due.rows[0].callback?.outcome,'left_message');
+    assert.deepEqual(due.rows[0].reasons,['Callback due today']);
+    assert.deepEqual((await queue('2026-12-04T18:00:00Z',1)).rows[0].reasons,['Callback overdue']);
+    assert.ok(!(await queue('2026-12-03T18:00:00Z',50,'foreign')).rows.some(row=>row.callback));
+    const contacts=await createProspectContact({pool,userId:'owner',prospectId:'account',input:{name:'Another Person',phone:'780-555-0110'}});
+    const otherId=contacts.contacts.find(person=>!person.isPrimary)!.id;
+    const held=await queue('2026-12-02T18:00:00Z');
+    assert.equal(held.rows.find(row=>row.prospect.id==='account')?.queueContactId,otherId);
+    await db.query(`INSERT INTO contact_interactions(id,user_id,prospect_id,type,outcome,source_metadata,created_at)
+      VALUES ('other-call','owner','account','call','attempted',jsonb_build_object('contactId',$1::text),'2026-12-03 18:00:00')`,[otherId]);
+    assert.equal((await queue('2026-12-03T20:00:00Z',1)).rows[0].callback?.contactId,contactId);
+    await db.query(`UPDATE contact_interactions SET source_metadata=jsonb_build_object('contactId',$1::text) WHERE id='other-call'`,[contactId]);
+    assert.ok(!(await queue('2026-12-03T20:00:00Z')).rows.some(row=>row.callback));
+    await finishCallSuggestion(pool,'owner',id,id,'dismissed');
+    assert.ok(!(await queue('2026-12-04T18:00:00Z')).rows.some(row=>row.callback));
+    const updated=await editCallNote(pool,'owner','account',id,{expectedRevision:id,notes:'Email requested.'});
+    await interpretCallNote(pool,'owner',id,{revision:updated.revision,decision:{...decision,channel:'email'}});
+    assert.ok(!(await queue('2026-12-04T18:00:00Z')).rows.some(row=>row.callback));
+  } finally {await db.close();}
+});
+
 test('manual phone note logs one broker-confirmed call without a dialer start or a verified number', async()=>{
   const {pool,db,workspace,count}=await harness();
   try {

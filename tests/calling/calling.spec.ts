@@ -58,7 +58,7 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function installCallingScenario(page: Page, options: { startFailures?: number; confirmFailures?: number; lostConfirmationResponses?: number; selectedHistoryDelayMs?: number; workspaceDelayMs?: number; delayedStart?: boolean; rejectedStart?: boolean; unavailableDiscard?: boolean; discardFailures?: number; callsPerDay?: number; mainLineOnly?: boolean; missingEmailPrimary?: boolean; mobileFirst?: boolean; contactEmails?: 'all' | 'primary_only'; touchHistory?: boolean; savedSearch?: boolean; differentEmployer?: boolean; delayedSearchQuery?: string; delayedSelectionProspectId?: string; noAlternates?: boolean; map?: boolean; missingPhone?: boolean; delayedContactSave?: boolean; lostContactSaveResponses?: number; replaceContactIdentity?: boolean } = {}) {
+async function installCallingScenario(page: Page, options: { startFailures?: number; confirmFailures?: number; lostConfirmationResponses?: number; selectedHistoryDelayMs?: number; workspaceDelayMs?: number; delayedStart?: boolean; rejectedStart?: boolean; unavailableDiscard?: boolean; discardFailures?: number; callsPerDay?: number; mainLineOnly?: boolean; missingEmailPrimary?: boolean; mobileFirst?: boolean; contactEmails?: 'all' | 'primary_only'; touchHistory?: boolean; callback?: boolean; savedSearch?: boolean; differentEmployer?: boolean; delayedSearchQuery?: string; delayedSelectionProspectId?: string; noAlternates?: boolean; map?: boolean; missingPhone?: boolean; delayedContactSave?: boolean; lostContactSaveResponses?: number; replaceContactIdentity?: boolean } = {}) {
   if (options.map) test.setTimeout(45_000); // Home's first lazy module compiles on a cold isolated Vite run.
   const starts: CallRequest[] = [];
   const confirmations: CallRequest[] = [];
@@ -276,7 +276,11 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
       const confirmedProspects = new Set([...sessions.values()].filter((session) => confirmed.has(session.clientEventId)).map((session) => session.prospectId));
       const includeCalledToday = new URL(request.url()).searchParams.get('includeCalledToday') === 'true';
       const rows = candidates.filter((candidate) => readiness(candidate.prospect.id).status === 'ready' && (includeCalledToday || !confirmedProspects.has(candidate.prospect.id)))
-        .map((candidate) => { const phoneReadiness=readiness(candidate.prospect.id); const choice=phoneReadiness.usableChoices[0]; const contact=roster.get(candidate.prospect.id)!.find(contact=>contact.id===choice.contactId)!; return { ...candidate, contact: {...contact,phone:choice.number,phoneType:choice.phoneType}, phoneReadiness }; });
+        .map((candidate) => { const phoneReadiness=readiness(candidate.prospect.id); const choice=phoneReadiness.usableChoices[0]; const contact=roster.get(candidate.prospect.id)!.find(contact=>contact.id===choice.contactId)!; return { ...candidate, contact: {...contact,phone:choice.number,phoneType:choice.phoneType}, phoneReadiness,
+          ...(options.callback && candidate===candidates[0] ? {queueContactId:firstRoster[1].id,callback:{
+            sourceCallId:'previous-voicemail',contactId:firstRoster[1].id,occurredAt:'2026-11-19T22:13:00Z',outcome:'left_message',
+            dueOn:'2026-12-03',reason:'Ask whether they renewed or found space.',note:'Left a voicemail about the off-market building.',
+          },reasons:['Callback due today']} : {}) }; });
       return json(route, {
         generatedAt: new Date().toISOString(), rows, total: rows.length,
         progress: progress(),
@@ -1386,6 +1390,24 @@ test('confirmed bad-number replay keeps alternate intent while its workspace is 
   expect(new Set(scenario.starts.map((item) => item.clientEventId)).size).toBe(1);
   expect(scenario.progress()).toEqual({ startedToday: 1, confirmedToday: 1, connectedToday: 0 });
   expect(await page.evaluate(() => (window as Window & { __callingDialHrefs?: string[] }).__callingDialHrefs)).toEqual([]);
+});
+
+test('due callback opens the exact person with the source voicemail visible before and during dialing',async({page})=>{
+  const scenario=await installCallingScenario(page,{callback:true,touchHistory:true});
+  const card=page.getByRole('region',{name:'Scheduled callback'});
+  await expect(page.getByRole('link',{name:'Call Rowan Singh',exact:true})).toBeVisible();
+  await expect(card).toContainText('Voicemail · Nov 19, 2026');
+  await expect(card).toContainText('Left a voicemail about the off-market building.');
+  await expect(card).toContainText('Ask whether they renewed or found space.');
+  await expect(card.getByRole('link',{name:'Open original call'})).toHaveAttribute('href',/noteId=previous-voicemail/);
+  await page.getByRole('button',{name:'Select contact Morgan Lee',exact:true}).click();
+  await expect(card).toHaveCount(0);
+  await page.getByRole('button',{name:'Select contact Rowan Singh',exact:true}).click();
+  await dial(page,'Rowan Singh');
+  await expect(card).toBeVisible();
+  await expect(page.getByRole('textbox',{name:'New call note'})).toHaveValue('');
+  expect(scenario.starts).toHaveLength(1);
+  expect(scenario.confirmations).toHaveLength(0);
 });
 
 test('refresh keeps the skipped companies, selected contact and previous position for this tab', async({page})=>{

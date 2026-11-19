@@ -1,3 +1,4 @@
+import { openSuggestions } from './callNoteRows';
 import { listProspectContacts, ProspectContactError, type ProspectContact } from './prospectContactService';
 import { randomUUID } from 'crypto';
 import type { Pool, PoolClient } from 'pg';
@@ -68,6 +69,16 @@ export class MobileCallingError extends Error {
 export type MobileCallQueueCandidate = {
   id: string;
   phoneReadiness?: PhoneReadiness;
+  queueContactId?: string | null;
+  callback?: {
+    sourceCallId: string;
+    contactId: string;
+    occurredAt: string;
+    outcome: string;
+    dueOn: string;
+    reason: string;
+    note: string;
+  };
   priorityScore: number;
   priority: 'critical' | 'high' | 'medium' | 'low';
   reasons: string[];
@@ -203,9 +214,18 @@ export async function listMobileCallQueue(params: {
   includeCalledToday?: boolean;
 }): Promise<{ rows: MobileCallQueueCandidate[]; totalEligible: number }> {
   const now = params.now || new Date();
+  const today = new Intl.DateTimeFormat('en-CA', {timeZone:'America/Edmonton', year:'numeric', month:'2-digit', day:'2-digit'}).format(now);
   const { rows } = await params.pool.query(`
-    SELECT
-      COUNT(*) OVER() AS total_eligible,
+    WITH callbacks AS (
+      SELECT s."prospectId", jsonb_agg(jsonb_build_object(
+        'sourceCallId', s.id, 'contactId', s."contactId", 'occurredAt', s."occurredAt", 'outcome', s.outcome,
+        'dueOn', s.recommendation->>'dueOn', 'reason', s.recommendation->>'reason', 'note', COALESCE(s."cleanedNote", s.notes)
+      ) ORDER BY s.recommendation->>'dueOn', s."occurredAt", s.id) AS plans
+      FROM (${openSuggestions}) s
+      WHERE s.recommendation->>'channel'='call' AND s."contactId" IS NOT NULL
+      GROUP BY s."prospectId"
+    )
+    SELECT callbacks.plans, today_call.contact_ids AS called_contacts,
       p.id,
       p.name,
       p.status,
@@ -225,6 +245,13 @@ export async function listMobileCallQueue(params: {
       COALESCE(listings.listing_titles, ARRAY[]::varchar[]) AS listing_titles,
       COALESCE(recent.items, '[]'::jsonb) AS recent_activity
     FROM public.prospects p
+    LEFT JOIN callbacks ON callbacks."prospectId"=p.id
+    LEFT JOIN LATERAL (
+      SELECT array_agg(COALESCE(ci.source_metadata->>'contactId','')) AS contact_ids
+      FROM public.contact_interactions ci
+      WHERE ci.user_id=p.user_id AND ci.prospect_id=p.id AND ci.type='call'
+        AND (ci.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Edmonton')::date = ($2::timestamptz AT TIME ZONE 'America/Edmonton')::date
+    ) today_call ON true
     LEFT JOIN LATERAL (
       SELECT MAX(ci.created_at) AS last_interaction_at
       FROM public.contact_interactions ci
@@ -255,14 +282,7 @@ export async function listMobileCallQueue(params: {
     WHERE p.user_id = $1
       AND p.merged_into_prospect_id IS NULL
       AND COALESCE(p.status, '') <> 'no_go'
-      AND ($3::boolean OR NOT EXISTS (
-        SELECT 1
-        FROM public.contact_interactions today_call
-        WHERE today_call.user_id = p.user_id
-          AND today_call.prospect_id = p.id
-          AND today_call.type = 'call'
-          AND (today_call.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/Edmonton')::date = ($2::timestamptz AT TIME ZONE 'America/Edmonton')::date
-      ))
+      AND ($3::boolean OR today_call.contact_ids IS NULL OR callbacks.plans IS NOT NULL)
     ORDER BY COALESCE(p.follow_up_due_date, latest.last_interaction_at, p.created_at) ASC, p.id ASC
 
   `, [params.userId, now.toISOString(), params.includeCalledToday === true]);
@@ -270,10 +290,16 @@ export async function listMobileCallQueue(params: {
   const chronologicalKeys = new Map<string, number>(rows.map((row) => [row.id,
     (asDate(row.follow_up_due_date) || asDate(row.last_interaction_at) || asDate(row.created_at))?.getTime() ?? Infinity,
   ]));
-  const candidates = rows
-    .map((row) => {
+  const candidates = rows.flatMap((row):MobileCallQueueCandidate[] => {
       const phoneReadiness = derivePhoneReadiness(row, Array.isArray(row.contacts) ? row.contacts : [], { now });
-      const choice = phoneReadiness.usableChoices[0];
+      const plans: NonNullable<MobileCallQueueCandidate['callback']>[] = row.plans || [];
+      const calledToday: string[] = params.includeCalledToday ? [] : row.called_contacts || [];
+      const callback = plans.find(plan => plan.dueOn <= today && !calledToday.includes(plan.contactId)
+        && phoneReadiness.usableChoices.some(option => option.contactId === plan.contactId));
+      const held = new Set(plans.filter(plan => plan.dueOn > today).map(plan => plan.contactId));
+      const choice = callback ? phoneReadiness.usableChoices.find(option => option.contactId === callback.contactId)
+        : phoneReadiness.usableChoices.find(option => !option.contactId || !held.has(option.contactId));
+      if (!choice || (!callback && (phoneReadiness.status !== 'ready' || calledToday.length))) return [];
       const chosenContact = choice?.contactId ? (Array.isArray(row.contacts) ? row.contacts : []).find((contact: any) => contact.id === choice.contactId) : null;
       const rank = rankMobileCallCandidate({
         status: row.status,
@@ -283,11 +309,12 @@ export async function listMobileCallQueue(params: {
         createdAt: row.created_at,
         now,
       });
-      return {
-        id: `call:${row.id}`, phoneReadiness,
+      return [{
+        id: `call:${row.id}`, phoneReadiness, queueContactId: choice.contactId,
+        ...(callback ? {callback} : {}),
         priorityScore: rank.score,
         priority: rank.priority,
-        reasons: rank.reasons,
+        reasons: callback ? [callback.dueOn === today ? 'Callback due today' : 'Callback overdue'] : rank.reasons,
         contact: {
           name: choice?.contactName || null,
           company: chosenContact?.company || row.contact_company || row.business_name || null,
@@ -306,14 +333,13 @@ export async function listMobileCallQueue(params: {
         },
         listingTitles: Array.isArray(row.listing_titles) ? row.listing_titles : [],
         recentActivity: Array.isArray(row.recent_activity) ? row.recent_activity : [],
-      } satisfies MobileCallQueueCandidate;
-    })
-    .filter((candidate) => candidate.phoneReadiness.status === 'ready')
-    .sort((left, right) => right.priorityScore - left.priorityScore
+      }];
+    }).sort((left, right) => Number(!!right.callback) - Number(!!left.callback)
+      || (left.callback?.dueOn || '').localeCompare(right.callback?.dueOn || '')
+      || right.priorityScore - left.priorityScore
       || (chronologicalKeys.get(left.prospect.id)! - chronologicalKeys.get(right.prospect.id)!)
-      || left.prospect.id.localeCompare(right.prospect.id))
-    .slice(0, params.limit);
-  return { rows: candidates, totalEligible: rows.filter((row) => derivePhoneReadiness(row, Array.isArray(row.contacts) ? row.contacts : [], { now }).status === 'ready').length };
+      || left.prospect.id.localeCompare(right.prospect.id));
+  return { rows: candidates.slice(0,params.limit), totalEligible: candidates.length };
 }
 
 export function outcomeSummary(outcome: MobileCallOutcome, notes: string) {

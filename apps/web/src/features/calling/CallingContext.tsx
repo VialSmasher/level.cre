@@ -1,7 +1,8 @@
 import type { CallingActivity } from '@/lib/mobileCalling'
 import { callingTouchContext, callingTouchLabel, callingTouchNote } from '@/lib/callingContext'
 
-export function CallingContext({ contactId, contactName, contactRows, accountRows, loading, error, onEdit }: {
+export function CallingContext({ contactId, contactName, contactRows, accountRows, loading, error, onEdit, shownCallId }: {
+  shownCallId?:string
   onEdit:(item:CallingActivity)=>void
   contactId: string | null; contactName: string; contactRows: CallingActivity[]; accountRows: CallingActivity[]; loading: boolean; error: boolean
 }) {
@@ -10,6 +11,7 @@ export function CallingContext({ contactId, contactName, contactRows, accountRow
   const context = callingTouchContext(contactRows, accountRows, contactId)
   if (!context) return <p className="mt-3 text-xs text-slate-500">{contactId ? 'No touch recorded for this contact yet.' : 'No activity recorded yet.'}</p>
   const item = context.activity
+  if (item.id === shownCallId) return null
   const note = callingTouchNote(item)
   const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(item.occurredAt) ? item.occurredAt + 'T12:00:00Z' : item.occurredAt)
   return <section aria-label="Calling context" className="mt-3 rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-2.5">

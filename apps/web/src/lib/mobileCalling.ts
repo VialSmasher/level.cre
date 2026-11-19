@@ -157,6 +157,8 @@ export type CallingWorkspace = {
 
 export type CallQueueCandidate = {
   id: string
+  queueContactId?: string | null
+  callback?: {sourceCallId:string; contactId:string; occurredAt:string; outcome:string; dueOn:string; reason:string; note:string}
   priorityScore: number
   priority: 'critical' | 'high' | 'medium' | 'low'
   reasons: string[]

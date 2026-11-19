@@ -24,7 +24,7 @@ export function CallFollowUps() {
   const finish=useMutation({
     mutationFn:async({row,state}:{row:FollowUp;state:'done'|'dismissed'})=>
       apiRequest('POST',path+'/'+encodeURIComponent(row.id)+'/finish',{revision:row.revision,state}),
-    onSettled:()=>client.invalidateQueries({queryKey:key}),
+    onSettled:()=>Promise.all([client.invalidateQueries({queryKey:key}),client.invalidateQueries({queryKey:['/api/calling/queue',user?.id]})]),
   })
   const rows=query.data?.rows || []
   if (!user || isDemoMode || (!rows.length && !query.isError)) return null
