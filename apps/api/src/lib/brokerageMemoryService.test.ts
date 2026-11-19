@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
+import { PGlite } from '@electric-sql/pglite'
 
 import type { MarketMemoryAnchor } from '@level-cre/shared'
 
@@ -13,6 +15,7 @@ import {
   decideBrokerageMemoryItem,
   getBrokerageMemoryReviewItem,
   previewBrokerageMemoryImport,
+  stageBrokerageMemoryImport,
 } from './brokerageMemoryService'
 
 function anchor(): MarketMemoryAnchor {
@@ -367,4 +370,50 @@ test('single-item review lookup scopes the selected item to its broker', async (
   const selectedQuery = queries.find(({ sql }) => /WHERE items\.id = \$1/i.test(sql))
   assert.deepEqual(selectedQuery?.values, ['item-one', 'user-one'])
   assert.match(selectedQuery?.sql || '', /imports\.status <> 'superseded'/)
+})
+
+test('staging appends independent batches and replay restores only the identical historical batch', async () => {
+  const pg = new PGlite()
+  try {
+    await pg.exec(`CREATE TABLE users(id varchar PRIMARY KEY);
+      CREATE TABLE intel_property_dossiers(id varchar PRIMARY KEY, created_by_user_id varchar, external_memory_key varchar, status text, source_provenance jsonb);
+      CREATE TABLE prospects(id varchar PRIMARY KEY);
+      CREATE TABLE listings(id varchar PRIMARY KEY);
+      INSERT INTO users VALUES ('broker');`)
+    const migration = readFileSync(new URL('../../../../drizzle/0018_brokerage_memory.sql', import.meta.url), 'utf8')
+    await pg.exec(migration.slice(0, migration.indexOf('ALTER TABLE')))
+    const query = (sql: string, args?: unknown[]) => pg.query(sql, args)
+    // Staging uses real SQL. The empty entity resolver keeps this fixture independent of PostGIS.
+    const pool = {
+      query: (sql: string, args?: unknown[]) => sql.includes('SELECT items.*') ? query(sql, args) : Promise.resolve({ rows: [] }),
+      connect: async () => ({ query, release() {} }),
+    } as never
+    const stage = async (day: number) => {
+      const input = payload()
+      input.generatedAt = new Date(Date.UTC(2026, 1, day)).toISOString()
+      const params = { pool, userId: 'broker', sourceFileName: 'properties.json', payload: input }
+      const preview = await previewBrokerageMemoryImport(params)
+      return stageBrokerageMemoryImport({ ...params, previewHash: preview.sourceHash })
+    }
+    const first = await stage(1)
+    const second = await stage(2)
+    assert.notEqual(first.importId, second.importId)
+    await query("UPDATE brokerage_memory_imports SET status = 'partially_approved' WHERE id = $1", [first.importId])
+    const third = await stage(3)
+    const retry = await stage(3)
+    assert.equal(retry.importId, third.importId)
+    assert.equal(retry.duplicate, true)
+    await query("UPDATE brokerage_memory_imports SET status = 'superseded' WHERE id = $1", [second.importId])
+    await query("UPDATE brokerage_memory_items SET status = 'superseded' WHERE import_id = $1", [second.importId])
+    const reopened = await stage(2)
+    assert.equal(reopened.importId, second.importId)
+    const rows = await query('SELECT b.status AS batch, i.status AS item FROM brokerage_memory_items i JOIN brokerage_memory_imports b ON b.id=i.import_id ORDER BY b.created_at')
+    assert.deepEqual(rows.rows, [
+      { batch: 'partially_approved', item: 'pending' },
+      { batch: 'preview', item: 'pending' },
+      { batch: 'preview', item: 'pending' },
+    ])
+  } finally {
+    await pg.close()
+  }
 })

@@ -5,7 +5,7 @@ Level CRE treats enriched title/property files as source-backed property memory,
 ## Durable flow
 
 1. `POST /api/intel/brokerage-memory/preview` parses and resolves the file in memory. It performs database reads only.
-2. `POST /api/intel/brokerage-memory/imports` saves one pending review item per canonical property. The request must include the hash returned by preview.
+2. `POST /api/intel/brokerage-memory/imports` saves one pending review item per canonical property. The request must include the hash returned by preview. Each changed file adds a separate review batch, including while earlier batches are partially reviewed. Repeating an identical file reuses its batch. Restaging an exact historical file can reopen superseded items within that batch alone.
 3. Today → Review presents one card per property with location, municipal, legal, ownership, and brokerage-context evidence groups.
 4. A signed-in broker can approve selected groups or reject the item. Approval creates or safely enriches a property dossier and inserts idempotent source facts in one transaction.
 5. `GET /api/intel/brokerage-memory/map` projects approved dossiers and pending review anchors onto the main map.

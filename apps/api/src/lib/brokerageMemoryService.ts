@@ -595,27 +595,6 @@ export async function stageBrokerageMemoryImport(params: {
     let importId = existingImport.rows[0]?.id || null
     let duplicate = Boolean(importId)
     if (!importId) {
-      const partiallyApproved = await client.query<{ id: string }>(`
-        SELECT id FROM public.brokerage_memory_imports
-        WHERE user_id = $1 AND source = $2 AND status = 'partially_approved'
-        LIMIT 1
-      `, [params.userId, BROKERAGE_MEMORY_SOURCE])
-      if (partiallyApproved.rows[0]) {
-        throw new BrokerageMemoryServiceError('Finish or reject the remaining properties in the current partially approved import before staging a changed file.', 409)
-      }
-      const staleImports = await client.query<{ id: string }>(`
-        UPDATE public.brokerage_memory_imports
-        SET status = 'superseded', updated_at = now()
-        WHERE user_id = $1 AND source = $2 AND status = 'preview'
-        RETURNING id
-      `, [params.userId, BROKERAGE_MEMORY_SOURCE])
-      if (staleImports.rows.length) {
-        await client.query(`
-          UPDATE public.brokerage_memory_items
-          SET status = 'superseded', updated_at = now()
-          WHERE import_id = ANY($1::varchar[]) AND status = 'pending'
-        `, [staleImports.rows.map((row) => row.id)])
-      }
       const inserted = await client.query<{ id: string }>(`
         INSERT INTO public.brokerage_memory_imports (
           user_id, source, source_file_name, source_hash, generated_at,
@@ -635,32 +614,11 @@ export async function stageBrokerageMemoryImport(params: {
       duplicate = false
     } else {
       if (existingImport.rows[0]?.status === 'superseded') {
-        const partiallyApproved = await client.query<{ id: string }>(`
-          SELECT id FROM public.brokerage_memory_imports
-          WHERE user_id = $1 AND source = $2 AND status = 'partially_approved' AND id <> $3
-          LIMIT 1
-        `, [params.userId, BROKERAGE_MEMORY_SOURCE, importId])
-        if (partiallyApproved.rows[0]) {
-          throw new BrokerageMemoryServiceError('Finish or reject the remaining properties in the current partially approved import before staging a changed file.', 409)
-        }
-        const staleImports = await client.query<{ id: string }>(`
-          UPDATE public.brokerage_memory_imports
-          SET status = 'superseded', updated_at = now()
-          WHERE user_id = $1 AND source = $2 AND status = 'preview' AND id <> $3
-          RETURNING id
-        `, [params.userId, BROKERAGE_MEMORY_SOURCE, importId])
-        if (staleImports.rows.length) {
-          await client.query(`
-            UPDATE public.brokerage_memory_items
-            SET status = 'superseded', updated_at = now()
-            WHERE import_id = ANY($1::varchar[]) AND status = 'pending'
-          `, [staleImports.rows.map((row) => row.id)])
-        }
         await client.query(`
           UPDATE public.brokerage_memory_items
           SET status = 'pending', updated_at = now()
-          WHERE import_id = $1 AND status = 'superseded'
-        `, [importId])
+          WHERE import_id = $1 AND user_id = $2 AND status = 'superseded'
+        `, [importId, params.userId])
       }
       await client.query(`
         UPDATE public.brokerage_memory_imports
