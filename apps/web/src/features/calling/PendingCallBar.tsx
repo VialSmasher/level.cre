@@ -14,7 +14,9 @@ export function PendingCallBar() {
   const [nextStep, setNextStep] = useState<'keep' | NextCallStep>('keep')
   const session = calling.session
   useEffect(() => { setOptions(false); setNotes(session?.confirmation?.notes || ''); setNextStep('keep') }, [session?.clientEventId])
-  if (location.split('?')[0] === '/app/calls' || !calling.brokerId) return null
+  // Keep the session alive globally, but show its floating controls only on the map.
+  // Calls has its own confirmation UI; unrelated pages must not inherit this overlay.
+  if (location.split(/[?#]/)[0].replace(/\/+$/, '') !== '/app' || !calling.brokerId) return null
   if (!session) return calling.recoveryError ? <div role="alert" className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom)+1rem)] lg:bottom-4 left-4 z-[100] max-w-sm rounded-lg border border-amber-200 bg-white p-3 text-xs shadow-lg lg:left-72">Calling details need to reload before a new call.<Button variant="ghost" className="ml-2 h-8 px-2 text-xs" onClick={() => calling.retryRecovery()}>Retry calling</Button></div> : null
   const target = session.contactSnapshot?.name || session.candidate.contact.name || session.candidate.contact.company || session.candidate.prospect.name
   const company = session.candidate.prospect.businessName || session.candidate.contact.company || session.candidate.prospect.name

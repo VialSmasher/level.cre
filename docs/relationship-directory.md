@@ -1,5 +1,15 @@
 # Daily Desk company relationship map
 
+## Relationship landing and pending-call visibility
+
+The landing page previews existing companies as small relationship diagrams. Recently opened companies are stored as at most six identifiers per authenticated broker in this browser, beginning with visits after this release. The API resolves them against current owner-bound records, including merged accounts. Recent conversations use confirmed emails, recorded call attempts and meetings in the past 90 days, ordered by their original occurrence time. Future, draft and inferred activity does not qualify. Saved broker links and sourced relationship changes provide another set of starting companies, with existing records as a fallback. Sections do not repeat the same company.
+
+Previews retain historical/ended broker labels, named contacts, unknown roles and actual counts. Opening one goes directly to its graph; All companies returns to the landing page. Viewing a company does not write activity, contacts, prospects or points. The overview is a broker-only, no-store read endpoint; browser history and query caches are owner-scoped. It requires no migration or automation change.
+
+The pending-call provider remains global so navigation cannot discard an unfinished call, but its floating bar renders only on the Map route. Calls keeps its own pending confirmation interface. Relationships, Today, Activity and other pages no longer inherit the floating call panel.
+
+Validation: 61 unique directory, ownership/authentication, contact and history tests passed, the API TypeScript check and both builds passed. The web TypeScript check retains 34 existing diagnostics, none in the changed files. Chrome checks covered company previews, return navigation, persistence after reload, search and the 390-pixel mobile layout. Release identifiers and live checks follow after deployment.
+
 ## Sync verification and navigation iteration
 
 Current API: `609b098c580f886ad8ca730289ab588496193636`, Railway deployment `4093e182-623c-4a4d-8a82-f5cfb084d266` verified successful. Current website: `13899963e2588841ed0b949117ddd3dc97aa8be2`, Vercel deployment `dpl_DPHCUMA2bjMey4n2dXS4T4un7mK3`, verified on `level-cre.vercel.app`. The installed Windows worker and local relationship client match the tested API release. Schedule and credentials are unchanged.

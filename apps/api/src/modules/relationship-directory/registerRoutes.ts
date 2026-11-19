@@ -8,6 +8,7 @@ import { getCallingWorkspace, ProspectContactError } from '../../lib/prospectCon
 import { resolveCanonicalProspect, ProspectMergeServiceError } from '../../lib/prospectMergeService';
 import { industrialIntelAgentManifest } from '../industrial-intel/agentManifest';
 import { BrokerSchema, RelationshipSchema } from './schemas';
+import { DirectoryHomeQuery, directoryHome } from './home';
 export { BrokerSchema, RelationshipSchema } from './schemas';
 const brokerColumns = `id, name, firm, office, email, phone, linkedin_url AS "linkedinUrl",
   source_url AS "sourceUrl", notes, version, archived`;
@@ -45,6 +46,11 @@ export function registerRelationshipDirectory(app: Express, pool: Pool) {
     }));
     const readAuth: RequestHandler = (req,res,next) => req.path.startsWith(agentBase)
       ? requireAccountIntelligenceAuth(req,res,next) : requireBrokerAuth(req,res,next);
+    app.get(base + '/home', requireBrokerAuth, handle(async(req,res,owner)=>{
+      const input=DirectoryHomeQuery.safeParse(req.query);
+      if(!input.success) return res.sendStatus(400);
+      res.json(await directoryHome(pool,owner,input.data.recent));
+    }));
     app.get([base, agentBase + '/search'], readAuth, handle(async (req, res, owner) => {
         const input = z.object({ search: z.string().trim().max(240).default('') }).safeParse(req.query);
         if (!input.success)

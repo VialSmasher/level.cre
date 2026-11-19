@@ -55,6 +55,12 @@ test('directory persistence, ownership, validation, concurrent edits, and merged
     const url = 'http://127.0.0.1:' + (server.address() as AddressInfo).port + '/api/desk/directory';
     const call = (path: string, auth = owner, body?: unknown) => fetch(url + path, { method: body === undefined ? 'GET' : 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     assert.equal((await call('', '')).status, 401);
+    assert.equal((await call('/home','')).status,401);
+    assert.equal((await call('/home','Bearer '+agentKey)).status,403);
+    assert.equal((await call('/home?userId=foreign')).status,400);
+    const overview=await call('/home?recent=account,foreign-account');
+    assert.equal(overview.headers.get('cache-control'),'no-store');
+    assert.deepEqual((await overview.json()).recent.map((c:any)=>c.id),['account']);
     let response = await call('');
     assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.equal((await response.json()).companies.length, 2);

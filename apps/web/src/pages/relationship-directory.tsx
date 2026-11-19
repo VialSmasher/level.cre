@@ -10,6 +10,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/ui/page-header';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { apiRequest } from '@/lib/queryClient';
+import { useAuth } from '@/contexts/AuthContext';
+import { RelationshipHome, type RelationshipHomeData } from '@/components/relationship-home';
+import { recentCompanyIds, relationshipHistoryKey, rememberCompany } from '@/lib/relationshipHistory';
 export type DirectoryContext = {
     roles: string[]; scope: string; legalEntity: string; jurisdiction: string; registryNumber: string;
     sourceType: string; sourceRef: string; asOf: string; evidenceStatus: string; notes: string;
@@ -121,9 +124,10 @@ function EditDialog({ editor, detail, close, saved }: {
     close: () => void;
     saved: (kind: string, id: string, archived: boolean) => void;
 }) {
+    const {user,isDemoMode}=useAuth();
     const [values, setValues] = useState(editor.values);
     const [search, setSearch] = useState('');
-    const options = useQuery<Directory>({ queryKey: [base, 'choices', search], queryFn: () => request(base + '?search=' + encodeURIComponent(search)), enabled: editor.kind === 'relationship' && !editor.values.version });
+    const options = useQuery<Directory>({ queryKey: [base, isDemoMode?'demo-user':user?.id, 'choices', search], queryFn: () => request(base + '?search=' + encodeURIComponent(search)), enabled: editor.kind === 'relationship' && !editor.values.version });
     const change = (key: string, value: string) => setValues(previous => ({ ...previous, [key]: value }));
     const mutation = useMutation({
         mutationFn: async () => {
@@ -215,6 +219,8 @@ function EditDialog({ editor, detail, close, saved }: {
   </Dialog>;
 }
 export default function RelationshipDirectory() {
+  const {user,isDemoMode}=useAuth()
+  const owner=isDemoMode?'demo-user':user?.id||''
   const [, navigate] = useLocation()
   const params = new URLSearchParams(useSearch())
   const selectedBroker = params.get('broker')
@@ -222,7 +228,14 @@ export default function RelationshipDirectory() {
   const selectedId = selectedBroker || selectedCompany
   const [search,setSearch] = useState('')
   const [debounced,setDebounced] = useState('')
-  const [searchOpen,setSearchOpen] = useState(!selectedId)
+  const [searchOpen,setSearchOpen] = useState(false)
+  const [history,setHistory] = useState<{owner:string;ids:string[]}>({owner:'',ids:[]})
+  useEffect(()=>{
+    let ids:string[]=[]
+    try { if(owner) ids=recentCompanyIds(JSON.parse(localStorage.getItem(relationshipHistoryKey(owner))||'[]')) } catch {}
+    setHistory({owner,ids})
+  },[owner])
+  const recentIds=history.owner===owner?history.ids:[]
   const [editor,setEditor] = useState<Editor|null>(null)
   const [inspection,setInspection] = useState<{kind:'contact'|'role'|'relationship'|'broker'|'research';value?:any}|null>(null)
   const [notice,setNotice] = useState('')
@@ -231,13 +244,23 @@ export default function RelationshipDirectory() {
   const queryClient = useQueryClient()
   useEffect(() => { const timer=setTimeout(() => setDebounced(search),180); return () => clearTimeout(timer) },[search])
   useEffect(() => {setInspection(null);setNotice('')},[selectedId])
-  const directory = useQuery<Directory>({queryKey:[base,'search',debounced],queryFn:() => request(base+'?search='+encodeURIComponent(debounced))})
+  const directory = useQuery<Directory>({queryKey:[base,owner,'search',debounced],queryFn:() => request(base+'?search='+encodeURIComponent(debounced)),enabled:!!owner&&searchOpen})
   const path = base+(selectedBroker?'/brokers/':'/companies/')+encodeURIComponent(selectedId||'')
-  const detailQuery = useQuery<Detail>({queryKey:[base,'detail',path],queryFn:() => request(path),enabled:Boolean(selectedId),refetchOnWindowFocus:true,refetchInterval:30000})
+  const detailQuery = useQuery<Detail>({queryKey:[base,owner,'detail',path],queryFn:() => request(path),enabled:!!owner&&Boolean(selectedId),refetchOnWindowFocus:true,refetchInterval:30000})
+  const home=useQuery<RelationshipHomeData>({queryKey:[base,owner,'home',recentIds.join(',')],queryFn:()=>request(base+'/home?recent='+encodeURIComponent(recentIds.join(','))),enabled:!!owner&&!selectedId,refetchOnWindowFocus:true})
   const updates = useQuery<{changes:Array<{externalKey:string;createdAt:string;companyName:string|null;request:any;result:any;beforeRecord:any}>}>({
-    queryKey:[base,'changes'],queryFn:()=>request(base+'/changes'),enabled:updatesOpen,refetchOnWindowFocus:true,refetchInterval:updatesOpen?30000:false,
+    queryKey:[base,owner,'changes'],queryFn:()=>request(base+'/changes'),enabled:!!owner&&updatesOpen,refetchOnWindowFocus:true,refetchInterval:updatesOpen?30000:false,
   })
   const detail=detailQuery.data
+  useEffect(()=>{
+    const id=detail?.prospect?.id
+    if(!owner||!id||!selectedCompany) return
+    setHistory(previous=>{
+      const ids=rememberCompany(previous.owner===owner?previous.ids:[],id)
+      try { localStorage.setItem(relationshipHistoryKey(owner),JSON.stringify(ids)) } catch {}
+      return {owner,ids}
+    })
+  },[owner,detail?.prospect?.id,selectedCompany])
   const broker=detail?.broker
   const name=broker?.name || detail?.prospect?.businessName || detail?.contacts?.find(c=>c.company)?.company || detail?.prospect?.name || ''
   const choose=(type:'company'|'broker',id:string) => {
@@ -281,7 +304,7 @@ export default function RelationshipDirectory() {
   </div>
   return <div className="min-h-full bg-[#f5f7fa]">
     <div className="mx-auto w-full max-w-[1440px] px-4 py-5 sm:px-6 lg:px-8">
-      <Link href="/app/desk" className="mb-4 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-blue-700"><ArrowLeft className="h-3.5 w-3.5"/>Daily Desk</Link>
+      <div className="mb-4 flex items-center gap-4"><Link href="/app/desk" className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-blue-700"><ArrowLeft className="h-3.5 w-3.5"/>Daily Desk</Link>{selectedId&&<button className="text-xs font-medium text-blue-700 hover:underline" onClick={()=>{setTrail([]);setSearch('');setSearchOpen(false);navigate('/app/desk/relationships')}}>All companies</button>}</div>
       <PageHeader className="gap-2 pb-3 sm:gap-4 sm:pb-5" label="Your network" title="Company relationships" description="Find a company. Follow the people, brokers and corporate connections around it." icon={Network} actions={<Button size="sm" variant="outline" onClick={()=>openBroker()}><Plus className="h-4 w-4"/>Add broker</Button>}/>
       <div className="my-3 flex flex-wrap items-start gap-2 sm:my-5 sm:gap-3">
         <div className="relative min-w-0 flex-1 basis-full sm:basis-0">
@@ -324,7 +347,7 @@ export default function RelationshipDirectory() {
         })}</div>
       </section>}
       {notice&&<p role="status" className="mb-3 text-xs text-emerald-700">{notice}</p>}
-      {!selectedId&&<div className="flex min-h-[450px] flex-col items-center justify-center rounded-lg border border-slate-200 bg-white text-center"><Network className="h-10 w-10 text-blue-200"/><h2 className="mt-5 text-lg font-semibold">Start with a company</h2><p className="mt-2 max-w-md px-5 text-sm leading-6 text-slate-500">Search above to open its relationship map. Follow a broker to see the other accounts connected to them.</p><Button variant="outline" className="mt-5" onClick={()=>setSearchOpen(true)}><Search size={14}/>Find a company</Button></div>}
+      {!selectedId&&<RelationshipHome data={home.data} loading={home.isLoading} error={home.isError} retry={()=>home.refetch()} open={id=>choose('company',id)} search={()=>setSearchOpen(true)}/>}
       {detailQuery.isLoading&&selectedId&&<p className="py-20 text-center text-sm text-slate-500">Opening relationship map…</p>}
       {detailQuery.isError&&<div role="alert" className="rounded border border-red-200 bg-white p-5 text-sm text-red-700">This record could not be opened. <Button variant="ghost" onClick={()=>detailQuery.refetch()}>Retry</Button></div>}
       {detail&&<RelationshipGraph detail={detail} name={name} choose={choose} addContact={role=>openContact(undefined,role)} addLink={()=>openLink()} inspectContact={contact=>setInspection({kind:'contact',value:contact})} inspectRelationship={link=>setInspection({kind:'relationship',value:link})} inspectRole={role=>setInspection({kind:'role',value:role})} inspectBroker={()=>setInspection({kind:'broker'})}/>}
