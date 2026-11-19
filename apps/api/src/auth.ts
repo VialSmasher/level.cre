@@ -279,8 +279,26 @@ export async function requireMarketRecordProposalAuth(req: Request, res: Respons
   return requireAuth(req, res, next)
 }
 
+function getConfiguredAccountIntelligenceAgent(req: Request) {
+  const expected = process.env.ACCOUNT_INTELLIGENCE_AGENT_API_KEY
+  const id = process.env.ACCOUNT_INTELLIGENCE_AGENT_USER_ID
+  const header = req.headers['x-levelcre-account-intelligence-key']
+  const bearer = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null
+  if (!expected || !id || ![header,bearer].some(token => typeof token === 'string' && safeTokenEquals(token,expected))) return null
+  return {id, agentName: process.env.ACCOUNT_INTELLIGENCE_AGENT_NAME || 'codex-account-intelligence'}
+}
+
+export async function requireAccountIntelligenceAuth(req: Request, res: Response, next: NextFunction) {
+  const accountAgent = getConfiguredAccountIntelligenceAgent(req) || getConfiguredMarketRecordAgent(req)
+  if (accountAgent) {
+    ;(req as any).user = {...accountAgent, role:'account_intelligence_agent'}
+    return next()
+  }
+  return requireBrokerAuth(req,res,next)
+}
+
 export async function requireBrokerAuth(req: Request, res: Response, next: NextFunction) {
-  const scopedAgent = getConfiguredMarketRecordAgent(req)
+  const scopedAgent = getConfiguredAccountIntelligenceAgent(req) || getConfiguredMarketRecordAgent(req)
     || getConfiguredSalesActivityAgent(req)
     || getConfiguredAgentUser(req)
   if (scopedAgent) {
@@ -289,7 +307,7 @@ export async function requireBrokerAuth(req: Request, res: Response, next: NextF
 
   return requireAuth(req, res, () => {
     const role = String((req as any).user?.role || '')
-    if (role === 'agent' || role === 'market_record_agent' || role === 'sales_activity_agent') {
+    if (role === 'agent' || role === 'account_intelligence_agent' || role === 'market_record_agent' || role === 'sales_activity_agent') {
       return res.status(403).json({ message: 'Broker approval is required for this action.' })
     }
     return next()

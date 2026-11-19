@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useSearch } from 'wouter';
-import { ArrowLeft, ArrowRight, Building2, ExternalLink, Linkedin, Mail, Network, Pencil, Phone, Plus, Search, Users } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Building2, ExternalLink, Linkedin, Mail, Network, Pencil, Phone, Plus, Search, Users, X } from 'lucide-react';
+import { RelationshipGraph, contactRoles, relationshipLabels } from '@/components/relationship-graph';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,7 +10,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/ui/page-header';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { apiRequest } from '@/lib/queryClient';
-import { cn } from '@/lib/utils';
+export type DirectoryContext = {
+    roles: string[]; scope: string; legalEntity: string; jurisdiction: string; registryNumber: string;
+    sourceType: string; sourceRef: string; asOf: string; evidenceStatus: string; notes: string;
+};
+const blankContext = (role = 'unknown'): DirectoryContext => ({roles:[role], scope:'',legalEntity:'',jurisdiction:'',registryNumber:'',sourceType:'broker_knowledge',sourceRef:'',asOf:today(),evidenceStatus:'recorded',notes:''});
 type Company = {
     id: string;
     name: string;
@@ -30,7 +35,7 @@ type Broker = {
     version: number;
     archived: boolean;
 };
-type Contact = {
+export type Contact = {
     id: string;
     name: string | null;
     email: string | null;
@@ -38,8 +43,9 @@ type Contact = {
     title: string | null;
     company: string | null;
     isPrimary: boolean;
+    directoryContext?: DirectoryContext | null;
 };
-type Relationship = {
+export type Relationship = {
     id: string;
     brokerId: string;
     prospectId: string;
@@ -61,7 +67,8 @@ type Directory = {
     moreCompanies: boolean;
     moreBrokers: boolean;
 };
-type Detail = {
+export type Finding = { id: string; payload: {contact: Contact}; status: string; createdAt: string };
+export type Detail = {
     broker?: Broker;
     prospect?: {
         id: string;
@@ -71,6 +78,8 @@ type Detail = {
     };
     contacts?: Contact[];
     relationships: Relationship[];
+    findings?: Finding[];
+    coverage?: Array<{role:string;gap:boolean;recordedContacts:string[]}>;
 };
 type Editor = {
     kind: 'broker' | 'contact' | 'relationship';
@@ -103,7 +112,8 @@ function Field({ name, label, value, onChange, required = false, type = 'text' }
     required?: boolean;
     type?: string;
 }) {
-    return <div className="space-y-1.5"><Label htmlFor={'field-' + name}>{label}</Label><Input id={'field-' + name} name={name} value={value || ''} onChange={e => onChange(name, e.target.value)} required={required} type={type} maxLength={name === 'sourceUrl' || name === 'linkedinUrl' ? 2000 : 320}/></div>;
+    const limits: Record<string,number> = {sourceUrl:2000,sourceRef:2000,linkedinUrl:2000,scope:500,legalEntity:300,jurisdiction:120,registryNumber:120,phone:80,email:320};
+    return <div className="space-y-1.5"><Label htmlFor={'field-' + name}>{label}</Label><Input id={'field-' + name} name={name} value={value || ''} onChange={e => onChange(name, e.target.value)} onBlur={e => { if(type==='date') onChange(name,e.currentTarget.value) }} required={required} type={type} maxLength={limits[name] || 240}/></div>;
 }
 function EditDialog({ editor, detail, close, saved }: {
     editor: Editor;
@@ -124,7 +134,7 @@ function EditDialog({ editor, detail, close, saved }: {
             if (editor.kind === 'contact') {
                 url = '/api/calling/prospects/' + detail!.prospect!.id + '/contacts' + (id ? '/' + id : '');
                 method = id ? 'PATCH' : 'POST';
-                body = { name: input.name, title: input.title, company: input.company, email: input.email, phone: input.phone };
+                body = { name: input.name, title: input.title, company: input.company, email: input.email, phone: input.phone, directoryContext: input.directoryContext };
             }
             if (editor.kind === 'relationship') {
                 url = base + '/relationships/' + id;
@@ -142,6 +152,8 @@ function EditDialog({ editor, detail, close, saved }: {
     const chooseCompany = Boolean(detail?.broker);
     const choiceRows = chooseCompany ? options.data?.companies : options.data?.brokers;
     const choiceKey = chooseCompany ? 'prospectId' : 'brokerId';
+    const context = values.directoryContext as DirectoryContext | undefined;
+    const contextChange = (key: string, value: string | string[]) => setValues(previous => ({...previous,directoryContext:{...previous.directoryContext,[key]:value}}));
     return <Dialog open onOpenChange={open => { if (!open && !mutation.isPending)
         close(); }}>
     <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
@@ -171,6 +183,26 @@ function EditDialog({ editor, detail, close, saved }: {
           </div>
           {editor.kind === 'broker' && <Field name="linkedinUrl" label="LinkedIn profile URL" value={values.linkedinUrl} onChange={change} type="url"/>}
         </>}
+        {editor.kind === 'contact' && context && <div className="space-y-4 border-t border-slate-200 pt-4">
+          <fieldset><legend className="mb-2 text-sm font-medium">Company connections</legend><div className="grid grid-cols-2 gap-2">
+            {[...contactRoles,{id:'unknown',label:'Role to confirm'}].map(role => <label key={role.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={context.roles.includes(role.id)} onChange={event => {
+              const next = event.target.checked ? [...context.roles.filter(r => r !== 'unknown'),role.id] : context.roles.filter(r => r !== role.id);
+              contextChange('roles',role.id === 'unknown' && event.target.checked ? ['unknown'] : next.length ? next : ['unknown']);
+            }}/>{role.label}</label>)}
+          </div></fieldset>
+          <Field name="scope" label="Responsibility or decision-making scope" value={context.scope} onChange={contextChange}/>
+          <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-1.5"><Label htmlFor="source-type">Source</Label><select id="source-type" className="h-10 w-full rounded-md border px-3 text-sm" value={context.sourceType} onChange={e => contextChange('sourceType',e.target.value)}>
+            {Object.entries({broker_knowledge:'My knowledge',company_website:'Company website',corporate_search:'Corporate search',email:'Email',linkedin:'LinkedIn',other:'Other record'}).map(([value,label]) => <option key={value} value={value}>{label}</option>)}
+          </select></div><Field name="asOf" label="Source date" value={context.asOf} type="date" required={context.sourceType==='corporate_search'} onChange={contextChange}/></div>
+          <Field name="sourceRef" label="Source link or document reference" value={context.sourceRef} required={context.sourceType==='corporate_search'} onChange={contextChange}/>
+          {(context.roles.includes('director') || context.sourceType === 'corporate_search') && <div className="space-y-3 rounded-md bg-slate-50 p-3">
+            <Field name="legalEntity" label="Exact legal entity" value={context.legalEntity} required={context.sourceType==='corporate_search'} onChange={contextChange}/>
+            <div className="grid gap-3 sm:grid-cols-2"><Field name="jurisdiction" label="Registry jurisdiction" value={context.jurisdiction} required={context.sourceType==='corporate_search'} onChange={contextChange}/><Field name="registryNumber" label="Registry number (if known)" value={context.registryNumber} onChange={contextChange}/></div>
+            <p className="text-xs leading-5 text-slate-500">A directorship records a legal connection. Record any evidence of real estate authority separately in the scope above.</p>
+          </div>}
+          <div className="space-y-1.5"><Label htmlFor="evidence-status">Evidence</Label><select id="evidence-status" className="h-10 w-full rounded-md border px-3 text-sm" value={context.evidenceStatus} onChange={e => contextChange('evidenceStatus',e.target.value)}><option value="recorded">Recorded by me</option><option value="observed">Observed in a source</option><option value="inferred">Inferred, needs verification</option></select></div>
+          <div className="space-y-1.5"><Label htmlFor="contact-notes">Notes</Label><Textarea id="contact-notes" value={context.notes} onChange={e => contextChange('notes',e.target.value)} maxLength={4000} rows={3}/></div>
+        </div>}
         {editor.kind !== 'contact' && <>
           <Field name="sourceUrl" label="Source link" value={values.sourceUrl} onChange={change} type="url"/>
           <div className="space-y-1.5"><Label htmlFor="notes">Notes</Label><Textarea id="notes" value={values.notes} onChange={e => change('notes', e.target.value)} maxLength={4000} rows={3}/></div>
@@ -183,101 +215,112 @@ function EditDialog({ editor, detail, close, saved }: {
   </Dialog>;
 }
 export default function RelationshipDirectory() {
-    const [, navigate] = useLocation();
-    const params = new URLSearchParams(useSearch());
-    const selectedBroker = params.get('broker');
-    const selectedCompany = params.get('company');
-    const [mode, setMode] = useState<'companies' | 'brokers'>(selectedBroker ? 'brokers' : 'companies');
-    const [search, setSearch] = useState('');
-    const [debounced, setDebounced] = useState('');
-    const [editor, setEditor] = useState<Editor | null>(null);
-    const [notice, setNotice] = useState('');
-    const [browseOpen, setBrowseOpen] = useState(false);
-    const queryClient = useQueryClient();
-    useEffect(() => { const timer = setTimeout(() => setDebounced(search), 180); return () => clearTimeout(timer); }, [search]);
-    const directory = useQuery<Directory>({ queryKey: [base, debounced], queryFn: () => request(base + '?search=' + encodeURIComponent(debounced)) });
-    const selectedId = selectedBroker || selectedCompany;
-    const path = base + (selectedBroker ? '/brokers/' : '/companies/') + encodeURIComponent(selectedId || '');
-    const detailQuery = useQuery<Detail>({ queryKey: [base, 'detail', path], queryFn: () => request(path), enabled: Boolean(selectedId) });
-    const detail = detailQuery.data;
-    const selected = detail?.broker;
-    const name = selected?.name || detail?.prospect?.businessName || detail?.contacts?.find(c => c.company)?.company || detail?.prospect?.name;
-    const rows = directory.data?.[mode] || [];
-    const choose = (type: 'company' | 'broker', id: string) => {
-        setMode(type === 'company' ? 'companies' : 'brokers');
-        setNotice('');
-        setBrowseOpen(false);
-        navigate('/app/desk/relationships?' + type + '=' + encodeURIComponent(id));
-    };
-    const openBroker = (broker?: Broker) => setEditor({ kind: 'broker', values: broker ? { ...broker } : { ...blankBroker, id: crypto.randomUUID() } });
-    const openContact = (contact?: Contact) => setEditor({ kind: 'contact', values: contact ? { ...contact } : { name: '', email: '', phone: '', company: name || '', title: '' } });
-    const openLink = (relationship?: Relationship) => setEditor({ kind: 'relationship', values: relationship ? { ...relationship } : {
-            id: crypto.randomUUID(), brokerId: selectedBroker || '', prospectId: detail?.prospect?.id || '',
-            status: 'unverified', scope: '', notes: '', sourceUrl: '', learnedOn: today(), version: 0, archived: false,
-        } });
-    const saved = async (kind: string, id: string, archived: boolean) => {
-        setEditor(null);
-        await queryClient.invalidateQueries({ queryKey: [base] });
-        await queryClient.invalidateQueries({ queryKey: ['/api/calling'] });
-        setNotice('Saved to your private directory.');
-        if (kind === 'broker' && !archived)
-            choose('broker', id);
-        if (kind === 'broker' && archived)
-            navigate('/app/desk/relationships');
-    };
-    return <div className="min-h-full bg-[#f3f5f7]">
-    <div className="mx-auto w-full max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8">
-      <Link href="/app/desk" className="mb-4 inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-blue-700"><ArrowLeft className="h-3.5 w-3.5"/>Daily Desk</Link>
-      <PageHeader label="Broker desk" title="Contacts & relationships" description="Your company contacts and the brokers connected to each account." icon={Network} actions={<Button size="sm" onClick={() => openBroker()}><Plus className="h-4 w-4"/>Add broker</Button>}/>
-      <p className="sr-only" role="status">{notice}</p>
-      <div className="mt-5 grid items-start gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="border border-slate-200 bg-white">
-          {selectedId && <button className="w-full px-4 py-3 text-left text-sm font-semibold text-blue-700 lg:hidden" onClick={() => setBrowseOpen(!browseOpen)} aria-expanded={browseOpen} aria-controls="directory-browser">{browseOpen ? 'Close directory' : 'Browse companies & brokers'}</button>}
-          <div id="directory-browser" className={cn(selectedId && !browseOpen && 'hidden lg:block')}>
-          <div className="flex border-b border-slate-200" role="group" aria-label="Directory type">{(['companies', 'brokers'] as const).map(value => <button key={value} className={cn('flex-1 border-b-2 px-4 py-3 text-sm font-semibold', mode === value ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-600 hover:bg-slate-50')} aria-pressed={mode === value} onClick={() => setMode(value)}>{value === 'companies' ? 'Companies' : 'Brokers'}</button>)}</div>
-          <div className="relative m-3"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400"/><Input className="pl-9" aria-label="Search directory" placeholder={'Find ' + mode} value={search} onChange={e => setSearch(e.target.value)}/></div>
-          {directory.isLoading && <p className="p-4 text-sm text-slate-500">Loading directory…</p>}
-          {directory.isError && <div role="alert" className="p-4 text-sm text-red-700">Could not load the directory.<Button variant="ghost" onClick={() => directory.refetch()}>Retry</Button></div>}
-          {!directory.isLoading && !directory.isError && !rows.length && <p className="p-4 text-sm text-slate-500">{mode === 'brokers' ? 'Add a broker to start connecting accounts.' : 'No matching company records.'}</p>}
-          <nav aria-label="Directory results" className="max-h-60 overflow-y-auto lg:max-h-[65vh]">{rows.map(row => <button key={row.id} onClick={() => choose(mode === 'companies' ? 'company' : 'broker', row.id)} className={cn('flex w-full items-center gap-3 border-l-2 px-4 py-3 text-left', selectedId === row.id ? 'border-blue-600 bg-blue-50' : 'border-transparent hover:bg-slate-50')}>
-            {mode === 'companies' ? <Building2 className="h-4 w-4 shrink-0 text-slate-500"/> : <Users className="h-4 w-4 shrink-0 text-slate-500"/>}
-            <span className="min-w-0"><span className="block text-sm font-semibold text-slate-900">{row.name}</span><span className="mt-0.5 block truncate text-xs text-slate-500">{'office' in row ? row.office || row.firm : row.address || row.recordName}</span></span>
-          </button>)}</nav>
-          {(mode === 'companies' ? directory.data?.moreCompanies : directory.data?.moreBrokers) && <p className="border-t p-3 text-xs text-slate-500">Showing the first 100. Search to narrow the list.</p>}
-          </div>
-        </aside>
-        <div className="min-w-0">
-          {!selectedId && <section className="border-y border-slate-200 bg-white px-6 py-10"><h2 className="text-lg font-semibold text-slate-900">Open a company or broker</h2><p className="mt-2 max-w-lg text-sm leading-6 text-slate-600">Company contacts come from your existing Level CRE records. Add brokers, record what you learn, and follow their connections between accounts.</p></section>}
-          {detailQuery.isLoading && selectedId && <p className="p-5 text-sm text-slate-500">Loading contact details…</p>}
-          {detailQuery.isError && <div role="alert" className="border border-red-200 bg-white p-5 text-sm text-red-700">This record could not be opened. It may have been merged or archived.<Button variant="ghost" onClick={() => detailQuery.refetch()}>Retry</Button></div>}
-          {detail && <>
-            <section className="border-b border-slate-300 pb-5">
-              <div className="flex items-start justify-between gap-3"><div><p className="text-[11px] font-semibold uppercase text-slate-500">{selected ? selected.firm : 'Company record'}</p><h2 className="mt-1 text-2xl font-semibold text-slate-950">{name}</h2><p className="mt-1 text-sm text-slate-600">{selected ? selected.office : detail.prospect?.address || detail.prospect?.name}</p></div>
-                {selected && <Button variant="outline" size="sm" onClick={() => openBroker(selected)}><Pencil className="h-3.5 w-3.5"/>Edit broker</Button>}</div>
-              {selected && <><ContactLinks company={selected.firm} {...selected}/>
-                {!selected.email && !selected.phone && <p className="mt-3 text-xs text-slate-500">Add this broker’s email or phone through Edit broker.</p>}
-                {selected.notes && <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">{selected.notes}</p>}
-                {selected.sourceUrl && <a className="mt-2 inline-flex items-center gap-1 text-xs text-blue-700 hover:underline" href={selected.sourceUrl} target="_blank" rel="noopener noreferrer">Contact source<ExternalLink className="h-3 w-3"/></a>}</>}
-            </section>
-            {!selected && <section className="mt-5 border border-slate-200 bg-white">
-              <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3"><h3 className="text-sm font-semibold">Company contacts</h3><Button size="sm" variant="outline" onClick={() => openContact()}><Plus className="h-3.5 w-3.5"/>Add contact</Button></div>
-              {detail.contacts?.map(contact => <div key={contact.id} className="border-b border-slate-100 px-4 py-4 last:border-0"><div className="flex items-start justify-between gap-2"><div><h4 className="text-sm font-semibold">{contact.name || 'Primary contact details'}</h4><p className="mt-0.5 text-xs text-slate-500">{contact.title || (contact.isPrimary ? 'Primary contact' : contact.company)}</p></div><Button variant="ghost" size="sm" aria-label={'Edit ' + (contact.name || 'primary contact')} onClick={() => openContact(contact)}><Pencil className="h-3.5 w-3.5"/></Button></div>
-                <ContactLinks name={contact.name || ''} company={name || ''} email={contact.email} phone={contact.phone}/></div>)}
-            </section>}
-            <section className="mt-5 border border-slate-200 bg-white">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3"><h3 className="flex items-center gap-2 text-sm font-semibold"><Network className="h-4 w-4 text-blue-600"/>{selected ? 'Connected accounts' : 'Broker relationships'}</h3><Button variant="outline" size="sm" onClick={() => openLink()}><Plus className="h-3.5 w-3.5"/>Link {selected ? 'account' : 'broker'}</Button></div>
-              {!detail.relationships.length && <p className="px-4 py-6 text-sm text-slate-500">Add a connection as you learn who works with this {selected ? 'broker' : 'company'}.</p>}
-              <div className="divide-y divide-slate-200">{detail.relationships.map(link => <div key={link.id} className="px-4 py-4">
-                <div className="flex items-start justify-between gap-3"><button onClick={() => choose(selected ? 'company' : 'broker', selected ? link.prospectId : link.brokerId)} className="group flex items-center gap-2 text-left text-sm font-semibold text-blue-700 hover:underline">{selected ? link.companyName : link.brokerName}<ArrowRight className="h-3.5 w-3.5 shrink-0"/></button><Button variant="ghost" size="sm" aria-label={'Edit connection for ' + (selected ? link.companyName : link.brokerName)} onClick={() => openLink(link)}><Pencil className="h-3.5 w-3.5"/></Button></div>
-                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs"><span className={link.status === 'active' ? 'font-medium text-emerald-700' : 'font-medium text-slate-600'}>{statuses[link.status]}</span><span className="text-slate-500">{link.scope || 'Scope to be confirmed'}</span></div>
-                {link.notes && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{link.notes}</p>}
-                <p className="mt-2 text-xs text-slate-400">Learned {link.learnedOn}{link.sourceUrl && <> · <a className="text-blue-700 hover:underline" href={link.sourceUrl} target="_blank" rel="noopener noreferrer">Source ↗</a></>}</p>
-              </div>)}</div>
-            </section>
-          </>}
+  const [, navigate] = useLocation()
+  const params = new URLSearchParams(useSearch())
+  const selectedBroker = params.get('broker')
+  const selectedCompany = params.get('company')
+  const selectedId = selectedBroker || selectedCompany
+  const [search,setSearch] = useState('')
+  const [debounced,setDebounced] = useState('')
+  const [searchOpen,setSearchOpen] = useState(!selectedId)
+  const [editor,setEditor] = useState<Editor|null>(null)
+  const [inspection,setInspection] = useState<{kind:'contact'|'role'|'relationship'|'broker'|'research';value?:any}|null>(null)
+  const [notice,setNotice] = useState('')
+  const queryClient = useQueryClient()
+  useEffect(() => { const timer=setTimeout(() => setDebounced(search),180); return () => clearTimeout(timer) },[search])
+  useEffect(() => {setInspection(null);setNotice('')},[selectedId])
+  const directory = useQuery<Directory>({queryKey:[base,debounced],queryFn:() => request(base+'?search='+encodeURIComponent(debounced))})
+  const path = base+(selectedBroker?'/brokers/':'/companies/')+encodeURIComponent(selectedId||'')
+  const detailQuery = useQuery<Detail>({queryKey:[base,'detail',path],queryFn:() => request(path),enabled:Boolean(selectedId)})
+  const detail=detailQuery.data
+  const broker=detail?.broker
+  const name=broker?.name || detail?.prospect?.businessName || detail?.contacts?.find(c=>c.company)?.company || detail?.prospect?.name || ''
+  const choose=(type:'company'|'broker',id:string) => {
+    setSearchOpen(false);setSearch('')
+    navigate('/app/desk/relationships?'+type+'='+encodeURIComponent(id))
+  }
+  const openBroker=(value?:Broker) => {setInspection(null);setEditor({kind:'broker',values:value?{...value}:{...blankBroker,id:crypto.randomUUID()}})}
+  const openContact=(contact?:Contact,role='unknown') => {
+    setInspection(null)
+    setEditor({kind:'contact',values:contact?{...contact,directoryContext:contact.directoryContext||blankContext(role)}:{name:'',email:'',phone:'',company:name,title:'',directoryContext:blankContext(role)}})
+  }
+  const openLink=(relationship?:Relationship) => {
+    setInspection(null)
+    setEditor({kind:'relationship',values:relationship?{...relationship}:{id:crypto.randomUUID(),brokerId:selectedBroker||'',prospectId:detail?.prospect?.id||'',status:'unverified',scope:'',notes:'',sourceUrl:'',learnedOn:today(),version:0,archived:false}})
+  }
+  const invalidate=async() => {
+    await queryClient.invalidateQueries({queryKey:[base]})
+    await queryClient.invalidateQueries({queryKey:['/api/calling']})
+  }
+  const saved=async(kind:string,id:string,archived:boolean) => {
+    setEditor(null);await invalidate();setNotice('Saved to your private relationship map.')
+    if(kind==='broker') archived?navigate('/app/desk/relationships'):choose('broker',id)
+  }
+  const review=useMutation({
+    mutationFn:async({id,decision}:{id:string;decision:'accepted'|'rejected'}) => apiRequest('POST',base+'/findings/'+id+'/review',{decision}),
+    onSuccess:async() => {await invalidate();setNotice('Finding reviewed. Your relationship map is up to date.')},
+  })
+  const role=contactRoles.find(r=>r.id===inspection?.value)
+  const inspectedContact:Contact|undefined=inspection?.kind==='contact'?inspection.value:undefined
+  const inspectedLink:Relationship|undefined=inspection?.kind==='relationship'?inspection.value:undefined
+  const roleContacts=detail?.contacts?.filter(c=>inspection?.value==='unknown'?!c.directoryContext?.roles.some(r=>r!=='unknown'):c.directoryContext?.roles.includes(inspection?.value))||[]
+  const findings=(detail?.findings||[]).filter(f=>inspection?.kind==='research'||f.payload.contact.directoryContext?.roles.includes(inspection?.value))
+  const sourceBlock=(context?:DirectoryContext|null) => context && <div className="mt-4 space-y-3 border-t border-slate-200 pt-4 text-sm">
+    <div className="flex flex-wrap gap-2">{context.roles.map(value=><span key={value} className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">{contactRoles.find(r=>r.id===value)?.label || 'Role to confirm'}</span>)}<span className="rounded bg-blue-50 px-2 py-1 text-xs text-blue-700">{context.evidenceStatus==='inferred'?'Inferred, verify':context.evidenceStatus==='observed'?'Source observation':'Broker recorded'}</span></div>
+    {context.scope&&<p className="leading-6 text-slate-700">{context.scope}</p>}
+    {context.legalEntity&&<div className="rounded bg-slate-50 p-3"><p className="font-medium">{context.legalEntity}</p><p className="mt-1 text-xs text-slate-500">{[context.jurisdiction,context.registryNumber].filter(Boolean).join(' · ')}</p><p className="mt-2 text-xs leading-5 text-slate-500">Directorship alone does not establish authority over property decisions.</p></div>}
+    {context.sourceRef&&<p className="break-words text-xs text-slate-600">{/^https:\/\//i.test(context.sourceRef)?<a href={context.sourceRef} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline">Open source ↗</a>:context.sourceRef}{context.asOf?' · '+context.asOf:''}</p>}
+    {!context.sourceRef&&<p className="text-xs text-slate-500">Source reference not yet recorded{context.asOf?' · '+context.asOf:''}</p>}
+    {context.notes&&<p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">{context.notes}</p>}
+  </div>
+  return <div className="min-h-full bg-[#f5f7fa]">
+    <div className="mx-auto w-full max-w-[1440px] px-4 py-5 sm:px-6 lg:px-8">
+      <Link href="/app/desk" className="mb-4 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-blue-700"><ArrowLeft className="h-3.5 w-3.5"/>Daily Desk</Link>
+      <PageHeader label="Your network" title="Company relationships" description="Find a company. Follow the people, brokers and corporate connections around it." icon={Network} actions={<Button size="sm" variant="outline" onClick={()=>openBroker()}><Plus className="h-4 w-4"/>Add broker</Button>}/>
+      <div className="my-5 flex flex-wrap items-start gap-3">
+        <div className="relative min-w-0 flex-1 basis-full sm:basis-0">
+          <Search className="pointer-events-none absolute left-3.5 top-3 h-4 w-4 text-slate-400"/>
+          <Input className="h-10 bg-white pl-10 pr-10" aria-label="Search companies, contacts or brokers" placeholder="Search a company, contact or broker…" value={search} onFocus={()=>setSearchOpen(true)} onKeyDown={e=>{if(e.key==='Escape')setSearchOpen(false)}} onChange={e=>{setSearch(e.target.value);setSearchOpen(true)}}/>
+          {searchOpen&&<button aria-label="Close search results" className="absolute right-3 top-3 text-slate-400" onClick={()=>setSearchOpen(false)}><X size={16}/></button>}
+          {searchOpen&&<div className="absolute left-0 right-0 top-12 z-20 max-h-[420px] overflow-auto rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+            {directory.isLoading&&<p className="p-3 text-sm text-slate-500">Searching your directory…</p>}
+            {directory.isError&&<div role="alert" className="p-3 text-sm text-red-700">Could not load results. <button onClick={()=>directory.refetch()}>Retry</button></div>}
+            {[{label:'Companies',rows:directory.data?.companies,type:'company' as const},{label:'Brokers',rows:directory.data?.brokers,type:'broker' as const}].map(group=>!!group.rows?.length&&<div key={group.type}>
+              <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{group.label}</p>
+              {group.rows.map(row=><button key={row.id} className="flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left hover:bg-blue-50" onClick={()=>choose(group.type,row.id)}>
+                {group.type==='company'?<Building2 className="h-4 w-4 shrink-0 text-slate-400"/>:<Users className="h-4 w-4 shrink-0 text-slate-400"/>}
+                <span className="min-w-0 flex-1"><span className="block text-sm font-medium">{row.name}</span><span className="mt-0.5 block truncate text-xs text-slate-400">{'office' in row?row.office||row.firm:row.address||row.recordName}</span></span><ArrowRight size={14} className="text-slate-300"/>
+              </button>)}
+            </div>)}
+            {!directory.isLoading&&!directory.isError&&!directory.data?.companies.length&&!directory.data?.brokers.length&&<p className="p-3 text-sm text-slate-500">No matching company or broker.</p>}
+            {(directory.data?.moreCompanies||directory.data?.moreBrokers)&&<p className="p-3 text-xs text-slate-500">Search more specifically to narrow the first 100 results.</p>}
+          </div>}
         </div>
+        {detail&&!broker&&<><Button className="h-10" variant="outline" onClick={()=>openContact()}><Plus size={15}/>Add contact</Button><Button className="h-10" variant="ghost" onClick={()=>setInspection({kind:'research'})}>Research gaps{detail.findings?.length?' · '+detail.findings.length+' to review':''}</Button></>}
       </div>
+      {notice&&<p role="status" className="mb-3 text-xs text-emerald-700">{notice}</p>}
+      {!selectedId&&<div className="flex min-h-[450px] flex-col items-center justify-center rounded-lg border border-slate-200 bg-white text-center"><Network className="h-10 w-10 text-blue-200"/><h2 className="mt-5 text-lg font-semibold">Start with a company</h2><p className="mt-2 max-w-md px-5 text-sm leading-6 text-slate-500">Search above to open its relationship map. Follow a broker to see the other accounts connected to them.</p><Button variant="outline" className="mt-5" onClick={()=>setSearchOpen(true)}><Search size={14}/>Find a company</Button></div>}
+      {detailQuery.isLoading&&selectedId&&<p className="py-20 text-center text-sm text-slate-500">Opening relationship map…</p>}
+      {detailQuery.isError&&<div role="alert" className="rounded border border-red-200 bg-white p-5 text-sm text-red-700">This record could not be opened. <Button variant="ghost" onClick={()=>detailQuery.refetch()}>Retry</Button></div>}
+      {detail&&<RelationshipGraph detail={detail} name={name} choose={choose} addContact={role=>openContact(undefined,role)} addLink={()=>openLink()} inspectContact={contact=>setInspection({kind:'contact',value:contact})} inspectRelationship={link=>setInspection({kind:'relationship',value:link})} inspectRole={role=>setInspection({kind:'role',value:role})} inspectBroker={()=>setInspection({kind:'broker'})}/>}
     </div>
-    {editor && <EditDialog key={editor.kind + (editor.values.id || 'new')} editor={editor} detail={detail} close={() => setEditor(null)} saved={saved}/>}
-  </div>;
+    {editor&&<EditDialog key={editor.kind+(editor.values.id||'new')} editor={editor} detail={detail} close={()=>setEditor(null)} saved={saved}/>}
+    {inspection&&<Dialog open onOpenChange={open=>{if(!open)setInspection(null)}}>
+      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader><DialogTitle>{inspectedContact?.name || (inspectedContact?'Company contact details':null) || (inspectedLink?'Account connection':null) || (inspection.kind==='broker'?broker?.name:null) || (inspection.kind==='research'?'Research gaps & findings':role?.label || 'Role to confirm')}</DialogTitle>
+          <DialogDescription>{inspection.kind==='broker'?broker?.firm:name}</DialogDescription></DialogHeader>
+        {inspectedContact&&<div><p className="text-sm text-slate-500">{inspectedContact.title||'Title not yet recorded'}</p><ContactLinks name={inspectedContact.name||''} company={name} email={inspectedContact.email} phone={inspectedContact.phone}/>{sourceBlock(inspectedContact.directoryContext)}<Button className="mt-5" size="sm" variant="outline" onClick={()=>openContact(inspectedContact)}><Pencil size={13}/>Edit contact & connections</Button></div>}
+        {inspectedLink&&<div className="space-y-3"><p className="text-sm font-medium">{inspectedLink.brokerName} → {inspectedLink.companyName}</p><p className="text-xs text-slate-500">{relationshipLabels[inspectedLink.status]} · Learned {inspectedLink.learnedOn}</p><p className="text-sm">{inspectedLink.scope||'Scope to be confirmed'}</p><p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">{inspectedLink.notes}</p>{inspectedLink.sourceUrl&&<a href={inspectedLink.sourceUrl} target="_blank" rel="noopener noreferrer" className="block text-xs text-blue-700">Open source ↗</a>}<Button size="sm" variant="outline" onClick={()=>openLink(inspectedLink)}><Pencil size={13}/>Edit connection</Button></div>}
+        {inspection.kind==='broker'&&broker&&<div><p className="text-sm text-slate-500">{broker.office}</p><ContactLinks company={broker.firm} {...broker}/>{broker.notes&&<p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-slate-600">{broker.notes}</p>}{broker.sourceUrl&&<a href={broker.sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-3 block text-xs text-blue-700">Contact source ↗</a>}<Button className="mt-5" variant="outline" size="sm" onClick={()=>openBroker(broker)}><Pencil size={13}/>Edit broker</Button></div>}
+        {inspection.kind==='role'&&<div>
+          {roleContacts.map(contact=><button key={contact.id} className="mb-2 flex w-full items-center justify-between rounded-md border border-slate-200 p-3 text-left text-sm" onClick={()=>setInspection({kind:'contact',value:contact})}><span>{contact.name||'Company main line'}<small className="mt-1 block text-xs text-slate-500">{contact.title||contact.email||contact.phone||'Title to confirm'}</small></span><ArrowRight size={14}/></button>)}
+          {!roleContacts.length&&<p className="text-sm leading-6 text-slate-500">No contact identified for this branch yet. Add a person and the source supporting their connection to this company.</p>}
+          <Button size="sm" variant="outline" className="mt-4" onClick={()=>openContact(undefined,inspection.value)}><Plus size={13}/>Add {role?.label.toLowerCase()||'company'} contact</Button>
+        </div>}
+        {inspection.kind==='research'&&<div><p className="text-sm leading-6 text-slate-500">These gaps are also included in the agent's company brief, alongside the saved contacts, broker connections and sources.</p><div className="mt-4 divide-y divide-slate-100">{detail?.coverage?.map(item=><button key={item.role} className="flex w-full justify-between py-3 text-left text-sm" onClick={()=>setInspection({kind:'role',value:item.role})}><span>{contactRoles.find(r=>r.id===item.role)?.label}</span><span className="text-xs text-slate-500">{item.gap?'Needs research':item.recordedContacts.length+' recorded'}</span></button>)}</div></div>}
+        {(inspection.kind==='role'||inspection.kind==='research')&&findings.length>0&&<div className="mt-4 border-t border-slate-200 pt-4"><h3 className="text-sm font-semibold">Agent findings to review</h3>{findings.map(finding=><section className="mt-3 rounded-md border border-dashed border-violet-200 p-3" key={finding.id}><h4 className="text-sm font-medium">{finding.payload.contact.name}</h4><p className="mt-1 text-xs text-slate-500">{finding.payload.contact.title}</p><ContactLinks name={finding.payload.contact.name||''} company={name} email={finding.payload.contact.email} phone={finding.payload.contact.phone}/>{sourceBlock(finding.payload.contact.directoryContext)}<div className="mt-4 flex gap-2"><Button size="sm" disabled={review.isPending} onClick={()=>review.mutate({id:finding.id,decision:'accepted'})}>Save to company</Button><Button variant="outline" size="sm" disabled={review.isPending} onClick={()=>review.mutate({id:finding.id,decision:'rejected'})}>Dismiss</Button></div></section>)}</div>}
+        {review.isError&&<p role="alert" className="text-sm text-red-700">{review.error.message}</p>}
+      </DialogContent>
+    </Dialog>}
+  </div>
 }

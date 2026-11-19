@@ -1,0 +1,69 @@
+.relationship-map { border:1px solid #dce3eb; border-radius:10px; overflow:hidden; background:#fafbfd; color:#1a2940; }
+.map-caption { display:flex; justify-content:space-between; gap:12px; padding:13px 20px; border-bottom:1px solid #e4e9f0; font-size:11px; color:#718096; background:#fff; }
+.map-caption>span:first-child { display:flex; gap:8px; align-items:center; color:#405169; font-weight:600; }
+.map-viewport { overflow:auto; background-image:radial-gradient(#d5dfe9 .75px,transparent .75px); background-size:20px 20px; }
+.map-world { position:relative; transform-origin:top left; }
+.map-world button:focus-visible,.map-controls button:focus-visible { outline:2px solid #2563eb; outline-offset:3px; }
+.map-wires { position:absolute; inset:0; pointer-events:none; }
+.map-wires path { stroke:#9eb6cf; stroke-width:1.5; fill:none; }
+.map-wires circle { fill:#5e87b5; }
+.map-wires .wire-broker,.map-wires .wire-unknown { stroke:#a2b0c1; stroke-dasharray:5 5; }
+.map-wires .wire-current { stroke:#6989ac; }
+.map-root { position:absolute; width:270px; min-height:130px; border-radius:9px; padding:20px 22px; background:#142e4e; color:white; box-shadow:0 7px 24px #1b35541a; }
+.map-root-label { display:flex; align-items:center; gap:7px; font-size:10px; color:#b0c6df; letter-spacing:.04em; }
+.map-root h2 { font-size:21px; line-height:1.25; font-weight:600; margin:11px 0 7px; }
+.map-root p { font-size:11px; line-height:1.6; color:#c7d6e7; }
+.map-company-phone { margin-top:10px; font-size:10px; color:#c7d6e7; text-align:left; }
+.map-company-phone:hover { text-decoration:underline; }
+.map-broker-contact { display:flex; flex-direction:column; align-items:flex-start; gap:7px; border-top:1px solid #ffffff24; padding-top:14px; margin-top:15px; font-size:11px; }
+.map-broker-contact a:hover { text-decoration:underline; }
+.map-broker-contact button { display:flex; align-items:center; gap:4px; color:#c7dcf4; margin-top:7px; }
+.map-broker-branch { position:absolute; width:260px; }
+.map-branch-heading { display:flex; align-items:center; gap:10px; padding:0 2px 15px; }
+.map-branch-heading strong { font-size:12px; font-weight:600; }
+.map-branch-heading small { display:block; font-size:10px; color:#8591a2; margin-top:3px; }
+.cw-mark { font-size:11px; font-weight:700; color:#ad3946; background:#f6e9eb; border-radius:5px; padding:7px 6px; }
+.map-broker-list { display:flex; flex-direction:column; gap:10px; }
+.map-broker-node,.map-role,.map-account,.map-unclassified { background:#fff; border:1px solid #d7e1ec; border-radius:7px; box-shadow:0 2px 5px #1e395503; }
+.map-broker-node { padding:12px 14px 10px; min-height:80px; }
+.map-person { display:flex; width:100%; align-items:center; justify-content:space-between; gap:10px; text-align:left; font-size:12px; line-height:1.5; }
+.map-person strong { font-weight:600; }
+.map-person small { display:block; font-size:10px; color:#7e8a9b; font-weight:400; margin-top:3px; }
+.map-person svg { color:#8398af; flex-shrink:0; }
+.map-person:hover { color:#215eaa; }
+.map-evidence-link { color:#72829a; font-size:10px; margin-top:9px; text-align:left; }
+.map-evidence-link:hover { color:#215eaa; text-decoration:underline; }
+.map-add { font-size:11px; display:flex; align-items:center; gap:5px; color:#54769a; padding:12px 3px; }
+.map-role { position:absolute; width:295px; min-height:108px; padding:0 14px 11px; }
+.map-role-heading { display:flex; gap:10px; align-items:center; justify-content:space-between; height:38px; border-bottom:1px solid #edf1f6; }
+.map-role-heading>button:first-child { flex:1; display:flex; align-items:center; gap:9px; text-align:left; font-size:12px; font-weight:600; }
+.map-role-heading>button:first-child span { font-size:10px; color:#8b9aab; font-weight:400; }
+.map-role-heading>button:last-child { color:#7d91a8; padding:4px; }
+.map-role.has-contacts { border-left:3px solid #5a85b5; }
+.map-empty { text-align:left; width:100%; padding-top:11px; }
+.map-empty span { display:block; font-size:11px; color:#8090a4; }
+.map-empty small { display:block; font-size:10px; color:#9aa6b5; margin-top:3px; }
+.map-empty:hover span { color:#215eaa; }
+.map-person.compact { padding-top:8px; font-size:11px; }
+.map-more { font-size:10px; color:#54769a; margin-top:6px; }
+.map-more.has-findings { border-bottom:1px dashed #a78bfa; color:#785ab1; }
+.map-unclassified { position:absolute; width:270px; padding:13px 15px; border-style:dashed; }
+.map-unclassified h3 { display:flex; align-items:center; gap:6px; font-size:11px; font-weight:500; color:#718398; }
+.map-director-note { position:absolute; left:790px; top:729px; color:#91a0b2; font-size:9px; line-height:1.7; }
+.map-empty-note { font-size:11px; color:#8190a2; padding:15px 0; }
+.map-account { position:absolute; width:320px; min-height:110px; padding:14px 16px; }
+.map-account p { font-size:10px; color:#72829a; margin-top:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.map-account-heading { position:absolute; font-size:10px; font-weight:600; letter-spacing:.09em; color:#7f91a6; }
+.map-account-heading span { margin-left:8px; }
+.map-link-account { position:absolute; color:#54769a; font-size:11px; display:flex; align-items:center; gap:5px; }
+.map-broker-legend { position:absolute; left:175px; bottom:60px; color:#8594a7; font-size:11px; }
+.map-footer { background:#fff; border-top:1px solid #e4e9f0; display:flex; align-items:center; justify-content:space-between; padding:9px 15px; gap:10px; }
+.map-key { display:flex; align-items:center; gap:18px; font-size:10px; color:#8491a2; }
+.map-key span { display:flex; align-items:center; gap:6px; }
+.map-key i { display:inline-block; width:18px; border-top:1.5px solid #91aac5; }
+.map-key i.dashed { border-top-style:dashed; }
+.map-controls { display:flex; align-items:center; gap:5px; }
+.map-controls button { height:24px; width:27px; display:flex; align-items:center; justify-content:center; border:1px solid #e2e8ef; border-radius:4px; color:#6f8198; font-size:14px; }
+.map-controls button:disabled { opacity:.35; }
+@media(max-width:900px) { .map-viewport { max-height:420px; } }
+@media(max-width:640px) { .map-caption { padding:12px; font-size:10px; gap:8px; } .map-key { gap:9px; font-size:9px; } }

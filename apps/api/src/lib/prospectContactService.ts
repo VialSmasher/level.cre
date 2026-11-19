@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import { derivePhoneReadiness, contactIdentityKey } from './phoneReadiness';
+import { DirectoryContextSchema, type DirectoryContext } from '../modules/relationship-directory/context';
 
 type Queryable = Pick<PoolClient, 'query'>;
 const optionalText = (max: number) => z.string().trim().max(max).nullable().optional();
 export const AdditionalPhoneSchema = z.object({ label: z.string().trim().min(1).max(40), number: z.string().trim().min(3).max(80) }).strict();
 const contactFields = {
+  directoryContext: DirectoryContextSchema.optional(),
   name: optionalText(240), company: optionalText(240),
   email: z.union([z.string().trim().email().max(320), z.literal(''), z.null()]).optional(),
   phone: optionalText(80), title: optionalText(240),
@@ -18,6 +20,7 @@ export const ProspectContactUpdateSchema = z.object({ ...contactFields, archived
 export type ProspectContactCreate = z.infer<typeof ProspectContactCreateSchema>;
 export type ProspectContactUpdate = z.infer<typeof ProspectContactUpdateSchema>;
 export type ProspectContact = {
+  directoryContext?: DirectoryContext | null;
   id: string; prospectId: string; isPrimary: boolean; name: string | null; company: string | null;
   email: string | null; phone: string | null; title: string | null;
   additionalPhones: Array<{ label: string; number: string }>; archivedAt: string | null;
@@ -29,7 +32,7 @@ const clean = (value: unknown) => typeof value === 'string' && value.trim() ? va
 const dateText = (value: any) => value instanceof Date ? value.toISOString() : value || null;
 export const primaryContactIdentity = contactIdentityKey;
 function dto(row: Record<string, any>): ProspectContact {
-  return { id: row.id, prospectId: row.prospect_id, isPrimary: row.is_primary,
+  return { id: row.id, prospectId: row.prospect_id, isPrimary: row.is_primary, directoryContext: row.directory_context || null,
     name: clean(row.name), company: clean(row.company), email: clean(row.email), phone: clean(row.phone), title: clean(row.title),
     additionalPhones: Array.isArray(row.additional_phones) ? row.additional_phones : [], archivedAt: dateText(row.archived_at) };
 }
@@ -112,16 +115,22 @@ export async function getCallingWorkspace(params: { pool: Pool; userId: string; 
   return transaction(params.pool, async (client) => workspace(client, params.userId, await requireContactProspect(client, params.userId, params.prospectId), params.contactId));
 }
 export async function createProspectContact(params: { pool: Pool; userId: string; prospectId: string; input: ProspectContactCreate }) {
-  return transaction(params.pool, async (client) => {
+  return transaction(params.pool, client => createProspectContactWithClient(client, params));
+}
+export async function createProspectContactWithClient(client: Queryable, params: { userId: string; prospectId: string; input: ProspectContactCreate }) {
     const prospect = await requireContactProspect(client, params.userId, params.prospectId);
     await reconcilePrimaryContact(client, params.userId, prospect);
     const input = params.input;
+    const createdContactId = randomUUID();
     await client.query(`INSERT INTO public.prospect_contacts
       (id,user_id,prospect_id,source,name,company,email,phone,title,additional_phones,identity_key)
       VALUES ($1,$2,$3,'broker_added',$4,$5,$6,$7,$8,$9::jsonb,$10)`,
-    [randomUUID(), params.userId, prospect.id, input.name, clean(input.company), clean(input.email), clean(input.phone), clean(input.title), JSON.stringify(input.additionalPhones || []), primaryContactIdentity({contact_name:input.name,contact_email:input.email,contact_phone:input.phone})]);
+    [createdContactId, params.userId, prospect.id, input.name, clean(input.company), clean(input.email), clean(input.phone), clean(input.title), JSON.stringify(input.additionalPhones || []), primaryContactIdentity({contact_name:input.name,contact_email:input.email,contact_phone:input.phone})]);
+    if (input.directoryContext) {
+      await client.query('UPDATE public.prospect_contacts SET directory_context=$3::jsonb WHERE user_id=$1 AND id=$2',
+        [params.userId,createdContactId,JSON.stringify(input.directoryContext)]);
+    }
     return workspace(client, params.userId, prospect);
-  });
 }
 export async function updateProspectContact(params: { pool: Pool; userId: string; prospectId: string; contactId: string; input: ProspectContactUpdate }) {
   return transaction(params.pool, async (client) => {
@@ -143,6 +152,7 @@ export async function updateProspectContact(params: { pool: Pool; userId: string
       // Name/email change creates a new relationship; apply explicitly supplied phone options/title to that new identity.
       const primary = await reconcilePrimaryContact(client, params.userId, prospect);
       const fields2: string[] = []; const values2: any[] = [primary.id, params.userId];
+      if (input.directoryContext) { values2.push(JSON.stringify(input.directoryContext)); fields2.push(`directory_context=$${values2.length}::jsonb`); }
       if (input.title !== undefined) { values2.push(clean(input.title)); fields2.push(`title=$${values2.length}`); }
       if (input.additionalPhones !== undefined) { values2.push(JSON.stringify(input.additionalPhones)); fields2.push(`additional_phones=$${values2.length}::jsonb`); }
       if (fields2.length) await client.query(`UPDATE public.prospect_contacts SET ${fields2.join(',')},updated_at=now() WHERE id=$1 AND user_id=$2`, values2);
@@ -152,13 +162,19 @@ export async function updateProspectContact(params: { pool: Pool; userId: string
       const nextIdentity = primaryContactIdentity({contact_name:next.name,contact_email:next.email,contact_phone:next.phone});
       if (!next.name) throw new ProspectContactError(400, 'contact_name_required', 'Additional contacts need a name.');
       if (input.archived !== true && nextIdentity !== previousIdentity) {
+        const replacementContactId = randomUUID();
         await client.query('UPDATE public.prospect_contacts SET archived_at=now(),updated_at=now() WHERE id=$1 AND user_id=$2', [row.id,params.userId]);
         await client.query(`INSERT INTO public.prospect_contacts (id,user_id,prospect_id,source,name,company,email,phone,title,additional_phones,identity_key)
           VALUES ($1,$2,$3,'broker_added',$4,$5,$6,$7,$8,$9::jsonb,$10)`,
-        [randomUUID(),params.userId,prospect.id,next.name,next.company,next.email,next.phone,input.title === undefined ? null : next.title,JSON.stringify(input.additionalPhones || []),nextIdentity]);
+        [replacementContactId,params.userId,prospect.id,next.name,next.company,next.email,next.phone,input.title === undefined ? null : next.title,JSON.stringify(input.additionalPhones || []),nextIdentity]);
+        if (input.directoryContext) {
+          await client.query('UPDATE public.prospect_contacts SET directory_context=$3::jsonb WHERE user_id=$1 AND id=$2',
+            [params.userId,replacementContactId,JSON.stringify(input.directoryContext)]);
+        }
         return workspace(client,params.userId,prospect);
       }
       const fields: string[] = []; const values: any[] = [row.id, params.userId, prospect.id];
+      if (input.directoryContext) { values.push(JSON.stringify(input.directoryContext)); fields.push(`directory_context=$${values.length}::jsonb`); }
       for (const key of ['name','company','email','phone','title'] as const) if (Object.prototype.hasOwnProperty.call(input, key)) {
         if (key === 'name' && !clean(input.name)) throw new ProspectContactError(400, 'contact_name_required', 'Additional contacts need a name.');
         values.push(clean(input[key])); fields.push(`${key}=$${values.length}`);

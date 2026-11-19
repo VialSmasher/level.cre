@@ -1648,6 +1648,10 @@ export const prospectContacts = pgTable("prospect_contacts", {
   identityKey: text("identity_key"),
   name: varchar("name"), company: varchar("company"), email: varchar("email"), phone: varchar("phone"), title: varchar("title"),
   additionalPhones: jsonb("additional_phones").$type<Array<{ label: string; number: string }>>().notNull().default([]),
+  directoryContext: jsonb("directory_context").$type<{
+    roles: string[]; scope: string; legalEntity: string; jurisdiction: string; registryNumber: string;
+    sourceType: string; sourceRef: string; asOf: string; evidenceStatus: string; notes: string;
+  }>(),
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

@@ -1,9 +1,11 @@
 import type { Express, Request, Response, RequestHandler } from 'express';
 import type { Pool } from 'pg';
 import { z } from 'zod';
-import { getUserId, requireBrokerAuth } from '../../auth';
+import { getUserId, requireBrokerAuth, requireAccountIntelligenceAuth } from '../../auth';
+import { coverage, FindingSchema, recordFinding, reviewFinding } from './findings';
 import { getCallingWorkspace, ProspectContactError } from '../../lib/prospectContactService';
 import { resolveCanonicalProspect, ProspectMergeServiceError } from '../../lib/prospectMergeService';
+import { industrialIntelAgentManifest } from '../industrial-intel/agentManifest';
 const text = (length: number) => z.string().trim().max(length).default('');
 const url = z.union([z.literal(''), z.string().url().max(2000).refine(value => {
         try {
@@ -60,13 +62,21 @@ export function registerRelationshipDirectory(app: Express, pool: Pool) {
                     return res.status(error.status).json({ message: error.message });
                 if (error.code === '23505')
                     return res.status(409).json({ message: 'This broker is already linked to that account. Edit the existing connection.' });
+                if ([400,404,409].includes(error.status))
+                    return res.status(error.status).json({message:error.message});
                 console.error('Relationship directory request failed', error);
                 res.status(500).json({ message: 'The directory could not be saved or loaded. Please try again.' });
             });
         };
     }
     const base = '/api/desk/directory';
-    app.get(base, requireBrokerAuth, handle(async (req, res, owner) => {
+    const agentBase = '/api/intel/directory';
+    app.get(agentBase + '/manifest', requireAccountIntelligenceAuth, handle(async (_req,res) => {
+      res.json(industrialIntelAgentManifest.capabilities.companyRelationships);
+    }));
+    const readAuth: RequestHandler = (req,res,next) => req.path.startsWith(agentBase)
+      ? requireAccountIntelligenceAuth(req,res,next) : requireBrokerAuth(req,res,next);
+    app.get([base, agentBase + '/search'], readAuth, handle(async (req, res, owner) => {
         const input = z.object({ search: z.string().trim().max(240).default('') }).safeParse(req.query);
         if (!input.success)
             return res.sendStatus(400);
@@ -86,7 +96,7 @@ export function registerRelationshipDirectory(app: Express, pool: Pool) {
         res.json({ companies: companies.rows.slice(0, 100), brokers: brokers.rows.slice(0, 100),
             moreCompanies: companies.rows.length > 100, moreBrokers: brokers.rows.length > 100 });
     }));
-    app.get(base + '/companies/:id', requireBrokerAuth, handle(async (req, res, owner) => {
+    app.get([base + '/companies/:id', agentBase + '/companies/:id/brief'], readAuth, handle(async (req, res, owner) => {
         const resolved = await resolveCanonicalProspect({ pool, userId: owner, prospectId: req.params.id });
         const workspace = await getCallingWorkspace({ pool, userId: owner, prospectId: resolved.canonicalProspectId });
         const links = await pool.query(`WITH RECURSIVE aliases AS (
@@ -97,9 +107,19 @@ export function registerRelationshipDirectory(app: Express, pool: Pool) {
       FROM public.directory_relationships r JOIN public.directory_brokers b ON b.id=r.broker_id AND b.user_id=r.user_id
       JOIN public.prospects p ON p.id=r.prospect_id AND p.user_id=r.user_id
       WHERE r.user_id=$1 AND r.prospect_id IN (SELECT id FROM aliases) AND NOT r.archived AND NOT b.archived ORDER BY b.name`, [owner, resolved.canonicalProspectId]);
-        res.json({ ...workspace, relationships: links.rows });
+        const findings = await pool.query(`WITH RECURSIVE aliases AS (
+          SELECT id FROM public.prospects WHERE user_id=$1 AND id=$2
+          UNION SELECT p.id FROM public.prospects p JOIN aliases a ON p.merged_into_prospect_id=a.id WHERE p.user_id=$1
+        ) SELECT id,prospect_id AS "sourceProspectId",payload,status,created_at AS "createdAt"
+          FROM public.directory_findings WHERE user_id=$1 AND prospect_id IN (SELECT id FROM aliases) AND status='observed' ORDER BY created_at`,
+          [owner,resolved.canonicalProspectId]);
+        res.json({ ...workspace, relationships: links.rows, findings: findings.rows,
+          coverage: coverage(workspace.contacts),
+          reasoningRules: ['A director role establishes a recorded legal connection only. Verify property decision authority separately.',
+            'Apply each relationship only to its recorded company, geography, date and scope.',
+            'An empty branch is a research gap. Pending findings remain observations.'] });
     }));
-    app.get(base + '/brokers/:id', requireBrokerAuth, handle(async (req, res, owner) => {
+    app.get([base + '/brokers/:id',agentBase + '/brokers/:id/brief'], readAuth, handle(async (req, res, owner) => {
         if (!z.string().uuid().safeParse(req.params.id).success)
             return res.sendStatus(400);
         const result = await pool.query(`SELECT ${brokerColumns} FROM public.directory_brokers WHERE user_id=$1 AND id=$2 AND NOT archived`, [owner, req.params.id]);
@@ -111,6 +131,16 @@ export function registerRelationshipDirectory(app: Express, pool: Pool) {
       WHERE r.user_id=$1 AND r.broker_id=$2 AND NOT r.archived ORDER BY "companyName"`, [owner, req.params.id]);
         res.json({ broker: result.rows[0], relationships: links.rows });
     }));
+    app.post(agentBase + '/findings', requireAccountIntelligenceAuth, handle(async (req,res,owner) => {
+      const parsed = FindingSchema.safeParse(req.body)
+      if (!parsed.success) return res.status(400).json({message:'Findings need a contact, source, date and valid company context.',issues:parsed.error.flatten()})
+      return res.json(await recordFinding(pool,owner,parsed.data))
+    }))
+    app.post(base + '/findings/:id/review', requireBrokerAuth, handle(async (req,res,owner) => {
+      const parsed = z.object({decision:z.enum(['accepted','rejected'])}).strict().safeParse(req.body)
+      if (!parsed.success || !z.string().uuid().safeParse(req.params.id).success) return res.sendStatus(400)
+      return res.json(await reviewFinding(pool,owner,req.params.id,parsed.data.decision))
+    }))
     app.put(base + '/brokers/:id', requireBrokerAuth, handle(async (req, res, owner) => {
         const parsed = BrokerSchema.safeParse(req.body);
         if (!parsed.success || !z.string().uuid().safeParse(req.params.id).success)

@@ -11,6 +11,7 @@ const migrationNames = [
   '0021_prospect_contacts.sql',
   '0022_desk_sync.sql',
   '0023_relationship_directory.sql',
+  '0024_relationship_graph.sql',
 ]
 
 async function main() {

@@ -34,6 +34,26 @@ export const industrialIntelAgentManifest = {
     "When extraction confidence is low or the property is an intersection/land parcel, keep address nullable and store location_description as a fact.",
   ],
   capabilities: {
+    companyRelationships: {
+      auth: 'Broker JWT or owner-bound ACCOUNT_INTELLIGENCE_AGENT_API_KEY with ACCOUNT_INTELLIGENCE_AGENT_USER_ID. Existing market-record agent credentials may also read and propose. General intel and sales activity keys cannot access this private graph.',
+      endpoints: [
+        { method: 'GET', path: '/api/intel/directory/manifest', description: 'Read this private company relationship contract using the owner-bound account intelligence credential.' },
+        { method: 'GET', path: '/api/intel/directory/search?search=<name>', description: 'Search owned company accounts, contact names and brokers. Resolve exact account and legal entity before attaching findings.' },
+        { method: 'GET', path: '/api/intel/directory/companies/:id/brief', description: 'Read company contacts, role coverage and gaps, broker links, pending observations, source dates and reasoning rules.' },
+        { method: 'GET', path: '/api/intel/directory/brokers/:id/brief', description: 'Follow a broker to connected company accounts, keeping historical status, date and geographic scope.' },
+        { method: 'POST', path: '/api/intel/directory/findings', description: 'Stage a sourced contact or director observation with an idempotent externalKey, prospectId and contact.directoryContext. Never creates confirmed activity or a new prospect.' },
+        { method: 'POST', path: '/api/desk/directory/findings/:id/review', description: 'Broker JWT only. Save a finding to the company or dismiss it. Source evidence status is preserved.' },
+      ],
+      roles: ['real_estate', 'operations', 'facilities', 'finance', 'director', 'unknown'],
+      requiredFindingContext: ['roles', 'sourceType', 'sourceRef', 'asOf', 'evidenceStatus'],
+      corporateSearchContext: ['legalEntity', 'jurisdiction', 'sourceRef', 'asOf'],
+      invariants: [
+        'Directorship is a legal connection and does not establish authority over real estate.',
+        'A parent-company or historical broker assignment does not establish current representation of a local subsidiary.',
+        'Keep inferred roles marked inferred. An inferred contact does not close a research gap.',
+        'Findings are private observations until broker review. No automatic map pins, outreach, activity credits or opportunity stage changes.',
+      ],
+    },
     brokerageMemory: {
       prospectTypeContract: {
         field: "records[].derived.prospectTypes",
