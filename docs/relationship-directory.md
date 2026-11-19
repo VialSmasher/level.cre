@@ -1,6 +1,16 @@
 # Daily Desk company relationship map
 
-## Current production release
+## Hands-off maintenance rollout
+
+On November 19, 2026 Patrick authorized importing the reviewed mockup and maintaining the graph during company research and BD. API release `c68dfffbfc1e0f27395478ce3b2b7f94088c7aee` adds a separately enabled, owner-bound maintenance endpoint and private change journal. Railway deployment `f42f7359-f577-464f-a439-5d08fb23c023` serves this API. The existing website remains compatible and displays the imported records.
+
+The live import contains four C&W brokers and six connections across five existing companies: Hagerty to Sysco, PepsiCo and Canada Bread; Frizalone to Sysco; Jackson to Siemens; Sethney to Eaton. Four links are historical and two are ended. Scope and source notes are retained; no current local representation is inferred. Hagerty's published business email and direct office number are saved. Signed-in browser verification confirmed the ended Siemens link and Hagerty's three-account graph and contact details.
+
+Patrick's dedicated private credential is installed with Windows user encryption and a user-only file ACL. The verified account is `livingstonpatrick1@gmail.com`. The personal `level-cre-relationships` skill, existing Outlook BD skill and root project instructions point to [the maintenance workflow](relationship-maintenance.md) and `scripts/codex/use-levelcre-relationships.ps1`. The existing Evening Level CRE Sync prompt was updated, retaining its weekday 6:15 p.m. schedule, model, reasoning and project. The existing Sync with Codex button reads that same prompt; no extra automation or button was created.
+
+Validation: all 58 authentication/directory/contact tests passed, the API TypeScript check passed, and the API build passed. Imported broker/link writes were verified through fresh owner-bound API reads. Uncertain contact/director evidence still uses findings, and ordinary broker-only approvals remain protected. Routine sourced maintenance requires the dedicated key plus explicit deployment opt-in, an original source/date, an idempotency key and fresh versions/snapshots. It cannot modify phone readiness, create prospects, send messages, award activity, change opportunity stages or share records.
+
+## Original graph production release
 
 Released November 19, 2026 with Patrick's explicit production approval. Application commit `dfb5cdfe76f6d841093edd2358d8996d7782c2b9` is live at [Daily Desk](https://level-cre.vercel.app/app/desk) and [Company relationships](https://level-cre.vercel.app/app/desk/relationships).
 
@@ -59,7 +69,7 @@ Finding shape, using fictional values solely to illustrate the contract
 }
 ```
 
-The same external key and payload return the same finding. Reusing a key with different evidence is rejected. Agents cannot approve their own findings or write confirmed broker relationships. Pending findings do not create contacts, prospects, map pins, activity credit, outreach or opportunities. Broker relationship changes remain explicit broker edits in this release. This release exposes agent tools, it does not schedule research or install a new live credential.
+The same external key and payload return the same finding. Reusing a key with different evidence is rejected. Agents cannot approve their own pending findings. Pending findings do not create contacts, prospects, map pins, activity credit, outreach or opportunities. The separately enabled maintenance rollout above now allows sourced direct contact and broker-link updates under Patrick's standing authorization; it preserves this findings/review path for uncertainty.
 
 ## Privacy and continuity
 
