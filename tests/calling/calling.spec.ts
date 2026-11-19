@@ -468,7 +468,7 @@ async function installCallingScenario(page: Page, options: { startFailures?: num
     await expect(page.getByTestId('asset-profile')).toHaveAttribute('data-asset-id', 'calling-prospect-1', { timeout: 20_000 });
   } else {
     await expect(page.getByRole('heading', { name: 'Calls', exact: true })).toBeVisible();
-    await expect(page.getByRole('link', { name: options.mainLineOnly || options.missingEmailPrimary ? 'Call Vas Patel' : 'Call Morgan Lee', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: options.callback ? 'Call Rowan Singh' : options.mainLineOnly || options.missingEmailPrimary ? 'Call Vas Patel' : 'Call Morgan Lee', exact: true })).toBeVisible();
   }
   return { starts, confirmations, discards, sessions, progress, roster, workspace, readiness, mutationSequence, queueReads, needsNumberReads, workspaceReads, searchReads, savedCandidates, releaseSearch, releaseSelection, releaseStart, releaseContactSave, contactWrites, enrichmentWrites, legacyCallWrites, apiWrites, pageErrors, confirmOnServer: (clientEventId: string) => confirmed.add(clientEventId) };
 }
