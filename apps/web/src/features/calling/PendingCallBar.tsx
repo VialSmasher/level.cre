@@ -10,10 +10,10 @@ export function PendingCallBar() {
   const calling = useCallingSession()
   const [location] = useLocation()
   const [options, setOptions] = useState(false)
-  const [notes, setNotes] = useState('')
+  const notes = calling.session?.confirmation?.notes ?? calling.session?.draftNote ?? ''
   const [nextStep, setNextStep] = useState<'keep' | NextCallStep>('keep')
   const session = calling.session
-  useEffect(() => { setOptions(false); setNotes(session?.confirmation?.notes || ''); setNextStep('keep') }, [session?.clientEventId])
+  useEffect(() => { setOptions(false); setNextStep('keep') }, [session?.clientEventId])
   // Keep the session alive globally, but show its floating controls only on the map.
   // Calls has its own confirmation UI; unrelated pages must not inherit this overlay.
   if (location.split(/[?#]/)[0].replace(/\/+$/, '') !== '/app' || !calling.brokerId) return null
@@ -31,7 +31,7 @@ export function PendingCallBar() {
     {calling.error ? <div role="alert" className="mt-2 text-xs leading-5 text-amber-800">{calling.error instanceof Error ? calling.error.message : 'This call still needs to save.'}{calling.startError && !session.confirmation ? <Button variant="outline" className="mt-1 h-8 text-xs" disabled={calling.pendingStart || calling.busy} onClick={() => calling.retryStart()}>Retry recording</Button> : null}</div> : null}
     {options ? <div className="mt-3 space-y-3 border-t border-slate-100 pt-3">
       <div className="flex flex-wrap gap-1.5">{([['no_answer', 'No answer'], ['left_message', 'Voicemail'], ['contacted', 'Connected'], ['wrong_number', 'Wrong number'], ['disconnected', 'Disconnected']] as const).map(([outcome, label]) => <Button key={outcome} variant="outline" className="h-8 px-2 text-[11px]" disabled={locked} onClick={() => confirm(outcome)}>{label}</Button>)}</div>
-      <div><label htmlFor="map-call-note" className="text-xs text-slate-600">Note · optional</label><Textarea id="map-call-note" value={notes} rows={2} maxLength={2000} disabled={locked} className="mt-1 text-xs" onChange={(event) => setNotes(event.target.value)} /></div>
+      <div><label htmlFor="map-call-note" className="text-xs text-slate-600">Note · optional</label><Textarea id="map-call-note" value={notes} rows={2} maxLength={2000} disabled={locked} className="mt-1 text-xs" onChange={(event) => calling.setDraftNote(session.clientEventId,event.target.value)} /></div>
       <div><label htmlFor="map-call-follow-up" className="text-xs text-slate-600">Next follow-up</label><select id="map-call-follow-up" value={nextStep} disabled={locked} className="mt-1 h-9 w-full rounded border border-slate-200 bg-white px-2 text-xs" onChange={(event) => setNextStep(event.target.value as typeof nextStep)}>{([['keep', 'Keep existing'], ['tomorrow', 'Tomorrow'], ['3d', '3 days'], ['1w', '1 week'], ['1m', '1 month'], ['none', 'None']] as const).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></div>
     </div> : null}
   </section>

@@ -83,7 +83,7 @@ async function workspace(db: Queryable, userId: string, prospect: Record<string,
     if (!exists.rows[0]) throw new ProspectContactError(404, 'contact_not_found', 'Contact was not found on this record.');
   }
   const [history, counts] = await Promise.all([
-    db.query(`SELECT id,type,outcome,date::text AS occurred_at,notes,source_metadata FROM public.contact_interactions
+    db.query(`SELECT id,type,outcome,date::text AS occurred_at,notes,source_provider,source_metadata FROM public.contact_interactions
       WHERE user_id=$1 AND prospect_id=$2 AND ($3::varchar IS NULL OR source_metadata->>'contactId'=$3)
       ORDER BY CASE WHEN date::text ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])($|[T ])'
         THEN date::text END DESC NULLS LAST,created_at DESC,id DESC LIMIT 100`, [userId, prospect.id, contactId || null]),
@@ -97,7 +97,8 @@ async function workspace(db: Queryable, userId: string, prospect: Record<string,
       buildingSf: prospect.building_sf ?? null, lotSizeAcres: prospect.lot_size_acres ?? null, aiMetadata: prospect.ai_metadata || null },
     contacts, primaryContactId: contacts.find((contact) => contact.isPrimary)!.id, phoneReadiness: derivePhoneReadiness(prospect, contacts),
     activity: history.rows.map((row) => ({ id: row.id, type: row.type, outcome: row.outcome, occurredAt: row.occurred_at,
-      notes: row.notes || '', contactId: row.source_metadata?.contactId || null,
+      notes: row.notes || '', canEditCallNote: row.type === 'call' && row.source_provider === 'level_cre_mobile',
+      noteRevision: row.source_metadata?.callNoteRevision ?? null, contactId: row.source_metadata?.contactId || null,
       contactName: row.source_metadata?.contactSnapshot?.name || row.source_metadata?.contactName || null,
       phoneSnapshot: row.source_metadata?.phoneSnapshot || null,
       subject: clean(row.source_metadata?.subject), email: clean(row.source_metadata?.email),

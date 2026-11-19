@@ -247,8 +247,7 @@ test('real copied prospects feed calls, asset history, scorecard, badges and XP 
     if (index === 1 || index === 2 || index === 3) {
       await page.getByRole('button', { name: 'More options', exact: true }).click();
       if (index === 2) {
-        await page.getByRole('button', { name: 'Add a note', exact: true }).click();
-        await page.getByLabel('Note · optional', { exact: true }).fill('LOCAL SIMULATION ONLY. No call placed. Controlled voicemail rehearsal.');
+        await page.getByLabel('Call note', { exact: true }).fill('LOCAL SIMULATION ONLY. No call placed. Controlled voicemail rehearsal.');
       }
       await page.getByRole('button', { name: index === 1 ? 'No answer' : index === 2 ? 'Voicemail' : 'Connected', exact: true }).click();
     } else {

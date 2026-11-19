@@ -30,6 +30,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { NeedsNumberList } from '@/features/calling/NeedsNumberList'
 import { PropertyEvidenceImportDialog } from '@/components/PropertyEvidenceImportDialog'
+import { CallFollowUps } from '@/features/calling/CallFollowUps'
 import { MarketMemoryPreviewDialog } from '@/components/MarketMemoryPreviewDialog'
 import { PropertyMemoryReviewCard } from '@/features/property-memory/PropertyMemoryReviewCard'
 import {
@@ -840,6 +841,7 @@ export default function DailyDeskPage() {
   })
 
   const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['/api/desk/call-follow-ups'] })
     queryClient.invalidateQueries({ queryKey: ['/api/automation/sales-brief?limit=25'] })
     queryClient.invalidateQueries({ queryKey: ['/api/agent/sales-activity/imports?matchStatus=needs_review&limit=50'] })
     queryClient.invalidateQueries({ queryKey: ['/api/activity-events?eventType=market_record_proposed&matchStatus=needs_review&limit=50'] })
@@ -953,6 +955,7 @@ export default function DailyDeskPage() {
           })}
         </section>
 
+        <CallFollowUps />
         <CommercialProgress />
         <MappingRecovery />
 

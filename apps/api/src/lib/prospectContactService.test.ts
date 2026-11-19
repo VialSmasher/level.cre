@@ -9,6 +9,54 @@ import { PGlite } from '@electric-sql/pglite';
 import { createProspectContact, getCallingWorkspace, updateProspectContact, ProspectContactCreateSchema, ProspectContactUpdateSchema } from './prospectContactService';
 import { recordMobileCallStart, recordMobileCallOutcome, discardMobileCallStart, getMobileCallingProgress, listMobileCallQueue } from './mobileCallingService';
 
+import { editCallNote, finishCallSuggestion, interpretCallNote, pendingCallNotes, suggestedCalls } from './callNotes';
+
+test('logged notes stay tied to their original call across edits, sync replays and a later missed call', async () => {
+  const {pool,db,workspace,count}=await harness();
+  try {
+    const contactId=(await workspace()).primaryContactId;
+    const log=(outcome:'contacted'|'no_answer',date:string,notes='')=>recordMobileCallOutcome({pool,userId:'owner',input:{
+      clientEventId:'call-'+randomUUID(),prospectId:'account',contactId,expectedPhone:'780-555-0100',outcome,notes,occurredAt:date+'T17:00:00Z',
+    }});
+    const first=await log('contacted','2026-11-19');
+    const id=first.interactionId!;
+    assert.equal((await pendingCallNotes(pool,'owner')).rows.length,0);
+    const notes='A different person answered. A summer window is possible.';
+    const saved=await editCallNote(pool,'owner','account',id,{notes,expectedRevision:null});
+    assert.deepEqual(await editCallNote(pool,'owner','account',id,{notes,expectedRevision:null}),saved);
+    await assert.rejects(editCallNote(pool,'foreign','account',id,{notes:'other',expectedRevision:null}),/not found/);
+    await assert.rejects(editCallNote(pool,'owner','account',id,{notes:'stale',expectedRevision:null}),/changed/);
+    const pending=await pendingCallNotes(pool,'owner');
+    assert.equal(pending.rows[0].notes,notes);
+    assert.equal(pending.rows[0].dialedContact,'Joe Owner');
+    assert.equal((await pendingCallNotes(pool,'foreign')).rows.length,0);
+    assert.equal((await workspace()).activity.find(r=>r.id===id)!.notes,notes);
+    const decision={state:'suggested' as const,dueOn:'2027-01-28',channel:'call' as const,reason:'Ask about summer timing and confirm who answered.',ifMissed:'Try again in two weeks.'};
+    const proposal={revision:saved.revision,decision};
+    await interpretCallNote(pool,'owner',id,proposal);
+    await interpretCallNote(pool,'owner',id,proposal);
+    assert.equal((await pendingCallNotes(pool,'owner')).rows.length,0);
+    assert.equal((await suggestedCalls(pool,'owner')).rows.length,1);
+    assert.equal((await suggestedCalls(pool,'foreign')).rows.length,0);
+    assert.equal(await count('skill_activities'),1);
+    await log('no_answer','2027-01-28');
+    const retry=(await pendingCallNotes(pool,'owner')).rows[0];
+    assert.equal(retry.id,id);
+    assert.equal(retry.laterCall.outcome,'no_answer');
+    assert.equal(retry.previousDecision.dueOn,'2027-01-28');
+    assert.equal((await suggestedCalls(pool,'owner')).rows.length,0);
+    await assert.rejects(interpretCallNote(pool,'owner',id,proposal),/changed/);
+    await interpretCallNote(pool,'owner',id,{revision:retry.revision,decision:{...decision,dueOn:'2027-02-11'}});
+    await finishCallSuggestion(pool,'owner',id,retry.revision,'dismissed');
+    assert.equal((await suggestedCalls(pool,'owner')).rows.length,0);
+    await assert.rejects(interpretCallNote(pool,'owner',id,{revision:retry.revision,decision}),/changed/);
+    const revised=await editCallNote(pool,'owner','account',id,{notes:'No contact requested.',expectedRevision:retry.revision});
+    await interpretCallNote(pool,'owner',id,{revision:revised.revision,decision:{state:'no_action'}});
+    assert.equal((await pendingCallNotes(pool,'owner')).rows.length,0);
+    assert.equal(await count('skill_activities'),2);
+  } finally {await db.close();}
+});
+
 const schema = `
 CREATE TABLE users(id varchar PRIMARY KEY);
 CREATE TABLE prospects(id varchar PRIMARY KEY,user_id varchar NOT NULL REFERENCES users(id),name varchar,status varchar,notes varchar DEFAULT '',address varchar,business_name varchar,website_url varchar,building_sf integer,lot_size_acres numeric,ai_metadata jsonb,last_contact_date varchar,follow_up_due_date timestamptz,contact_name varchar,contact_company varchar,contact_email varchar,contact_phone varchar,merged_into_prospect_id varchar,created_at timestamp DEFAULT now(),updated_at timestamp DEFAULT now());

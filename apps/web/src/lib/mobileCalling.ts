@@ -17,6 +17,7 @@ export type MobileCallSession = {
   expectedPhone: string
   phoneKey?: string
   startedAt: string
+  draftNote?: string
   recorded: boolean
   candidate: CallQueueCandidate
   contactId?: string | null
@@ -136,6 +137,7 @@ export type CallingContact = {
 }
 
 export type CallingActivity = {
+  canEditCallNote?: boolean; noteRevision?: string | null
   id: string; type: string; outcome: string; occurredAt: string; notes: string
   contactId: string | null; contactName: string | null; phoneSnapshot: string | null
   subject?: string | null; direction?: 'inbound' | 'outbound' | 'internal' | null; evidenceStatus?: 'confirmed' | 'observed' | 'inferred' | null; email?: string | null
@@ -280,6 +282,7 @@ export function parseStoredCallSession(value: string | null, brokerId: string): 
   try {
     const parsed = JSON.parse(value) as Partial<MobileCallSession>
     if (parsed.brokerId !== brokerId || !brokerId) return null
+    if (parsed.draftNote !== undefined && (typeof parsed.draftNote !== 'string' || parsed.draftNote.length > 2000)) return null
     if (parsed.origin !== undefined && !['calls', 'map'].includes(parsed.origin)) return null
     if (typeof parsed.clientEventId !== 'string' || typeof parsed.prospectId !== 'string'
       || typeof parsed.expectedPhone !== 'string' || typeof parsed.startedAt !== 'string') return null

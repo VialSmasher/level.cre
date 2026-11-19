@@ -11,6 +11,8 @@ import { useProfile } from '@/hooks/useProfile'
 import { apiRequest } from '@/lib/queryClient'
 import { CallingContacts, ContactEditor, contactName } from '@/features/calling/CallingContacts'
 import { useCallingSession } from '@/features/calling/CallingSessionProvider'
+import { SavedNoteEditor, type NoteTarget } from '@/features/calling/SavedNoteEditor'
+import type { CallingActivity as ActivityRow } from '@/lib/mobileCalling'
 import { CallingActivity } from '@/features/calling/CallingActivity'
 import { NeedsNumberList } from '@/features/calling/NeedsNumberList'
 import {
@@ -72,8 +74,8 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const [previousCompanies, setPreviousCompanies] = useState<CompanyVisit[]>([])
   const [includeCalledToday, setIncludeCalledToday] = useState(false)
   const [showOptions, setShowOptions] = useState(false)
-  const [showNotes, setShowNotes] = useState(false)
-  const [notes, setNotes] = useState(() => session?.confirmation?.notes || '')
+  const [noteTarget,setNoteTarget] = useState<NoteTarget | null>(null)
+  const notes = session?.confirmation?.notes ?? session?.draftNote ?? ''
   const [nextStep, setNextStep] = useState<'keep' | NextCallStep>('keep')
   const [announcement, setAnnouncement] = useState('')
   const [emailEditor, setEmailEditor] = useState<{ contact: CallingContact; existingIds: string[] } | null>(null)
@@ -127,7 +129,9 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     if (!workspace) return
     requestedRecordHandled.current = true
     const primary = workspace.contacts.find((contact) => contact.id === workspace.primaryContactId)
-    const preferred = workspace.phoneReadiness?.status === 'ready' ? preferredCallingChoice(workspace.phoneReadiness) : null
+    const contactParam = new URLSearchParams(window.location.search).get('contactId')
+    const requestedContact = workspace.contacts.find(contact => contact.id === contactParam && !contact.archivedAt)
+    const preferred = workspace.phoneReadiness?.status === 'ready' ? preferredCallingChoice(workspace.phoneReadiness,requestedContact?.id) : null
     const candidate = queueQuery.data?.rows.find((row) => row.prospect.id === workspace.prospect.id) || {
       id: 'call:' + workspace.prospect.id, prospect: workspace.prospect,
       contact: { name: primary?.name || null, company: workspace.prospect.businessName || primary?.company || workspace.prospect.name,
@@ -137,7 +141,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     }
     setRetainedCandidate(candidate)
     setSelectedProspectId(workspace.prospect.id)
-    setSelectedContactId(preferred?.contactId || workspace.primaryContactId)
+    setSelectedContactId(requestedContact?.id || preferred?.contactId || workspace.primaryContactId)
     setSelectedPhone(preferred?.number || '')
   }, [requestedWorkspaceQuery.data, session])
 
@@ -181,8 +185,6 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     setSelectedContactId(visit.contactId)
     setSelectedPhone(visit.phone)
     setActivityFilter('contact')
-    setNotes('')
-    setShowNotes(false)
     setShowOptions(false)
     setNextStep('keep')
     setFocusNext(true)
@@ -247,8 +249,6 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   }
 
   const resetForm = () => {
-    setNotes('')
-    setShowNotes(false)
     setShowOptions(false)
     setNextStep('keep')
   }
@@ -312,9 +312,6 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
     }
   }, [resolution])
 
-  useEffect(() => {
-    if (session?.confirmation) setNotes(session.confirmation.notes)
-  }, [session?.clientEventId])
 
   useEffect(() => {
     if (!focusNext || !activeCandidate || session) return
@@ -375,6 +372,11 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
   const error = calling.error || calling.recoveryError
   const upcoming = candidates.filter((candidate) => candidate.prospect.id !== activeCandidate?.prospect.id)
   const account = workspaceQuery.data?.prospect
+  const editCallNote = (item:ActivityRow) => {
+    if (!account || !item.canEditCallNote) return
+    setNoteTarget({prospectId:account.id,company:account.businessName || account.name,notes:item.notes,
+      call:{id:item.id,revision:item.noteRevision ?? null,date:brokerCallDate(item.occurredAt)}})
+  }
 
   return (
     <div className="min-h-[calc(100dvh-7.5rem)] bg-[#f6f9ff] lg:min-h-screen">
@@ -458,7 +460,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
                 </div>
               </div>
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs"><p className="text-slate-500">{session ? session.confirmation && session.afterConfirmation === 'another_contact' ? 'Retry will log this call and prepare another contact on this company.' : 'Confirm after trying the call.' : 'Opens your dialer.'}</p>{session ? <p className={cn('font-medium', Boolean(calling.startError) ? 'text-amber-700' : 'text-emerald-700')}>{session.recorded ? 'Call started' : Boolean(calling.startError) ? 'Call start not recorded' : 'Saving call start...'}</p> : null}</div>
-              <CallingContext contactId={activityContactId} contactName={selectedName} contactRows={contactActivityQuery.data?.activity || []} accountRows={workspaceQuery.data?.activity || []} loading={activityContactId ? contactActivityQuery.isLoading : workspaceQuery.isLoading} error={activityContactId ? contactActivityQuery.isError : workspaceQuery.isError} />
+              <CallingContext onEdit={editCallNote} contactId={activityContactId} contactName={selectedName} contactRows={contactActivityQuery.data?.activity || []} accountRows={workspaceQuery.data?.activity || []} loading={activityContactId ? contactActivityQuery.isLoading : workspaceQuery.isLoading} error={activityContactId ? contactActivityQuery.isError : workspaceQuery.isError} />
               {!telHref && !session && !workspaceQuery.isLoading && !workspaceQuery.isError ? <p className="mt-2 text-xs leading-4 text-amber-700">This contact needs one dialable number. Select another contact, edit the number, or skip for now.</p> : null}
 
               {session ? (
@@ -466,16 +468,13 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
                   <p className="mb-1 text-[11px] leading-4 text-slate-500">Log this call or choose Didn’t call before changing companies.</p>
                   <div className="flex flex-wrap gap-1">
                     <Button variant="ghost" className="h-11 px-2 text-xs text-slate-500" disabled={busy} onClick={() => calling.discard('calls')}>Didn't call</Button>
-                    <Button variant="ghost" className="h-9 px-2 text-xs" onClick={() => setShowNotes((value) => !value)} aria-expanded={showNotes} aria-controls="call-notes">{showNotes ? 'Hide note' : 'Add a note'}</Button>
                     <Button variant="ghost" className="h-9 px-2 text-xs" onClick={() => setShowOptions((value) => !value)} aria-expanded={showOptions} aria-controls="call-options">More options<ChevronDown className="ml-1 h-3.5 w-3.5" /></Button>
                     {anotherContact && !session.confirmation ? <Button variant="ghost" className="h-11 px-2 text-xs text-slate-600" aria-label="Log & try another contact" disabled={submissionLocked} onClick={() => confirm('attempted', 'another_contact')}>Log &amp; try another contact<ArrowRight className="ml-1.5 h-3.5 w-3.5" /></Button> : null}
                   </div>
-                  {showNotes ? (
                     <div id="call-notes" className="mt-2">
-                      <div className="mb-2 flex items-center justify-between"><label htmlFor="call-note" className="text-xs font-semibold text-slate-500">Note · optional</label><VoiceDictationButton disabled={submissionLocked} onTranscript={(text) => setNotes((current) => current ? current.trimEnd() + ' ' + text : text)} /></div>
-                      <Textarea id="call-note" value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={2000} rows={3} placeholder="Just the useful bit..." disabled={submissionLocked} />
+                      <div className="mb-2 flex items-center justify-between"><label htmlFor="call-note" className="text-xs font-semibold text-slate-700">Call note</label><VoiceDictationButton disabled={submissionLocked} onTranscript={(text) => calling.setDraftNote(session.clientEventId,current => current ? current.trimEnd() + ' ' + text : text)} /></div>
+                      <Textarea id="call-note" value={notes} onChange={(event) => calling.setDraftNote(session.clientEventId,event.target.value)} maxLength={2000} rows={3} placeholder="Who answered? What did they say about the property or timing?" disabled={submissionLocked} />
                     </div>
-                  ) : null}
                   {showOptions ? (
                     <div id="call-options" className="mt-3 space-y-3">
                       <div><p className="mb-2 text-xs font-semibold text-slate-500">Choose an outcome and move on</p><div className="grid grid-cols-3 gap-2">
@@ -492,8 +491,8 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
             </div>
             {workspaceQuery.isError ? <div role="alert" className="border-t border-slate-100 px-4 py-4"><p className="text-xs text-amber-800">Contacts could not be loaded.</p><Button variant="ghost" size="sm" onClick={() => workspaceQuery.refetch()}>Retry contacts</Button></div> : workspaceQuery.isLoading ? <p className="border-t border-slate-100 px-4 py-4 text-xs text-slate-500">Loading company workspace...</p> : <>
               <CallingContacts key={activeCandidate.prospect.id} prospectId={activeCandidate.prospect.id} contacts={contacts} selectedId={session?.contactId || selectedContactId} selectedPhone={phone} locked={Boolean(session)} readiness={readiness} onSelect={selectContact} onDial={startCall} onSaved={onContactSaved} />
-              {account?.notes ? <details className="border-t border-blue-100/70 px-4 py-3 sm:px-6"><summary className="min-h-9 cursor-pointer text-xs font-medium text-slate-500">Company notes</summary><p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{account.notes}</p></details> : null}
-              <CallingActivity rows={historyQuery.data?.activity || []} filter={activityFilter} onFilter={setActivityFilter} contactName={selectedName} unattributedCount={workspaceQuery.data?.unattributedActivityCount || 0} loading={activityFilter === 'contact' && Boolean(activityContactId) ? contactActivityQuery.isLoading : historyQuery.isLoading} error={historyQuery.isError} onRetry={() => historyQuery.refetch()} />
+              {account ? <details className="border-t border-blue-100/70 px-4 py-3 sm:px-6"><summary className="min-h-9 cursor-pointer text-xs font-medium text-slate-500">Company notes</summary><p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">{account.notes}</p><Button size="sm" variant="ghost" className="text-blue-700" onClick={()=>setNoteTarget({prospectId:account.id,company:account.businessName || account.name,notes:account.notes || ''})}>{account.notes ? 'Edit company notes' : 'Add company notes'}</Button></details> : null}
+              <CallingActivity onEdit={editCallNote} rows={historyQuery.data?.activity || []} filter={activityFilter} onFilter={setActivityFilter} contactName={selectedName} unattributedCount={workspaceQuery.data?.unattributedActivityCount || 0} loading={activityFilter === 'contact' && Boolean(activityContactId) ? contactActivityQuery.isLoading : historyQuery.isLoading} error={historyQuery.isError} onRetry={() => historyQuery.refetch()} />
             </>}
           </section>
         ) : !queueQuery.isLoading && !queueQuery.isError ? (
@@ -525,6 +524,7 @@ function CallingDesk({ brokerId }: { brokerId: string }) {
         </aside>
         </div>
       </main>
+      {noteTarget && <SavedNoteEditor target={noteTarget} brokerId={brokerId} onClose={()=>setNoteTarget(null)}/>}
       {emailEditor ? <ContactEditor key={emailEditor.contact.id} prospectId={emailEditor.contact.prospectId} contact={emailEditor.contact} existingIds={emailEditor.existingIds} focusEmail onClose={() => setEmailEditor(null)} onSaved={(workspace, contactId) => { onContactSaved(workspace, contactId); setEmailEditor(null) }} /> : null}
     </div>
   )

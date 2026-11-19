@@ -316,7 +316,7 @@ export async function listMobileCallQueue(params: {
   return { rows: candidates, totalEligible: rows.filter((row) => derivePhoneReadiness(row, Array.isArray(row.contacts) ? row.contacts : [], { now }).status === 'ready').length };
 }
 
-function outcomeSummary(outcome: MobileCallOutcome, notes: string) {
+export function outcomeSummary(outcome: MobileCallOutcome, notes: string) {
   const labels: Record<MobileCallOutcome, string> = {
     attempted: 'Call attempted',
     wrong_number: 'Wrong number',
@@ -677,6 +677,35 @@ export async function recordMobileCallOutcome(params: {
     }
 
     const interactionId = randomUUID();
+    // Tie a subsequent call to one due recommendation for this exact saved dialing target.
+    // An unspecified attempt leaves the recommendation open until its outcome is known.
+    let previousPlan: unknown;
+    if (metadata.contactId && params.input.outcome !== 'attempted') {
+      const {rows:[prior]} = await client.query(`
+        SELECT i.id, i.source_metadata->>'callNoteRevision' AS revision, i.source_metadata->'callNoteReview' AS plan
+        FROM public.contact_interactions i
+        WHERE i.user_id=$1 AND i.prospect_id=$2 AND i.type='call' AND i.source_provider='level_cre_mobile'
+          AND i.source_metadata->>'contactId'=$3 AND i.source_metadata->'callNoteReview'->>'state'='suggested'
+          AND (i.source_metadata->'callNoteReview'->>'revision'=i.source_metadata->>'callNoteRevision'
+            OR i.source_metadata->'callNoteLastTouch'->>'interactionId'=i.source_metadata->>'callNoteRevision')
+          AND (i.source_metadata->'callNoteLastTouch' IS NULL
+            OR (i.source_metadata->'callNoteLastTouch'->>'occurredAt')::timestamptz <= $4::timestamptz)
+          AND i.source_metadata->'callNoteReview'->>'channel'='call'
+          AND i.source_metadata->'callNoteReview'->>'dueOn' <= (($4::timestamptz AT TIME ZONE 'America/Edmonton')::date)::text
+        ORDER BY i.source_metadata->'callNoteReview'->>'dueOn', i.id LIMIT 1 FOR UPDATE`,
+        [params.userId, params.input.prospectId, metadata.contactId, occurredAt]);
+      if (prior) {
+        previousPlan = prior.plan;
+        const recheck = !params.input.notes && params.input.nextFollowUp === undefined &&
+          ['no_answer','left_message','wrong_number','disconnected'].includes(params.input.outcome);
+        const change = recheck ? {
+          callNoteRevision: interactionId,
+          callNoteLastTouch: {interactionId, occurredAt, outcome: params.input.outcome},
+        } : {callNoteReview: {...prior.plan, revision:prior.revision, state:'done'}};
+        await client.query(`UPDATE public.contact_interactions SET source_metadata=source_metadata || $3::jsonb
+          WHERE user_id=$1 AND id=$2`, [params.userId,prior.id,JSON.stringify(change)]);
+      }
+    }
     await client.query(`
       INSERT INTO public.contact_interactions (
         id, user_id, prospect_id, date, type, outcome, notes, next_follow_up,
@@ -691,7 +720,10 @@ export async function recordMobileCallOutcome(params: {
       params.input.notes,
       params.input.nextFollowUp === undefined ? null : params.input.nextFollowUp,
       params.input.clientEventId,
-      JSON.stringify({ activityEventId: eventId, contactId: metadata.contactId, contactSnapshot: metadata.contactSnapshot, phoneSnapshot: params.input.expectedPhone, outcome: params.input.outcome }),
+      JSON.stringify({ activityEventId: eventId, contactId: metadata.contactId, contactSnapshot: metadata.contactSnapshot, phoneSnapshot: params.input.expectedPhone, outcome: params.input.outcome,
+        ...(params.input.notes ? {callNoteRevision: interactionId, callNotePreviousPlan: previousPlan} : {}),
+        ...(params.input.nextFollowUp !== undefined ? {followUpSelected: true} : {}),
+      }),
     ]);
 
     await client.query(`

@@ -1,7 +1,8 @@
 import type { CallingActivity } from '@/lib/mobileCalling'
 import { callingTouchContext, callingTouchLabel, callingTouchNote } from '@/lib/callingContext'
 
-export function CallingContext({ contactId, contactName, contactRows, accountRows, loading, error }: {
+export function CallingContext({ contactId, contactName, contactRows, accountRows, loading, error, onEdit }: {
+  onEdit:(item:CallingActivity)=>void
   contactId: string | null; contactName: string; contactRows: CallingActivity[]; accountRows: CallingActivity[]; loading: boolean; error: boolean
 }) {
   if (loading) return <p role="status" className="mt-3 text-xs text-slate-500">Loading last touch…</p>
@@ -16,5 +17,6 @@ export function CallingContext({ contactId, contactName, contactRows, accountRow
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1"><p className="text-xs font-medium text-slate-700">{context.scope === 'contact' ? 'Last recorded touch' : 'Latest account activity'}<span className="font-normal text-slate-500"> · {context.scope === 'contact' ? contactName : item.contactName || item.email || 'Contact not recorded'}</span></p><time dateTime={item.occurredAt} className="text-[11px] tabular-nums text-slate-500">{date.toLocaleDateString('en-CA', { timeZone: 'America/Edmonton', month: 'short', day: 'numeric', year: 'numeric' })}</time></div>
     <p className="mt-1 text-xs font-medium text-slate-700">{callingTouchLabel(item)}</p>
     {note ? <p className="mt-1 line-clamp-2 break-words text-xs leading-5 text-slate-600" title={note}>{note}</p> : null}
+    {item.canEditCallNote && <button type="button" className="mt-1 min-h-8 text-xs font-medium text-blue-700 hover:underline" onClick={()=>onEdit(item)}>{item.notes ? 'Edit call note' : 'Add call note'}</button>}
   </section>
 }

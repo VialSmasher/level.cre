@@ -34,6 +34,7 @@ export type CallingSessionController = {
   start: (candidate: CallQueueCandidate, contact: CallingContact, choice: CallingPhoneChoice, origin?: MobileCallSession['origin']) => MobileCallSession | null
   confirm: (outcome?: MobileCallOutcome, notes?: string, nextFollowUp?: string | null, continuation?: CallConfirmationContinuation) => boolean
   discard: (origin?: MobileCallSession['origin']) => boolean
+  setDraftNote: (id: string, value: string | ((current: string) => string)) => void
   retryStart: () => boolean
   retryConfirmation: () => boolean
   pendingStart: boolean
@@ -117,7 +118,7 @@ function BrokerCallingSession({ brokerId, children }: { brokerId: string | null;
       ['/api/calling/queue', brokerId], ['/api/automation/sales-brief?limit=25'],
       ['/api/automation/activity-pulse'], ['/api/prospects'], ['/api/interactions'],
       ['/api/automation/production-activities'], ['/api/skill-activities'], ['/api/skills'],
-      ['/api/stats/header'], ['/api/profile'], ['/api/calling/workspace', brokerId],
+      ['/api/desk/call-follow-ups', brokerId], ['/api/stats/header'], ['/api/profile'], ['/api/calling/workspace', brokerId],
       ['/api/calling/workspace-activity', brokerId], ['/api/calling/needs-number'],
     ]) void queryClient.invalidateQueries({ queryKey })
   }
@@ -280,6 +281,12 @@ function BrokerCallingSession({ brokerId, children }: { brokerId: string | null;
 
   const value: CallingSessionController = {
     brokerId, session, start, confirm, discard, retryStart,
+    setDraftNote: (id, value) => {
+      const current = sessionRef.current
+      if (!current || current.clientEventId !== id || current.confirmation || discardingRef.current) return
+      const text = typeof value === 'string' ? value : value(current.draftNote || '')
+      persistSession({...current, draftNote: text.slice(0,2000)})
+    },
     retryConfirmation: () => confirm(),
     pendingStart: startMutation.isPending, pendingConfirmation: outcomeMutation.isPending,
     pendingDiscard: discardMutation.isPending, busy,
