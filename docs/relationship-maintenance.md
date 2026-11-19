@@ -4,7 +4,7 @@ Patrick authorized hands-off relationship maintenance on November 19, 2026: impo
 
 ## Operating workflow
 
-Use `scripts/codex/use-levelcre-relationships.ps1`. It reads a Windows-user-encrypted credential from `%USERPROFILE%/.codex/secrets/levelcre-relationships.json`, checks its owner against the live manifest and only calls the fixed production API. Never print the credential or use another broker's configuration. Patrick's verified owner is `cca487b3-eb6f-4e67-b8b3-0a6ac5728099`, account `livingstonpatrick1@gmail.com`.
+Use `scripts/codex/use-levelcre-relationships.ps1`. It reads a Windows-user-encrypted credential from `%USERPROFILE%/.codex/secrets/levelcre-relationships.json`, checks its owner against the live manifest and only calls the fixed production API. Never print the credential or use another broker's configuration. Patrick's verified owner is `cca487b3-eb6f-4e67-b8b3-0a6ac5728099`, account `livingstonpatrick1@gmail.com`. This personal client pins that owner independently of the configuration file and refuses either a configuration or server identity mismatch. Demo relationships are fictional browser-only samples; no demo request may read or write Patrick's graph.
 
 ```powershell
 ./scripts/codex/use-levelcre-relationships.ps1 -Action Manifest

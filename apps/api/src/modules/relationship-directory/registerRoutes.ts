@@ -20,6 +20,10 @@ export function registerRelationshipDirectory(app: Express, pool: Pool) {
     function handle(action: (req: Request, res: Response, owner: string) => Promise<unknown>): RequestHandler {
         return (req, res) => {
             res.set('Cache-Control', 'no-store');
+            if(req.headers['x-demo-mode']==='true') {
+                res.status(403).json({message:'Demo relationships use fictional browser samples only.'});
+                return;
+            }
             const owner = getUserId(req);
             if (owner === 'demo-user') {
                 res.status(403).json({ message: 'Sign in to save your private directory.' });

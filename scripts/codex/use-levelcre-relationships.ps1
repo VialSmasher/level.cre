@@ -10,6 +10,9 @@ $ErrorActionPreference='Stop'
 $configPath=Join-Path $env:USERPROFILE '.codex/secrets/levelcre-relationships.json'
 if(!(Test-Path -LiteralPath $configPath)){throw 'Private relationship access is not configured for this Windows profile.'}
 $config=Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+# This installed client is Patrick's personal workflow; other brokers need their own harness.
+$expectedOwner='cca487b3-eb6f-4e67-b8b3-0a6ac5728099'
+if($config.userId -ne $expectedOwner){throw 'This client is locked to the livingstonpatrick1@gmail.com master account.'}
 $base='https://levelcre-production.up.railway.app'
 if($config.baseUrl -ne $base){throw 'Unexpected relationship API origin.'}
 Add-Type -AssemblyName System.Security
@@ -17,7 +20,7 @@ $bytes=[Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64Str
 $headers=@{Authorization='Bearer '+[Text.Encoding]::UTF8.GetString($bytes)}
 try {
   $manifest=Invoke-RestMethod -Uri "$base/api/intel/directory/manifest" -Headers $headers -TimeoutSec 30
-  if($manifest.ownerId -ne $config.userId){throw 'Relationship credential identity mismatch. Stop and reconnect the intended owner.'}
+  if($manifest.ownerId -ne $expectedOwner){throw 'Relationship credential identity mismatch. Stop and reconnect the livingstonpatrick1@gmail.com master account.'}
   $path=switch($Action){
     Manifest {'/manifest'}
     Search {'/search?search='+[Uri]::EscapeDataString($Query)}

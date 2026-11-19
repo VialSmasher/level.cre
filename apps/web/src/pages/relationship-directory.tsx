@@ -268,12 +268,15 @@ export default function RelationshipDirectory() {
     setSearchOpen(false);setSearch('')
     navigate('/app/desk/relationships?'+type+'='+encodeURIComponent(id))
   }
-  const openBroker=(value?:Broker) => {setInspection(null);setEditor({kind:'broker',values:value?{...value}:{...blankBroker,id:crypto.randomUUID()}})}
+  const sampleNotice='Fictional samples are read-only. Sign in to maintain your own company relationships.'
+  const openBroker=(value?:Broker) => {if(isDemoMode){setNotice(sampleNotice);return};setInspection(null);setEditor({kind:'broker',values:value?{...value}:{...blankBroker,id:crypto.randomUUID()}})}
   const openContact=(contact?:Contact,role='unknown') => {
+    if(isDemoMode){setNotice(sampleNotice);return}
     setInspection(null)
     setEditor({kind:'contact',values:contact?{...contact,directoryContext:contact.directoryContext||blankContext(role)}:{name:'',email:'',phone:'',company:name,title:'',directoryContext:blankContext(role)}})
   }
   const openLink=(relationship?:Relationship) => {
+    if(isDemoMode){setNotice(sampleNotice);return}
     setInspection(null)
     setEditor({kind:'relationship',values:relationship?{...relationship}:{id:crypto.randomUUID(),brokerId:selectedBroker||'',prospectId:detail?.prospect?.id||'',status:'unverified',scope:'',notes:'',sourceUrl:'',learnedOn:today(),version:0,archived:false}})
   }
@@ -305,6 +308,7 @@ export default function RelationshipDirectory() {
   return <div className="min-h-full bg-[#f5f7fa]">
     <div className="mx-auto w-full max-w-[1440px] px-4 py-5 sm:px-6 lg:px-8">
       <div className="mb-4 flex items-center gap-4"><Link href="/app/desk" className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-blue-700"><ArrowLeft className="h-3.5 w-3.5"/>Daily Desk</Link>{selectedId&&<button className="text-xs font-medium text-blue-700 hover:underline" onClick={()=>{setTrail([]);setSearch('');setSearchOpen(false);navigate('/app/desk/relationships')}}>All companies</button>}</div>
+      {isDemoMode&&<p role="note" className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">Demo: fictional samples only. These companies and people are not real account data, and changes cannot be saved.</p>}
       <PageHeader className="gap-2 pb-3 sm:gap-4 sm:pb-5" label="Your network" title="Company relationships" description="Find a company. Follow the people, brokers and corporate connections around it." icon={Network} actions={<Button size="sm" variant="outline" onClick={()=>openBroker()}><Plus className="h-4 w-4"/>Add broker</Button>}/>
       <div className="my-3 flex flex-wrap items-start gap-2 sm:my-5 sm:gap-3">
         <div className="relative min-w-0 flex-1 basis-full sm:basis-0">

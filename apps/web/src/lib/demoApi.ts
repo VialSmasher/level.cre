@@ -1,3 +1,5 @@
+import { relationshipDemoRead } from './relationshipDemo'
+
 type DemoApiResult = {
   handled: boolean
   payload: unknown
@@ -386,6 +388,8 @@ function emailCounts() {
 }
 
 function readPayload(pathname: string, searchParams: URLSearchParams): DemoApiResult | null {
+  const directory=relationshipDemoRead(pathname,searchParams)
+  if(directory!==undefined)return {handled:true,payload:directory}
   if (pathname === '/api/auth/demo/user') {
     return { handled: true, payload: { id: 'demo-user', email: 'broker@example.test', firstName: 'Demo', lastName: 'Broker', profileImageUrl: null } }
   }
@@ -501,8 +505,9 @@ export function getDemoApiResult(method: string, url: string, data?: unknown): D
   if (!isDemoModeRequested()) return null
   const parsed = new URL(url, window.location.origin)
   const normalizedMethod = method.toUpperCase()
-  if (normalizedMethod === 'GET') return readPayload(parsed.pathname, parsed.searchParams)
-  return writePayload(normalizedMethod, parsed.pathname, data)
+  const result=normalizedMethod==='GET' ? readPayload(parsed.pathname,parsed.searchParams) : writePayload(normalizedMethod,parsed.pathname,data)
+  // Demo must never fall through to a live request, even if a real session is cached.
+  return result||{handled:true,status:normalizedMethod==='GET'?404:403,payload:{message:'This action is unavailable in the sample demo. Sign in to use your private account.'}}
 }
 
 export function demoJsonResponse(result: DemoApiResult) {

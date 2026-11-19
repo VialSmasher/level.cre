@@ -58,6 +58,11 @@ test('directory persistence, ownership, validation, concurrent edits, and merged
     assert.equal((await call('/home','')).status,401);
     assert.equal((await call('/home','Bearer '+agentKey)).status,403);
     assert.equal((await call('/home?userId=foreign')).status,400);
+    // Even a cached real broker JWT cannot turn an explicit demo request into private access.
+    for(const path of ['/home','/companies/account','/changes']) {
+      assert.equal((await fetch(url+path,{headers:{Authorization:owner,'x-demo-mode':'true'}})).status,403);
+    }
+    assert.equal((await fetch(url+'/brokers/'+randomUUID(),{method:'PUT',headers:{Authorization:owner,'x-demo-mode':'true','content-type':'application/json'},body:JSON.stringify({name:'Must not save'})})).status,403);
     const overview=await call('/home?recent=account,foreign-account');
     assert.equal(overview.headers.get('cache-control'),'no-store');
     assert.deepEqual((await overview.json()).recent.map((c:any)=>c.id),['account']);

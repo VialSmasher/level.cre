@@ -85,7 +85,11 @@ export async function apiRequest(
   options: Pick<RequestInit, 'keepalive' | 'signal'> = {},
 ): Promise<Response> {
   const demoResult = getDemoApiResult(method, url, data);
-  if (demoResult?.handled) return demoJsonResponse(demoResult);
+  if (demoResult?.handled) {
+    const response=demoJsonResponse(demoResult);
+    await throwIfResNotOk(response);
+    return response;
+  }
 
   const fullUrl = apiUrl(url);
   const authHeaders = await getAuthHeaders();
@@ -134,7 +138,11 @@ export const getQueryFn: <T>(options: {
   async ({ queryKey }) => {
     const key = queryKey.join("/") as string;
     const demoResult = getDemoApiResult('GET', key);
-    if (demoResult?.handled) return demoResult.payload as any;
+    if (demoResult?.handled) {
+      const response=demoJsonResponse(demoResult);
+      await throwIfResNotOk(response);
+      return demoResult.payload as any;
+    }
 
     const authHeaders = await getAuthHeaders();
     const url = apiUrl(key.startsWith('/api') ? key : `/api${key.startsWith('/') ? '' : '/'}${key}`);
